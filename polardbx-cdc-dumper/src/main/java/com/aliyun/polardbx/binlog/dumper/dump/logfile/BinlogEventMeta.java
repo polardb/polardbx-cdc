@@ -1,0 +1,52 @@
+/*
+ *
+ * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ */
+
+package com.aliyun.polardbx.binlog.dumper.dump.logfile;
+
+/**
+ * Created by ShuGuang
+ **/
+public class BinlogEventMeta {
+
+    private final int type;
+    private final int length;
+    private final int startPosition;
+    private final int nextPosition;
+
+    public BinlogEventMeta(int type, int length, int startPosition, int nextPosition) {
+        this.type = type;
+        this.length = length;
+        this.startPosition = startPosition;
+        this.nextPosition = nextPosition;
+    }
+
+    public int getType() {
+        return type;
+    }
+
+    public int getLength() {
+        return length;
+    }
+
+    public int getStartPosition() {
+        return startPosition;
+    }
+
+    public int getNextPosition() {
+        return nextPosition;
+    }
+}

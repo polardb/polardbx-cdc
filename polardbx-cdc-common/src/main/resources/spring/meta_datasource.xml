@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:tx="http://www.springframework.org/schema/tx"
+       xmlns="http://www.springframework.org/schema/beans"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans-4.1.xsd
+        http://www.springframework.org/schema/tx
+        http://www.springframework.org/schema/tx/spring-tx.xsd">
+
+    <bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+        <property name="dataSource" ref="metaDataSource"/>
+        <property name="configLocation" value="classpath:sqlmap.xml"/>
+        <property name="typeAliasesPackage" value="com.aliyun.polardbx.com.taobao.tddl.dbsync.binlog.domain.po"/>
+    </bean>
+
+    <bean class="org.mybatis.spring.mapper.MapperScannerConfigurer"
+          p:basePackage="com.aliyun.polardbx.binlog.dao"
+          p:sqlSessionFactoryBeanName="sqlSessionFactory"/>
+
+    <bean id="metaDataSource" class="com.aliyun.polardbx.binlog.CustomDataSource" destroy-method="close"
+          lazy-init="true">
+        <constructor-arg name="dnPasswordKey" value="${dnPasswordKey}"/>
+        <constructor-arg name="useEncryptedPassword" value="${useEncryptedPassword}"/>
+        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+        <property name="url" value="${metaDb_url}"/>
+        <property name="username" value="${metaDb_username}"/>
+        <property name="password" value="${metaDb_password}"/>
+        <property name="maxActive">
+            <value>20</value>
+        </property>
+        <property name="initialSize">
+            <value>1</value>
+        </property>
+        <property name="maxWait">
+            <value>60000</value>
+        </property>
+        <property name="maxIdle">
+            <value>20</value>
+        </property> <!-- 可以和maxActive保持一致 -->
+        <property name="minIdle">
+            <value>1</value>
+        </property>  <!-- 可以和initialSize保持一致 -->
+        <property name="removeAbandoned">
+            <value>true</value>
+        </property>
+        <property name="removeAbandonedTimeout">
+            <value>180</value>
+        </property>
+        <property name="timeBetweenEvictionRunsMillis">
+            <value>60000</value>
+        </property>
+        <property name="minEvictableIdleTimeMillis">
+            <value>180000</value>
+        </property>
+        <property name="connectionProperties">
+            <value>useUnicode=true;characterEncoding=utf-8</value>
+        </property>
+        <!-- sql检查配置,在idle空闲线程检查时,检查链接有效性，丢弃无效的链接,实现自动重连-->
+        <property name="testWhileIdle">
+            <value>true</value>
+        </property>
+        <property name="testOnBorrow">
+            <value>false</value>
+        </property>
+        <property name="testOnReturn">
+            <value>false</value>
+        </property>
+        <property name="validationQuery">
+            <value>SELECT @@version</value>
+        </property>
+        <property name="validationInterval">
+            <value>3000</value>
+        </property>
+        <property name="numTestsPerEvictionRun">
+            <value>-1</value>
+        </property>
+    </bean>
+
+    <bean id="metaTransactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+        <property name="dataSource" ref="metaDataSource"/>
+    </bean>
+
+    <bean id="metaTransactionTemplate" class="org.springframework.transaction.support.TransactionTemplate">
+        <property name="transactionManager" ref="metaTransactionManager"/>
+    </bean>
+
+    <tx:annotation-driven transaction-manager="metaTransactionManager"/>
+
+    <bean id="metaJdbcTemplate" class="org.springframework.jdbc.core.JdbcTemplate">
+        <property name="dataSource" ref="metaDataSource"/>
+    </bean>
+</beans>

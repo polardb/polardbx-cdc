@@ -1,0 +1,1 @@
+*/1 * * * * admin /home/admin/.bin/cdc_log_cleaner.sh 90 >/dev/null 2>&1

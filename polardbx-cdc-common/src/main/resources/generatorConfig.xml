@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE generatorConfiguration
+        PUBLIC "-//mybatis.org//DTD MyBatis Generator Configuration 1.0//EN"
+        "http://mybatis.org/dtd/mybatis-generator-config_1_0.dtd">
+
+<generatorConfiguration>
+    <context id="polarx_tables" targetRuntime="MyBatis3DynamicSql">
+        <!-- prevent a lot of comments in the generated code. Add the following configuration control -->
+        <commentGenerator>
+            <property name="suppressAllComments" value="false"/>
+            <property name="suppressDate" value="false"/>
+        </commentGenerator>
+
+        <!-- database connection -->
+        <jdbcConnection driverClass="com.mysql.jdbc.Driver"
+                        connectionURL="jdbc:mysql://127.0.0.1:3306?useUnicode=true&amp;characterEncoding=UTF-8"
+                        userId="diamond"
+                        password="diamond1qaz@2wsx">
+        </jdbcConnection>
+
+        <javaTypeResolver>
+            <property name="forceBigDecimals" value="false"/>
+        </javaTypeResolver>
+
+        <!-- model layer corresponding to data table -->
+        <javaModelGenerator targetPackage="com.aliyun.polardbx.binlog.domain.po" targetProject="src/main/java">
+            <property name="enableSubPackages" value="false"/>
+            <property name="trimStrings" value="true"/>
+            <property name="constructorBased" value="true"/>
+        </javaModelGenerator>
+
+        <!-- mapper interface in mybatis3 -->
+        <javaClientGenerator type="XMLMAPPER" targetPackage="com.aliyun.polardbx.binlog.dao"
+                             targetProject="src/main/java">
+            <property name="enableSubPackages" value="true"/>
+        </javaClientGenerator>
+
+        <!-- data table generation operation schema: equivalent to library name; tablename: table name; domainobjectname: corresponding do -->
+
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="db_group_info" domainObjectName="DbGroupInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="tables_ext" domainObjectName="TablesExt"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="storage_info" domainObjectName="StorageInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_node_info" domainObjectName="NodeInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_task_config" domainObjectName="BinlogTaskConfig"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_dumper_info" domainObjectName="DumperInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_task_info" domainObjectName="RelayFinalTaskInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="group_detail_info" domainObjectName="GroupDetailInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="indexes" domainObjectName="Indexes"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_logic_meta_history" domainObjectName="BinlogLogicMetaHistory"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_phy_ddl_history" domainObjectName="BinlogPhyDdlHistory"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_polarx_command" domainObjectName="BinlogPolarxCommand"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_oss_record" domainObjectName="BinlogOssRecord"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="server_info" domainObjectName="ServerInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_storage_history" domainObjectName="StorageHistoryInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_system_config" domainObjectName="SystemConfigInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_schedule_history" domainObjectName="BinlogScheduleHistory"/>-->
+    </context>
+</generatorConfiguration>

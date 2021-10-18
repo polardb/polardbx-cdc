@@ -1,0 +1,87 @@
+/*
+ *
+ * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ */
+
+package com.aliyun.polardbx.binlog.transmit;
+
+import com.aliyun.polardbx.binlog.protocol.TxnToken;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Created by ziyang.lb
+ **/
+public class MessageChunk {
+
+    private static final Logger logger = LoggerFactory.getLogger(MessageChunk.class);
+    private long startTimeMills;
+    private long startTimeNanos;
+    private long totalMemSize;
+    private long timeSum;
+    private long countSum;
+    private final List<TxnToken> tokens;
+    private final ChunkMode chunkMode;
+
+    public MessageChunk(ChunkMode chunkMode, int itemSize) {
+        this.chunkMode = chunkMode;
+        this.tokens = new ArrayList<>(itemSize);
+    }
+
+    public void addTxnToken(TxnToken txnToken) {
+        tokens.add(txnToken);
+        if (tokens.size() == 1) {
+            startTimeMills = System.currentTimeMillis();
+            startTimeNanos = System.nanoTime();
+        }
+    }
+
+    public void addMemSize(long memSize) {
+        totalMemSize += memSize;
+    }
+
+    public List<TxnToken> getTokens() {
+        return tokens;
+    }
+
+    public long getTotalMemSize() {
+        return totalMemSize;
+    }
+
+    public long getStartTimeMills() {
+        return startTimeMills;
+    }
+
+    public long getStartTimeNanos() {
+        return startTimeNanos;
+    }
+
+    public void clear() {
+        timeSum += (System.nanoTime() - startTimeNanos);
+        countSum++;
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("message chunk process time [{}]", ((double) timeSum) / countSum);
+        }
+
+        startTimeMills = 0;
+        startTimeNanos = 0;
+        totalMemSize = 0;
+        tokens.clear();
+    }
+}

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+source /etc/profile
+*/1 * * * * admin /home/admin/polardbx-binlog.standalone/bin/process-check.sh >>/tmp/process-check_log.log 2>&1

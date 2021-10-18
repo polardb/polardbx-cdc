@@ -1,0 +1,22 @@
+{
+  "methodConfig": [
+    {
+      "name": [
+        {
+          "service": "com.aliyun.polardbx.binlog.protocol.TxnService",
+          "method": "Send"
+        }
+      ],
+      "retryPolicy": {
+        "maxAttempts": 5000000,
+        "initialBackoff": "0.5s",
+        "maxBackoff": "30s",
+        "backoffMultiplier": 10,
+        "retryableStatusCodes": [
+          "UNAVAILABLE",
+          "UNKNOWN"
+        ]
+      }
+    }
+  ]
+}

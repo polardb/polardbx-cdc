@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.aliyun.polardbx.rpc.cdc";
+option optimize_for = SPEED;
+
+package dumper;
+
+service CdcService {
+  // ShowBinaryLogs + ShowMasterLogs
+  rpc ShowBinaryLogs (Request) returns (stream BinaryLog) {}
+
+  rpc ShowMasterStatus (Request) returns (MasterStatus) {}
+
+  rpc ShowBinlogEvents (ShowBinlogEventsRequest) returns (stream BinlogEvent) {}
+
+  rpc Dump (DumpRequest) returns (stream DumpStream) {}
+
+  rpc Sync (DumpRequest) returns (stream DumpStream) {}
+}
+
+message Request {
+  string req = 1;
+}
+
+message ShowBinlogEventsRequest{
+  string      logName = 1;
+  int64       pos = 2;
+  int64       offset = 3;
+  int64       rowCount = 4;
+}
+
+message DumpRequest{
+  string      fileName = 1;
+  int64       position = 2;
+}
+
+
+message BinaryLog {
+  string logName = 1;
+  int64  fileSize = 2;
+}
+
+message MasterStatus {
+  string file = 1;
+  int64  position = 2;
+  string  binlogDoDB = 3;
+  string  binlogIgnoreDB = 4;
+  string  executedGtidSet = 5;
+}
+
+message BinlogEvent {
+  string logName = 1;
+  int64  pos = 2;
+  string  eventType = 3;
+  int64  serverId = 4;
+  int64  endLogPos = 5;
+  string  info = 6;
+}
+
+message DumpStream {
+  bytes       payload = 1;
+}

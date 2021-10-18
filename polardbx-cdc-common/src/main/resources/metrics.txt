@@ -1,0 +1,51 @@
+|polardbx_cdc_dumper_m_delay|dumper_m_delay|平均值|latestDelayTimeOnCommit|dumper master延迟时间|
+|polardbx_cdc_dumper_m_eps|dumper_m_eps|平均值|avgEventWriteTps|dumper master每秒处理Event的个数(含Begin和Commit)|
+|polardbx_cdc_dumper_m_dml_eps|dumper_m_dml_eps|平均值|avgRevEventWriteTps|dumper master每秒处理Event的个数(不包含Begin和Commit)|
+|polardbx_cdc_dumper_m_tps|dumper_m_tps|平均值|avgTxnWriteTps|dumper master每秒处理事务的个数|
+|polardbx_cdc_dumper_m_bps|dumper_m_bps|平均值|avgWriteBytesTps|dumper master每秒处理的数据量|
+|polardbx_cdc_dumper_m_event_rt|dumper_m_event_rt|平均值|avgWriteTimePerEvent|dumper master每条事件的处理时间|
+|polardbx_cdc_dumper_m_txn_rt|dumper_m_txn_rt|平均值|avgWriteTimePerTxn|dumper master每个事务的处理时间|
+|polardbx_cdc_dumper_s_delay|dumper_s_delay|平均值|latestDelayTimeOnCommit|dumper slave延迟时间|
+|polardbx_cdc_dumper_s_eps|dumper_s_eps|平均值|avgEventWriteTps|dumper slave每秒处理Event的个数|
+|polardbx_cdc_dumper_s_tps|dumper_s_tps|平均值|avgTxnWriteTps|dumper slave每秒处理事务的个数|
+|polardbx_cdc_dumper_s_bps|dumper_s_bps|平均值|avgWriteBytesTps|dumper slave每秒处理的数据量|
+|polardbx_cdc_dumper_s_event_rt|dumper_s_event_rt|平均值|avgWriteTimePerEvent|dumper slave每条事件的处理时间|
+|polardbx_cdc_dumper_s_txn_rt|dumper_s_txn_rt|平均值|avgWriteTimePerTxn|dumper slave每个事务的处理时间|
+|polardbx_cdc_task_merge_txn_count|merge_txn_count|累加值|totalMergePassCount|task合并的总事务数|
+|polardbx_cdc_task_merge_txn_2pc_count|merge_2pctxn_count|累加值|totalMergePass2PCCount|task合并的总事务数(2pc)|
+|polardbx_cdc_task_merge_buf_size|merge_buf_size|平均值|ringBufferQueuedSize|merge缓冲队列占使用量|
+|polardbx_cdc_task_transmit_buf_size|trans_buf_size|平均值|transmitQueuedSize|Transmitter缓冲队列占使用量|
+|polardbx_task_e_network_in_bytes_total_naive|net_in|瞬时值|netIn|入口流量|
+|polardbx_task_e_in_tps|tran_per_second|瞬时值|tranTotalCount|事务tps|
+|polardbx_task_e_in_eps|event_per_second|瞬时值|eventTotalCount|eps|
+|polardbx_task_e_in_max_delay|in_delay|瞬时值|delay|输入延迟|
+|polardbx_cdc_dumper_m_youngUsed|dumper_m_youngUsed|瞬时值|-|dumper master年轻代使用量|
+|polardbx_cdc_dumper_m_youngMax|dumper_m_youngMax|瞬时值|-|dumper master年轻代大小|
+|polardbx_cdc_dumper_m_oldUsed|dumper_m_oldUsed|瞬时值|-|dumper master老年代使用量|
+|polardbx_cdc_dumper_m_oldMax|dumper_m_oldMax|瞬时值|-|dumper master老年代大小|
+|polardbx_cdc_dumper_m_heapUsage|dumper_m_heapUsage|瞬时值|-|dumper master内存使用率|
+|polardbx_cdc_dumper_m_youngCollectionCount|dumper_m_youngCollectionCount|累计值|-|dumper master年轻代GC次数|
+|polardbx_cdc_dumper_m_oldCollectionCount|dumper_m_oldCollectionCount|累计值|-|dumper master老年代GC次数|
+|polardbx_cdc_dumper_m_youngCollectionTime|dumper_m_youngCollectionTime|累计值|-|dumper master年轻代GC时间|
+|polardbx_cdc_dumper_m_oldCollectionTime|dumper_m_oldCollectionTime|累计值|-|dumper master老年代GC时间|
+|polardbx_cdc_dumper_m_currentThreadCount|dumper_m_currentThreadCount|瞬时值|-|dumper master线程数|
+|polardbx_cdc_dumper_s_youngUsed|dumper_s_youngUsed|瞬时值|-|dumper slave年轻带使用量|
+|polardbx_cdc_dumper_s_youngMax|dumper_s_youngMax|瞬时值|-|dumper slave年轻代大小|
+|polardbx_cdc_dumper_s_oldUsed|dumper_s_oldUsed|瞬时值|-|dumper slave老年代使用量|
+|polardbx_cdc_dumper_s_oldMax|dumper_s_oldMax|瞬时值|-|dumper slave老年代大小|
+|polardbx_cdc_dumper_s_heapUsage|dumper_s_heapUsage|瞬时值|-|dumper slave内存使用率|
+|polardbx_cdc_dumper_s_youngCollectionCount|dumper_s_youngCollectionCount|累计值|-|dumper slave年轻代GC次数|
+|polardbx_cdc_dumper_s_oldCollectionCount|dumper_s_oldCollectionCount|累计值|-|dumper slave老年代GC次数|
+|polardbx_cdc_dumper_s_youngCollectionTime|dumper_s_youngCollectionTime|累计值|-|dumper slave年轻代GC时间|
+|polardbx_cdc_dumper_s_oldCollectionTime|dumper_s_oldCollectionTime|累计值|-|dumper slave老年代GC时间|
+|polardbx_cdc_dumper_s_currentThreadCount|dumper_s_currentThreadCount|瞬时值|-|dumper slave当前线程数|
+|polardbx_cdc_task_youngUsed|task_youngUsed|瞬时值|-|cdc task年轻代使用量|
+|polardbx_cdc_task_youngMax|task_youngMax|瞬时值|-|cdc task年轻代大小|
+|polardbx_cdc_task_oldUsed|task_oldUsed|瞬时值|-|cdc task老年代使用量|
+|polardbx_cdc_task_oldMax|task_oldMax|瞬时值|-|cdc task老年代大小|
+|polardbx_cdc_task_heapUsage|task_heapUsage|瞬时值|-|cdc task内存使用率|
+|polardbx_cdc_task_youngCollectionCount|task_youngCollectionCount|累计值|-|cdc task年轻的GC次数|
+|polardbx_cdc_task_oldCollectionCount|task_oldCollectionCount|累计值|-|cdc task老年代GC次数|
+|polardbx_cdc_task_youngCollectionTime|task_youngCollectionTime|累计值|-|cdc task年轻代GC时间|
+|polardbx_cdc_task_oldCollectionTime|task_oldCollectionTime|累计值|-|cdc task老年代GC时间|
+|polardbx_cdc_task_currentThreadCount|task_currentThreadCount|瞬时值|-|cdc task当前线程数|
