@@ -25,39 +25,43 @@ import java.sql.JDBCType;
 import java.util.Date;
 
 public final class BinlogPolarxCommandDynamicSqlSupport {
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.632+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.916+08:00",
         comments = "Source Table: binlog_polarx_command")
     public static final BinlogPolarxCommand binlogPolarxCommand = new BinlogPolarxCommand();
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.633+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.916+08:00",
         comments = "Source field: binlog_polarx_command.id")
     public static final SqlColumn<Long> id = binlogPolarxCommand.id;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.633+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.916+08:00",
         comments = "Source field: binlog_polarx_command.gmt_created")
     public static final SqlColumn<Date> gmtCreated = binlogPolarxCommand.gmtCreated;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.633+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.916+08:00",
         comments = "Source field: binlog_polarx_command.gmt_modified")
     public static final SqlColumn<Date> gmtModified = binlogPolarxCommand.gmtModified;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.633+08:00",
-        comments = "Source field: binlog_polarx_command.type")
-    public static final SqlColumn<Integer> type = binlogPolarxCommand.type;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.917+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_id")
+    public static final SqlColumn<String> cmdId = binlogPolarxCommand.cmdId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.633+08:00",
-        comments = "Source field: binlog_polarx_command.command")
-    public static final SqlColumn<String> command = binlogPolarxCommand.command;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.917+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_type")
+    public static final SqlColumn<String> cmdType = binlogPolarxCommand.cmdType;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.633+08:00",
-        comments = "Source field: binlog_polarx_command.ext")
-    public static final SqlColumn<String> ext = binlogPolarxCommand.ext;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.917+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_status")
+    public static final SqlColumn<Long> cmdStatus = binlogPolarxCommand.cmdStatus;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.634+08:00",
-        comments = "Source field: binlog_polarx_command.reply")
-    public static final SqlColumn<String> reply = binlogPolarxCommand.reply;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.917+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_request")
+    public static final SqlColumn<String> cmdRequest = binlogPolarxCommand.cmdRequest;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.632+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.917+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_reply")
+    public static final SqlColumn<String> cmdReply = binlogPolarxCommand.cmdReply;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.916+08:00",
         comments = "Source Table: binlog_polarx_command")
     public static final class BinlogPolarxCommand extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
@@ -66,13 +70,15 @@ public final class BinlogPolarxCommandDynamicSqlSupport {
 
         public final SqlColumn<Date> gmtModified = column("gmt_modified", JDBCType.TIMESTAMP);
 
-        public final SqlColumn<Integer> type = column("type", JDBCType.INTEGER);
+        public final SqlColumn<String> cmdId = column("cmd_id", JDBCType.VARCHAR);
 
-        public final SqlColumn<String> command = column("command", JDBCType.VARCHAR);
+        public final SqlColumn<String> cmdType = column("cmd_type", JDBCType.VARCHAR);
 
-        public final SqlColumn<String> ext = column("ext", JDBCType.VARCHAR);
+        public final SqlColumn<Long> cmdStatus = column("cmd_status", JDBCType.BIGINT);
 
-        public final SqlColumn<String> reply = column("reply", JDBCType.LONGVARCHAR);
+        public final SqlColumn<String> cmdRequest = column("cmd_request", JDBCType.LONGVARCHAR);
+
+        public final SqlColumn<String> cmdReply = column("cmd_reply", JDBCType.LONGVARCHAR);
 
         public BinlogPolarxCommand() {
             super("binlog_polarx_command");

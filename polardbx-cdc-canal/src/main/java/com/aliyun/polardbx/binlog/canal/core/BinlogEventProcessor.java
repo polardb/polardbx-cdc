@@ -24,7 +24,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.core.dump.ErosaConnection;
 import com.aliyun.polardbx.binlog.canal.core.handle.EventHandle;
-import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
+import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +36,7 @@ public class BinlogEventProcessor {
     private EventHandle handle;
     private LogFetcher fetcher;
     private String binlogFileName;
+    private ServerCharactorSet serverCharactorSet;
 
     private boolean run;
 
@@ -43,7 +44,8 @@ public class BinlogEventProcessor {
         this.handle = handle;
     }
 
-    public void init(ErosaConnection connection, String binlogFileName, long position, boolean search)
+    public void init(ErosaConnection connection, String binlogFileName, long position, boolean search,
+                     ServerCharactorSet serverCharactorSet)
         throws IOException {
         connection.connect();
         if (this.fetcher != null) {
@@ -51,6 +53,7 @@ public class BinlogEventProcessor {
         }
         this.fetcher = connection.providerFetcher(binlogFileName, position, search);
         this.binlogFileName = binlogFileName;
+        this.serverCharactorSet = serverCharactorSet;
     }
 
     public void start() throws Exception {
@@ -61,15 +64,17 @@ public class BinlogEventProcessor {
         LogFetcher buffer = fetcher;
         LogPosition logPosition = new LogPosition(binlogFileName, 0);
         context.setLogPosition(logPosition);
+        context.setServerCharactorSet(serverCharactorSet);
         while (run && fetcher.fetch()) {
             LogEvent event = decoder.decode(buffer, context);
 
             if (event == null) {
-                throw new CanalParseException("parse failed");
+                // 如果是文件中读取数据，可能读取的不是一个完整的binlog文件
+                continue;
             }
             handle.handle(event, context.getLogPosition());
-            if (handle.interupt()) {
-                logger.error(" handler interupt");
+            if (handle.interrupt()) {
+                logger.error(" handler interrupt");
                 break;
             }
         }

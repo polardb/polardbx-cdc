@@ -19,17 +19,21 @@ package com.aliyun.polardbx.binlog;
 
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
+import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
 import com.aliyun.polardbx.binlog.domain.BinlogParameter;
 import com.aliyun.polardbx.binlog.domain.MergeSourceInfo;
 import com.aliyun.polardbx.binlog.domain.MergeSourceType;
 import com.aliyun.polardbx.binlog.domain.RpcParameter;
+import com.aliyun.polardbx.binlog.domain.StorageContent;
 import com.aliyun.polardbx.binlog.domain.TaskInfo;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
+import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.model.TaskConfig;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import lombok.extern.slf4j.Slf4j;
 import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
 
 import java.util.ArrayList;
@@ -37,9 +41,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.tso;
+import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
+
 /**
  * Created by ziyang.lb
  **/
+@Slf4j
 public class TaskInfoProvider {
     private final static Gson GSON = new GsonBuilder().create();
     private final String taskName;
@@ -109,6 +117,18 @@ public class TaskInfoProvider {
         }
 
         taskInfo.setMergeSourceInfos(sourceInfos);
+        taskInfo.setForceCompleteHbWindow(getStorageContent(config.getTso()).isRepaired());
         return taskInfo;
+    }
+
+    private StorageContent getStorageContent(String currentTso) {
+        StorageHistoryInfoMapper storageHistoryMapper = SpringContextHolder.getObject(StorageHistoryInfoMapper.class);
+        List<StorageHistoryInfo> storageHistoryInfos =
+            storageHistoryMapper.select(s -> s.where(tso, isEqualTo(currentTso)));
+        if (storageHistoryInfos.isEmpty()) {
+            throw new PolardbxException("can`t find storage info for tso " + currentTso);
+        }
+        log.info("storage content is " + storageHistoryInfos.get(0).getStorageContent());
+        return GSON.fromJson(storageHistoryInfos.get(0).getStorageContent(), StorageContent.class);
     }
 }

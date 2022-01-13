@@ -41,19 +41,20 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY
 @Slf4j
 public class TopologyWatcher extends AbstractBinlogTimerTask {
     private final int storageTriggerRelayThreshold;
-    private volatile boolean initFlag;
     private final SystemConfigInfoMapper systemConfigInfoMapper =
         SpringContextHolder.getObject(SystemConfigInfoMapper.class);
+    private volatile boolean initFlag;
 
-    public TopologyWatcher(String cluster, String name, int interval, int storageTriggerRelayThreshold) {
-        super(cluster, name, interval);
+    public TopologyWatcher(String cluster, String clusterType, String name, int interval,
+                           int storageTriggerRelayThreshold) {
+        super(cluster, clusterType, name, interval);
         this.storageTriggerRelayThreshold = storageTriggerRelayThreshold;
     }
 
     @Override
     public void exec() {
-        StorageCountStrategy storageCountStrategy = new StorageCountStrategy(cluster, storageTriggerRelayThreshold);
-        TopologyService topologyService = new TopologyService(storageCountStrategy, cluster);
+        StorageCountStrategy storageCountStrategy = new StorageCountStrategy(clusterId, storageTriggerRelayThreshold);
+        TopologyService topologyService = new TopologyService(storageCountStrategy, clusterId);
         try {
             if (!RuntimeLeaderElector.isDaemonLeader()) {
                 if (log.isDebugEnabled()) {
@@ -64,7 +65,7 @@ public class TopologyWatcher extends AbstractBinlogTimerTask {
             tryInit();
             topologyService.tryBuild();
         } catch (Throwable th) {
-            log.error("topologyService.project fail {} {} {}", cluster, name, interval, th);
+            log.error("topologyService.project fail {} {} {}", clusterId, name, interval, th);
             MonitorManager.getInstance()
                 .triggerAlarm(MonitorType.DAEMON_TOPOLOGY_WATCHER_ERROR, ExceptionUtils.getStackTrace(th));
             throw new PolardbxException("topologyService.project fail", th);
@@ -74,8 +75,8 @@ public class TopologyWatcher extends AbstractBinlogTimerTask {
     private void tryInit() {
         if (!initFlag) {
             try {
-                ClusterSnapshot clusterSnapshot = new ClusterSnapshot(
-                    1, null, null, null, null, null);
+                ClusterSnapshot clusterSnapshot = new ClusterSnapshot(1, null, null,
+                    null, null, null, null);
                 SystemConfigInfo info = new SystemConfigInfo();
                 info.setConfigKey(CLUSTER_SNAPSHOT_VERSION_KEY);
                 info.setConfigValue(JSONObject.toJSONString(clusterSnapshot));

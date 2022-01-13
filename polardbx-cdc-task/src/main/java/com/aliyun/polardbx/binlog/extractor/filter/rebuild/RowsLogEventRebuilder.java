@@ -27,7 +27,6 @@ import com.aliyun.polardbx.binlog.format.RowEventBuilder;
 import com.aliyun.polardbx.binlog.format.field.Field;
 import com.aliyun.polardbx.binlog.format.field.NullField;
 import com.aliyun.polardbx.binlog.format.field.SimpleField;
-import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
 
 import java.util.ArrayList;
@@ -39,7 +38,7 @@ import java.util.List;
  */
 public class RowsLogEventRebuilder {
 
-    public static RowEventBuilder convert(RowsLogEvent rowsLogEvent, int serverId) {
+    public static RowEventBuilder convert(RowsLogEvent rowsLogEvent, long serverId) {
 
         LogHeader lg = rowsLogEvent.getHeader();
 
@@ -47,13 +46,12 @@ public class RowsLogEventRebuilder {
         // prepare prop
         RowEventBuilder rowEvent = new RowEventBuilder((int) rowsLogEvent.getTableId(),
             rowsLogEvent.getColumnLen(),
-            BinlogEventType.valueOf(rowsLogEvent.getHeader().getType()),
+            rowsLogEvent.getHeader().getType(),
             (int) rowsLogEvent.getWhen(),
             serverId);
         rowEvent.setTimestamp((int) lg.getWhen());
         rowEvent.setFlags((short) lg.getFlags());
         rowEvent.setColumnCount(columnLen);
-        rowEvent.setServerId((int) lg.getServerId());
         rowEvent.set_flags(rowsLogEvent.getFlags());
         rowEvent.setEventType(lg.getType());
 

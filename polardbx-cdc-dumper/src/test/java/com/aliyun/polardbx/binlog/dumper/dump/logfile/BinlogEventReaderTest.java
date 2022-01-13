@@ -17,8 +17,8 @@
 
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import org.junit.Test;
 
 import java.io.BufferedWriter;
@@ -52,17 +52,18 @@ public class BinlogEventReaderTest {
     @Test
     public void binlogDumper() throws IOException {
         BinlogEventReader binlogFileReader =
-            new BinlogEventReader(new File("/Users/yanfenglin/Downloads/mysql-bin.000004"),
+            new BinlogEventReader(new File("/Users/yanfenglin/Downloads/binlog.000001"),
                 0, 0, -1);
         BufferedWriter bw = new BufferedWriter(
-            new OutputStreamWriter(new FileOutputStream("/Users/yanfenglin/Downloads/mysql-bin.000004.dump")));
+            new OutputStreamWriter(new FileOutputStream("/Users/yanfenglin/Downloads/binlog.000001.dump")));
         binlogFileReader.valid();
         binlogFileReader.skipPos();
         binlogFileReader.skipOffset();
         while (binlogFileReader.hasNext()) {
             BinlogEvent binlogEvent = binlogFileReader.nextBinlogEvent();
             bw.write(
-                binlogEvent.getEndLogPos() + "---" + binlogEvent.getEventType() + " " + binlogEvent.getInfo() + "\n");
+                binlogEvent.getEndLogPos() + "---" + binlogEvent.getServerId() + "---" + binlogEvent.getEventType()
+                    + " " + binlogEvent.getInfo() + " size : " + binlogEvent.getSerializedSize() + "\n");
         }
         bw.close();
     }

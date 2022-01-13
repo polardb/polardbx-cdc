@@ -20,9 +20,7 @@ package com.aliyun.polardbx.binlog.util;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserFeature;
 
 /**
- * @Author ShuGuang
- * @Description
- * @Date 2021/6/4 2:40 下午
+ * Created by ziyang.lb
  */
 public class FastSQLConstant {
     public final static SQLParserFeature[] FEATURES = {

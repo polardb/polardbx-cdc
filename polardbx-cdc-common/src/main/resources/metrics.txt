@@ -49,3 +49,7 @@
 |polardbx_cdc_task_youngCollectionTime|task_youngCollectionTime|累计值|-|cdc task年轻代GC时间|
 |polardbx_cdc_task_oldCollectionTime|task_oldCollectionTime|累计值|-|cdc task老年代GC时间|
 |polardbx_cdc_task_currentThreadCount|task_currentThreadCount|瞬时值|-|cdc task当前线程数|
+|polardbx_cdc_task_netIn|net_in|瞬时值|netIn|cdc task入口流量|
+|polardbx_cdc_task_tranPerSecond|tran_per_second|瞬时值|tranTotalCount|cdc task事务处理数|
+|polardbx_cdc_task_eventPerSecond|event_per_second|瞬时值|eventTotalCount|cdc task事件处理数|
+|polardbx_cdc_task_inDelay|in_delay|瞬时值|delay|cdc task输入延迟|

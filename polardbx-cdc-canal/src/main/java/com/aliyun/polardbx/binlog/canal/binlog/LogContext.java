@@ -19,6 +19,7 @@ package com.aliyun.polardbx.binlog.canal.binlog;
 
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
+import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -34,6 +35,10 @@ public final class LogContext {
     private FormatDescriptionLogEvent formatDescription;
 
     private LogPosition logPosition;
+
+    private long serverId;
+
+    private ServerCharactorSet serverCharactorSet;
 
     public LogContext() {
         this.formatDescription = FormatDescriptionLogEvent.FORMAT_DESCRIPTION_EVENT_5_x;
@@ -59,6 +64,14 @@ public final class LogContext {
         this.formatDescription = formatDescription;
     }
 
+    public ServerCharactorSet getServerCharactorSet() {
+        return serverCharactorSet;
+    }
+
+    public void setServerCharactorSet(ServerCharactorSet serverCharactorSet) {
+        this.serverCharactorSet = serverCharactorSet;
+    }
+
     public final void putTable(TableMapLogEvent mapEvent) {
         mapOfTable.put(Long.valueOf(mapEvent.getTableId()), mapEvent);
     }
@@ -75,5 +88,13 @@ public final class LogContext {
         formatDescription = FormatDescriptionLogEvent.FORMAT_DESCRIPTION_EVENT_5_x;
 
         mapOfTable.clear();
+    }
+
+    public long getServerId() {
+        return serverId;
+    }
+
+    public void setServerId(long serverId) {
+        this.serverId = serverId;
     }
 }

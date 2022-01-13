@@ -259,6 +259,13 @@ public final class LogHeader {
     }
 
     /**
+     * Server ID of the server that created the event.
+     */
+    public final void setServerId(long serverId) {
+        this.serverId = serverId;
+    }
+
+    /**
      * Some 16 flags. See the definitions above for LOG_EVENT_TIME_F, LOG_EVENT_FORCED_ROTATE_F,
      * LOG_EVENT_THREAD_SPECIFIC_F, and LOG_EVENT_SUPPRESS_USE_F for notes.
      */

@@ -17,15 +17,11 @@
 
 package com.aliyun.polardbx.binlog.cdc;
 
-import java.util.Arrays;
-
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.repository.Schema;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObject;
 import com.alibaba.polardbx.druid.sql.repository.SchemaRepository;
 import com.alibaba.polardbx.druid.util.JdbcConstants;
-
-import com.alibaba.polardbx.druid.sql.repository.SchemaRepository;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import lombok.extern.slf4j.Slf4j;
@@ -39,16 +35,13 @@ public class TestConsole {
 
     @Test
     public void t1() {
-        System.out.println(Arrays.toString("b".getBytes()));
-        //SchemaRepository repository = new SchemaRepository(JdbcConstants.MYSQL);
-        //repository.setDefaultSchema("d1");
-        //repository.acceptDDL("create table t1 (id int)");
-        //repository.acceptDDL("create index idx1 on t1(id)");
-        //repository.acceptDDL("drop index idx1 on t1");
-        //repository.acceptDDL("drop table t1");
-        //
-        //repository.acceptDDL("/*DRDS /127.0.0.1/11d66d5292400000/ */DROP INDEX idx_gmt ON `t_ddl_test_JaV1_00`");
-
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(log);
+        System.out.println(memoryTableMeta.snapshot());
+        memoryTableMeta.apply(null, "d1", "create table t1 (id int)", null);
+        memoryTableMeta.apply(null, "d1", "create table t1 (id int,name varchar(16))", null);
+        System.out.println(memoryTableMeta.find("d1", "t1"));
+        System.out.println(memoryTableMeta.snapshot());
+        memoryTableMeta.snapshot().forEach((k, v) -> memoryTableMeta.apply(null, k, v, null));
     }
 
     @Test
@@ -132,7 +125,7 @@ public class TestConsole {
         repository.console("ALTER TABLE d1.t1 ALGORITHM=INPLACE, LOCK=NONE, ADD INDEX `idx_id`(id)");
         buffer = new StringBuffer();
         if (table.getStatement() instanceof MySqlCreateTableStatement) {
-            ((MySqlCreateTableStatement)table.getStatement()).normalizeTableOptions();
+            ((MySqlCreateTableStatement) table.getStatement()).normalizeTableOptions();
         }
         table.getStatement().output(buffer);
         System.out.println(buffer);

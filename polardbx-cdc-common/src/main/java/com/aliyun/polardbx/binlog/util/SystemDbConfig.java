@@ -20,9 +20,11 @@ package com.aliyun.polardbx.binlog.util;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.SystemConfigInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.SystemConfigInfo;
+import com.aliyun.polardbx.binlog.error.ConfigKeyNotExistException;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import com.google.common.util.concurrent.UncheckedExecutionException;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -71,7 +73,14 @@ public class SystemDbConfig {
     }
 
     public static String getCachedSystemDbConfig(String sysKey) {
-        return CACHE.getUnchecked(sysKey);
+        try {
+            return CACHE.getUnchecked(sysKey);
+        } catch (UncheckedExecutionException e) {
+            if (e.getCause() instanceof ConfigKeyNotExistException) {
+                throw (ConfigKeyNotExistException) e.getCause();
+            }
+            throw e;
+        }
     }
 
     public static void upsertSystemDbConfig(String key, String value) {

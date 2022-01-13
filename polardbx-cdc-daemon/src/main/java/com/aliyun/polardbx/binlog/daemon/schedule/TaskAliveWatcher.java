@@ -65,8 +65,8 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
     private final RelayFinalTaskInfoMapper taskInfoMapper =
         SpringContextHolder.getObject(RelayFinalTaskInfoMapper.class);
 
-    public TaskAliveWatcher(String cluster, String taskName, int interval) {
-        super(cluster, taskName, interval);
+    public TaskAliveWatcher(String cluster, String clusterType, String taskName, int interval) {
+        super(cluster, clusterType, taskName, interval);
         instId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
     }
 
@@ -114,12 +114,12 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         Optional<CommonInfo> infoOptional;
         if (TaskType.Relay.name().equals(config.getRole()) || TaskType.Final.name().equals(config.getRole())) {
             infoOptional = taskInfoMapper.selectOne(
-                s -> s.where(RelayFinalTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(cluster))
+                s -> s.where(RelayFinalTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                     .and(RelayFinalTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
                 .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated()));
         } else {
             infoOptional = dumperInfoMapper.selectOne(
-                s -> s.where(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(cluster))
+                s -> s.where(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                     .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
                 .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated()));
         }

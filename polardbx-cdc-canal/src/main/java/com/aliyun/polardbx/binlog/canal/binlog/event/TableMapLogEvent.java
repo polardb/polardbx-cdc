@@ -19,6 +19,7 @@ package com.aliyun.polardbx.binlog.canal.binlog.event;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.BitSet;
 
@@ -324,7 +325,8 @@ public final class TableMapLogEvent extends LogEvent {
     /**
      * Constructor used by slave to read the event from the binary log.
      */
-    public TableMapLogEvent(LogHeader header, LogBuffer buffer, FormatDescriptionLogEvent descriptionEvent) {
+    public TableMapLogEvent(LogHeader header, LogBuffer buffer, FormatDescriptionLogEvent descriptionEvent,
+                            String charsetName) {
         super(header);
 
         final int commonHeaderLen = descriptionEvent.commonHeaderLen;
@@ -344,9 +346,9 @@ public final class TableMapLogEvent extends LogEvent {
 
         /* Read the variable part of the event */
         //        buffer.position(commonHeaderLen + postHeaderLen);
-        dbname = buffer.getString();
+        dbname = StringUtils.isNotBlank(charsetName) ? buffer.getString(charsetName) : buffer.getString();
         buffer.forward(1); /* termination null */
-        tblname = buffer.getString();
+        tblname = StringUtils.isNotBlank(charsetName) ? buffer.getString(charsetName) : buffer.getString();
         buffer.forward(1); /* termination null */
 
         // Read column information from buffer

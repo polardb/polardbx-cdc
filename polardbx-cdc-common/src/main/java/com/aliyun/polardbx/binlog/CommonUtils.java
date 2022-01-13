@@ -17,6 +17,7 @@
 
 package com.aliyun.polardbx.binlog;
 
+import com.aliyun.polardbx.binlog.domain.MarkInfo;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -169,6 +170,20 @@ public class CommonUtils {
         return address == null ? null : address.getHostName();
     }
 
+    /**
+     * 需要转义，比如表名为test`backtick，在sql语句中应该是如下的形式
+     * <p>
+     * CREATE TABLE IF NOT EXISTS `test``backtick` (
+     * c1 int,
+     * _drds_implicit_id_ bigint AUTO_INCREMENT,
+     * PRIMARY KEY (_drds_implicit_id_)
+     * )
+     */
+    public static String escape(String str) {
+        String regex = "(?<!`)`(?!`)";
+        return str.replaceAll(regex, "``");
+    }
+
     public static InetAddress getHostAddress() {
         InetAddress localAddress = null;
         try {
@@ -219,4 +234,9 @@ public class CommonUtils {
         return (name != null && !EMPTY_IP.equals(name) && !LOCALHOST_IP.equals(name) && IP_PATTERN.matcher(name)
             .matches());
     }
+
+    public static MarkInfo getCommand(String rowLogsQuery) {
+        return new MarkInfo(rowLogsQuery);
+    }
+
 }

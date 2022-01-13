@@ -151,7 +151,8 @@ public class CanalBootstrap {
         handle.setEventHandler(handler);
 
         processor.setHandle(handle);
-        processor.init(connection, startPosition.getFileName(), startPosition.getPosition(), false);
+        processor.init(connection, startPosition.getFileName(), startPosition.getPosition(), false,
+            mySqlInfo.getServerCharactorSet());
         try {
             processor.start();
         } finally {
@@ -174,7 +175,7 @@ public class CanalBootstrap {
         String searchFile = endPosition.getFileName();
         while (true) {
             searchTsoEventHandle.reset();
-            processor.init(connection.fork(), searchFile, 0, true);
+            processor.init(connection.fork(), searchFile, 0, true, mySqlInfo.getServerCharactorSet());
             long binlogFileSize = connection.binlogFileSize(searchFile);
             if (binlogFileSize == -1) {
                 //找不到这个文件，直接break

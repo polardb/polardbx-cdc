@@ -75,7 +75,6 @@ public class MysqlConnection implements ErosaConnection {
 
     public MysqlConnection(AuthenticationInfo authInfo) {
         this.authInfo = authInfo;
-
     }
 
     @Override
@@ -129,11 +128,13 @@ public class MysqlConnection implements ErosaConnection {
         decoder.handle(LogEvent.QUERY_EVENT);
         decoder.handle(LogEvent.XID_EVENT);
         decoder.handle(LogEvent.SEQUENCE_EVENT);
+        decoder.handle(LogEvent.GCN_EVENT);
         decoder.handle(LogEvent.XA_PREPARE_LOG_EVENT);
         decoder.handle(LogEvent.WRITE_ROWS_EVENT_V1);
         decoder.handle(LogEvent.WRITE_ROWS_EVENT);
         decoder.handle(LogEvent.TABLE_MAP_EVENT);
         LogContext context = new LogContext();
+        context.setServerCharactorSet(getDefaultDatabaseCharset());
         LogPosition logPosition = new LogPosition(binlogfilename, binlogPosition);
         context.setLogPosition(logPosition);
         while (fetcher.fetch()) {
@@ -162,6 +163,8 @@ public class MysqlConnection implements ErosaConnection {
         fetcher.open(conn, binlogfilename, binlogPosition, (int) generateUniqueServerId());
         LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
         LogContext context = new LogContext();
+        context.setServerCharactorSet(getDefaultDatabaseCharset());
+
         while (fetcher.fetch()) {
             LogEvent event = decoder.decode(fetcher, context);
 
@@ -220,18 +223,21 @@ public class MysqlConnection implements ErosaConnection {
     }
 
     public int update(String sql) {
-        Statement stmt = null;
-        try {
-            stmt = conn.createStatement();
-            return stmt.executeUpdate(sql);
-        } catch (SQLException e) {
-            throw new SQLExecuteException(e);
-        } finally {
-            if (stmt != null) {
-                try {
-                    stmt.close();
-                } catch (SQLException e) {
-                    // ignore
+        synchronized (this) {
+            Statement stmt = null;
+            try {
+                stmt = conn.createStatement();
+                return stmt.executeUpdate(sql);
+            } catch (SQLException e) {
+                logger.error("SQLException: original sql: {}, actual statement:{}", sql, stmt);
+                throw new SQLExecuteException(e);
+            } finally {
+                if (stmt != null) {
+                    try {
+                        stmt.close();
+                    } catch (SQLException e) {
+                        // ignore
+                    }
                 }
             }
         }
@@ -388,19 +394,24 @@ public class MysqlConnection implements ErosaConnection {
     }
 
     public <T> T query(String sql, ProcessJdbcResult<T> processor) {
-        Statement stmt = null;
-        try {
-            stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery(sql);
-            return processor.process(rs);
-        } catch (SQLException e) {
-            throw new SQLExecuteException(e);
-        } finally {
-            if (stmt != null) {
-                try {
-                    stmt.close();
-                } catch (SQLException e) {
-                    // ignore
+        synchronized (this) {
+            Statement stmt = null;
+            ResultSet rs = null;
+            try {
+                stmt = conn.createStatement();
+                rs = stmt.executeQuery(sql);
+                return processor.process(rs);
+            } catch (SQLException e) {
+                logger.error("SQLException: original sql: {}, actual statement:{}", sql, stmt);
+                throw new SQLExecuteException(e);
+            } finally {
+                if (stmt != null) {
+                    try {
+                        rs.close();
+                        stmt.close();
+                    } catch (SQLException e) {
+                        // ignore
+                    }
                 }
             }
         }
@@ -466,9 +477,7 @@ public class MysqlConnection implements ErosaConnection {
 
     public BinlogFormat getBinlogFormat() {
         if (binlogFormat == null) {
-            synchronized (this) {
-                loadBinlogFormat();
-            }
+            loadBinlogFormat();
         }
 
         return binlogFormat;
@@ -476,9 +485,7 @@ public class MysqlConnection implements ErosaConnection {
 
     public BinlogImage getBinlogImage() {
         if (binlogImage == null) {
-            synchronized (this) {
-                loadBinlogImage();
-            }
+            loadBinlogImage();
         }
 
         return binlogImage;
@@ -491,12 +498,14 @@ public class MysqlConnection implements ErosaConnection {
 
     public ServerCharactorSet getDefaultDatabaseCharset() {
         if (serverCharactorSet == null) {
-            synchronized (this) {
-                loadServerDatabaseCharset();
-            }
+            loadServerDatabaseCharset();
         }
 
         return serverCharactorSet;
+    }
+
+    public void setServerCharactorset(ServerCharactorSet serverCharactorSet) {
+        this.serverCharactorSet = serverCharactorSet;
     }
 
     // ================== setter / getter ===================

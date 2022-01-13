@@ -17,7 +17,7 @@
 
 package com.aliyun.polardbx.binlog;
 
-import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.error.ConfigKeyNotExistException;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -62,8 +62,8 @@ public class SpringContextHolder implements ApplicationContextAware, EmbeddedVal
     public static String getPropertiesValue(String name) {
         try {
             return stringValueResolver.resolveStringValue("${" + name + "}");
-        } catch (Exception e) {
-            throw new PolardbxException("Get property error for " + name);
+        } catch (IllegalArgumentException e) {
+            throw new ConfigKeyNotExistException("Get property error for " + name, e);
         }
     }
 }

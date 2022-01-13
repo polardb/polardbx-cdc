@@ -125,9 +125,7 @@ defaultLog=$HOME/logs/polardbx-binlog/$TASK_NAME/default.log
 cd $HOME
 
 #Start Java Process
-if [[ "$TASK_NAME" == "DAEMON" ]]; then
-  ${JAVA} ${JAVA_OPTS} -classpath ${CLASSPATH}:. com.aliyun.polardbx.binlog.daemon.DaemonBootStrap "taskName=${TASK_NAME}" 1>>$defaultLog 2>&1 &
-elif [[ "$TASK_NAME" == Dumper* ]]; then
+if [[ "$TASK_NAME" == Dumper* ]]; then
   ${JAVA} ${JAVA_OPTS} -classpath ${CLASSPATH}:. com.aliyun.polardbx.binlog.dumper.DumperBootStrap "taskName=${TASK_NAME}" 1>>$defaultLog 2>&1 &
 elif [[ "$TASK_NAME" == "TRANSFER" ]]; then
   ${JAVA} ${JAVA_OPTS} -classpath ${CLASSPATH}:. com.aliyun.polardbx.binlog.transfer.Main "taskName=${TASK_NAME}" 1>>$defaultLog 2>&1 &

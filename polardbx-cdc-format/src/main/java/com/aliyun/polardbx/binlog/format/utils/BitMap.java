@@ -87,4 +87,15 @@ public class BitMap {
     public byte[] getData() {
         return data;
     }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        for (int i = 0; i < size; i++) {
+            sb.append(get(i)).append(",");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
 }

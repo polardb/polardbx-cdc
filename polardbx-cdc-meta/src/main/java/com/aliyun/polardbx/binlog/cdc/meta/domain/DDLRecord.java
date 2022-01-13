@@ -28,5 +28,6 @@ import lombok.ToString;
 @Builder
 @ToString
 public class DDLRecord {
-    private String sqlKind, schemaName, tableName, ddlSql, metaInfo;
+    private String sqlKind, schemaName, tableName, ddlSql, metaInfo, originDdlSql;
+    private DDLExtInfo extInfo;
 }

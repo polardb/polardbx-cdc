@@ -25,6 +25,8 @@ import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.gson.Gson;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -41,11 +43,13 @@ import java.util.stream.Collectors;
  * MySQL  不敏感：create database Abc 之后执行show databases查询出来的库名是abc, use abc/use Abc都可以
  * PolarX 不敏感：create database Abc 之后执行show database查询出来的库名是Abc, use abc/use Abc都可以
  * <p>
- * 一些历史原因，CDC在server内核打标时，对逻辑库表名称并没有进行转小写处理，TopologyManager在此需要进行统一toLowerCase处理
+ * 一些历史原因，CDC在server内核打标时，对逻辑库表名称并没有进行转小写处理，TopologyManager再次需要进行统一toLowerCase处理
  * <p>
  * Created by ziyang.lb
  */
+@Slf4j
 public class TopologyManager {
+    private static final Gson GSON = new Gson();
     private LogicMetaTopology topology;
 
     private Map<Pair<String, String>, LogicDbTopology> cache = Maps.newHashMap();
@@ -58,7 +62,7 @@ public class TopologyManager {
         this.topology = topology;
     }
 
-    public void apply(String schema, String table, TopologyRecord record) {
+    public void apply(String tso, String schema, String table, TopologyRecord record) {
         if (record == null) {
             //2do 特殊处理
             return;
@@ -72,23 +76,28 @@ public class TopologyManager {
             "table name [%s] and logicTableMeta [%s] should both exist or both not exist", table,
             record.getLogicTableMeta());
         if (record.getLogicDbMeta() != null) {
-            //insert or update db, logic table is unknown
             LogicDbTopology origin = getTopology(schema);
-            if (origin == null) {
-                //insert
-                topology.add(record.getLogicDbMeta());
-            } else {
-                //update all groups
-                //以group为准，更新phyDbName, storageInstId
-                Map<String, PhyDbTopology> groupDetail = record.getLogicDbMeta().getPhySchemas().stream().collect(
-                    Collectors.toMap(PhyDbTopology::getGroup, Function.identity()));
-                origin.setPhySchemas(record.getLogicDbMeta().getPhySchemas());
-                origin.getLogicTableMetas().stream().flatMap(logicSchema -> logicSchema.getPhySchemas().stream())
-                    .forEach(phySchema -> {
-                        PhyDbTopology phyDbs = groupDetail.get(phySchema.getGroup());
-                        phySchema.setSchema(phyDbs.getSchema());
-                        phySchema.setStorageInstId(phyDbs.getStorageInstId());
-                    });
+            try {
+                //insert or update db, logic table is unknown
+                if (origin == null) {
+                    //insert
+                    topology.add(record.getLogicDbMeta());
+                } else {
+                    //update all groups
+                    //以group为准，更新phyDbName, storageInstId
+                    Map<String, PhyDbTopology> groupDetail = record.getLogicDbMeta().getPhySchemas().stream().collect(
+                        Collectors.toMap(PhyDbTopology::getGroup, Function.identity()));
+                    origin.setPhySchemas(record.getLogicDbMeta().getPhySchemas());
+                    origin.getLogicTableMetas().stream().flatMap(logicSchema -> logicSchema.getPhySchemas().stream())
+                        .forEach(phySchema -> {
+                            PhyDbTopology phyDbs = groupDetail.get(phySchema.getGroup());
+                            phySchema.setSchema(phyDbs.getSchema());
+                            phySchema.setStorageInstId(phyDbs.getStorageInstId());
+                        });
+                }
+            } catch (Exception e) {
+                log.error("update logic db meta fail {} {} {}", tso, GSON.toJson(origin), GSON.toJson(record));
+                throw new RuntimeException(e);
             }
         } else if (record.getLogicTableMeta() != null) {
             Preconditions.checkNotNull(table);
@@ -100,7 +109,7 @@ public class TopologyManager {
                 //insert
                 topology.getLeft().getLogicTableMetas().add(meta);
             } else {
-                invalidCache(schema, table);
+                invalidCache(tso, schema, table);
                 //update
                 //origin.setPhySchemas(phySchemas);
                 origin.setTableName(meta.getTableName());
@@ -115,7 +124,6 @@ public class TopologyManager {
     public LogicDbTopology getTopology(String schema) {
         Preconditions.checkNotNull(schema);
         schema = toLowerCase(schema);
-
         for (LogicDbTopology logicSchema : topology.getLogicDbMetas()) {
             if (schema.equals(logicSchema.getSchema())) {
                 return logicSchema;
@@ -196,13 +204,29 @@ public class TopologyManager {
         return topology;
     }
 
-    private void invalidCache(String schema, String table) {
+    private void invalidCache(String tso, String schema, String table) {
         Iterator<Entry<Pair<String, String>, LogicDbTopology>> iterator = cache.entrySet().iterator();
         while (iterator.hasNext()) {
             Entry<Pair<String, String>, LogicDbTopology> c = iterator.next();
             LogicDbTopology t = c.getValue();
-            if (t.getSchema().equals(schema) && t.getLogicTableMetas().get(0).getTableName().equals(table)) {
+            if (t.getSchema().equals(schema) && (StringUtils.isEmpty(table) || t.getLogicTableMetas().get(0)
+                .getTableName().equals(table))) {
+                log.warn("TSO {}: remove topology of {}.{}", tso, schema, table);
                 iterator.remove();
+            }
+        }
+    }
+
+    public void removeTopology(String tso, String schema, String table) {
+        schema = toLowerCase(schema);
+        table = toLowerCase(table);
+
+        invalidCache(tso, schema, table);
+        if (StringUtils.isNotEmpty(schema)) {
+            if (StringUtils.isEmpty(table)) {
+                topology.removeSchema(schema);
+            } else {
+                topology.removeTable(schema, table);
             }
         }
     }

@@ -21,10 +21,11 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.Iterator;
 import java.util.List;
 
 /**
- *
+ * Created by Shuguang
  */
 @Data
 @AllArgsConstructor
@@ -51,6 +52,7 @@ public class LogicMetaTopology {
         private String tableCollation;
         private int tableType;
         private String createSql;
+        private String createSql4Phy;
         private List<PhyTableTopology> phySchemas;
     }
 
@@ -68,5 +70,28 @@ public class LogicMetaTopology {
 
     public List<LogicDbTopology> getLogicDbMetas() {
         return logicDbMetas;
+    }
+
+    public void removeSchema(String schema) {
+        Iterator<LogicDbTopology> iterator = this.logicDbMetas.iterator();
+        while (iterator.hasNext()) {
+            if (iterator.next().getSchema().equals(schema)) {
+                iterator.remove();
+            }
+        }
+    }
+
+    public void removeTable(String schema, String table) {
+        for (LogicDbTopology logicDbMeta : this.logicDbMetas) {
+            if (logicDbMeta.getSchema().equals(schema)) {
+                Iterator<LogicTableMetaTopology> iterator = logicDbMeta.getLogicTableMetas().iterator();
+                while (iterator.hasNext()) {
+                    if (iterator.next().getTableName().equals(table)) {
+                        iterator.remove();
+                    }
+                }
+                break;
+            }
+        }
     }
 }

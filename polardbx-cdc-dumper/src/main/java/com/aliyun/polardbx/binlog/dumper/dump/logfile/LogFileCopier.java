@@ -20,16 +20,21 @@ package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig;
+import com.aliyun.polardbx.binlog.MetaCoopCommandEnum;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RotateLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.event.RowsQueryLogEvent;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.MarkInfo;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.client.DumpClientV2;
 import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
@@ -50,6 +55,7 @@ import org.springframework.retry.support.RetryTemplate;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -101,6 +107,7 @@ public class LogFileCopier {
                     prepare();
                     dumpClient = new DumpClientV2(leaderHost, leaderPort);
                     dumpClient.connect();
+                    logContext.setLogPosition(new LogPosition(binlogFile.getFileName(), binlogFile.position()));
                     dumpClient.dump(binlogFile.getFileName(), binlogFile.position(), this::consume);
                 } catch (InterruptedException e) {
                     break;
@@ -152,6 +159,10 @@ public class LogFileCopier {
     private void prepare() throws IOException {
         buildTarget();
         buildBinlogFile();
+        String lastTso = seekLastTso();
+        if (StringUtils.isNotBlank(lastTso)) {
+            DynamicApplicationVersionConfig.applyConfigByTso(lastTso);
+        }
         Metrics.get().setLatestDelayTimeOnCommit(0);
     }
 
@@ -220,9 +231,18 @@ public class LogFileCopier {
             checkDelay(eventType, data, offset);
             binlogFile.writeEventWithoutUpdate(data, offset, length);
         }
-        
+
         if (eventType == LogEvent.XID_EVENT) {
             Metrics.get().incrementTotalWriteTxnCount();
+        }
+
+        if (eventType == LogEvent.ROWS_QUERY_LOG_EVENT) {
+            RowsQueryLogEvent rowsQueryLogEvent =
+                (RowsQueryLogEvent) logDecoder.decode(new LogBuffer(data, offset, length), logContext);
+            MarkInfo markInfo = CommonUtils.getCommand(rowsQueryLogEvent.getRowsQuery());
+            if (markInfo.isValid() && markInfo.getCommand() == MetaCoopCommandEnum.ConfigChange) {
+                DynamicApplicationVersionConfig.setConfigByTso(markInfo.getTso());
+            }
         }
 
         lastEventType = eventType;
@@ -254,6 +274,22 @@ public class LogFileCopier {
             }
         }
         logger.info("buildBinlogFile {}#{}", binlogFile.getFileName(), binlogFile.position());
+    }
+
+    public String seekLastTso() throws IOException {
+        List<String> binlogFileNames = logFileManager.getAllLogFileNamesOrdered();
+        for (int i = binlogFileNames.size() - 1; i >= 0; i--) {
+            String fileName = binlogFileNames.get(i);
+            BinlogFile binlogFile =
+                new BinlogFile(new File(logFileManager.getBinlogFileDirPath() + File.separator + fileName), "r",
+                    writeBufferSize, seekBufferSize);
+            BinlogFile.SeekResult result = binlogFile.seekLastTso();
+            binlogFile.close();
+            if (StringUtils.isNotBlank(result.getLastTso())) {
+                return result.getLastTso();
+            }
+        }
+        return null;
     }
 
     private void rotate(String rotateFileName) throws IOException {

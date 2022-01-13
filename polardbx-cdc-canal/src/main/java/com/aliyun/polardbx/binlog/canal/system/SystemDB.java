@@ -48,6 +48,7 @@ public class SystemDB {
     public static final String DRDS_CDC_INSTRUCTION = "__cdc_instruction__";
     public static final String DRDS_CDC_HEARTBEAT = "__cdc_heartbeat__";
     public static final String DRDS_GLOBAL_TX_LOG = "__drds_global_tx_log";
+    public static final String DRDS_REDO_LOG = "__drds_redo_log";
     public static final String GLOBAL_TX_LOG_FIELD_COMMIT_TS = "COMMIT_TS";
     public static final String GLOBAL_TX_LOG_FIELD_TYPE = "TYPE";
     public static final String GLOBAL_TX_LOG_FIELD_TXID = "TXID";

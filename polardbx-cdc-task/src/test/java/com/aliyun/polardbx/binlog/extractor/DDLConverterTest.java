@@ -17,8 +17,22 @@
 
 package com.aliyun.polardbx.binlog.extractor;
 
+import com.alibaba.polardbx.druid.DbType;
+import com.alibaba.polardbx.druid.sql.SQLUtils;
+import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
+import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
+import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
+import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter;
+import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import org.junit.Assert;
 import org.junit.Test;
+
+import java.util.List;
 
 public class DDLConverterTest {
 
@@ -31,15 +45,17 @@ public class DDLConverterTest {
                 + "        PRIMARY KEY (`ID`),\n"
                 + "        LOCAL KEY `_local_user_email` USING BTREE (`user_email`)\n"
                 + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_unicode_520_ci  dbpartition by hash(`user_email`) ";
-        String formatDDL = DDLConverter.convertNormalDDL(ddl, null, "utf8_general_cs", "12345667788");
+        String formatDDL = DDLConverter.convertNormalDDL(ddl, null, "utf8_general_cs", 1, "12345667788");
         System.out.println(formatDDL);
-        System.out.println(DDLConverter.formatPolarxDDL(ddl, null, "utf8_general_cs", 1));
+        System.out.println(DDLConverter.formatPolarxDDL(ddl, null,
+            "utf8_general_cs", 1));
     }
 
     @Test
     public void testDatabase() {
-        String ddl = " create database test_ddl;";
-        String formatDDL = DDLConverter.convertNormalDDL(ddl, "utf8mb4", null, "12345667788");
+        String ddl = "create database d0 partition_mode='partitioning';";
+        String formatDDL = DDLConverter.convertNormalDDL(ddl, "utf8mb4", null,
+            1, "12345667788");
         System.out.println(formatDDL);
     }
 
@@ -48,7 +64,8 @@ public class DDLConverterTest {
         String ddl = "CREATE TABLE `bt` (\n" + "\t`id` int(11) NOT NULL AUTO_INCREMENT BY GROUP,\n"
             + "\t`name` varchar(20) DEFAULT NULL,\n" + "\tPRIMARY KEY (`id`)\n"
             + ") ENGINE = InnoDB AUTO_INCREMENT = 200006 DEFAULT CHARSET = utf8mb4  broadcast";
-        String formatDDL = DDLConverter.convertNormalDDL(ddl, null, "utf8_general_cs", "12345667788");
+        String formatDDL = DDLConverter.convertNormalDDL(ddl, null, "utf8_general_cs",
+            1, "12345667788");
         System.out.println(formatDDL);
     }
 
@@ -69,7 +86,8 @@ public class DDLConverterTest {
         System.out.println(DDLConverter.formatPolarxDDL(ddl7, null, "gbk", 1));
         String ddl5 = "rename table A to B";
         System.out.println(DDLConverter.formatPolarxDDL(ddl5, null, "gbk", 1));
-        System.out.println(DDLConverter.formatPolarxDDL("select 1", null, "gbk", 1));
+        System.out.println(DDLConverter.formatPolarxDDL("select 1", null,
+            "gbk", 1));
     }
 
     @Test
@@ -78,6 +96,206 @@ public class DDLConverterTest {
             + "\tINDEX `auto_shard_key_name` USING BTREE(`NAME`(10)),\n"
             + "\t_drds_implicit_id_ bigint AUTO_INCREMENT,\n" + "\tPRIMARY KEY (_drds_implicit_id_)\n" + ")\n"
             + "DBPARTITION BY hash(name)";
-        System.out.println(DDLConverter.convertNormalDDL(ddl, null, null, "12345667788"));
+        System.out.println(DDLConverter.convertNormalDDL(ddl, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testCreateWith() {
+        String ddl = "CREATE TABLE `wx_azz_ex_details-2` (\n"
+            + "        `fd_id` varchar(255) NOT NULL,\n"
+            + "        `fd_add_time` varchar(255) DEFAULT NULL,\n"
+            + "        `fd_add_way` varchar(255) DEFAULT NULL COMMENT '对应p_contact的getAddWay,添加方式',\n"
+            + "        `fd_avatar` varchar(255) DEFAULT NULL COMMENT '对应p_contact的getAvatar',\n"
+            + "        `fd_corp_full_name` varchar(255) DEFAULT NULL COMMENT '公司全称',\n"
+            + "        `fd_corp_name` varchar(255) DEFAULT NULL COMMENT '公司名称',\n"
+            + "        `fd_creat_time` varchar(255) DEFAULT NULL,\n"
+            + "        `fd_external_userid` varchar(255) DEFAULT NULL COMMENT '对应p_contact的getWorkID',\n"
+            + "        `fd_gender` varchar(255) DEFAULT NULL COMMENT '对应p_contact的getGender',\n"
+            + "        `fd_name` varchar(255) DEFAULT NULL COMMENT '对应p_contact的getNickname',\n"
+            + "        `fd_position` varchar(255) DEFAULT NULL COMMENT '职位',\n"
+            + "        `fd_remark_copr_name` varchar(255) CHARACTER SET utf8mb4 DEFAULT NULL,\n"
+            + "        `fd_remark_mobiles` varchar(255) CHARACTER SET utf8mb4 DEFAULT NULL,\n"
+            + "        `fd_spare1` varchar(255) DEFAULT NULL,\n"
+            + "        `fd_spare2` varchar(255) DEFAULT NULL,\n"
+            + "        `fd_spare3` varchar(255) DEFAULT NULL,\n"
+            + "        `fd_state` varchar(255) DEFAULT NULL COMMENT '对应p_contact的getAddWayState',\n"
+            + "        `fd_sys_code` varchar(255) DEFAULT NULL,\n"
+            + "        `fd_tag` text COMMENT '标签',\n"
+            + "        `fd_type` varchar(255) DEFAULT NULL,\n"
+            + "        `fd_unionid` varchar(255) DEFAULT NULL COMMENT 'uniodid',\n"
+            + "        `fd_update_time` varchar(255) DEFAULT NULL COMMENT '对应p_contact的getUpdateTime',\n"
+            + "        `fd_user_des` varchar(255) DEFAULT NULL COMMENT '对应p_contact的 wxId的加密',\n"
+            + "        `fd_user_id` varchar(255) DEFAULT NULL COMMENT '对应p_contact的 appId',\n"
+            + "        `fd_user_remark` varchar(255) DEFAULT NULL COMMENT '对应p_contact的getAppName',\n"
+            + "        PRIMARY KEY (`fd_id`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = utf8 COMMENT '科技中心客户信息中间表'";
+        System.out.println(DDLConverter.convertNormalDDL("wx_azz_ex_details-2", ddl, null,
+            "utf8_general_ci", 1, "12345667788"));
+    }
+
+    @Test
+    public void testTableGroup() {
+        String ddl =
+            "create table `meng``shi1` ( `a` int(11) not null, "
+                + "`b` char(1) default null, "
+                + "`c` double default null, "
+                + "primary key (`a`) )"
+                + " engine = innodb default charset = utf8mb4 "
+                + " default character set = utf8mb4 default collate = utf8mb4_general_ci tablegroup `tgtest`";
+        System.out.println(DDLConverter.convertNormalDDL("abc`abc", ddl, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testAddClusterIndex() {
+        String sql = "ALTER TABLE `auto_partition_idx_tb`\n"
+            + "\tADD INDEX `ap_index` (`id`)";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testAddUniqueClusterIndex() {
+        String sql = "ALTER TABLE `auto_partition_idx_tb`\n"
+            + "\tADD UNIQUE CLUSTERED INDEX `ap_index` (`id`)";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testCreateIndex() {
+        String sql = "CREATE CLUSTERED INDEX `ap_index` ON `auto_partition_idx_tb` (`id`)";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null, 1, "12345667788"));
+
+        String sql2 = "CREATE INDEX gsi ON alter_partition_ddl_primary_table (id) PARTITION BY HASH (id)";
+        String result2 = DDLConverter.convertNormalDDL(sql2, null, null, 1, "12345667788");
+        System.out.println(result2);
+        Assert.assertEquals("CREATE INDEX gsi ON alter_partition_ddl_primary_table (id)", result2);
+
+        String sql3 =
+            "CREATE INDEX gsi ON alter_partition_ddl_primary_table (id) tbpartition BY HASH (id) tbpartitions 16";
+        String result3 = DDLConverter.convertNormalDDL(sql3, null, null, 1, "12345667788");
+        System.out.println(result3);
+    }
+
+    @Test
+    public void testCreateUniqueIndex() {
+        String sql = "CREATE UNIQUE CLUSTERED INDEX `ap_index` ON `auto_partition_idx_tb` (`id`)";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testCreateLocalIndex() {
+        String sql = "CREATE LOCAL INDEX l_i_idx_with_clustered ON auto_idx_with_clustered (i)";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null,
+            1, "12345667788"));
+
+        sql = "ALTER TABLE auto_idx_with_clustered ADD LOCAL INDEX l_i_idx_with_clustered (i)";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testHints() {
+        String sql =
+            "/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*//!tddl:enable_recyclebin=true*/drop table test_recyclebin_tb";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testEscape() {
+        String s1 = "ab``ab";
+        String s2 = "ab`ab";
+        String s3 = "ab```ab";
+        String s4 = "ab````ab";
+        String s5 = "abab";
+
+        Assert.assertEquals(CommonUtils.escape(s1), s1);
+        Assert.assertEquals(CommonUtils.escape(s2), "ab``ab");
+        Assert.assertEquals(CommonUtils.escape(s3), s3);
+        Assert.assertEquals(CommonUtils.escape(s4), s4);
+        Assert.assertEquals(CommonUtils.escape(s5), s5);
+    }
+
+    @Test
+    public void testBackQuote1() {
+        String dropSql = "drop table `xxx``yyy`";
+        SQLStatementParser parser =
+            SQLParserUtils.createSQLStatementParser(dropSql, DbType.mysql, FastSQLConstant.FEATURES);
+        List<SQLStatement> stmtList = parser.parseStatementList();
+        for (SQLExprTableSource tableSource : ((SQLDropTableStatement) stmtList.get(0)).getTableSources()) {
+            System.out.println(tableSource.getTableName());
+            System.out.println(tableSource.getTableName(true));
+        }
+    }
+
+    @Test
+    public void testBackQuote2() {
+        String dropSql = "drop database `xxx``yyy`";
+        SQLStatementParser parser =
+            SQLParserUtils.createSQLStatementParser(dropSql, DbType.mysql, FastSQLConstant.FEATURES);
+        List<SQLStatement> stmtList = parser.parseStatementList();
+        String databaseName = ((SQLDropDatabaseStatement) stmtList.get(0)).getDatabaseName();
+        System.out.println(databaseName);
+        System.out.println(SQLUtils.normalize(databaseName));
+        System.out.println(SQLUtils.normalize(databaseName, false));
+        System.out.println(SQLUtils.normalize("uuu"));
+        System.out.println(SQLUtils.normalize("uu`u"));
+    }
+
+    @Test
+    public void testBackQuote3() {
+        String dropSql = "rename table aaa to `bbb``ccc`";
+        SQLStatementParser parser =
+            SQLParserUtils.createSQLStatementParser(dropSql, DbType.mysql, FastSQLConstant.FEATURES);
+        List<SQLStatement> stmtList = parser.parseStatementList();
+        String renameTo = ((MySqlRenameTableStatement) stmtList.get(0)).getItems().get(0).getTo()
+            .getSimpleName();
+        System.out.println(renameTo);
+        System.out.println(SQLUtils.normalize(renameTo));
+    }
+
+    @Test
+    public void testPurge() {
+        String dropSql = "DROP TABLE IF EXISTS test_recycle_broadcast_tb PURGE";
+        System.out.println(DDLConverter.convertNormalDDL(dropSql, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testAutoincrementGroup() {
+        String sql = "ALTER TABLE alter_table_without_seq_change\n"
+            + "\tMODIFY COLUMN c1 bigint UNSIGNED NOT NULL AUTO_INCREMENT BY GROUP";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null,
+            1, "12345667788"));
+
+        String sql2 = "ALTER TABLE alter_table_without_seq_change\n"
+            + "\tADD COLUMN c1 bigint UNSIGNED NOT NULL AUTO_INCREMENT BY GROUP";
+        System.out.println(DDLConverter.convertNormalDDL(sql2, null, null,
+            1, "12345667788"));
+    }
+
+    @Test
+    public void testWithHints() {
+        String sql = "/* CDC_TOKEN : 0644b5a0-1ce9-43f9-8b62-62d0a0f59d72 */\n"
+            + "CREATE TABLE IF NOT EXISTS `t_ddl_test_normal` (\n"
+            + "\t`ID` BIGINT(20) NOT NULL AUTO_INCREMENT,\n"
+            + "\t`JOB_ID` BIGINT(20) NOT NULL DEFAULT 0,\n"
+            + "\t`EXT_ID` BIGINT(20) NOT NULL DEFAULT 0,\n"
+            + "\t`TV_ID` BIGINT(20) NOT NULL DEFAULT 0,\n"
+            + "\t`SCHEMA_NAME` VARCHAR(200) NOT NULL,\n"
+            + "\t`TABLE_NAME` VARCHAR(200) NOT NULL,\n"
+            + "\t`GMT_CREATED` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+            + "\t`DDL_SQL` TEXT NOT NULL,\n"
+            + "\tPRIMARY KEY (`ID`),\n"
+            + "\tKEY `idx1` (`SCHEMA_NAME`),\n"
+            + "\tINDEX `auto_shard_key_job_id` USING BTREE(`JOB_ID`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4\n"
+            + "DBPARTITION BY hash(ID)\n"
+            + "TBPARTITION BY hash(JOB_ID) TBPARTITIONS 16";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null, 1, "123456666"));
     }
 }

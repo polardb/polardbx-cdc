@@ -49,6 +49,7 @@ import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.google.gson.Gson;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.math.NumberUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,6 +73,8 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     private TRANSACTION_STATE state = TRANSACTION_STATE.STATE_START;
     private String partitionId;
     private String nextTraceId;
+    private String orginalTraceId;
+    private Long serverId;
     private String lastTraceId;
     private String charset;
     private boolean txGlobal = false;
@@ -189,16 +192,17 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         if (LogEventUtil.isPrepare(event)) {
             XaPrepareLogEvent prepareLogEvent = (XaPrepareLogEvent) event;
             if (prepareLogEvent.isOnePhase()) {
-                xa = false;
                 // 一阶段真实TSO会导致 noTSO事务与一阶段乱序的情况产生
-                tsoTransaction = false;
+                this.xa = false;
+                this.tsoTransaction = false;
                 this.realTSO = -1;
+                this.snapshotSeq = null;
                 setCommit(rc);
             } else {
                 setPrepare();
             }
         } else if (LogEventUtil.isEnd(event)) {
-            // do nothing
+            //do nothing
         } else {
             processEvent_0(event, rc);
         }
@@ -208,7 +212,15 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         if (LogEventUtil.isRowsQueryEvent(event)) {
             RowsQueryLogEvent queryLogEvent = (RowsQueryLogEvent) event;
             try {
-                nextTraceId = LogEventUtil.buildTrace(queryLogEvent);
+                orginalTraceId = queryLogEvent.getRowsQuery();
+                String results[] = LogEventUtil.buildTrace(queryLogEvent);
+                if (results != null) {
+                    nextTraceId = results[0];
+                    if (NumberUtils.isCreatable(results[1])) {
+                        serverId = NumberUtils.createLong(results[1]);
+                    }
+                }
+
             } catch (Exception e) {
                 logger.error("parser trace error " + queryLogEvent.getRowsQuery(), e);
                 throw e;
@@ -234,7 +246,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
             //直接使用前面紧邻的TableMapEvent的TraceId
             event.setTrace(lastTraceId);
         }
-
+        if (serverId != null) {
+            event.setTraceServerId(serverId);
+        }
         addTxnBuffer(event);
     }
 
@@ -247,7 +261,24 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
             .payload(logEvent.toBytes())
             .eventType(logEvent.getHeader().getType())
             .build();
-        buffer.push(txnItem);
+        try {
+            buffer.push(txnItem);
+        } catch (Exception e) {
+            logger.error(
+                "push to buffer error local trace : " + orginalTraceId + " with : " + binlogFileName + ":" + logEvent
+                    .getLogPos() + " buffer : " + buffer.getTxnKey() + " " + buffer.itemSize(), e);
+            logger.error("buffer cache:");
+            Iterator<TxnItemRef> it = buffer.iterator();
+            while (it.hasNext()) {
+                TxnItemRef ii = it.next();
+                logger.error("item type : " + ii.getEventType() + " .. trace : " + ii.getTraceId());
+            }
+            throw e;
+        }
+    }
+
+    public Long getServerId() {
+        return serverId;
     }
 
     private boolean processSpecialTableData(LogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
@@ -384,10 +415,26 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         return SystemDB.DRDS_GLOBAL_TX_LOG.equalsIgnoreCase(tableName);
     }
 
+    private boolean isDrdsRedoLogTable(String tableName) {
+        return SystemDB.DRDS_REDO_LOG.equalsIgnoreCase(tableName);
+    }
+
     private boolean filter(LogEvent event) {
         if (event.getHeader().getType() == LogEvent.TABLE_MAP_EVENT) {
             TableMapLogEvent tableMapLogEvent = (TableMapLogEvent) event;
-            return isGlobalTxTable(tableMapLogEvent.getTableName());
+            String tableName = tableMapLogEvent.getTableName();
+            return isGlobalTxTable(tableName) || isDrdsRedoLogTable(tableName);
+        }
+        if (event instanceof RowsLogEvent) {
+            RowsLogEvent rowsLogEvent = (RowsLogEvent) event;
+            TableMapLogEvent table = rowsLogEvent.getTable();
+            return isDrdsRedoLogTable(table.getTableName());
+        }
+        if (event instanceof QueryLogEvent) {
+            QueryLogEvent logEvent = (QueryLogEvent) event;
+            if (StringUtils.startsWithIgnoreCase(logEvent.getQuery(), "savepoint")) {
+                return true;
+            }
         }
         return false;
     }
@@ -676,6 +723,10 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
 
     public boolean isCDCStartCommand() {
         return instructionType == InstructionType.CdcStart;
+    }
+
+    public boolean isEnvConfigChangeCommand() {
+        return instructionType == InstructionType.CdcEnvConfigChange;
     }
 
     public Long getSnapshotSeq() {

@@ -17,6 +17,7 @@
 
 package com.aliyun.polardbx.binlog.format.utils;
 
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -418,6 +419,10 @@ public final class CharsetConversion {
     }
 
     public static String getJavaCharset(String mysqlCharset) {
+        if (StringUtils.isBlank(mysqlCharset)) {
+            return mysqlCharset;
+        }
+
         Entry entry = mysqlCharsetMap.get(mysqlCharset.toUpperCase());
         if (entry == null) {
             return mysqlCharset;

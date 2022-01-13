@@ -57,9 +57,9 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements Binlog
     private int fallbackIntervalInSeconds = 60;                                             // 切换回退时间
 
     private BinlogFormat[] supportBinlogFormats;
-        // 支持的binlogFormat,如果设置会执行强校验
+    // 支持的binlogFormat,如果设置会执行强校验
     private BinlogImage[] supportBinlogImages;
-        // 支持的binlogImage,如果设置会执行强校验
+    // 支持的binlogImage,如果设置会执行强校验
 
     // update by yishun.chen,特殊异常处理参数
     private int dumpErrorCount = 0;                                              // binlogDump失败异常计数
@@ -76,6 +76,7 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements Binlog
         return buildMysqlConnection(this.runningInfo);
     }
 
+    @Override
     protected void preDump(ErosaConnection connection) {
         if (!(connection instanceof MysqlConnection)) {
             throw new CanalParseException("Unsupported connection type : " + connection.getClass().getSimpleName());
@@ -126,12 +127,14 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements Binlog
                 throw new CanalParseException("not found default database charset");
             }
         }
+        ((MysqlConnection) connection).setServerCharactorset(serverCharactorSet);
 
         lowerCaseTableNames = metaConnection.getLowerCaseTableNames();
     }
 
     // =================== helper method =================
 
+    @Override
     protected void afterDump(ErosaConnection connection) {
         super.afterDump(connection);
 

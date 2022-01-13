@@ -42,7 +42,7 @@ public class TableMeta {
     private List<FieldMeta> fields = new ArrayList<FieldMeta>();
     private String ddl;                                // 表结构的DDL语句
     private String charset;
-    private boolean         implicitPk = false;
+    private boolean useImplicitPk = false;
 
     public TableMeta() {
 
@@ -123,12 +123,12 @@ public class TableMeta {
         this.charset = charset;
     }
 
-    public void setImplicitPk(boolean implicitPk) {
-        this.implicitPk = implicitPk;
+    public void setUseImplicitPk(boolean implicitPk) {
+        this.useImplicitPk = implicitPk;
     }
 
-    public boolean getImplicitPk() {
-        return this.implicitPk;
+    public boolean getUseImplicitPk() {
+        return this.useImplicitPk;
     }
 
     @Override

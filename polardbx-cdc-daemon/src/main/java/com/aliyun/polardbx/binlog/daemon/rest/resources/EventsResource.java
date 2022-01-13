@@ -20,8 +20,8 @@ package com.aliyun.polardbx.binlog.daemon.rest.resources;
 import com.aliyun.polardbx.binlog.AlarmEvent;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
+import com.sun.jersey.spi.resource.Singleton;
 
-import javax.inject.Singleton;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;

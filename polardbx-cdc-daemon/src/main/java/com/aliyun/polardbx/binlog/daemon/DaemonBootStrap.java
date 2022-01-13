@@ -17,25 +17,21 @@
 
 package com.aliyun.polardbx.binlog.daemon;
 
+import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.cdc.meta.CdcMetaManager;
+import com.aliyun.polardbx.binlog.daemon.cluster.ClusterBootStrapFactory;
+import com.aliyun.polardbx.binlog.daemon.cluster.ClusterBootstrapService;
 import com.aliyun.polardbx.binlog.daemon.rest.RestServer;
 import com.aliyun.polardbx.binlog.daemon.schedule.NodeReporter;
-import com.aliyun.polardbx.binlog.daemon.schedule.TaskAliveWatcher;
-import com.aliyun.polardbx.binlog.daemon.schedule.TopologyWatcher;
-import com.aliyun.polardbx.binlog.heartbeat.TsoHeartbeat;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
-import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.apache.commons.lang.StringUtils;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.COMMON_PORTS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_HEARTBEAT_INTERVAL_MS;
-import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TASK_WATCH_INTERVAL_MS;
-import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TOPOLOGY_WATCH_INTERVAL_MS;
-import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 
 /**
@@ -46,7 +42,7 @@ public class DaemonBootStrap {
 
     public static void main(String[] args) {
         try {
-            System.setProperty(TASK_NAME, "DAEMON");
+            System.setProperty(TASK_NAME, "Daemon");
 
             // Spring Context
             final SpringContextBootStrap appContextBootStrap =
@@ -61,30 +57,24 @@ public class DaemonBootStrap {
             // 初始化表
             CdcMetaManager cdcMetaManager = new CdcMetaManager();
             cdcMetaManager.init();
-
-            // TSO心跳定时任务，逻辑binlog stream强依赖该心跳
-            TsoHeartbeat tsoHeartbeat =
-                new TsoHeartbeat(DynamicApplicationConfig.getInt(DAEMON_TSO_HEARTBEAT_INTERVAL));
-            tsoHeartbeat.setAlarm(t -> MonitorManager.getInstance()
-                .triggerAlarm(MonitorType.DAEMON_POLARX_HEARTBEAT_ERROR, ExceptionUtils.getStackTrace(t)));
-            tsoHeartbeat.start();
+            String cluster = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+            String clusterType = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_TYPE);
+            if (StringUtils.isBlank(clusterType)) {
+                // 兼容一下历史版本，如果没有配置，默认为CDC Global Binlog集群
+                clusterType = ClusterTypeEnum.BINLOG.name();
+            }
 
             // Node Reporter
-            String cluster = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
-            NodeReporter nodeReporter = new NodeReporter(cluster, "NodeReport",
+            NodeReporter nodeReporter = new NodeReporter(cluster, clusterType, "NodeReport",
                 DynamicApplicationConfig.getInt(DAEMON_HEARTBEAT_INTERVAL_MS));
             nodeReporter.start();
 
-            // Topology Watcher
-            TopologyWatcher topologyWatcher = new TopologyWatcher(cluster, "TopologyWatcher",
-                DynamicApplicationConfig.getInt(DAEMON_TOPOLOGY_WATCH_INTERVAL_MS),
-                DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_STORAGE_TRIGGER_RELAY_THRESHOLD));
-            topologyWatcher.start();
-
-            // TaskAliveWatcher
-            TaskAliveWatcher taskAliveWatcher = new TaskAliveWatcher(cluster, "TaskKeepAlive",
-                DynamicApplicationConfig.getInt(DAEMON_TASK_WATCH_INTERVAL_MS));
-            taskAliveWatcher.start();
+            ClusterBootstrapService bootstrapService =
+                ClusterBootStrapFactory.getBootstrapService(ClusterTypeEnum.valueOf(clusterType));
+            if (bootstrapService == null) {
+                throw new UnsupportedOperationException("not support cluster type :" + clusterType);
+            }
+            bootstrapService.start();
 
             // RestServer
             RestServer restServer = new RestServer();
@@ -102,10 +92,10 @@ public class DaemonBootStrap {
                     log.info("## daemon server is down.");
                 }
             }));
-
         } catch (Throwable t) {
             log.error("## Something goes wrong when starting up the daemon process:", t);
             Runtime.getRuntime().halt(1);
         }
     }
+
 }

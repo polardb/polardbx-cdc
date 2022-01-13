@@ -25,6 +25,9 @@ public enum InstructionType {
     /**
      * 存储实例发生了变更
      */
-    StorageInstChange;
-
+    StorageInstChange,
+    /**
+     * CDC 配置参数变更
+     */
+    CdcEnvConfigChange;
 }

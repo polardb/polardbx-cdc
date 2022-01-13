@@ -17,40 +17,38 @@
 
 package com.aliyun.polardbx.binlog.canal.core.dump;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
-
-import org.springframework.util.Assert;
-
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionBegin;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
+import org.springframework.util.Assert;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author shicai.xsc 2020/11/29 18:46
- * @desc
  * @since 5.0.0.0
  */
 public class EventTransactionBuffer {
-    private static final long        INIT_SQEUENCE = -1;
-    private int                      bufferSize    = 1024;
-    private int                      indexMask;
-    private MySQLDBMSEvent[]         entries;
+    private static final long INIT_SQEUENCE = -1;
+    private int bufferSize = 1024;
+    private int indexMask;
+    private MySQLDBMSEvent[] entries;
 
-    private AtomicLong putSequence   = new AtomicLong(INIT_SQEUENCE); // 代表当前put操作最后一次写操作发生的位置
-    private AtomicLong               flushSequence = new AtomicLong(INIT_SQEUENCE); // 代表满足flush条件后最后一次数据flush的时间
+    private AtomicLong putSequence = new AtomicLong(INIT_SQEUENCE); // 代表当前put操作最后一次写操作发生的位置
+    private AtomicLong flushSequence = new AtomicLong(INIT_SQEUENCE); // 代表满足flush条件后最后一次数据flush的时间
 
     private TransactionFlushCallback flushCallback;
 
-    public EventTransactionBuffer(){
+    public EventTransactionBuffer() {
 
     }
 
-    public EventTransactionBuffer(TransactionFlushCallback flushCallback){
+    public EventTransactionBuffer(TransactionFlushCallback flushCallback) {
         this.flushCallback = flushCallback;
     }
 

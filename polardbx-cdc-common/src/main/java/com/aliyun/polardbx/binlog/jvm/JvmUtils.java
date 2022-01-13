@@ -17,6 +17,8 @@
 
 package com.aliyun.polardbx.binlog.jvm;
 
+import org.apache.commons.lang3.StringUtils;
+
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
@@ -24,8 +26,6 @@ import java.lang.management.MemoryType;
 import java.lang.management.MemoryUsage;
 import java.lang.management.ThreadMXBean;
 import java.util.List;
-
-import org.apache.commons.lang3.StringUtils;
 
 /**
  * Created by ziyang.lb on 2021/01/21.
@@ -45,27 +45,27 @@ public class JvmUtils {
             String name = mp.getName();
             if (type == MemoryType.HEAP) {
                 switch (name) {
-                    case "Par Eden Space":
-                    case "PS Eden Space": {
-                        MemoryUsage memoryUsage = mp.getUsage();
-                        edenUsed = memoryUsage.getUsed();
-                        edenMax = memoryUsage.getMax();
-                        break;
-                    }
-                    case "Par Survivor Space":
-                    case "PS Survivor Space": {
-                        MemoryUsage memoryUsage = mp.getUsage();
-                        survivorUsed = memoryUsage.getUsed();
-                        survivorMax = memoryUsage.getMax();
-                        break;
-                    }
-                    case "CMS Old Gen":
-                    case "PS Old Gen": {
-                        MemoryUsage memoryUsage = mp.getUsage();
-                        jvmSnapshot.setOldUsed(memoryUsage.getUsed());
-                        jvmSnapshot.setOldMax(memoryUsage.getMax());
-                        break;
-                    }
+                case "Par Eden Space":
+                case "PS Eden Space": {
+                    MemoryUsage memoryUsage = mp.getUsage();
+                    edenUsed = memoryUsage.getUsed();
+                    edenMax = memoryUsage.getMax();
+                    break;
+                }
+                case "Par Survivor Space":
+                case "PS Survivor Space": {
+                    MemoryUsage memoryUsage = mp.getUsage();
+                    survivorUsed = memoryUsage.getUsed();
+                    survivorMax = memoryUsage.getMax();
+                    break;
+                }
+                case "CMS Old Gen":
+                case "PS Old Gen": {
+                    MemoryUsage memoryUsage = mp.getUsage();
+                    jvmSnapshot.setOldUsed(memoryUsage.getUsed());
+                    jvmSnapshot.setOldMax(memoryUsage.getMax());
+                    break;
+                }
                 }
             }
             if (StringUtils.equalsIgnoreCase("Metaspace", name)) {
@@ -85,18 +85,18 @@ public class JvmUtils {
         for (GarbageCollectorMXBean gcBean : gc) {
             String name = gcBean.getName();
             switch (name) {
-                case "ParNew":
-                case "PS Scavenge": {
-                    jvmSnapshot.setYoungCollectionCount(gcBean.getCollectionCount());
-                    jvmSnapshot.setYoungCollectionTime(gcBean.getCollectionTime());
-                    break;
-                }
-                case "ConcurrentMarkSweep":
-                case "PS MarkSweep": {
-                    jvmSnapshot.setOldCollectionCount(gcBean.getCollectionCount());
-                    jvmSnapshot.setOldCollectionTime(gcBean.getCollectionTime());
-                    break;
-                }
+            case "ParNew":
+            case "PS Scavenge": {
+                jvmSnapshot.setYoungCollectionCount(gcBean.getCollectionCount());
+                jvmSnapshot.setYoungCollectionTime(gcBean.getCollectionTime());
+                break;
+            }
+            case "ConcurrentMarkSweep":
+            case "PS MarkSweep": {
+                jvmSnapshot.setOldCollectionCount(gcBean.getCollectionCount());
+                jvmSnapshot.setOldCollectionTime(gcBean.getCollectionTime());
+                break;
+            }
             }
         }
         //计算当前线程数

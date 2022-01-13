@@ -30,6 +30,11 @@ public abstract class ConfigKeys {
      * Polarx主实例的id
      */
     public static final String POLARX_INST_ID = "polardbx.instance.id";
+
+    /**
+     * polarx实例IP
+     */
+    public static final String POLARX_URL = "polarx_url";
     /**
      * polarx实例用户名
      */
@@ -79,6 +84,14 @@ public abstract class ConfigKeys {
      */
     public static final String PRINT_METRICS = "printMetrics";
     /**
+     * 激活Daemon接口ACL
+     */
+    public static final String ENABLE_INTERFACE_ACL = "enableInterfaceACL";
+    /**
+     * 当前cdc集群类型
+     */
+    public static final String CLUSTER_TYPE = "cluster_type";
+    /**
      * 密码加解密key
      */
     public static final String DN_PASSWORD_KEY = "dnPasswordKey";
@@ -118,10 +131,13 @@ public abstract class ConfigKeys {
      * 逻辑Binlog Write Buffer的flush的间隔（单位：毫秒），当flush策略为1时有效
      */
     public static final String BINLOG_WRITE_FLUSH_INTERVAL = "binlog.write.flush.interval";
+    /**
+     * 心跳刷盘频率，默认30秒
+     */
+    public static final String HEARTBEAT_FLUSH_INTERVAL = "binlog.write.heartbeatFlushInterval";
     //******************************************************************************************************************
     //***************************************************Task运行时相关的配置**********************************************
     //******************************************************************************************************************
-
     /**
      * 在task进行bootstrap的过程中，是否自动启动task engine内核，默认为false
      */
@@ -314,5 +330,8 @@ public abstract class ConfigKeys {
             SpringContextHolder.getPropertiesValue(ConfigKeys.CLUSTER_ID));
     public static final String CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY =
         String.format("%s:cluster_topology_dumper_master_node",
+            SpringContextHolder.getPropertiesValue(ConfigKeys.CLUSTER_ID));
+    public static final String CLUSTER_SUSPEND_TOPOLOGY_REBUILDING =
+        String.format("%s:cluster_suspend_topology_rebuilding",
             SpringContextHolder.getPropertiesValue(ConfigKeys.CLUSTER_ID));
 }

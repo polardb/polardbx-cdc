@@ -21,7 +21,7 @@ import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
 
 public class BinlogGenerateUtil {
 
-    public static FormatDescriptionEvent buildFormatDescriptionEvent(int serverId, String mysqlVersion) {
+    public static FormatDescriptionEvent buildFormatDescriptionEvent(long serverId, String mysqlVersion) {
         FormatDescriptionEvent formatDescriptionEvent = new FormatDescriptionEvent((short) 4, mysqlVersion, serverId);
         return formatDescriptionEvent;
     }

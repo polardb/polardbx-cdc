@@ -35,11 +35,7 @@ import java.nio.channels.FileChannel;
  */
 @Slf4j
 public class BinlogDumpReader {
-    private byte seq = 1;
-
     private static final int SIZE = 2 * 1024 * 1024;//聚合小的event，一次发送
-
-    // https://dev.mysql.com/doc/refman/5.7/en/replication-options-binary-log.html
     /**
      * Command-Line Format	--max-binlog-size=#
      * System Variable	max_binlog_size
@@ -51,17 +47,17 @@ public class BinlogDumpReader {
      * Maximum Value	1073741824
      */
     private static final int EVENT_MAX_SIZE = 32 * 1024 * 1024;//最大4G，这里为节省内存，先设置为32M
+
+    // https://dev.mysql.com/doc/refman/5.7/en/replication-options-binary-log.html
     String fileName;
     long pos;
     long fp;
     FileInputStream inputStream;
     FileChannel channel;
-
     ByteBuffer buffer = ByteBuffer.allocate(EVENT_MAX_SIZE);
-
     LogFileManager logFileManager;
-
     int left = 0;
+    private byte seq = 1;
 
     public BinlogDumpReader(LogFileManager logFileManager, String fileName, long pos) throws IOException {
         this.logFileManager = logFileManager;

@@ -125,7 +125,7 @@ public class BinlogExtractor implements Extractor {
 
         JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
         version = polarxTemplate.queryForObject(QUERY_FOR_VERSION, String.class);
-        
+
         List<String> startCmdTSOList = metaTemplate.queryForList(QUERY_START_CMD, String.class);
         if (!CollectionUtils.isEmpty(startCmdTSOList)) {
             startCmdTSO = startCmdTSOList.get(0);
@@ -166,7 +166,7 @@ public class BinlogExtractor implements Extractor {
      */
     private void addDefaultFilter(String startTSO) {
 
-        int serverId = (int) ServerConfigUtil.getGlobalNumberVar("SERVER_ID");
+        long serverId = ServerConfigUtil.getGlobalNumberVar("SERVER_ID");
 
         logger.info("starting binlog extractor serverId : " + serverId);
 
@@ -187,6 +187,7 @@ public class BinlogExtractor implements Extractor {
         acceptFilter.addAcceptEvent(LogEvent.XA_PREPARE_LOG_EVENT);
         // accept tso
         acceptFilter.addAcceptEvent(LogEvent.SEQUENCE_EVENT);
+        acceptFilter.addAcceptEvent(LogEvent.GCN_EVENT);
         acceptFilter.addAcceptEvent(LogEvent.TABLE_MAP_EVENT);
         acceptFilter.addAcceptEvent(LogEvent.XID_EVENT);
 

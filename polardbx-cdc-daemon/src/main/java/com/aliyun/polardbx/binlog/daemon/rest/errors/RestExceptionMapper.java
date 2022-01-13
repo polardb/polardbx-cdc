@@ -18,10 +18,10 @@
 package com.aliyun.polardbx.binlog.daemon.rest.errors;
 
 import com.aliyun.polardbx.binlog.daemon.rest.entities.ErrorMessage;
+import com.sun.jersey.api.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.ext.ExceptionMapper;
 

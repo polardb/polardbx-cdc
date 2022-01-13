@@ -17,6 +17,7 @@
 
 package com.aliyun.polardbx.binlog.canal.binlog;
 
+import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.event.AppendBlockLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.BeginLoadQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.CreateFileLogEvent;
@@ -25,6 +26,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.DeleteRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.ExecuteLoadLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.ExecuteLoadQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.event.GcnLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.GtidLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.HeartbeatLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.IgnorableLogEvent;
@@ -54,6 +56,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.BinlogCheckPointLog
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidListLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.StartEncryptionLogEvent;
+import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -122,6 +125,11 @@ public final class LogDecoder {
             logPosition.position = header.getLogPos();
             return event;
         }
+        case LogEvent.GCN_EVENT: {
+            GcnLogEvent event = new GcnLogEvent(header, buffer, descriptionEvent);
+            logPosition.position = header.getLogPos();
+            return event;
+        }
         case LogEvent.QUERY_EVENT: {
             QueryLogEvent event = new QueryLogEvent(header, buffer, descriptionEvent);
             /* updating position in context */
@@ -135,7 +143,9 @@ public final class LogDecoder {
             return event;
         }
         case LogEvent.TABLE_MAP_EVENT: {
-            TableMapLogEvent mapEvent = new TableMapLogEvent(header, buffer, descriptionEvent);
+            ServerCharactorSet charactorSet = context.getServerCharactorSet();
+            TableMapLogEvent mapEvent = new TableMapLogEvent(header, buffer, descriptionEvent,
+                CharsetConversion.getJavaCharset(charactorSet.getCharacterSetServer()));
             /* updating position in context */
             logPosition.position = header.getLogPos();
             context.putTable(mapEvent);
@@ -146,6 +156,9 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
+            if (context.getServerId() != 0L) {
+                event.setServerId(context.getServerId());
+            }
             return event;
         }
         case LogEvent.UPDATE_ROWS_EVENT_V1: {
@@ -153,6 +166,9 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
+            if (context.getServerId() != 0L) {
+                event.setServerId(context.getServerId());
+            }
             return event;
         }
         case LogEvent.DELETE_ROWS_EVENT_V1: {
@@ -160,6 +176,9 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
+            if (context.getServerId() != 0L) {
+                event.setServerId(context.getServerId());
+            }
             return event;
         }
         case LogEvent.ROTATE_EVENT: {
@@ -304,6 +323,7 @@ public final class LogDecoder {
             RowsQueryLogEvent event = new RowsQueryLogEvent(header, buffer, descriptionEvent);
             /* updating position in context */
             logPosition.position = header.getLogPos();
+            context.setServerId(LogEventUtil.getServerIdFromRowQuery(event));
             return event;
         }
         case LogEvent.WRITE_ROWS_EVENT: {
@@ -311,6 +331,9 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
+            if (context.getServerId() != 0L) {
+                event.setServerId(context.getServerId());
+            }
             return event;
         }
         case LogEvent.UPDATE_ROWS_EVENT: {
@@ -318,6 +341,9 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
+            if (context.getServerId() != 0L) {
+                event.setServerId(context.getServerId());
+            }
             return event;
         }
         case LogEvent.DELETE_ROWS_EVENT: {
@@ -325,6 +351,9 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
+            if (context.getServerId() != 0L) {
+                event.setServerId(context.getServerId());
+            }
             return event;
         }
         case LogEvent.GTID_LOG_EVENT:
@@ -471,4 +500,5 @@ public final class LogDecoder {
         buffer.rewind();
         return null;
     }
+
 }

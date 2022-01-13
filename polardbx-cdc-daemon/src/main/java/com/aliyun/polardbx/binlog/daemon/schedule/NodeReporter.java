@@ -17,6 +17,7 @@
 
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
+import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -47,8 +48,8 @@ public class NodeReporter extends AbstractBinlogTimerTask {
     private final String instId;
     private final String portStr;
 
-    public NodeReporter(String cluster, String name, int interval) {
-        super(cluster, name, interval);
+    public NodeReporter(String cluster, String clusterType, String name, int interval) {
+        super(cluster, clusterType, name, interval);
         instId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
         portStr = buildPortStr();
     }
@@ -72,8 +73,10 @@ public class NodeReporter extends AbstractBinlogTimerTask {
             return;
         }
 
+        ClusterTypeEnum clusterTypeEnum = ClusterTypeEnum.valueOf(clusterType);
         nodeInfo.setRole(role);
-        nodeInfo.setClusterId(cluster);
+        nodeInfo.setClusterId(clusterId);
+        nodeInfo.setClusterType(clusterTypeEnum.name());
         nodeInfo.setContainerId(DynamicApplicationConfig.getString(ConfigKeys.INST_ID));
         nodeInfo.setIp(DynamicApplicationConfig.getString(ConfigKeys.INST_IP));
         nodeInfo.setDaemonPort(DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_PORT));

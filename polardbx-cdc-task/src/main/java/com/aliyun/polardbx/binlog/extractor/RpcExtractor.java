@@ -96,7 +96,7 @@ public class RpcExtractor implements Extractor {
                     buildRpcParameter();
                     String target = rpcParameter.getAddress() + ":" + rpcParameter.getPort();
                     NettyChannelBuilder channelBuilder =
-                        (NettyChannelBuilder) ManagedChannelBuilder.forTarget(target).usePlaintext();
+                        (NettyChannelBuilder) ManagedChannelBuilder.forTarget(target).usePlaintext();// TODO,参数需要进一步丰富
                     rpcClient = new TxnStreamRpcClient(channelBuilder, new TxnMessageReceiver() {
 
                         @Override

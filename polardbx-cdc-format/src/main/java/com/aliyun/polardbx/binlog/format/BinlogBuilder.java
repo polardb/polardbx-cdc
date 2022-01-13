@@ -58,7 +58,7 @@ public abstract class BinlogBuilder {
      * seconds since unix epoch
      */
     protected int eventType;
-    protected int serverId;
+    protected long serverId;
 
     /**
      * event header end
@@ -97,7 +97,7 @@ public abstract class BinlogBuilder {
     public BinlogBuilder() {
     }
 
-    public BinlogBuilder(int timestamp, int eventType, int serverId) {
+    public BinlogBuilder(int timestamp, int eventType, long serverId) {
         this.timestamp = timestamp;
         this.eventType = eventType;
         this.serverId = serverId;

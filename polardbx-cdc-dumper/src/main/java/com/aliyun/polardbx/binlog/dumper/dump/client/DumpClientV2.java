@@ -17,15 +17,15 @@
 
 package com.aliyun.polardbx.binlog.dumper.dump.client;
 
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.monitor.MonitorManager;
+import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpc.cdc.BinaryLog;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc.CdcServiceStub;
 import com.aliyun.polardbx.rpc.cdc.DumpRequest;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.rpc.cdc.Request;
-import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
-import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;

@@ -21,21 +21,34 @@ import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig;
 import com.aliyun.polardbx.binlog.MarkType;
+import com.aliyun.polardbx.binlog.MetaCoopCommandEnum;
+import com.aliyun.polardbx.binlog.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.canal.core.gtid.ByteHelper;
+import com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
 import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
+import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
 import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.EnvConfigChangeInfo;
 import com.aliyun.polardbx.binlog.domain.StorageChangeInfo;
 import com.aliyun.polardbx.binlog.domain.StorageContent;
 import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.domain.po.BinlogEnvConfigHistory;
+import com.aliyun.polardbx.binlog.domain.po.BinlogPolarxCommand;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.RelayFinalTaskInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
+import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator;
 import com.aliyun.polardbx.binlog.dumper.metrics.Metrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -55,6 +68,7 @@ import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.protobuf.ByteString;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import org.apache.commons.lang3.StringUtils;
@@ -64,11 +78,13 @@ import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.CollectionUtils;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -79,11 +95,17 @@ import static com.aliyun.polardbx.binlog.CommonUtils.getTsoPhysicalTime;
 import static com.aliyun.polardbx.binlog.ConfigKeys.EXPECTED_STORAGE_TSO_KEY;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.instructionId;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.tso;
+import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.gmtCreated;
+import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
+import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
+import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.status;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeBegin;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeCommit;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeMarkEvent;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isIn;
+import static org.mybatis.dynamic.sql.SqlBuilder.isLessThanOrEqualTo;
+import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
 
 /**
  * Created by ziyang.lb
@@ -93,8 +115,6 @@ public class LogFileGenerator {
 
     private static final Logger logger = LoggerFactory.getLogger(LogFileGenerator.class);
     private static final String MODE = "rw";
-    //单位：s，不能随意调整，否则会导致Dumper主备同步异常，下游同步异常
-    private static final long WRITE_HEARTBEAT_INTERVAL_SECONDS = 30;
     private static final Gson GSON = new GsonBuilder().create();
 
     // 缓存formatDesc数据，binlog文件滚动需要
@@ -236,6 +256,7 @@ public class LogFileGenerator {
     private void prepare() throws IOException, InterruptedException {
         logger.info("prepare dumping from final task.");
         buildBinlogFile();
+        DynamicApplicationVersionConfig.applyConfigByTso(startTso);
         waitTaskConfigReady(startTso);
         buildTarget();
         if (StringUtils.isNotBlank(startTso)) {
@@ -258,7 +279,8 @@ public class LogFileGenerator {
             assert currentToken.getType() == TxnType.DML;
             Metrics.get().setLatestDelayTimeOnReceive(calcDelayTime(currentToken));
             Metrics.get().markBegin();
-            writeBegin();
+            long serverId = extractServerId(message);
+            writeBegin(serverId);
 
             break;
         case DATA:
@@ -269,7 +291,8 @@ public class LogFileGenerator {
             break;
         case END:
             assert currentToken.getType() == TxnType.DML;
-            writeCommit();
+            serverId = extractServerId(message);
+            writeCommit(serverId);
             tryFlush(currentFlushPolicy == FlushPolicy.FlushPerTxn);
 
             Metrics.get().markEnd();
@@ -300,11 +323,28 @@ public class LogFileGenerator {
                 if (binlogFile.hasBufferedData() && flag) {
                     tryFlush(true);
                 }
+            } else if (currentToken.getType() == TxnType.META_CONFIG_ENV_CHANGE) {
+                logger.info("receive an meta config env change token with tso {}", currentToken.getTso());
+                EnvConfigChangeInfo envConfigChangeInfo =
+                    GSON.fromJson(new String(currentToken.getPayload().toByteArray()), EnvConfigChangeInfo.class);
+                recordMetaEnvConfigHistory(currentToken.getTso(), envConfigChangeInfo);
+                writeConfigChangeEvent();
+                tryFlush(true);
             }
             break;
         default:
             throw new PolardbxException("invalid message type for logfile generator: " + processType);
         }
+    }
+
+    private long extractServerId(TxnMessage message) {
+        List<TxnItem> itemList = message.getTxnData().getTxnItemsList();
+        if (CollectionUtils.isEmpty(itemList)) {
+            return ServerConfigUtil.getGlobalNumberVar("SERVER_ID");
+        }
+        ByteString payload = itemList.get(0).getPayload();
+        byte[] serverIdBytes = payload.substring(5, 9).toByteArray();
+        return ByteHelper.readUnsignedIntLittleEndian(serverIdBytes, 0);
     }
 
     /**
@@ -326,7 +366,7 @@ public class LogFileGenerator {
      */
     private boolean tryWriteHeartBeat() throws IOException {
         long seconds = CommonUtils.getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS);
-        if (seconds % WRITE_HEARTBEAT_INTERVAL_SECONDS == 0) {
+        if (seconds % DynamicApplicationVersionConfig.getLong(ConfigKeys.HEARTBEAT_FLUSH_INTERVAL) == 0) {
             writeTso();
             if (logger.isDebugEnabled()) {
                 logger.debug("Write a heartbeat tso {} to binlog file {}.", currentToken.getTso(),
@@ -411,9 +451,9 @@ public class LogFileGenerator {
         logger.info("target final task address is :" + targetTaskAddress);
     }
 
-    private void writeBegin() throws IOException {
+    private void writeBegin(long serverId) throws IOException {
         Pair<byte[], Integer> begin = makeBegin(getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS),
-            currentToken.getBeginSchema());
+            currentToken.getBeginSchema(), serverId);
         binlogFile.writeEvent(begin.getLeft(), 0, begin.getRight(), true);
 
         if (logger.isDebugEnabled()) {
@@ -426,15 +466,14 @@ public class LogFileGenerator {
             final byte[] data = txnItem.getPayload().toByteArray();
             EventGenerator.updateTimeStamp(data,
                 CommonUtils.getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS));
-            EventGenerator.updateServerId(data);
             binlogFile.writeEvent(data, 0, data.length, true);
-
             Metrics.get().incrementTotalWriteDmlEventCount();
         }
     }
 
-    private void writeCommit() throws IOException {
-        final Pair<byte[], Integer> commit = makeCommit(getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS));
+    private void writeCommit(long serverId) throws IOException {
+        final Pair<byte[], Integer> commit =
+            makeCommit(getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS), serverId);
         binlogFile.writeEvent(commit.getLeft(), 0, commit.getRight(), true);
 
         writeTso();
@@ -442,7 +481,7 @@ public class LogFileGenerator {
 
     private void writeDdl(byte[] data) throws IOException {
         EventGenerator.updateTimeStamp(data, CommonUtils.getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS));
-        EventGenerator.updateServerId(data);
+//        EventGenerator.updateServerId(data);
         binlogFile.writeEvent(data, 0, data.length, true);
 
         writeTso();
@@ -465,6 +504,14 @@ public class LogFileGenerator {
         final Pair<byte[], Integer> tsoEvent =
             makeMarkEvent(getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS), tso);
         binlogFile.writeEvent(tsoEvent.getLeft(), 0, tsoEvent.getRight(), true);
+    }
+
+    private void writeConfigChangeEvent() throws IOException {
+        String tso = MarkType.CTS + "::" + currentToken.getTso() + "::" + MetaCoopCommandEnum.ConfigChange;
+        final Pair<byte[], Integer> tsoEvent =
+            makeMarkEvent(getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS), tso);
+        binlogFile.writeEvent(tsoEvent.getLeft(), 0, tsoEvent.getRight(), true);
+        DynamicApplicationVersionConfig.setConfigByTso(currentToken.getTso());
     }
 
     private boolean checkRotate(long timestamp, boolean rotateAlreadyExist) throws IOException {
@@ -524,7 +571,7 @@ public class LogFileGenerator {
         }
     }
 
-    private void recordStorageHistory(String tsoIn, String instructionIdParam, List<String> storageList)
+    private void recordStorageHistory(String tsoParam, String instructionIdParam, List<String> storageList)
         throws InterruptedException {
         if (storageList == null || storageList.isEmpty()) {
             throw new PolardbxException("Meta scale storage list can`t be null");
@@ -534,24 +581,99 @@ public class LogFileGenerator {
         StorageHistoryInfoMapper storageHistoryMapper = SpringContextHolder.getObject(StorageHistoryInfoMapper.class);
         TransactionTemplate transactionTemplate = SpringContextHolder.getObject("metaTransactionTemplate");
         transactionTemplate.execute((o) -> {
-            List<StorageHistoryInfo> storageHistoryInfos = storageHistoryMapper
-                .select(s -> s.where(tso, isEqualTo(tsoIn)).or(instructionId, isEqualTo(instructionIdParam)));
-            //幂等判断
+            // 幂等判断
+            // tso记录到binlog文件和记录到binlog_storage_history表是非原子操作，需要做幂等判断
+            // instructionId也是不能重复的，正常情况下tso和instructionId是一对一的关系，但可能出现bug
+            // 比如：https://yuque.antfin-inc.com/jingwei3/knddog/uxpbzq，所以此处查询要更严谨一些，where条件也要包含instructionId
+            List<StorageHistoryInfo> storageHistoryInfos = storageHistoryMapper.select(
+                s -> s.where(tso, isEqualTo(tsoParam))
+                    .or(instructionId, isEqualTo(instructionIdParam)));
             if (storageHistoryInfos.isEmpty()) {
+                boolean repaired = tryRepairStorageList(instructionIdParam, storageList);
                 StorageContent content = new StorageContent();
                 content.setStorageInstIds(storageList);
+                content.setRepaired(repaired);
+
                 StorageHistoryInfo info = new StorageHistoryInfo();
                 info.setStatus(0);
-                info.setTso(tsoIn);
+                info.setTso(tsoParam);
                 info.setStorageContent(GSON.toJson(content));
                 info.setInstructionId(instructionIdParam);
                 storageHistoryMapper.insert(info);
                 logger.info("record storage history : " + GSON.toJson(info));
             } else {
-                logger.info("storage history with tso {} is already exist, ignored.", tsoIn);
+                logger.info("storage history with tso {} or instruction id {} is already exist, ignored.", tsoParam,
+                    instructionIdParam);
             }
             return null;
         });
+    }
+
+    private void recordMetaEnvConfigHistory(final String tso, EnvConfigChangeInfo envConfigChangeInfo)
+        throws InterruptedException {
+        TransactionTemplate transactionTemplate = SpringContextHolder.getObject("metaTransactionTemplate");
+        final BinlogEnvConfigHistoryMapper configHistoryMapper =
+            SpringContextHolder.getObject(BinlogEnvConfigHistoryMapper.class);
+        transactionTemplate.execute((o) -> {
+            // 幂等判断
+            // tso记录到binlog文件和记录到BinlogEnvConfigHistory表是非原子操作，需要做幂等判断
+            // instructionId也是不能重复的，正常情况下tso和instructionId是一对一的关系，但可能出现bug
+            // 比如：https://yuque.antfin-inc.com/jingwei3/knddog/uxpbzq，所以此处查询要更严谨一些，where条件也要包含instructionId
+            List<BinlogEnvConfigHistory> configHistoryList = configHistoryMapper.select(
+                s -> s.where(BinlogEnvConfigHistoryDynamicSqlSupport.tso, isEqualTo(tso))
+                    .and(BinlogEnvConfigHistoryDynamicSqlSupport.instructionId,
+                        isEqualTo(envConfigChangeInfo.getInstructionId())));
+            if (configHistoryList.isEmpty()) {
+                BinlogEnvConfigHistory binlogEnvConfigHistory = new BinlogEnvConfigHistory();
+                binlogEnvConfigHistory.setTso(currentToken.getTso());
+                binlogEnvConfigHistory.setInstructionId(envConfigChangeInfo.getInstructionId());
+                binlogEnvConfigHistory.setChangeEnvContent(envConfigChangeInfo.getContent());
+                configHistoryMapper.insert(binlogEnvConfigHistory);
+                logger.info("record meta env config change history : " + GSON.toJson(envConfigChangeInfo));
+            } else {
+                logger
+                    .info("env config change  history with tso {} or instruction id {} is already exist, ignored.", tso,
+                        envConfigChangeInfo.getInstructionId());
+            }
+            return null;
+        });
+    }
+
+    private boolean tryRepairStorageList(String instructionIdParam, List<String> storageList) {
+        BinlogPolarxCommandMapper commandMapper = SpringContextHolder.getObject(BinlogPolarxCommandMapper.class);
+        StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
+        Optional<BinlogPolarxCommand> optional = commandMapper
+            .selectOne(s -> s.where(BinlogPolarxCommandDynamicSqlSupport.cmdId, isEqualTo(instructionIdParam)));
+
+        if (optional.isPresent()) {
+            BinlogPolarxCommand command = optional.get();
+            if ("ADD_STORAGE".equals(command.getCmdType())) {
+                logger.info("storage list before trying to repair is " + storageList);
+                List<StorageInfo> storageInfosInDb = storageInfoMapper.select(c ->
+                    c.where(instKind, isEqualTo(0))//0:master, 1:slave, 2:metadb
+                        .and(status, isNotEqualTo(2))//0:storage ready, 1:prepare offline, 2:storage offline
+                        .and(gmtCreated, isLessThanOrEqualTo(command.getGmtCreated()))
+                        .orderBy(id));
+                Set<String> storageIdsInDb = storageInfosInDb.stream().collect(
+                    Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1, (s1, s2) -> s1)).values().stream()
+                    .map(StorageInfo::getStorageInstId)
+                    .collect(Collectors.toSet());
+
+                boolean repaired = false;
+                for (String id : storageIdsInDb) {
+                    if (!storageList.contains(id)) {
+                        logger.warn("storage inst id {} is not exist in instruction storage list.", id);
+                        storageList.add(id);
+                        repaired = true;
+                    }
+                }
+                logger.info("storage list after trying to repair is " + storageList);
+                return repaired;
+            }
+        } else {
+            logger.error("can`t find the polarx command record for instruction-id " + instructionIdParam);
+        }
+        return false;
     }
 
     private void tryFlush(boolean forceFlush) throws IOException {

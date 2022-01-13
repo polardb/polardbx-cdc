@@ -17,16 +17,17 @@
 
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
-import javax.inject.Singleton;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.daemon.rest.entities.ConfigInfo;
+import com.aliyun.polardbx.binlog.error.ConfigKeyNotExistException;
+import com.sun.jersey.spi.resource.Singleton;
+
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
-
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.daemon.rest.entities.ConfigInfo;
 
 @Path("/config/v1")
 @Singleton
@@ -35,15 +36,20 @@ public class DynamicConfigResource {
     @POST
     @Path("/set")
     @Produces(MediaType.TEXT_PLAIN)
-    public boolean set(ConfigInfo configInfo) {
+    public String set(ConfigInfo configInfo) {
         DynamicApplicationConfig.setValue(configInfo.getKey(), configInfo.getValue());
-        return true;
+        return true + "";
     }
 
     @GET
     @Path("/get/{key}")
     @Produces("text/plain;charset=utf-8")
     public String get(@PathParam("key") String key) {
-        return DynamicApplicationConfig.getValue(key);
+        try {
+            String result = DynamicApplicationConfig.getValue(key);
+            return result == null ? "" : result;
+        } catch (ConfigKeyNotExistException e) {
+            return "";
+        }
     }
 }

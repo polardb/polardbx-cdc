@@ -17,22 +17,27 @@
 
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
+import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.List;
 
 /**
  * Created by ShuGuang
@@ -64,6 +69,7 @@ public class BinlogEventReader {
         this.offset = offset < 0 ? 0 : offset;
         this.rowCount = rowCount < 0 ? Integer.MAX_VALUE : rowCount;
         this.context.setLogPosition(new LogPosition(fileName, pos));
+        this.context.setServerCharactorSet(loadCharactorSet());
         this.inputStream = new FileInputStream(file);
         this.channel = inputStream.getChannel();
         log.info("[fixed] show binlog events in {} from {} limit {}, {}", fileName, this.pos, this.offset,
@@ -183,7 +189,7 @@ public class BinlogEventReader {
             LogEvent.getTypeName(eventType)).setServerId(serverId).setEndLogPos(endLogPos).setInfo(info).build();
         fp += length;
         rowCount--;
-        
+
         return binlogEvent;
     }
 
@@ -224,6 +230,28 @@ public class BinlogEventReader {
 
     private String bufferMessage(ByteBuffer buffer) {
         return "[" + buffer.position() + "," + buffer.limit() + "," + buffer.capacity() + "]";
+    }
+
+    private ServerCharactorSet loadCharactorSet() {
+        JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+        List<Pair<String, String>> list = jdbcTemplate.query("show variables like '%character%'",
+            (rs, rowNum) -> Pair.of(rs.getString(1), rs.getString(2)));
+        ServerCharactorSet set = new ServerCharactorSet();
+        list.forEach(pair -> {
+            String variableName = pair.getLeft();
+            String charset = pair.getRight();
+            log.info(variableName + " : " + charset);
+            if ("character_set_client".equalsIgnoreCase(variableName)) {
+                set.setCharacterSetClient(charset);
+            } else if ("character_set_connection".equalsIgnoreCase(variableName)) {
+                set.setCharacterSetConnection(charset);
+            } else if ("character_set_database".equalsIgnoreCase(variableName)) {
+                set.setCharacterSetDatabase(charset);
+            } else if ("character_set_server".equalsIgnoreCase(variableName)) {
+                set.setCharacterSetServer(charset);
+            }
+        });
+        return set;
     }
 
     public void close() {

@@ -59,8 +59,8 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
                 MultiStreamStartTsoWindow.getInstance().readyFoConsume(context.getRuntimeContext().getStorageInstId(),
                     position.getRtso());
             if (isReady) {
-                position.setRtso(MultiStreamStartTsoWindow.getInstance().getFilterTSO());
-                logger.info("merge final tso : " + position.getRtso());
+//                position.setRtso(MultiStreamStartTsoWindow.getInstance().getFilterTSO());
+//                logger.info("merge final tso : " + position.getRtso());
                 break;
             }
             logger.warn("wait for all stream ready!");

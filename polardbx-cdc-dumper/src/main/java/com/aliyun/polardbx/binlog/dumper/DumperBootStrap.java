@@ -83,7 +83,8 @@ public class DumperBootStrap {
             controller.start();
 
             final TaskHeartbeat taskHeartbeat =
-                new TaskHeartbeat(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID), taskName,
+                new TaskHeartbeat(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID),
+                    DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_TYPE), taskName,
                     DynamicApplicationConfig.getInt(TOPOLOGY_TASK_HEARTBEAT_INTERVAL),
                     taskInfoProvider.get().getBinlogTaskConfig());
             taskHeartbeat.setCursorProvider(controller.getLogFileManager());

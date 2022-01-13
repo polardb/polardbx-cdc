@@ -18,23 +18,34 @@
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.alibaba.polardbx.druid.DbType;
+import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLIndexDefinition;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.expr.SQLIdentifierExpr;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddColumn;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddConstraint;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddIndex;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLSelectOrderByItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableElement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlUnique;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlTableIndex;
-import com.alibaba.polardbx.druid.sql.parser.SQLParserFeature;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.canal.LowerCaseTableNameVariables;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
 import com.aliyun.polardbx.binlog.format.utils.CharsetConversion;
+import com.aliyun.polardbx.binlog.util.FastSQLConstant;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,28 +53,29 @@ import org.slf4j.LoggerFactory;
 import java.util.Iterator;
 import java.util.List;
 
+import static com.aliyun.polardbx.binlog.CommonUtils.escape;
+
 public class DDLConverter {
 
-    private final static SQLParserFeature[] defaultFeatures = {
-        SQLParserFeature.EnableSQLBinaryOpExprGroup,
-        SQLParserFeature.UseInsertColumnsCache, SQLParserFeature.OptimizedForParameterized,
-        SQLParserFeature.TDDLHint, SQLParserFeature.EnableCurrentUserExpr, SQLParserFeature.DRDSAsyncDDL,
-        SQLParserFeature.DRDSBaseline, SQLParserFeature.DrdsMisc, SQLParserFeature.DrdsGSI, SQLParserFeature.DrdsCCL
-    };
     private static final Logger logger = LoggerFactory.getLogger(DDLConverter.class);
 
-    private static String transferTable(String tableName, int lowerCaseTableNames) {
+    private static String tryLowercase(String sql, int lowerCaseTableNames) {
         return lowerCaseTableNames
-            == LowerCaseTableNameVariables.LOWERCASE.getValue() ? tableName.toLowerCase() : tableName;
+            == LowerCaseTableNameVariables.LOWERCASE.getValue() ? sql.toLowerCase() : sql;
     }
 
     public static String formatPolarxDDL(String polarxDDL, String dbCharset, String tbCollation,
+                                         int lowerCaseTableNames) {
+        return formatPolarxDDL(null, polarxDDL, dbCharset, tbCollation, lowerCaseTableNames);
+    }
+
+    public static String formatPolarxDDL(String tableName, String polarxDDL, String dbCharset, String tbCollation,
                                          int lowerCaseTableNames) {
 
         String ddl = polarxDDL;
         try {
             SQLStatementParser parser =
-                SQLParserUtils.createSQLStatementParser(polarxDDL, DbType.mysql, defaultFeatures);
+                SQLParserUtils.createSQLStatementParser(polarxDDL, DbType.mysql, FastSQLConstant.FEATURES);
             List<SQLStatement> statementList = parser.parseStatementList();
             SQLStatement statement = statementList.get(0);
             if (statement instanceof SQLCreateTableStatement) {
@@ -75,37 +87,47 @@ public class DDLConverter {
                     }
                     createTableStatement.addOption("COLLATE", new SQLIdentifierExpr(tbCollation));
                 }
+                hack4RepairTableName(tableName, createTableStatement, polarxDDL);
                 ddl = createTableStatement.toString();
             } else if (statement instanceof SQLCreateDatabaseStatement) {
                 SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) statement;
                 createDatabaseStatement.setCharacterSet(dbCharset);
                 ddl = createDatabaseStatement.toString();
             }
-            ddl = transferTable(ddl, lowerCaseTableNames);
+            ddl = tryLowercase(ddl, lowerCaseTableNames);
         } catch (Exception e) {
             logger.error("parse ddl failed! ", e);
         }
         return ddl;
     }
 
+    public static String convertNormalDDL(String polarxDDL, String dbCharset, String tbCollation,
+                                          int lowerCaseTableNames, String tso) {
+        return convertNormalDDL(null, polarxDDL, dbCharset, tbCollation, lowerCaseTableNames, tso);
+    }
+
     /**
      * 目前polarx 特有的DDL 除建表之外，其他 拆分变更表和gsi 都会被过滤掉，
      * 其余 alter table 都是正常ddl，可以同步给mysql，这里只考虑create table语句。
      */
-    public static String convertNormalDDL(String polarxDDL, String dbCharset, String tbCollation, String tso) {
+    public static String convertNormalDDL(String tableName, String polarxDDL, String dbCharset, String tbCollation,
+                                          int lowerCaseTableNames, String tso) {
 
         SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(polarxDDL, DbType.mysql, defaultFeatures);
+            SQLParserUtils.createSQLStatementParser(polarxDDL, DbType.mysql, FastSQLConstant.FEATURES);
         List<SQLStatement> statementList = parser.parseStatementList();
         SQLStatement sqlStatement = statementList.get(0);
 
+        //暂不支持私有DDL
         StringBuilder hintsBuilder = new StringBuilder();
-        hintsBuilder.append("/*POLARX_ORIGIN_SQL=").append(polarxDDL).append("*//*").append("TSO=").append(tso)
-            .append("*/");
+        // hintsBuilder.append("/*POLARX_ORIGIN_SQL=").append(sqlStatement.toString()).append("*//*").append("TSO=")
+        //    .append(tso)
+        //    .append("*/");
 
         if (sqlStatement instanceof SQLCreateDatabaseStatement) {
             SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) sqlStatement;
             createDatabaseStatement.setPartitionMode(null);
+            createDatabaseStatement.setLocality(null);
             createDatabaseStatement.setCharacterSet(dbCharset);
         } else if (sqlStatement instanceof MySqlCreateTableStatement) {
             MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) sqlStatement;
@@ -118,6 +140,7 @@ public class DDLConverter {
             createTableStatement.setTablePartitions(null);
             createTableStatement.setPrefixBroadcast(false);
             createTableStatement.setPrefixPartition(false);
+            createTableStatement.setTableGroup(null);
             if (StringUtils.isNotBlank(tbCollation)) {
                 String charset = CharsetConversion.getCharsetByCollation(tbCollation);
                 if (StringUtils.isNotBlank(charset)) {
@@ -160,8 +183,57 @@ public class DDLConverter {
                     }
                 }
             }
+            hack4RepairTableName(tableName, createTableStatement, polarxDDL);
+            return hintsBuilder.toString() + tryLowercase(createTableStatement.toUnformattedString(),
+                lowerCaseTableNames);
+        } else if (sqlStatement instanceof SQLAlterTableStatement) {
+            SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
+            for (SQLAlterTableItem item : sqlAlterTableStatement.getItems()) {
+                if (item instanceof SQLAlterTableAddIndex) {
+                    SQLAlterTableAddIndex addIndex = (SQLAlterTableAddIndex) item;
+                    addIndex.setClustered(false);
+                    addIndex.setGlobal(false);
+                    addIndex.setPartitioning(null);
+                    addIndex.setDbPartitionBy(null);
+                    addIndex.setTablePartitionBy(null);
+                    addIndex.setTablePartitions(null);
+                    addIndex.getIndexDefinition().setLocal(false);
+                }
+                if (item instanceof SQLAlterTableAddConstraint) {
+                    SQLConstraint constraint = ((SQLAlterTableAddConstraint) item).getConstraint();
+                    if (constraint instanceof MySqlUnique) {
+                        MySqlUnique mySqlUnique = ((MySqlUnique) constraint);
+                        mySqlUnique.setClustered(false);
+                        mySqlUnique.setGlobal(false);
+                        mySqlUnique.setLocal(false);
+                        mySqlUnique.setPartitioning(null);
+                        mySqlUnique.setDbPartitionBy(null);
+                        mySqlUnique.setTablePartitionBy(null);
+                        mySqlUnique.setTablePartitions(null);
+                    }
+                }
+                if (item instanceof MySqlAlterTableModifyColumn) {
+                    MySqlAlterTableModifyColumn modifyColumn = (MySqlAlterTableModifyColumn) item;
+                    modifyColumn.getNewColumnDefinition().setSequenceType(null);
+                }
 
-            return hintsBuilder.toString() + createTableStatement.toUnformattedString();
+                if (item instanceof SQLAlterTableAddColumn) {
+                    SQLAlterTableAddColumn alterTableAlterColumn = (SQLAlterTableAddColumn) item;
+                    alterTableAlterColumn.getColumns().forEach(c -> c.setSequenceType(null));
+                }
+            }
+        } else if (sqlStatement instanceof SQLCreateIndexStatement) {
+            SQLCreateIndexStatement sqlCreateIndexStatement = (SQLCreateIndexStatement) sqlStatement;
+            sqlCreateIndexStatement.setClustered(false);
+            sqlCreateIndexStatement.setGlobal(false);
+            sqlCreateIndexStatement.setLocal(false);
+            sqlCreateIndexStatement.setDbPartitionBy(null);
+            sqlCreateIndexStatement.setPartitioning(null);
+            sqlCreateIndexStatement.setTablePartitionBy(null);
+            sqlCreateIndexStatement.setTablePartitions(null);
+        } else if (sqlStatement instanceof SQLDropTableStatement) {
+            SQLDropTableStatement sqlDropTableStatement = (SQLDropTableStatement) sqlStatement;
+            sqlDropTableStatement.setPurge(false);
         }
 
         return hintsBuilder.toString() + sqlStatement.toString();
@@ -177,5 +249,22 @@ public class DDLConverter {
             }
         }
         return false;
+    }
+    
+    private static void hack4RepairTableName(String tableName, SQLCreateTableStatement createTableStatement,
+                                             String ddlSql) {
+        if (StringUtils.isBlank(tableName)) {
+            return;
+        }
+
+        String tableNameInSql = createTableStatement.getTableName();
+        String tableNameInSqlNormal = SQLUtils.normalize(tableNameInSql);
+
+        if (!StringUtils.equals(tableName, tableNameInSqlNormal)) {
+            logger.warn("prepare to repair table name for sql {}, new tableName is {}, old tableName is {}.",
+                ddlSql, tableName, tableNameInSqlNormal);
+            createTableStatement.setTableName("`" + escape(tableName) + "`");
+            logger.warn("repair table name in create sql, before : {}, after :{}", tableNameInSql, tableName);
+        }
     }
 }

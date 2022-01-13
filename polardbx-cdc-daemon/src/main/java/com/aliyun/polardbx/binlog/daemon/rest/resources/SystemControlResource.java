@@ -17,18 +17,25 @@
 
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.canal.system.InstructionType;
 import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
 import com.google.common.collect.Lists;
+import com.sun.jersey.spi.resource.Singleton;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 
 import javax.ws.rs.GET;
+import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
@@ -37,6 +44,7 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
@@ -51,6 +59,7 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
 
 @Path("/system")
 @Produces(MediaType.APPLICATION_JSON)
+@Singleton
 public class SystemControlResource {
     private static final Logger logger = LoggerFactory.getLogger(SystemControlResource.class);
 
@@ -81,6 +90,11 @@ public class SystemControlResource {
     private static final String QUERY_STORAGE_LIMIT_1 =
         "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
 
+    private static final String TRANSACTION_POLICY = "set drds_transaction_policy='TSO'";
+
+    private static String SEND_CONFIG_UPDATE_CMND =
+        "insert into __cdc_instruction__(INSTRUCTION_TYPE, INSTRUCTION_CONTENT, INSTRUCTION_ID) values(?,?,?)";
+
     @GET
     @Path("/reset")
     public String reset() {
@@ -103,7 +117,7 @@ public class SystemControlResource {
         metaTemplate.execute(CDC_METADB_RESET_9);
         metaTemplate.execute(CDC_METADB_RESET_10);
         logger.info("metadb is reset.");
-        
+
         final StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
         List<StorageInfo> storageInfos;
         storageInfos = storageInfoMapper.select(c ->
@@ -141,13 +155,37 @@ public class SystemControlResource {
                     }
                 }
             } catch (Exception e) {
-                logger.error("jdbc failed!",e);
+                logger.error("jdbc failed!", e);
                 throw new RuntimeException("jdbc failed", e);
             }
 
             logger.info("storage node is reset for id : " + storageInfo.getStorageInstId());
         }
 
+        return "成功";
+    }
+
+    @POST
+    @Path("/setConfigEnv")
+    public String setConfigEnv(String content) {
+        JSONObject object = JSON.parseObject(content);
+        String name = object.getString("name");
+        String value = object.getString("value");
+        logger.info("receive set name : " + name + " , value : " + value);
+        if (StringUtils.isBlank(name)) {
+            return "name should not be empty";
+        }
+        JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
+        TransactionTemplate transactionTemplate = SpringContextHolder.getObject("polarxTransactionTemplate");
+        transactionTemplate.execute((o) -> transactionTemplate.execute(transactionStatus -> {
+            template.execute(TRANSACTION_POLICY);
+            JSONObject newObject = new JSONObject();
+            newObject.put(name, value);
+            template
+                .update(SEND_CONFIG_UPDATE_CMND, InstructionType.CdcEnvConfigChange.name(), newObject.toJSONString(),
+                    UUID.randomUUID().toString());
+            return null;
+        }));
         return "成功";
     }
 }

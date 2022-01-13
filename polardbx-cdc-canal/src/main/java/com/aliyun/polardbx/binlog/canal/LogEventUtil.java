@@ -77,7 +77,7 @@ public class LogEventUtil {
                 return query.substring(XA_ROLLBACK.length()).trim();
             }
         }
-        
+
         if (event instanceof XaPrepareLogEvent) {
             XaPrepareLogEvent xaPrepareLogEvent = (XaPrepareLogEvent) event;
         }
@@ -187,6 +187,10 @@ public class LogEventUtil {
         return event.getHeader().getType() == LogEvent.SEQUENCE_EVENT;
     }
 
+    public static boolean isGCNEvent(LogEvent event) {
+        return event.getHeader().getType() == LogEvent.GCN_EVENT;
+    }
+
     public static boolean isRowsQueryEvent(LogEvent event) {
         return event.getHeader().getType() == LogEvent.ROWS_QUERY_LOG_EVENT;
     }
@@ -194,11 +198,12 @@ public class LogEventUtil {
     /**
      * DRDS / ip / trace-seq / subseq
      *
-     * @return / 10 / 2/
+     * @return / 10 / 2/, serverId
      */
-    public static String buildTrace(RowsQueryLogEvent event) {
+    public static String[] buildTrace(RowsQueryLogEvent event) {
         String query = event.getRowsQuery();
         if (query.startsWith("/*DRDS")) {
+            String[] results = new String[2];
             String[] primarySplitArray = StringUtils.split(query, "/");
             String[] secondarySplitArray = StringUtils.split(primarySplitArray[2], "-");
             String seq = secondarySplitArray.length < 2 ? "0" : secondarySplitArray[1];
@@ -206,7 +211,12 @@ public class LogEventUtil {
             if (NumberUtils.isCreatable(primarySplitArray[3])) {
                 subSeq = primarySplitArray[3];
             }
-            return buildTraceId(seq, subSeq);
+            String trace = buildTraceId(seq, subSeq);
+            results[0] = trace;
+            if (primarySplitArray.length > 4) {
+                results[1] = primarySplitArray[4];
+            }
+            return results;
         }
         return null;
     }
@@ -216,6 +226,29 @@ public class LogEventUtil {
         String main = StringUtils.leftPad(mainSeq, TRACE_MAIN_LEN, "0");
         String sub = StringUtils.leftPad(subSeq, TRACE_SUB_LEN, "0");
         return main + sub;
+    }
+
+    /**
+     * / DRDS / ip / trace-seq / subseq / server id / * /
+     *
+     * @return / 10 / 2/
+     */
+    public static long getServerIdFromRowQuery(RowsQueryLogEvent event) {
+        long serverId = 0L;
+        String query = event.getRowsQuery();
+        if (query.startsWith("/*DRDS")) {
+            String[] ps = StringUtils.split(query, "/");
+            final int serverIdIdx = 4;
+            if (ps.length >= serverIdIdx + 2) {
+                String serverIdStr = ps[serverIdIdx];
+                try {
+                    serverId = Long.parseLong(serverIdStr);
+                } catch (Throwable e) {
+
+                }
+            }
+        }
+        return serverId;
     }
 
     public static String makeXid(Long tranId, String groupName) throws UnsupportedEncodingException {

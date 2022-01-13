@@ -23,6 +23,7 @@ import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.event.GcnLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.SequenceLogEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
@@ -47,7 +48,17 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
     private TransactionStorage transactionStorage;
     private Transaction currentTran;
     private boolean receiveFormatDesc = false;
-    private long lastSequenceNum;
+    /**
+     * DN 5.7，通过Sequence Event记录Snapshot Tso和Commit Tso，有两种SequenceType
+     * DN 8.0的V1版本，通过XA End Event记录Snapshot Tso，通过XA Commit Event记录Commit Tso
+     * 对于这两种方式，它们的Snapshot Tso都是记录到XA Start之后的，所以处理模式类似
+     */
+    private long lastCommitSequenceNum;
+    /**
+     * DN8.0的V2版本，通过Gcn Event记录Snapshot Tso和Commit Tso，未做类型的上区分，具体是记录的Snapshot还是Commit
+     * 依实际情况而定，lastGcn代表的可能是Snapshot Tso，也可能是 Commit Tso
+     */
+    private long lastGcn = -1L;
 
     public TransactionBufferEventFilter(Storage storage) {
         this.storage = storage;
@@ -64,34 +75,19 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         if (LogEventUtil.isStart(event)) {
             processStart(event, context);
         } else if (LogEventUtil.isEnd(event)) {
-            //check prepare tso for AliSQL 8.0
-            if (LogEventUtil.containsPrepareGCN(event)) {
-                processPrepareSequence(((QueryLogEvent) event).getPrepareGCN());
-            }
+            processEnd(event, context);
         } else if (LogEventUtil.isCommit(event)) {
-            //check commit tso for AliSQL 8.0
-            if (LogEventUtil.containsCommitGCN(event)) {
-                processCommitSequence(((QueryLogEvent) event).getCommitGCN());
-            }
             processCommit(event, context);
             tryDoNext(context);
         } else if (LogEventUtil.isRollback(event)) {
-            processRollback(event, context.getRuntimeContext());
+            processRollback(event, context);
             tryDoNext(context);
         } else if (LogEventUtil.isSequenceEvent(event)) {
-            //check prepare and commit tso for AliSQL 5.7
-            SequenceLogEvent sequenceLogEvent = (SequenceLogEvent) event;
-            if (sequenceLogEvent.isCommitSequence()) {
-                processCommitSequence(sequenceLogEvent.getSequenceNum());
-            } else if (sequenceLogEvent.isSnapSequence()) {
-                processPrepareSequence(sequenceLogEvent.getSequenceNum());
-            }
+            processSequence(event, context);
+        } else if (LogEventUtil.isGCNEvent(event)) {
+            processGcn(event, context);
         } else {
-            try {
-                processEvent(event, context);
-            } catch (Exception e) {
-                throw new PolardbxException(e);
-            }
+            processEvent(event, context);
         }
     }
 
@@ -103,7 +99,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
     }
 
     private void processCommitSequence(long sequence) {
-        this.lastSequenceNum = sequence;
+        this.lastCommitSequenceNum = sequence;
     }
 
     @Override
@@ -123,8 +119,10 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         transactionStorage.clear();
     }
 
-    private void processRollback(LogEvent logEvent, RuntimeContext rc) {
+    private void processRollback(LogEvent logEvent, HandlerContext context) throws Exception {
         String xid = LogEventUtil.getXid(logEvent);
+        RuntimeContext rc = context.getRuntimeContext();
+
         if (StringUtils.isNotBlank(xid)) {
             Transaction transaction = transactionStorage.getByXid(xid);
             if (transaction == null) {
@@ -151,7 +149,19 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             currentTran = tran;
             if (tran.isCdcSingle()) {
                 tran.release();
+                lastGcn = -1L;
                 return;
+            }
+            // 1> DN8.0的V2版本，将Snapshot tso通过Gcn Event记录到了XA Start前面，所以，需要在此处对Snapshot tso进行处理
+            // 2> DN8.0的V2版本，为单机事务也记录了Commit TSO，通过Gcn Event记录到了Begin Event前面，但我们和5.7的行为保持一致，
+            //    通过前序2pc事务的真实tso为单机事务生成虚拟tso，不使用Gcn
+            // 3> 处理完成后，需立即将lastGcn设置为-1，以免对后序普通XA事务(事务策略不是tso的MySQL原生XA事务)造成影响
+            if (lastGcn != -1L) {
+                if (currentTran.isXa()) {
+                    currentTran.setTsoTransaction();
+                    currentTran.setSnapshotSeq(lastGcn);
+                }
+                lastGcn = -1L;
             }
             transactionStorage.add(tran);
         } catch (Exception e) {
@@ -159,7 +169,19 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
     }
 
-    private void processCommit(LogEvent event, HandlerContext context) {
+    private void processEnd(LogEvent event, HandlerContext context) {
+        // DN8.0的V1版本，将Snapshot Tso通过Variables的方式，记录到了XA End Event
+        if (LogEventUtil.containsPrepareGCN(event)) {
+            processPrepareSequence(((QueryLogEvent) event).getPrepareGCN());
+        }
+    }
+
+    private void processCommit(LogEvent event, HandlerContext context) throws Exception {
+        //DN8.0的V1版本将Commit Tso通过Variables的方式，记录到了XA Commit Event
+        if (LogEventUtil.containsCommitGCN(event)) {
+            processCommitSequence(((QueryLogEvent) event).getCommitGCN());
+        }
+
         String xid = LogEventUtil.getXid(event);
         Transaction commitTran = null;
         if (StringUtils.isNotBlank(xid)) {
@@ -175,12 +197,36 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             return;
         }
         if (commitTran.isTsoTransaction()) {
-            commitTran.setRealTSO(lastSequenceNum);
+            if (lastGcn > 0 && lastCommitSequenceNum > 0) {
+                throw new PolardbxException(
+                    "lastGcn and lastCommitSequenceNum can`t be greater than zero in the mean while.");
+            }
+            if (lastCommitSequenceNum > 0) {
+                commitTran.setRealTSO(lastCommitSequenceNum);
+            } else if (lastGcn > 0) {
+                commitTran.setRealTSO(lastGcn);
+            }
         }
         commitTran.setCommit(context.getRuntimeContext());
     }
 
+    private void processSequence(LogEvent event, HandlerContext context) {
+        //check prepare and commit tso for DN 5.7
+        SequenceLogEvent sequenceLogEvent = (SequenceLogEvent) event;
+        if (sequenceLogEvent.isCommitSequence()) {
+            processCommitSequence(sequenceLogEvent.getSequenceNum());
+        } else if (sequenceLogEvent.isSnapSequence()) {
+            processPrepareSequence(sequenceLogEvent.getSequenceNum());
+        }
+    }
+
+    private void processGcn(LogEvent event, HandlerContext context) {
+        GcnLogEvent gcnLogEvent = (GcnLogEvent) event;
+        lastGcn = gcnLogEvent.getGcn();
+    }
+
     private void tryDoNext(HandlerContext context) throws Exception {
+        lastGcn = -1L;
         transactionStorage.purge();
         TransactionGroup group;
         while ((group = transactionStorage.fetchNext()) != null) {
@@ -207,11 +253,13 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             if (event.getHeader().getType() == LogEvent.FORMAT_DESCRIPTION_EVENT) {
                 writeFormatDescriptionEvent((FormatDescriptionLogEvent) event, context);
             }
+            // 如果currentTran==null，说明此Query Event是DDL，识别出是DDL，直接push清空storage
+            // DN8.0的V2版本在ddl语句前面会跟随一个Gcn Event，需要对Gcn进行reset操作
             if (event.getHeader().getType() == LogEvent.QUERY_EVENT) {
-                // 识别出是DDL，直接push清空storage。
                 Transaction transaction = new Transaction((QueryLogEvent) event, context.getRuntimeContext(), storage);
                 transactionStorage.add(transaction);
                 transaction.setCommit(context.getRuntimeContext());
+                lastGcn = -1L;
             }
             return;
         }

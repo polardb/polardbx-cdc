@@ -27,6 +27,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.ROWS_HEADER_LEN_V2;
+
 /**
  * v2
  */
@@ -49,8 +51,12 @@ public class RowEventBuilder extends BinlogBuilder {
     private int _flags;
     private String commitLog;
 
-    public RowEventBuilder(int tableId, int columnCount, BinlogEventType type, int createTime, int serverId) {
-        super(createTime, type.getType(), serverId);
+    public RowEventBuilder(int tableId, int columnCount, BinlogEventType type, int createTime, long serverId) {
+        this(tableId, columnCount, type.getType(), createTime, serverId);
+    }
+
+    public RowEventBuilder(int tableId, int columnCount, int eventType, int createTime, long serverId) {
+        super(createTime, eventType, serverId);
         this.tableId = tableId;
         this.columnCount = columnCount;
         _flags = ROW_FLAG_END_STATMENT;
@@ -103,14 +109,17 @@ public class RowEventBuilder extends BinlogBuilder {
 
     @Override
     protected void writePostHeader(AutoExpandBuffer outputData) throws Exception {
-        if (FormatDescriptionEvent.EVENT_HEADER_LENGTH[eventType - 1] == 6) {
+        int postHeaderLen = FormatDescriptionEvent.EVENT_HEADER_LENGTH[eventType - 1];
+        if (postHeaderLen == 6) {
             numberToBytes(outputData, tableId, INT32);
         } else {
             numberToBytes(outputData, tableId, 6);
         }
         numberToBytes(outputData, _flags, INT16);
-        numberToBytes(outputData, extraData.length + 2, INT16);
-        writeBytes(outputData, extraData);
+        if (postHeaderLen == ROWS_HEADER_LEN_V2.getLength()) {
+            numberToBytes(outputData, extraData.length + 2, INT16);
+            writeBytes(outputData, extraData);
+        }
     }
 
     public void addRowData(RowData rowData) {

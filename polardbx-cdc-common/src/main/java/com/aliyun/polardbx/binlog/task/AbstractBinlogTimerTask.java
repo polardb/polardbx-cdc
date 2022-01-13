@@ -27,7 +27,8 @@ import java.util.TimerTask;
  */
 @Slf4j
 public abstract class AbstractBinlogTimerTask {
-    protected String cluster;
+    protected String clusterId;
+    protected String clusterType;
     protected String name;
     protected int interval;
     private Timer timer;
@@ -35,10 +36,11 @@ public abstract class AbstractBinlogTimerTask {
     private AbstractBinlogTimerTask() {
     }
 
-    public AbstractBinlogTimerTask(String cluster, String name, int interval) {
-        this.cluster = cluster;
+    public AbstractBinlogTimerTask(String clusterId, String clusterType, String name, int interval) {
+        this.clusterId = clusterId;
         this.name = name;
         this.interval = interval;
+        this.clusterType = clusterType;
         timer = new Timer("TimerTask-" + name);
     }
 

@@ -104,6 +104,7 @@ public class ExtractorOutputTpsLimitTest {
         acceptFilter.addAcceptEvent(LogEvent.XA_PREPARE_LOG_EVENT);
         // accept tso
         acceptFilter.addAcceptEvent(LogEvent.SEQUENCE_EVENT);
+        acceptFilter.addAcceptEvent(LogEvent.GCN_EVENT);
         acceptFilter.addAcceptEvent(LogEvent.TABLE_MAP_EVENT);
         acceptFilter.addAcceptEvent(LogEvent.XID_EVENT);
 

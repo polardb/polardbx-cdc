@@ -18,7 +18,6 @@
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.alibaba.polardbx.druid.DbType;
-import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
@@ -26,6 +25,8 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
+import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
+import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
@@ -34,6 +35,7 @@ import com.aliyun.polardbx.binlog.cdc.meta.LogicTableMeta;
 import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
+import com.aliyun.polardbx.binlog.util.FastSQLConstant;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
@@ -81,7 +83,10 @@ public class TableMetaDelegate implements ITableMetaDelegate {
     }
 
     private void fireEvent(String schema, String ddl, boolean isPhy, boolean isTopoChange, RuntimeContext rc) {
-        List<SQLStatement> stmtList = SQLUtils.parseStatements(ddl, DbType.mysql);
+        SQLStatementParser parser =
+            SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.FEATURES);
+        List<SQLStatement> stmtList = parser.parseStatementList();
+
         for (SQLStatement stmt : stmtList) {
             if (stmt instanceof MySqlRenameTableStatement) {
                 MySqlRenameTableStatement renameStmt = (MySqlRenameTableStatement) stmt;

@@ -49,6 +49,7 @@ public class LocalBinlogParser extends AbstractEventParser {
         decoder.handle(LogEvent.TABLE_MAP_EVENT);
         decoder.handle(LogEvent.XID_EVENT);
         decoder.handle(LogEvent.SEQUENCE_EVENT);
+        decoder.handle(LogEvent.GCN_EVENT);
         decoder.handle(LogEvent.WRITE_ROWS_EVENT);
         decoder.handle(LogEvent.UPDATE_ROWS_EVENT);
         decoder.handle(LogEvent.DELETE_ROWS_EVENT);

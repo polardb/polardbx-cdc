@@ -183,6 +183,9 @@ public abstract class LogEvent implements HandlerEvent {
      */
     public static final int SEQUENCE_EVENT = 80;
 
+    /* DataNode 8.0 TSO EVENT */
+    public static final int GCN_EVENT = 105;
+
     public static final int MARIA_EVENTS_BEGIN = 160;
     /* New Maria event numbers start from here */
     public static final int ANNOTATE_ROWS_EVENT = 160;
@@ -303,6 +306,8 @@ public abstract class LogEvent implements HandlerEvent {
 
     protected byte[] newData;
 
+    protected Long traceServerId;
+
     protected LogEvent(LogHeader header) {
         this.header = header;
     }
@@ -381,6 +386,8 @@ public abstract class LogEvent implements HandlerEvent {
             return "Previous_gtids";
         case SEQUENCE_EVENT:
             return "Sequence";
+        case GCN_EVENT:
+            return "Gcn";
         case XA_PREPARE_LOG_EVENT:
             return "XA_Prepare";
         default:
@@ -408,6 +415,13 @@ public abstract class LogEvent implements HandlerEvent {
      */
     public final long getServerId() {
         return header.getServerId();
+    }
+
+    /**
+     * Server ID of the server that created the event.
+     */
+    public final void setServerId(long serverId) {
+        header.setServerId(serverId);
     }
 
     /**
@@ -455,5 +469,13 @@ public abstract class LogEvent implements HandlerEvent {
 
     public String getCommitLogInfo() {
         return null;
+    }
+
+    public Long getTraceServerId() {
+        return traceServerId;
+    }
+
+    public void setTraceServerId(Long traceServerId) {
+        this.traceServerId = traceServerId;
     }
 }

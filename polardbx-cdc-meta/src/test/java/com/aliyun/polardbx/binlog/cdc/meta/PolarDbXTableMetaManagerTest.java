@@ -51,6 +51,18 @@ public class PolarDbXTableMetaManagerTest {
     }
 
     @Test
+    public void rollback() {
+
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null, null);
+        metaManager.init("Final");
+
+        metaManager.rollback(new BinlogPosition(null, "684854406688853196813796092824455782400000000000000000"));
+        System.out.println(metaManager.findLogic("d1", "t4"));
+        System.out.println(metaManager.findLogic("d1", "t5"));
+
+    }
+
+    @Test
     public void apply1() {
         //标准SQL
         // CREATE TABLE t1 (
@@ -100,6 +112,18 @@ public class PolarDbXTableMetaManagerTest {
         metaManager2.applyBase(new BinlogPosition(null, "2"), x);
 
         System.out.println(metaManager2.getPhyTables("polardbx-storage-1-master"));
+
+    }
+
+    @Test
+    public void rollback1() {
+
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null, null);
+        metaManager.init("Final");
+
+        metaManager.rollback(new BinlogPosition(null, "684854406688853196813796092824455782400000000000000000"));
+        System.out.println(metaManager.findLogic("d1", "t4"));
+        System.out.println(metaManager.findLogic("d1", "t5"));
 
     }
 

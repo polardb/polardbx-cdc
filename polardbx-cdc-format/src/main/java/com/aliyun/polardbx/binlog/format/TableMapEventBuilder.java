@@ -22,6 +22,7 @@ import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
 import lombok.Data;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.List;
 
@@ -55,18 +56,22 @@ public class TableMapEventBuilder extends BinlogBuilder {
 
     private List<Field> fieldList;
 
-    public TableMapEventBuilder(int timestamp, int serverId, long tableId, String schema, String tableName) {
+    private String charSet;
+
+    public TableMapEventBuilder(int timestamp, long serverId, long tableId, String schema, String tableName,
+                                String charSet) {
         super(timestamp, BinlogEventType.TABLE_MAP_EVENT.getType(), serverId);
         this.tableId = tableId;
         this.schema = schema;
         this.tableName = tableName;
+        this.charSet = charSet;
     }
 
     @Override
     protected void writePayload(AutoExpandBuffer outputData) throws Exception {
-        writeString(outputData, schema, ISO_8859_1, true);
+        writeString(outputData, schema, StringUtils.isNotBlank(charSet) ? charSet : ISO_8859_1, true);
         numberToBytes(outputData, 0, INT8);
-        writeString(outputData, tableName, ISO_8859_1, true);
+        writeString(outputData, tableName, StringUtils.isNotBlank(charSet) ? charSet : ISO_8859_1, true);
         numberToBytes(outputData, 0, INT8);
         if (fieldList != null) {
             writeLenencInteger(outputData, fieldList.size());

@@ -84,13 +84,19 @@ public class BinlogPosition extends LogPosition {
     }
 
     public static BinlogPosition parseFromString(String source) {
+        if (StringUtils.isBlank(source)) {
+            return null;
+        }
+        // 格式： filename:position#masterid.timestamp
         int colonIndex = source.indexOf(':');
         int miscIndex = colonIndex + 1;
         int sharpIndex = source.indexOf('#', miscIndex);
-        int semicolonIndex = source.indexOf(';', miscIndex); // NOTE: 向后兼容
+        // NOTE: 向后兼容
+        int semicolonIndex = source.indexOf(';', miscIndex);
         int dotIndex = source.lastIndexOf('.');
+        // NOTE: 错误的位点
         if (colonIndex == -1) {
-            return null; // NOTE: 错误的位点
+            return null;
         }
 
         String binlogSuffix = source.substring(0, colonIndex);
@@ -98,14 +104,16 @@ public class BinlogPosition extends LogPosition {
         if (sharpIndex != -1) {
             binlogPosition = Long.parseLong(source.substring(miscIndex, sharpIndex));
         } else if (semicolonIndex != -1) {
-            binlogPosition = Long.parseLong(source.substring(miscIndex, semicolonIndex)); // NOTE: 向后兼容
+            // NOTE: 向后兼容
+            binlogPosition = Long.parseLong(source.substring(miscIndex, semicolonIndex));
         } else if (dotIndex != -1 && dotIndex > colonIndex) {
             binlogPosition = Long.parseLong(source.substring(miscIndex, dotIndex));
         } else {
             binlogPosition = Long.parseLong(source.substring(miscIndex));
         }
 
-        long masterId = 0; // NOTE: 默认值为 0
+        // NOTE: 默认值为 0
+        long masterId = 0;
         if (sharpIndex != -1) {
             if (dotIndex != -1) {
                 masterId = Long.parseLong(source.substring(sharpIndex + 1, dotIndex));
@@ -119,7 +127,8 @@ public class BinlogPosition extends LogPosition {
             timestamp = Long.parseLong(source.substring(dotIndex + 1));
         }
 
-        return new BinlogPosition(binlogSuffix, binlogPosition, // NL
+        // NL
+        return new BinlogPosition(binlogSuffix, binlogPosition,
             masterId,
             timestamp);
     }

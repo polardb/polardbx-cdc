@@ -21,134 +21,151 @@ import javax.annotation.Generated;
 import java.util.Date;
 
 public class BinlogPolarxCommand {
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.625+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.909+08:00",
         comments = "Source field: binlog_polarx_command.id")
     private Long id;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
         comments = "Source field: binlog_polarx_command.gmt_created")
     private Date gmtCreated;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
         comments = "Source field: binlog_polarx_command.gmt_modified")
     private Date gmtModified;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
-        comments = "Source field: binlog_polarx_command.type")
-    private Integer type;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_id")
+    private String cmdId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.command")
-    private String command;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_type")
+    private String cmdType;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.ext")
-    private String ext;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_status")
+    private Long cmdStatus;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.reply")
-    private String reply;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.911+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_request")
+    private String cmdRequest;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.622+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.911+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_reply")
+    private String cmdReply;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.905+08:00",
         comments = "Source Table: binlog_polarx_command")
-    public BinlogPolarxCommand(Long id, Date gmtCreated, Date gmtModified, Integer type, String command, String ext,
-                               String reply) {
+    public BinlogPolarxCommand(Long id, Date gmtCreated, Date gmtModified, String cmdId, String cmdType, Long cmdStatus,
+                               String cmdRequest, String cmdReply) {
         this.id = id;
         this.gmtCreated = gmtCreated;
         this.gmtModified = gmtModified;
-        this.type = type;
-        this.command = command;
-        this.ext = ext;
-        this.reply = reply;
+        this.cmdId = cmdId;
+        this.cmdType = cmdType;
+        this.cmdStatus = cmdStatus;
+        this.cmdRequest = cmdRequest;
+        this.cmdReply = cmdReply;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.625+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.908+08:00",
         comments = "Source Table: binlog_polarx_command")
     public BinlogPolarxCommand() {
         super();
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
         comments = "Source field: binlog_polarx_command.id")
     public Long getId() {
         return id;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
         comments = "Source field: binlog_polarx_command.id")
     public void setId(Long id) {
         this.id = id;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
         comments = "Source field: binlog_polarx_command.gmt_created")
     public Date getGmtCreated() {
         return gmtCreated;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
         comments = "Source field: binlog_polarx_command.gmt_created")
     public void setGmtCreated(Date gmtCreated) {
         this.gmtCreated = gmtCreated;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
         comments = "Source field: binlog_polarx_command.gmt_modified")
     public Date getGmtModified() {
         return gmtModified;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
         comments = "Source field: binlog_polarx_command.gmt_modified")
     public void setGmtModified(Date gmtModified) {
         this.gmtModified = gmtModified;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.626+08:00",
-        comments = "Source field: binlog_polarx_command.type")
-    public Integer getType() {
-        return type;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_id")
+    public String getCmdId() {
+        return cmdId;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.type")
-    public void setType(Integer type) {
-        this.type = type;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_id")
+    public void setCmdId(String cmdId) {
+        this.cmdId = cmdId == null ? null : cmdId.trim();
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.command")
-    public String getCommand() {
-        return command;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_type")
+    public String getCmdType() {
+        return cmdType;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.command")
-    public void setCommand(String command) {
-        this.command = command == null ? null : command.trim();
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.91+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_type")
+    public void setCmdType(String cmdType) {
+        this.cmdType = cmdType == null ? null : cmdType.trim();
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.ext")
-    public String getExt() {
-        return ext;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.911+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_status")
+    public Long getCmdStatus() {
+        return cmdStatus;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.ext")
-    public void setExt(String ext) {
-        this.ext = ext == null ? null : ext.trim();
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.911+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_status")
+    public void setCmdStatus(Long cmdStatus) {
+        this.cmdStatus = cmdStatus;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.reply")
-    public String getReply() {
-        return reply;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.911+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_request")
+    public String getCmdRequest() {
+        return cmdRequest;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2020-12-22T19:53:40.627+08:00",
-        comments = "Source field: binlog_polarx_command.reply")
-    public void setReply(String reply) {
-        this.reply = reply == null ? null : reply.trim();
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.911+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_request")
+    public void setCmdRequest(String cmdRequest) {
+        this.cmdRequest = cmdRequest == null ? null : cmdRequest.trim();
+    }
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.911+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_reply")
+    public String getCmdReply() {
+        return cmdReply;
+    }
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-10-01T17:37:42.911+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_reply")
+    public void setCmdReply(String cmdReply) {
+        this.cmdReply = cmdReply == null ? null : cmdReply.trim();
     }
 }

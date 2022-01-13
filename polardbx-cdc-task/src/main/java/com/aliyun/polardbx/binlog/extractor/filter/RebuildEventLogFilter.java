@@ -17,6 +17,11 @@
 
 package com.aliyun.polardbx.binlog.extractor.filter;
 
+import com.alibaba.polardbx.druid.DbType;
+import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.DrdsMoveDataBase;
+import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
+import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
@@ -65,6 +70,7 @@ import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
 import com.aliyun.polardbx.binlog.format.utils.CharsetConversion;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
+import com.aliyun.polardbx.binlog.util.FastSQLConstant;
 import com.google.gson.Gson;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -87,20 +93,16 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.META_USE_HISTORY_TABLE_FIRST
 public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
 
     private static final Logger logger = LoggerFactory.getLogger(RebuildEventLogFilter.class);
-    private static ThreadLocal<AutoExpandBuffer> localBuffer = new ThreadLocal<AutoExpandBuffer>();
-    private int serviceId;
-    private int offset = 5;
+    private long serviceId;
+    private static final ThreadLocal<AutoExpandBuffer> localBuffer = new ThreadLocal<AutoExpandBuffer>();
+    private final LogDecoder logDecoder = new LogDecoder();
+    private final Set<String> cdcSchemaSet;
+    private final EventAcceptFilter eventAcceptFilter;
     private ITableMetaDelegate delegate;
     private String defaultCharset;
-    private LogDecoder logDecoder = new LogDecoder();
-
-    private EventAcceptFilter eventAcceptFilter;
-
     private FormatDescriptionLogEvent fde;
 
-    private Set<String> cdcSchemaSet;
-
-    public RebuildEventLogFilter(int serviceId, EventAcceptFilter eventAcceptFilter, Set<String> cdcSchemaSet) {
+    public RebuildEventLogFilter(long serviceId, EventAcceptFilter eventAcceptFilter, Set<String> cdcSchemaSet) {
         this.serviceId = serviceId;
         this.eventAcceptFilter = eventAcceptFilter;
         this.cdcSchemaSet = cdcSchemaSet;
@@ -134,7 +136,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             rebuildRowLogEvent((RowsLogEvent) event, LogEvent.WRITE_ROWS_EVENT);
             break;
         case LogEvent.TABLE_MAP_EVENT:
-            rebuildTableMapEvent((TableMapLogEvent) event);
+            rebuildTableMapEvent((TableMapLogEvent) event, context);
             break;
         default:
             // should not be here
@@ -143,7 +145,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         return true;
     }
 
-    private void rebuildTableMapEvent(TableMapLogEvent tle) throws Exception {
+    private void rebuildTableMapEvent(TableMapLogEvent tle, HandlerContext context) throws Exception {
         if (SystemDB.isSys(tle.getDbName())) {
             return;
         }
@@ -152,7 +154,9 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             logger.debug("detected un compatible table meta for table map event, will reformat event "
                 + tableMeta.getPhySchema() + tableMeta.getPhyTable());
         }
-        TableMapEventBuilder tme = TableMapEventRebuilder.convert(tle, serviceId);
+        String characterServer = context.getRuntimeContext().getServerCharactorSet().getCharacterSetServer();
+        TableMapEventBuilder tme =
+            TableMapEventRebuilder.convert(tle, serviceId, CharsetConversion.getJavaCharset(characterServer));
         if (!tableMeta.isCompatible()) {
             try {
                 rebuildTableMapBuilder(tme, tableMeta);
@@ -198,8 +202,6 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         }
         try {
             RowEventBuilder reb = RowsLogEventRebuilder.convert(rle, serviceId);
-            reb.setServerId(serviceId);
-            reb.setEventType(eventType);
             if (!tableMeta.isCompatible()) {
                 rebuildRowEventBuilder(tableMeta, reb, rle.getTable());
             }
@@ -273,6 +275,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         LogContext lc = new LogContext();
         lc.setFormatDescription(fde);
         lc.setLogPosition(new LogPosition(""));
+        lc.setServerCharactorSet(context.getRuntimeContext().getServerCharactorSet());
         while (tranIt.hasNext()) {
             Transaction transaction = tranIt.next();
             if (transaction.isDescriptionEvent()) {
@@ -290,10 +293,19 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                         it.remove();
                         continue;
                     }
-                    if (!reformat(e, context, transaction.getVirtualTSO())) {
-                        it.remove();
-                        continue;
+                    final long oldServerId = serviceId;
+                    if (transaction.getServerId() != null) {
+                        serviceId = transaction.getServerId();
                     }
+                    try {
+                        if (!reformat(e, context, transaction.getVirtualTSO())) {
+                            it.remove();
+                            continue;
+                        }
+                    } finally {
+                        serviceId = oldServerId;
+                    }
+
                     allRemove = false;
                     tir.setPayload(e.toBytes());
                 }
@@ -347,6 +359,10 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             return;
         }
 
+        if (query.toLowerCase().startsWith("savepoint")) {
+            return;
+        }
+
         RuntimeContext rc = context.getRuntimeContext();
         if (rc.getLowerCaseTableNames() == LowerCaseTableNameVariables.LOWERCASE.getValue()) {
             query = query.toLowerCase();
@@ -359,7 +375,6 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         position.setRtso(virtualTSO);
 
         logger.info("receive phy ddl " + query + " for pos " + new Gson().toJson(position));
-
         boolean useHistoryTableFirst = DynamicApplicationConfig.getBoolean(META_USE_HISTORY_TABLE_FIRST);
         if (useHistoryTableFirst) {
             logger.warn("begin to query ddl sql from history table for db {} and tso {}.", event.getDbName(),
@@ -374,7 +389,6 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                     event.getDbName(), position.getRtso(), query);
             }
         }
-
         delegate.apply(position, event.getDbName(), query, null, context.getRuntimeContext());
     }
 
@@ -408,6 +422,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             }
         }
 
+        ddlEvent.getDdlRecord().setDdlSql(ddlRecord.getDdlSql());
         // 用来处理一些异常情况，比如打标sql有问题，或cdc识别不了打标sql，都可以通过该方式进行容错处理
         boolean useHistoryTableFirst = DynamicApplicationConfig.getBoolean(META_USE_HISTORY_TABLE_FIRST);
         if (useHistoryTableFirst) {
@@ -426,13 +441,14 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         logger.info("begin to apply logic ddl : " + orgDDL + " tso : " + transaction.getVirtualTSO());
         boolean isNormalDDL = true;
         String ddl = "select 1";
-        if (orgDDL.startsWith("move") || orgDDL.startsWith("MOVE")) {
+        if (isMoveDataBaseSql(orgDDL)) {
             isNormalDDL = false;
         } else {
-            ddl = DDLConverter.formatPolarxDDL(orgDDL, dbCharset, tbCollation,
+            ddl = DDLConverter.formatPolarxDDL(ddlRecord.getTableName(), orgDDL, dbCharset, tbCollation,
                 runtimeContext.getLowerCaseTableNames());
         }
 
+        ddlEvent.getDdlRecord().setOriginDdlSql(orgDDL);
         ddlEvent.getDdlRecord().setDdlSql(ddl);
         logger.info("real apply logic ddl is : " + ddl);
         delegate.applyLogic(ddlEvent.getPosition(),
@@ -442,7 +458,8 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
 
         if (isNormalDDL) {
             //转换成标准DDL
-            ddl = DDLConverter.convertNormalDDL(orgDDL, dbCharset, tbCollation, transaction.getVirtualTSO());
+            ddl = DDLConverter.convertNormalDDL(ddlRecord.getTableName(), orgDDL, dbCharset, tbCollation,
+                runtimeContext.getLowerCaseTableNames(), transaction.getVirtualTSO());
             ddlEvent.setQueryEventBuilder(new QueryEventBuilder(ddlRecord.getSchemaName(),
                 ddl,
                 clientCharsetId,
@@ -454,6 +471,13 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             ddlEvent.setCommitKey(ddl);
             ddlEvent.setData(toByte(ddlEvent.getQueryEventBuilder()));
         }
+    }
+
+    protected boolean isMoveDataBaseSql(String ddlSql) {
+        SQLStatementParser parser = SQLParserUtils.createSQLStatementParser(ddlSql, DbType.mysql,
+            FastSQLConstant.FEATURES);
+        SQLStatement stmt = parser.parseStatementList().get(0);
+        return stmt instanceof DrdsMoveDataBase;
     }
 
     private void rebuildTableMapBuilder(TableMapEventBuilder tme, LogicTableMeta tableMeta) {
@@ -658,5 +682,4 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         this.defaultCharset = context.getRuntimeContext().getDefaultDatabaseCharset();
         eventAcceptFilter.onStartConsume(context);
     }
-
 }

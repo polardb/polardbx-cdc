@@ -74,8 +74,15 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta {
 
     public boolean applyBase(BinlogPosition position) {
         // 每次rollback需要重新构建一次memory data
-        final Map<String, String> snapshot = polarDbXLogicTableMeta.snapshot();
+        Map<String, String> snapshot = polarDbXLogicTableMeta.snapshot();
         snapshot.forEach((k, v) -> super.apply(position, k, v, null));
+        //用于订正逻辑表和物理表结构不一致的情况
+        Map<String, String> snapshotToFix = polarDbXLogicTableMeta.phySnapshot();
+        if (snapshotToFix != null && !snapshotToFix.isEmpty()) {
+            snapshotToFix.forEach((k, v) -> super.apply(position, k, v, null));
+        } else {
+            logger.info("all tables is compatible for rollback to tso:{}...", position.getRtso());
+        }
 
         // 根据逻辑MetaSnapshot构建物理
         List<PhyTableTopology> phyTables = topologyManager.getPhyTables(storageInstId);

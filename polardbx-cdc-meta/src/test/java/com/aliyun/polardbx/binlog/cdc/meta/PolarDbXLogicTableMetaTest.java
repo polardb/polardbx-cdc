@@ -56,7 +56,6 @@ public class PolarDbXLogicTableMetaTest {
                 "create PARTITION table d1.t1 (id int) dbpartition by hash(id) tbpartition by hash(id) tbpartitions 2")
                 .metaInfo(MockData.CREATE_D1_T1).build(), null);
 
-
         System.out.println(logicTableMeta.find("d1", "t1"));
 
     }

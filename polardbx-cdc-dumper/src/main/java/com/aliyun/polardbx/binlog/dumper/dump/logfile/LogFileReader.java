@@ -18,11 +18,11 @@
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.alibaba.fastjson.JSON;
-import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
-import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
+import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
+import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import io.grpc.Status;

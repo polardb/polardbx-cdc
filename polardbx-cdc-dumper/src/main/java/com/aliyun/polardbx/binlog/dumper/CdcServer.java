@@ -17,6 +17,11 @@
 
 package com.aliyun.polardbx.binlog.dumper;
 
+import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManager;
+import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileReader;
+import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
+import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.rpc.cdc.BinaryLog;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc;
@@ -25,11 +30,6 @@ import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.rpc.cdc.MasterStatus;
 import com.aliyun.polardbx.rpc.cdc.Request;
 import com.aliyun.polardbx.rpc.cdc.ShowBinlogEventsRequest;
-import com.aliyun.polardbx.binlog.domain.Cursor;
-import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManager;
-import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileReader;
-import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
-import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.ServerCallStreamObserver;

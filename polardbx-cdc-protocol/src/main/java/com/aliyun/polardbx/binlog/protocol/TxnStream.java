@@ -128,17 +128,19 @@ public final class TxnStream {
                 "tSeq\030\014 \001(\003\"\177\n\016TxnMergedToken\022\013\n\003tso\030\001 \001(" +
                 "\t\022:\n\004type\030\002 \001(\0162,.com.aliyun.polardbx.bi" +
                 "nlog.protocol.TxnType\022\023\n\013beginSchema\030\003 \001" +
-                "(\t\022\017\n\007payload\030\004 \001(\014\">\n\007TxnItem\022\017\n\007traceI" +
-                "d\030\001 \001(\t\022\021\n\teventType\030\002 \001(\005\022\017\n\007payload\030\003 " +
-                "\001(\014*?\n\013MessageType\022\t\n\005WHOLE\020\000\022\t\n\005BEGIN\020\001" +
-                "\022\010\n\004DATA\020\002\022\007\n\003END\020\003\022\007\n\003TAG\020\004*k\n\007TxnType\022" +
-                "\007\n\003DML\020\000\022\017\n\013FORMAT_DESC\020\001\022\014\n\010META_DDL\020\002\022" +
-                "\016\n\nMETA_SCALE\020\003\022\024\n\020META_DDL_PRIVATE\020\004\022\022\n" +
-                "\016META_HEARTBEAT\020\0052z\n\nTxnService\022l\n\004dump\022" +
-                "0.com.aliyun.polardbx.binlog.protocol.Du" +
-                "mpRequest\032..com.aliyun.polardbx.binlog.p" +
-                "rotocol.DumpReply\"\0000\001B)\n#com.aliyun.pola" +
-                "rdbx.binlog.protocolH\001P\001b\006proto3"
+                "(\t\022\017\n\007payload\030\004 \001(\014\"Q\n\007TxnItem\022\017\n\007traceI" +
+                "d\030\001 \001(\t\022\021\n\trowsQuery\030\002 \001(\t\022\021\n\teventType\030" +
+                "\003 \001(\005\022\017\n\007payload\030\004 \001(\014*?\n\013MessageType\022\t\n" +
+                "\005WHOLE\020\000\022\t\n\005BEGIN\020\001\022\010\n\004DATA\020\002\022\007\n\003END\020\003\022\007"
+                +
+                "\n\003TAG\020\004*k\n\007TxnType\022\007\n\003DML\020\000\022\017\n\013FORMAT_DE" +
+                "SC\020\001\022\014\n\010META_DDL\020\002\022\016\n\nMETA_SCALE\020\003\022\024\n\020ME" +
+                "TA_DDL_PRIVATE\020\004\022\022\n\016META_HEARTBEAT\020\0052z\n\n" +
+                "TxnService\022l\n\004dump\0220.com.aliyun.polardbx" +
+                ".binlog.protocol.DumpRequest\032..com.aliyu" +
+                "n.polardbx.binlog.protocol.DumpReply\"\0000\001" +
+                "B)\n#com.aliyun.polardbx.binlog.protocolH" +
+                "\001P\001b\006proto3"
         };
         descriptor = com.google.protobuf.Descriptors.FileDescriptor
             .internalBuildGeneratedFileFrom(descriptorData,
@@ -205,7 +207,7 @@ public final class TxnStream {
         internal_static_com_aliyun_polardbx_binlog_protocol_TxnItem_fieldAccessorTable = new
             com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
             internal_static_com_aliyun_polardbx_binlog_protocol_TxnItem_descriptor,
-            new java.lang.String[] {"TraceId", "EventType", "Payload",});
+            new java.lang.String[] {"TraceId", "RowsQuery", "EventType", "Payload",});
     }
 
     // @@protoc_insertion_point(outer_class_scope)

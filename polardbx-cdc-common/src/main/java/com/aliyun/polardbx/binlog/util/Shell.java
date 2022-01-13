@@ -47,9 +47,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 
 /**
- * @Author ShuGuang
- * @Description copy from hadoop-common version 3.3.0
- * @Date 2020/7/20 8:12 下午
+ *
  */
 public abstract class Shell {
     /**
@@ -304,8 +302,7 @@ public abstract class Shell {
      * behavior on Windows as on Unix platforms. Creating, deleting or renaming
      * a file within that folder will still succeed on Windows.
      *
-     * @param f          input file
-     * @param executable
+     * @param f input file
      * @return true on success, false otherwise
      */
     public static boolean setExecutable(File f, boolean executable) {
@@ -326,8 +323,8 @@ public abstract class Shell {
      * Change the permissions on a file / directory, recursively, if
      * needed.
      *
-     * @param filename  name of the file whose permissions are to change
-     * @param perm      permission string
+     * @param filename name of the file whose permissions are to change
+     * @param perm permission string
      * @param recursive true, if permissions should be changed recursively
      * @return the exit code from the command.
      */
@@ -351,9 +348,9 @@ public abstract class Shell {
     /**
      * Return a command to set permission for specific file.
      *
-     * @param perm      String permission to set
+     * @param perm String permission to set
      * @param recursive boolean true to apply to all sub-directories recursively
-     * @param file      String file to set
+     * @param file String file to set
      * @return String[] containing command and arguments
      */
     public static String[] getSetPermissionCommand(String perm,
@@ -449,7 +446,7 @@ public abstract class Shell {
      * given parent directory.  The file extension is inferred by platform:
      * <code>".cmd"</code> on Windows, or <code>".sh"</code> otherwise.
      *
-     * @param parent   File parent directory
+     * @param parent File parent directory
      * @param basename String script file basename
      * @return File referencing the script in the directory
      */
@@ -459,7 +456,7 @@ public abstract class Shell {
 
     /**
      * Returns a script file name with the given basename.
-     *
+     * <p>
      * The file extension is inferred by platform:
      * <code>".cmd"</code> on Windows, or <code>".sh"</code> otherwise.
      *
@@ -523,7 +520,7 @@ public abstract class Shell {
     /**
      * Centralized logic to discover and validate the sanity of the Daemon
      * home directory.
-     *
+     * <p>
      * This does a lot of work so it should only be called
      * privately for initialization once per process.
      *
@@ -647,7 +644,7 @@ public abstract class Shell {
      * have an initializer that takes an exception.
      *
      * @param text error text
-     * @param ex   inner exception
+     * @param ex inner exception
      * @return a new exception to throw.
      */
     private static FileNotFoundException fileNotFoundException(String text,
@@ -706,7 +703,7 @@ public abstract class Shell {
      * for tests.
      *
      * @param daemonHomeDir home directory (assumed to be valid)
-     * @param executable    executable
+     * @param executable executable
      * @return path to the binary
      * @throws FileNotFoundException if the executable was not found/valid
      */
@@ -828,7 +825,7 @@ public abstract class Shell {
 
     /**
      * Predicate to indicate whether or not the path to winutils is known.
-     *
+     * <p>
      * If true, then {@link #WINUTILS} is non-null, and both
      * {@link #getWinUtilsPath()} and {@link #getWinUtilsFile()}
      * will successfully return this value. Always false on non-windows systems.
@@ -988,10 +985,10 @@ public abstract class Shell {
      * Create a shell instance which can be re-executed when the {@link #run()}
      * method is invoked with a given elapsed time between calls.
      *
-     * @param interval            the minimum duration in milliseconds to wait before
-     *                            re-executing the command. If set to 0, there is no minimum.
+     * @param interval the minimum duration in milliseconds to wait before
+     * re-executing the command. If set to 0, there is no minimum.
      * @param redirectErrorStream should the error stream be merged with
-     *                            the normal output stream?
+     * the normal output stream?
      */
     protected Shell(long interval, boolean redirectErrorStream) {
         this.interval = interval;
@@ -1203,7 +1200,7 @@ public abstract class Shell {
      * Concatenates strings, using a separator.
      *
      * @param separator to join with
-     * @param strings   to join
+     * @param strings to join
      * @return the joined string
      */
     public static String join(CharSequence separator, String[] strings) {
@@ -1343,18 +1340,18 @@ public abstract class Shell {
         /**
          * Create a new instance of the ShellCommandExecutor to execute a command.
          *
-         * @param execString       The command to execute with arguments
-         * @param dir              If not-null, specifies the directory which should be set
-         *                         as the current working directory for the command.
-         *                         If null, the current working directory is not modified.
-         * @param env              If not-null, environment of the command will include the
-         *                         key-value pairs specified in the map. If null, the current
-         *                         environment is not modified.
-         * @param timeout          Specifies the time in milliseconds, after which the
-         *                         command will be killed and the status marked as timed-out.
-         *                         If 0, the command will not be timed out.
+         * @param execString The command to execute with arguments
+         * @param dir If not-null, specifies the directory which should be set
+         * as the current working directory for the command.
+         * If null, the current working directory is not modified.
+         * @param env If not-null, environment of the command will include the
+         * key-value pairs specified in the map. If null, the current
+         * environment is not modified.
+         * @param timeout Specifies the time in milliseconds, after which the
+         * command will be killed and the status marked as timed-out.
+         * If 0, the command will not be timed out.
          * @param inheritParentEnv Indicates if the process should inherit the env
-         *                         vars from the parent process or not.
+         * vars from the parent process or not.
          */
         public ShellCommandExecutor(String[] execString, File dir,
                                     Map<String, String> env, long timeout, boolean inheritParentEnv) {
@@ -1477,8 +1474,8 @@ public abstract class Shell {
      * Covers most of the simple cases without requiring the user to implement
      * the <code>Shell</code> interface.
      *
-     * @param env     the map of environment key=value
-     * @param cmd     shell command to execute.
+     * @param env the map of environment key=value
+     * @param cmd shell command to execute.
      * @param timeout time in milliseconds after which script should be marked timeout
      * @return the output of the executed command.
      * @throws IOException on any problem.

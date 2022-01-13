@@ -116,14 +116,15 @@ message TxnItem{
     3.如果物理binlog中带有traceId标识，直接使用即可；如果物理binlog中不带有traceId标识，通过"时间戳+自增序列"手动生成 </br>
   */
   string          traceId = 1;
+  string          rowsQuery = 2;
   /**
     1.对应mysql的EventType
    */
-  int32           eventType = 2;
+  int32           eventType = 3;
   /**
     1.二进制数据
    */
-  bytes           payload = 3;
+  bytes           payload = 4;
 }
 
 enum TxnType{
@@ -151,4 +152,8 @@ enum TxnType{
     元信息：心跳信息
    */
   META_HEARTBEAT = 5;
+  /**
+    元信息：config配置变更
+   */
+  META_CONFIG_ENV_CHANGE = 6;
 }

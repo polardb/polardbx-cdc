@@ -18,6 +18,7 @@
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
 import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -36,6 +37,7 @@ import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.domain.po.RelayFinalTaskInfo;
 import com.aliyun.polardbx.binlog.error.RetryableException;
+import com.sun.jersey.spi.resource.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.joda.time.DateTime;
@@ -52,28 +54,62 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-@Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @Slf4j
+@Path("/")
+@Singleton
 public class RootResource {
 
     private static final Logger logger = LoggerFactory.getLogger(RootResource.class);
 
     @GET
     @Path("/")
-    public ServerInfo serverInfo() {
+    public String serverInfo() {
         logger.info("receive a request for root.");
-        return buildServerInfo();
+        return "";
+    }
+
+    @GET
+    @Path("/getCursors")
+    public List<Map<String, Object>> getCursors() {
+        logger.info("receive a request for getting cursors.");
+
+        String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+        NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
+        List<NodeInfo> nodeInfoList = nodeInfoMapper.select(s -> s
+            .where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
+
+        return nodeInfoList.stream()
+            .map(n -> {
+                Map<String, Object> map = new HashMap<>();
+                Cursor cursor = StringUtils.isNotBlank(n.getLatestCursor()) ?
+                    JSONObject.parseObject(n.getLatestCursor(), Cursor.class) : null;
+                map.put("fileName", cursor != null ? cursor.getFileName() : "");
+                map.put("filePosition", cursor != null ? cursor.getFilePosition() : "");
+                map.put("containerId", n.getContainerId());
+                return map;
+            }).collect(Collectors.toList());
     }
 
     @GET
     @Path("/status")
     public String status() {
         logger.info("receive a request for status.");
+        String clusterType = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_TYPE);
+        if (StringUtils.isBlank(clusterType) || ClusterTypeEnum.BINLOG.name().equals(clusterType)) {
+            return check4GlobalBinlog();
+        } else {
+            return "OK";
+        }
+    }
+
+    private String check4GlobalBinlog() {
         boolean status;
         String cause = "";
 

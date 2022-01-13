@@ -76,7 +76,7 @@ public class DefaultBinlogEventHandle implements EventHandle {
     }
 
     @Override
-    public boolean interupt() {
+    public boolean interrupt() {
         return false;
     }
 
@@ -89,7 +89,6 @@ public class DefaultBinlogEventHandle implements EventHandle {
         runtimeContext.setVersion(polarxVersion);
         if (StringUtils.isNotBlank(requestTSO)) {
             runtimeContext.setRecovery(true);
-//            startPosition.setRtso(requestTSO);
         } else {
             runtimeContext.setRecovery(false);
         }

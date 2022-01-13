@@ -21,7 +21,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 
 public interface EventHandle {
-    boolean interupt();
+    boolean interrupt();
 
     void onStart();
 

@@ -26,6 +26,7 @@ import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
 import com.aliyun.polardbx.binlog.cdc.meta.LogicTableMeta.FieldMetaExt;
+import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicDbTopology;
@@ -34,7 +35,11 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyTableTopolog
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapper;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Stopwatch;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.List;
@@ -43,11 +48,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
- *
+ * Created by Shuguang
  */
 @Slf4j
 public class PolarDbXTableMetaManager implements TableMetaTSDB {
-
+    private static final Gson GSON = new GsonBuilder().create();
     private AtomicBoolean initialized = new AtomicBoolean(false);
 
     private PolarDbXLogicTableMeta polarDbXLogicTableMeta;
@@ -157,6 +162,9 @@ public class PolarDbXTableMetaManager implements TableMetaTSDB {
     }
 
     public boolean applyLogic(BinlogPosition position, DDLRecord record, String extra) {
+        if (StringUtils.isNotEmpty(extra)) {
+            record.setExtInfo(GSON.fromJson(extra, DDLExtInfo.class));
+        }
         this.polarDbXLogicTableMeta.apply(position, record, extra);
         return true;
     }
@@ -169,8 +177,11 @@ public class PolarDbXTableMetaManager implements TableMetaTSDB {
 
     @Override
     public boolean rollback(BinlogPosition position) {
+        Stopwatch sw = Stopwatch.createStarted();
         polarDbXLogicTableMeta.rollback(position);
         polarDbXStorageTableMeta.rollback(position);
+        sw.stop();
+        log.warn("Final task rollback to tso:{}, cost {}", position.getRtso(), sw);
         return true;
     }
 

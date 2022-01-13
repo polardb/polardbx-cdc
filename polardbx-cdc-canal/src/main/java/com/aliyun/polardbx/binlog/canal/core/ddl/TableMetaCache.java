@@ -47,7 +47,7 @@ public class TableMetaCache {
         memoryTableMeta.destory();
     }
 
-    public TableMetaCache(MysqlConnection connection){
+    public TableMetaCache(MysqlConnection connection) {
         this.connection = connection;
         this.memoryTableMeta = new MemoryTableMeta(logger);
     }

@@ -258,6 +258,19 @@ public final class RowsLogBuffer {
         }
     }
 
+    public final Serializable nextValue(final int type, final int meta, boolean isBinary, String newCharsetName) {
+        fNull = nullBits.get(nullBitIndex++);
+        if (fNull) {
+            value = null;
+            javaType = mysqlToJavaType(type, meta, isBinary);
+            length = 0;
+            return null;
+        } else {
+            // Extracting field value from packed buffer.
+            return fetchValue(type, meta, isBinary, buffer, newCharsetName);
+        }
+    }
+
     public final Serializable fetchValue(int type, final int meta, boolean isBinary) {
         return fetchValue(type, meta, isBinary, buffer, charsetName);
     }

@@ -70,7 +70,7 @@ public class TxnShuffleStageHandler implements WorkHandler<MessageEvent>, Lifecy
                 processMetaToken(event, token);
             } else if (token.getType() == TxnType.DML) {
                 processDmlToken(event, token);
-            } else if (token.getType() == TxnType.META_HEARTBEAT) {
+            } else if (token.getType() == TxnType.META_HEARTBEAT || token.getType() == TxnType.META_CONFIG_ENV_CHANGE) {
                 processMetaToken(event, token);
             } else {
                 throw new PolardbxException("invalid txn token type: " + token.getType());

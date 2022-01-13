@@ -21,7 +21,7 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 
 public class PositionNotFoundException extends PolardbxException {
 
-    public PositionNotFoundException(){
+    public PositionNotFoundException() {
     }
 
     public PositionNotFoundException(String message) {
@@ -32,12 +32,12 @@ public class PositionNotFoundException extends PolardbxException {
         super(message, cause);
     }
 
-    public PositionNotFoundException(Throwable cause){
+    public PositionNotFoundException(Throwable cause) {
         super(cause);
     }
 
     public PositionNotFoundException(String message, Throwable cause, boolean enableSuppression,
-                                     boolean writableStackTrace){
+                                     boolean writableStackTrace) {
         super(message, cause, enableSuppression, writableStackTrace);
     }
 }

@@ -64,13 +64,13 @@ public class EventGenerator {
 
     //高频使用，为了性能，复用byte数组
     //后期维护时：一要注意线程安全；二要注意每次调用时，中间位置不要遗留上次的脏数据
-    public static Pair<byte[], Integer> makeBegin(long timestamp, String schema) {
+    public static Pair<byte[], Integer> makeBegin(long timestamp, String schema, long serverId) {
         ByteArray begin = new ByteArray(BYTES.get());
 
         //write query event header
         begin.writeLong(timestamp, 4);// write timestamp
         begin.write((byte) LogEvent.QUERY_EVENT);// write event type
-        begin.writeLong(ServerConfigUtil.getGlobalNumberVar("SERVER_ID"), 4);// write serverId
+        begin.writeLong(serverId, 4);// write serverId
         begin.skip(4);//we don't know the size now
         begin.skip(4);//we don't know the log pos now
         begin.writeLong(8,
@@ -98,13 +98,13 @@ public class EventGenerator {
 
     //高频使用，为了性能，复用byte数组
     //后期维护时：一要注意线程安全；二要注意每次调用时，中间位置不要遗留上次的脏数据
-    public static Pair<byte[], Integer> makeCommit(long timestamp) {
+    public static Pair<byte[], Integer> makeCommit(long timestamp, long serverId) {
         ByteArray commit = new ByteArray(BYTES.get());
 
         //write xid event header
         commit.writeLong(timestamp, 4);
         commit.write((byte) LogEvent.XID_EVENT);
-        commit.writeLong(ServerConfigUtil.getGlobalNumberVar("SERVER_ID"), 4);// write serverId
+        commit.writeLong(serverId, 4);// write serverId
         commit.skip(4);// we don't know the size now
         commit.skip(4);// we don't know the log pos now
         commit.writeLong(0, 2);//

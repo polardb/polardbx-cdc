@@ -36,6 +36,7 @@ public final class TxnItem extends
 
     private TxnItem() {
         traceId_ = "";
+        rowsQuery_ = "";
         payload_ = com.google.protobuf.ByteString.EMPTY;
     }
 
@@ -76,12 +77,18 @@ public final class TxnItem extends
                     traceId_ = s;
                     break;
                 }
-                case 16: {
+                case 18: {
+                    java.lang.String s = input.readStringRequireUtf8();
+
+                    rowsQuery_ = s;
+                    break;
+                }
+                case 24: {
 
                     eventType_ = input.readInt32();
                     break;
                 }
-                case 26: {
+                case 34: {
 
                     payload_ = input.readBytes();
                     break;
@@ -176,7 +183,49 @@ public final class TxnItem extends
         }
     }
 
-    public static final int EVENTTYPE_FIELD_NUMBER = 2;
+    public static final int ROWSQUERY_FIELD_NUMBER = 2;
+    private volatile java.lang.Object rowsQuery_;
+
+    /**
+     * <code>string rowsQuery = 2;</code>
+     *
+     * @return The rowsQuery.
+     */
+    @java.lang.Override
+    public java.lang.String getRowsQuery() {
+        java.lang.Object ref = rowsQuery_;
+        if (ref instanceof java.lang.String) {
+            return (java.lang.String) ref;
+        } else {
+            com.google.protobuf.ByteString bs =
+                (com.google.protobuf.ByteString) ref;
+            java.lang.String s = bs.toStringUtf8();
+            rowsQuery_ = s;
+            return s;
+        }
+    }
+
+    /**
+     * <code>string rowsQuery = 2;</code>
+     *
+     * @return The bytes for rowsQuery.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+    getRowsQueryBytes() {
+        java.lang.Object ref = rowsQuery_;
+        if (ref instanceof java.lang.String) {
+            com.google.protobuf.ByteString b =
+                com.google.protobuf.ByteString.copyFromUtf8(
+                    (java.lang.String) ref);
+            rowsQuery_ = b;
+            return b;
+        } else {
+            return (com.google.protobuf.ByteString) ref;
+        }
+    }
+
+    public static final int EVENTTYPE_FIELD_NUMBER = 3;
     private int eventType_;
 
     /**
@@ -185,7 +234,7 @@ public final class TxnItem extends
      * 1.对应mysql的EventType
      * </pre>
      *
-     * <code>int32 eventType = 2;</code>
+     * <code>int32 eventType = 3;</code>
      *
      * @return The eventType.
      */
@@ -194,7 +243,7 @@ public final class TxnItem extends
         return eventType_;
     }
 
-    public static final int PAYLOAD_FIELD_NUMBER = 3;
+    public static final int PAYLOAD_FIELD_NUMBER = 4;
     private com.google.protobuf.ByteString payload_;
 
     /**
@@ -203,7 +252,7 @@ public final class TxnItem extends
      * 1.二进制数据
      * </pre>
      *
-     * <code>bytes payload = 3;</code>
+     * <code>bytes payload = 4;</code>
      *
      * @return The payload.
      */
@@ -234,11 +283,14 @@ public final class TxnItem extends
         if (!getTraceIdBytes().isEmpty()) {
             com.google.protobuf.GeneratedMessageV3.writeString(output, 1, traceId_);
         }
+        if (!getRowsQueryBytes().isEmpty()) {
+            com.google.protobuf.GeneratedMessageV3.writeString(output, 2, rowsQuery_);
+        }
         if (eventType_ != 0) {
-            output.writeInt32(2, eventType_);
+            output.writeInt32(3, eventType_);
         }
         if (!payload_.isEmpty()) {
-            output.writeBytes(3, payload_);
+            output.writeBytes(4, payload_);
         }
         unknownFields.writeTo(output);
     }
@@ -254,13 +306,16 @@ public final class TxnItem extends
         if (!getTraceIdBytes().isEmpty()) {
             size += com.google.protobuf.GeneratedMessageV3.computeStringSize(1, traceId_);
         }
+        if (!getRowsQueryBytes().isEmpty()) {
+            size += com.google.protobuf.GeneratedMessageV3.computeStringSize(2, rowsQuery_);
+        }
         if (eventType_ != 0) {
             size += com.google.protobuf.CodedOutputStream
-                .computeInt32Size(2, eventType_);
+                .computeInt32Size(3, eventType_);
         }
         if (!payload_.isEmpty()) {
             size += com.google.protobuf.CodedOutputStream
-                .computeBytesSize(3, payload_);
+                .computeBytesSize(4, payload_);
         }
         size += unknownFields.getSerializedSize();
         memoizedSize = size;
@@ -279,6 +334,10 @@ public final class TxnItem extends
 
         if (!getTraceId()
             .equals(other.getTraceId())) {
+            return false;
+        }
+        if (!getRowsQuery()
+            .equals(other.getRowsQuery())) {
             return false;
         }
         if (getEventType()
@@ -304,6 +363,8 @@ public final class TxnItem extends
         hash = (19 * hash) + getDescriptor().hashCode();
         hash = (37 * hash) + TRACEID_FIELD_NUMBER;
         hash = (53 * hash) + getTraceId().hashCode();
+        hash = (37 * hash) + ROWSQUERY_FIELD_NUMBER;
+        hash = (53 * hash) + getRowsQuery().hashCode();
         hash = (37 * hash) + EVENTTYPE_FIELD_NUMBER;
         hash = (53 * hash) + getEventType();
         hash = (37 * hash) + PAYLOAD_FIELD_NUMBER;
@@ -463,6 +524,8 @@ public final class TxnItem extends
             super.clear();
             traceId_ = "";
 
+            rowsQuery_ = "";
+
             eventType_ = 0;
 
             payload_ = com.google.protobuf.ByteString.EMPTY;
@@ -494,6 +557,7 @@ public final class TxnItem extends
         public com.aliyun.polardbx.binlog.protocol.TxnItem buildPartial() {
             com.aliyun.polardbx.binlog.protocol.TxnItem result = new com.aliyun.polardbx.binlog.protocol.TxnItem(this);
             result.traceId_ = traceId_;
+            result.rowsQuery_ = rowsQuery_;
             result.eventType_ = eventType_;
             result.payload_ = payload_;
             onBuilt();
@@ -554,6 +618,10 @@ public final class TxnItem extends
             }
             if (!other.getTraceId().isEmpty()) {
                 traceId_ = other.traceId_;
+                onChanged();
+            }
+            if (!other.getRowsQuery().isEmpty()) {
+                rowsQuery_ = other.rowsQuery_;
                 onChanged();
             }
             if (other.getEventType() != 0) {
@@ -712,6 +780,92 @@ public final class TxnItem extends
             return this;
         }
 
+        private java.lang.Object rowsQuery_ = "";
+
+        /**
+         * <code>string rowsQuery = 2;</code>
+         *
+         * @return The rowsQuery.
+         */
+        public java.lang.String getRowsQuery() {
+            java.lang.Object ref = rowsQuery_;
+            if (!(ref instanceof java.lang.String)) {
+                com.google.protobuf.ByteString bs =
+                    (com.google.protobuf.ByteString) ref;
+                java.lang.String s = bs.toStringUtf8();
+                rowsQuery_ = s;
+                return s;
+            } else {
+                return (java.lang.String) ref;
+            }
+        }
+
+        /**
+         * <code>string rowsQuery = 2;</code>
+         *
+         * @return The bytes for rowsQuery.
+         */
+        public com.google.protobuf.ByteString
+        getRowsQueryBytes() {
+            java.lang.Object ref = rowsQuery_;
+            if (ref instanceof String) {
+                com.google.protobuf.ByteString b =
+                    com.google.protobuf.ByteString.copyFromUtf8(
+                        (java.lang.String) ref);
+                rowsQuery_ = b;
+                return b;
+            } else {
+                return (com.google.protobuf.ByteString) ref;
+            }
+        }
+
+        /**
+         * <code>string rowsQuery = 2;</code>
+         *
+         * @param value The rowsQuery to set.
+         * @return This builder for chaining.
+         */
+        public Builder setRowsQuery(
+            java.lang.String value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+
+            rowsQuery_ = value;
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>string rowsQuery = 2;</code>
+         *
+         * @return This builder for chaining.
+         */
+        public Builder clearRowsQuery() {
+
+            rowsQuery_ = getDefaultInstance().getRowsQuery();
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>string rowsQuery = 2;</code>
+         *
+         * @param value The bytes for rowsQuery to set.
+         * @return This builder for chaining.
+         */
+        public Builder setRowsQueryBytes(
+            com.google.protobuf.ByteString value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+            checkByteStringIsUtf8(value);
+
+            rowsQuery_ = value;
+            onChanged();
+            return this;
+        }
+
         private int eventType_;
 
         /**
@@ -720,7 +874,7 @@ public final class TxnItem extends
          * 1.对应mysql的EventType
          * </pre>
          *
-         * <code>int32 eventType = 2;</code>
+         * <code>int32 eventType = 3;</code>
          *
          * @return The eventType.
          */
@@ -735,7 +889,7 @@ public final class TxnItem extends
          * 1.对应mysql的EventType
          * </pre>
          *
-         * <code>int32 eventType = 2;</code>
+         * <code>int32 eventType = 3;</code>
          *
          * @param value The eventType to set.
          * @return This builder for chaining.
@@ -753,7 +907,7 @@ public final class TxnItem extends
          * 1.对应mysql的EventType
          * </pre>
          *
-         * <code>int32 eventType = 2;</code>
+         * <code>int32 eventType = 3;</code>
          *
          * @return This builder for chaining.
          */
@@ -772,7 +926,7 @@ public final class TxnItem extends
          * 1.二进制数据
          * </pre>
          *
-         * <code>bytes payload = 3;</code>
+         * <code>bytes payload = 4;</code>
          *
          * @return The payload.
          */
@@ -787,7 +941,7 @@ public final class TxnItem extends
          * 1.二进制数据
          * </pre>
          *
-         * <code>bytes payload = 3;</code>
+         * <code>bytes payload = 4;</code>
          *
          * @param value The payload to set.
          * @return This builder for chaining.
@@ -808,7 +962,7 @@ public final class TxnItem extends
          * 1.二进制数据
          * </pre>
          *
-         * <code>bytes payload = 3;</code>
+         * <code>bytes payload = 4;</code>
          *
          * @return This builder for chaining.
          */

@@ -73,6 +73,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
+import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SUSPEND_TOPOLOGY_REBUILDING;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
@@ -120,6 +121,12 @@ public class TopologyService {
     }
 
     public void tryBuild() throws Throwable {
+        String suspendTopologyRebuilding = SystemDbConfig.getSystemDbConfig(CLUSTER_SUSPEND_TOPOLOGY_REBUILDING);
+        if (StringUtils.isNotBlank(suspendTopologyRebuilding) && "true".equals(suspendTopologyRebuilding)) {
+            log.info("current cluster is in suspend state , skip rebuilding cluster topology");
+            return;
+        }
+
         //check and prepare parameter
         log.info("current daemon is leader, do with the cluster's topology project!");
         ResourceManager resourceManager = new ResourceManager(clusterId);
@@ -134,7 +141,8 @@ public class TopologyService {
         StorageHistoryInfo storageHistoryInfo = buildStorageHistoryInfo(expectedStorageTso);
         List<StorageInfo> storageInfos = buildStorageInfos(storageHistoryInfo);
 
-        if (shouldRefreshTopology(resourceManager, preClusterSnapshot, storageInfos, executionSnapshot)) {
+        if (shouldRefreshTopology(resourceManager, preClusterSnapshot, storageInfos, executionSnapshot,
+            storageHistoryInfo)) {
             long newVersion = preClusterSnapshot.getVersion() + 1;
             List<Container> containers = resourceManager.availableContainers();
             String dumperMasterNode = selectDumperMasterNode(
@@ -144,7 +152,7 @@ public class TopologyService {
             List<BinlogTaskConfig> topologyConfigs = taskDistributionFunction.apply(containers, storageInfos,
                 expectedStorageTso, newVersion, dumperMasterNode);
             ClusterSnapshot postClusterSnapshot = buildPostClusterSnapshot(topologyConfigs,
-                containers, storageInfos, newVersion, dumperMasterNode);
+                containers, storageInfos, newVersion, dumperMasterNode, storageHistoryInfo);
             persist(clusterId, storageHistoryInfo, storageInfos, topologyConfigs, preClusterSnapshot,
                 postClusterSnapshot, executionSnapshot);
             log.info("Topology with version {} is successfully build.", newVersion);
@@ -174,7 +182,8 @@ public class TopologyService {
     }
 
     private boolean shouldRefreshTopology(ResourceManager resourceManager, ClusterSnapshot preClusterSnapshot,
-                                          List<StorageInfo> storages, ExecutionSnapshot executionSnapshot) {
+                                          List<StorageInfo> storages, ExecutionSnapshot executionSnapshot,
+                                          StorageHistoryInfo storageHistoryInfo) {
         if (preClusterSnapshot.isNew()) {
             log.info("cluster snapshot is new, topology will rebuild.");
             return true;
@@ -182,8 +191,10 @@ public class TopologyService {
 
         Set<String> latestContainers = resourceManager.allOnlineContainers();
         Set<String> latestStorages = storages.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toSet());
-        boolean isMetaChange = !(latestContainers.equals(preClusterSnapshot.getContainers()) && latestStorages
-            .equals(preClusterSnapshot.getStorages()));
+        boolean isMetaChange =
+            !(latestContainers.equals(preClusterSnapshot.getContainers())
+                && latestStorages.equals(preClusterSnapshot.getStorages())
+                && StringUtils.equals(storageHistoryInfo.getTso(), preClusterSnapshot.getStorageHistoryTso()));
         boolean isAllRunningOk = executionSnapshot.isOK();
 
         // 如果所有Dumper&Task进程运行OK，只要元数据未发生变化，则不进行拓扑重建
@@ -195,7 +206,7 @@ public class TopologyService {
             }
             return isMetaChange;
         } else {
-            // 对异常状态的Dumper或Task所在的容器进行检测，如果所在容器的Dameon也不正常，则进行拓扑重建
+            // 对异常状态的Dumper或Task所在的容器进行检测，如果所在容器的Daemon也不正常，则进行拓扑重建
             Set<String> containers4Check = executionSnapshot.downProcessContainers();
             boolean isOK = resourceManager.isContainersOk(containers4Check);
             if (!isOK) {
@@ -223,7 +234,8 @@ public class TopologyService {
                                                      List<Container> containers,
                                                      List<StorageInfo> storageInfos,
                                                      long newVersion,
-                                                     String dumperMasterNode) {
+                                                     String dumperMasterNode,
+                                                     StorageHistoryInfo storageHistoryInfo) {
         Optional<String> dumperMasterOptional = topologyConfigs.stream()
             .filter(c -> TaskType.Dumper.name().equals(c.getRole()) && c.getContainerId().equals(dumperMasterNode))
             .map(BinlogTaskConfig::getTaskName)
@@ -241,7 +253,8 @@ public class TopologyService {
             containers.stream().map(Container::getContainerId).collect(Collectors.toSet()),
             storageInfos.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toSet()),
             dumperMasterNode,
-            dumperMasterName);
+            dumperMasterName,
+            storageHistoryInfo == null ? TaskConfig.ORIGIN_TSO : storageHistoryInfo.getTso());
     }
 
     private String selectDumperMasterNode(Set<String> containers, ClusterSnapshot preClusterSnapshot) {

@@ -21,6 +21,7 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.LogEventHandler;
+import com.aliyun.polardbx.binlog.domain.EnvConfigChangeInfo;
 import com.aliyun.polardbx.binlog.domain.StorageChangeInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.TimeoutException;
@@ -132,6 +133,16 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             txnTokenBuilder.setType(TxnType.META_SCALE);
             logger.info("output logic meta scale : " + transaction.getInstructionContent() + " for : "
                 + transaction.getVirtualTSO());
+        } else if (transaction.isEnvConfigChangeCommand()) {
+            Gson gson = new Gson().newBuilder().create();
+            EnvConfigChangeInfo configChangeInfo = new EnvConfigChangeInfo();
+            configChangeInfo.setInstructionId(transaction.getInstructionId());
+            configChangeInfo.setContent(transaction.getInstructionContent());
+            txnTokenBuilder.setPayload(ByteString.copyFrom(gson.toJson(configChangeInfo), "utf8"));
+            txnTokenBuilder.setType(TxnType.META_CONFIG_ENV_CHANGE);
+            logger.info("output logic meta config env change : " + transaction.getInstructionContent() + " for : "
+                + transaction.getVirtualTSO());
+
         }
 
         transaction.markBufferComplete();

@@ -45,7 +45,7 @@ clean_process_log() {
     ls -lhtr $current_process_path|sed '1d'|while read LINE
     do
         db_path="$current_process_path/`echo $LINE|awk '{print $9}'`"
-        clean_db_log $db_path
+        clean_db_log $db_path $2
 
         get_dir_size
         if [ $use -lt $max_used ]; then

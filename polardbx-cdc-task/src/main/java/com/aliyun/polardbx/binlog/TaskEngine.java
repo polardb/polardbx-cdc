@@ -260,6 +260,7 @@ public class TaskEngine implements TxnMessageProvider {
             DynamicApplicationConfig.getInt(ConfigKeys.TASK_MERGER_DRYRUN_MODE),
             storage);
         result.addHeartBeatWindowAware(collector);
+        result.setForceCompleteHbWindow(taskInfo.isForceCompleteHbWindow());
         return result;
     }
 }

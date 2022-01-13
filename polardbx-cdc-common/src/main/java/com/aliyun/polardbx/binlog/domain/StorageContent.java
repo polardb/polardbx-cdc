@@ -26,5 +26,12 @@ import java.util.List;
  **/
 @Data
 public class StorageContent {
+    /**
+     * 标识storage inst id list的内容是否是经过修复后的
+     */
+    boolean repaired;
+    /**
+     * storage inst id list
+     */
     List<String> storageInstIds;
 }

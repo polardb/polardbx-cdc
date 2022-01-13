@@ -85,7 +85,8 @@ public class BinlogTest {
             1,
             123,
             "test_abc_db",
-            "test_abc_tb");
+            "test_abc_tb",
+            "utf8");
         List<Field> fieldList = new ArrayList<>();
 
         fieldList.add(MakeFieldFactory.makeField("BIGINT(20)", "1", "utf8mb4", false));

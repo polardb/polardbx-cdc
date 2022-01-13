@@ -17,12 +17,10 @@
 
 package com.aliyun.polardbx.binlog.scheduler;
 
-import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.util.CollectionUtils;
 
-import java.util.HashSet;
 import java.util.Set;
 
 /**
@@ -35,12 +33,13 @@ public class ClusterSnapshot {
     private Set<String> storages;
     private String dumperMaster;
     private String dumperMasterNode;
+    private String storageHistoryTso;
 
     public ClusterSnapshot() {
     }
 
     public ClusterSnapshot(long version, Long timestamp, Set<String> containers, Set<String> storages,
-                           String dumperMasterNode, String dumperMaster) {
+                           String dumperMasterNode, String dumperMaster, String storageHistoryTso) {
         if (version != 1L && timestamp == null) {
             throw new PolardbxException("timestamp can not be null.");
         }
@@ -56,6 +55,9 @@ public class ClusterSnapshot {
         if (version != 1L && StringUtils.isBlank(dumperMasterNode)) {
             throw new PolardbxException("dumperNode can not be null or empty.");
         }
+        if (version != 1L && StringUtils.isBlank(storageHistoryTso)) {
+            throw new PolardbxException("storageHistoryTso can not be null or empty.");
+        }
 
         this.version = version;
         this.timestamp = timestamp;
@@ -63,6 +65,7 @@ public class ClusterSnapshot {
         this.storages = storages;
         this.dumperMasterNode = dumperMasterNode;
         this.dumperMaster = dumperMaster;
+        this.storageHistoryTso = storageHistoryTso;
     }
 
     public boolean isNew() {
@@ -117,9 +120,11 @@ public class ClusterSnapshot {
         this.dumperMasterNode = dumperMasterNode;
     }
 
-    public static void main(String args[]) {
-        Set<String> sets = new HashSet<>();
-        sets.add("17938558");
-        System.out.println(JSONObject.toJSONString(sets));
+    public String getStorageHistoryTso() {
+        return storageHistoryTso;
+    }
+
+    public void setStorageHistoryTso(String storageHistoryTso) {
+        this.storageHistoryTso = storageHistoryTso;
     }
 }

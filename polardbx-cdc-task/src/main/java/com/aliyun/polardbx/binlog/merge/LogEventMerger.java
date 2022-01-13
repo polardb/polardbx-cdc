@@ -83,6 +83,7 @@ public class LogEventMerger implements Merger {
     private Long startTime;
     private Long latestPassTime;
     private Long latestPassCount;
+    private boolean forceCompleteHbWindow;
     private volatile boolean running;
 
     public LogEventMerger(TaskType taskType, Collector collector, boolean isMergeNoTsoXa, String startTso,
@@ -288,20 +289,36 @@ public class LogEventMerger implements Merger {
     }
 
     private void tryForceComplete() {
-        if (lastScaleToken != null && !currentWindow.isComplete()) {
-            long commitSeq = CommonUtils.getTsoTimestamp(lastScaleToken.getTso());
-            long snapshotSeq = currentWindow.getSnapshotSeq();
-
-            int forceCompleteThreshold = DynamicApplicationConfig.getInt(TASK_HB_WINDOW_FORCE_COMPLETE_THRESHOLD);
-            if (forceCountAfterLastScale < forceCompleteThreshold) {
+        if (!currentWindow.isComplete()) {
+            if (forceCompleteHbWindow) {
                 currentWindow.forceComplete();
-                logger.warn("Force complete heart beat window, last scale token`s commitSeq is {}, "
-                        + "this heart beat window`s snapshot seq is{}.",
-                    commitSeq, snapshotSeq);
-            } else {
-                logger.error(
-                    "snapshot seq {} is large than commit seq {}, but heartbeat window is not complete, maybe it`s a bug.",
-                    snapshotSeq, commitSeq);
+                return;
+            }
+
+            if (lastScaleToken != null) {
+                long commitSeq = CommonUtils.getTsoTimestamp(lastScaleToken.getTso());
+                long snapshotSeq = currentWindow.getSnapshotSeq();
+
+                // 需要考虑：打标事务和心跳事务并发执行的情况
+                // <p>
+                // 之前的一个策略是：使用旧拓扑的心跳事务的snapshotSeq一定小于打标事务的commitSeq，所以，如果snapshotSeq < commitSeq则执行
+                // forceComplete，但后来发现此命题并不成立，因为事务执行时是先获取拓扑结构，再获取snapshotSeq，那么持有老拓扑的心跳事务和打标
+                // 事务在获取snapshotSeq时存在并发关系。如果先获取snapshotSeq，再获取拓扑结构，则上面的命题是成立的
+                // <p>
+                // 新策略：最优的方案是Server内核在打标的时候，确认持有老拓扑的心跳事务都已经排空，然后再执行打标操作，但分布式场景下不太好做，另外
+                // 有很多老版本的Server，需要考略兼容性。考虑到心跳事务和打标事务之间的并发度很低，正常来说打标事务之后只会出现一次基于老拓扑的心跳事务，
+                // 除非Daemon发生脑裂，所以暂时采取一种宽松的策略，如果foreComplete的次数没有超过阈值，则也直接进行force
+                int forceCompleteThreshold = DynamicApplicationConfig.getInt(TASK_HB_WINDOW_FORCE_COMPLETE_THRESHOLD);
+                if (forceCountAfterLastScale < forceCompleteThreshold) {
+                    currentWindow.forceComplete();
+                    logger.warn("Force complete heart beat window, last scale token`s commitSeq is {}, "
+                            + "this heart beat window`s snapshot seq is{}.",
+                        commitSeq, snapshotSeq);
+                } else {
+                    logger.error(
+                        "snapshot seq {} is large than commit seq {}, but heartbeat window is not complete, maybe it`s a bug.",
+                        snapshotSeq, commitSeq);
+                }
             }
         }
     }
@@ -420,5 +437,10 @@ public class LogEventMerger implements Merger {
 
     public Long getLatestPassCount() {
         return latestPassCount;
+    }
+
+    public void setForceCompleteHbWindow(boolean forceCompleteHbWindow) {
+        this.forceCompleteHbWindow = forceCompleteHbWindow;
+        logger.info("set forceCompleteHbWindow`s value to " + forceCompleteHbWindow);
     }
 }

@@ -54,7 +54,7 @@ public class RuntimeContext {
      */
     private boolean recovery;
 
-    private int serverId;
+    private long serverId;
 
     private int lowerCaseTableNames;
 
@@ -192,11 +192,11 @@ public class RuntimeContext {
         this.topology = topology;
     }
 
-    public int getServerId() {
+    public long getServerId() {
         return serverId;
     }
 
-    public void setServerId(int serverId) {
+    public void setServerId(long serverId) {
         this.serverId = serverId;
     }
 

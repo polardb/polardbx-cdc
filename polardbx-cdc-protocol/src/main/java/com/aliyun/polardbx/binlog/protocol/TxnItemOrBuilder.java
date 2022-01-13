@@ -54,12 +54,27 @@ public interface TxnItemOrBuilder extends
     getTraceIdBytes();
 
     /**
+     * <code>string rowsQuery = 2;</code>
+     *
+     * @return The rowsQuery.
+     */
+    java.lang.String getRowsQuery();
+
+    /**
+     * <code>string rowsQuery = 2;</code>
+     *
+     * @return The bytes for rowsQuery.
+     */
+    com.google.protobuf.ByteString
+    getRowsQueryBytes();
+
+    /**
      * <pre>
      * *
      * 1.对应mysql的EventType
      * </pre>
      *
-     * <code>int32 eventType = 2;</code>
+     * <code>int32 eventType = 3;</code>
      *
      * @return The eventType.
      */
@@ -71,7 +86,7 @@ public interface TxnItemOrBuilder extends
      * 1.二进制数据
      * </pre>
      *
-     * <code>bytes payload = 3;</code>
+     * <code>bytes payload = 4;</code>
      *
      * @return The payload.
      */

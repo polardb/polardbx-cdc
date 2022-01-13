@@ -20,6 +20,7 @@ package com.aliyun.polardbx.binlog.canal.core.handle;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
+import com.aliyun.polardbx.binlog.canal.binlog.event.GcnLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.SequenceLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
@@ -33,8 +34,8 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 
 public class SearchTsoEventHandle implements EventHandle {
-    private static final Logger logger = LoggerFactory.getLogger(
-        SearchTsoEventHandle.class);
+    private static final Logger logger = LoggerFactory.getLogger(SearchTsoEventHandle.class);
+
     private final long searchTSO;
     private final Map<String, TranPosition> tranPositionMap = Maps.newHashMap();
     private final AuthenticationInfo authenticationInfo;
@@ -46,27 +47,28 @@ public class SearchTsoEventHandle implements EventHandle {
     private long lastPrintTimestamp = System.currentTimeMillis();
     private TranPosition currentTransaction;
     private TranPosition commandTransaction;
-    private long lastTSO = -1;
+    private boolean interrupt = false;
+    private long lastTso = -1;
+    private long minTso;
+    private long lastGcn = -1L;
 
-    private boolean interupt = false;
-    private long minTSO;
-
-    public SearchTsoEventHandle(long searchTSO, AuthenticationInfo authenticationInfo, long minTSO) {
+    public SearchTsoEventHandle(long searchTSO, AuthenticationInfo authenticationInfo, long minTso) {
         this.searchTSO = searchTSO;
         this.authenticationInfo = authenticationInfo;
-        this.minTSO = minTSO;
+        this.minTso = minTso;
     }
 
     @Override
-    public boolean interupt() {
-        return interupt;
+    public boolean interrupt() {
+        return interrupt;
     }
 
     @Override
     public void onStart() {
         tranPositionMap.clear();
         currentTransaction = null;
-        lastTSO = -1;
+        lastTso = -1;
+        lastGcn = -1;
     }
 
     @Override
@@ -88,10 +90,11 @@ public class SearchTsoEventHandle implements EventHandle {
     }
 
     public void reset() {
-        lastTSO = -1;
+        lastGcn = -1;
+        lastTso = -1;
         tranPositionMap.clear();
         logPos = 4;
-        interupt = false;
+        interrupt = false;
     }
 
     @Override
@@ -101,31 +104,35 @@ public class SearchTsoEventHandle implements EventHandle {
         } else if (LogEventUtil.isPrepare(event)) {
             onPrepare(event, logPosition);
         } else if (LogEventUtil.isCommit(event)) {
-            // check commit tso for AliSQL 8.0
-            if (LogEventUtil.containsCommitGCN(event) && checkCommitSequence(((QueryLogEvent) event).getCommitGCN())) {
-                return;
-            }
             onCommit(event, logPosition);
             onTransactionEndEvent();
         } else if (LogEventUtil.isRollback(event)) {
             onRollback(event, logPosition);
             onTransactionEndEvent();
         } else if (LogEventUtil.isSequenceEvent(event)) {
-            // check commit tso fro AliSQL 5.7
-            SequenceLogEvent sequenceLogEvent = (SequenceLogEvent) event;
-            if (sequenceLogEvent.isCommitSequence() && checkCommitSequence(sequenceLogEvent.getSequenceNum())) {
-                return;
-            }
+            onSequence(event);
+        } else if (LogEventUtil.isGCNEvent(event)) {
+            onGcn(event);
         } else {
             if (currentTransaction != null) {
                 currentTransaction.processEvent(event);
                 if (currentTransaction.isCdcStartCmd() || currentTransaction.isStorageChangeCmd()) {
                     this.commandTransaction = currentTransaction;
                 }
+            } else {
+                //DN8.0 V2版本ddl也有记录tso，需要进行重置
+                if (event.getHeader().getType() == LogEvent.QUERY_EVENT) {
+                    lastGcn = -1L;
+                }
             }
         }
+
+        if (interrupt) {
+            return;
+        }
+
         if (returnBinlogPosition != null) {
-            interupt = true;
+            interrupt = true;
             logger.info("returnBinlogPosition is found, stop searching. position info is {}:{}",
                 returnBinlogPosition.getFileName(), returnBinlogPosition.getFilePattern());
             return;
@@ -134,8 +141,8 @@ public class SearchTsoEventHandle implements EventHandle {
 
         if (logPos >= endPosition.getPosition() || !logPosition.getFileName()
             .equalsIgnoreCase(endPosition.getFileName())) {
-            lastTSO = -1L;
-            interupt = true;
+            lastTso = -1L;
+            interrupt = true;
             logger.warn("reach end logPosition：" + logPosition + ", endPos : " + endPosition + " , logPos:" + logPos);
             return;
         }
@@ -143,10 +150,10 @@ public class SearchTsoEventHandle implements EventHandle {
     }
 
     private boolean checkCommitSequence(long sequence) {
-        lastTSO = sequence;
-        if (searchTSO > 0 && lastTSO > searchTSO && isCmdTxnNullOrCompleted()) {
-            interupt = true;
-            logger.info("search tso " + searchTSO + " is less than last tso " + lastTSO + ", stop searching.");
+        lastTso = sequence;
+        if (searchTSO > 0 && lastTso > searchTSO && isCmdTxnNullOrCompleted()) {
+            interrupt = true;
+            logger.info("search tso " + searchTSO + " is less than last tso " + lastTso + ", stop searching.");
             return true;
         }
         return false;
@@ -154,7 +161,8 @@ public class SearchTsoEventHandle implements EventHandle {
 
     private void onTransactionEndEvent() {
         currentTransaction = null;
-        lastTSO = -1;
+        lastTso = -1;
+        lastGcn = -1L;
     }
 
     private boolean isCmdTxnNullOrCompleted() {
@@ -162,6 +170,7 @@ public class SearchTsoEventHandle implements EventHandle {
     }
 
     private void onStart(LogEvent event, LogPosition logPosition) {
+        lastGcn = -1L;
         String xid = LogEventUtil.getXid(event);
         if (xid == null) {
             currentTransaction = new TranPosition();
@@ -189,6 +198,13 @@ public class SearchTsoEventHandle implements EventHandle {
     }
 
     private void onCommit(LogEvent event, LogPosition logPosition) {
+        if (LogEventUtil.containsCommitGCN(event) && checkCommitSequence(((QueryLogEvent) event).getCommitGCN())) {
+            return;
+        }
+        if (lastGcn != -1L && checkCommitSequence(lastGcn)) {
+            return;
+        }
+
         String xid = LogEventUtil.getXid(event);
         TranPosition tranPosition;
         if (xid != null) {
@@ -198,11 +214,11 @@ public class SearchTsoEventHandle implements EventHandle {
         }
         if (tranPosition != null) {
             tranPosition.setEnd(buildPosition(event, logPosition));
-            tranPosition.setTso(lastTSO);
-            if (minTSO > 0 && lastTSO < minTSO) {
+            tranPosition.setTso(lastTso);
+            if (minTso > 0 && lastTso < minTso) {
                 return;
             }
-            if (returnBinlogPosition == null && lastTSO > 0 && lastTSO < searchTSO) {
+            if (returnBinlogPosition == null && lastTso > 0 && lastTso < searchTSO) {
                 returnBinlogPosition = tranPosition.getPosition();
             }
             if (searchTSO == -1 && tranPosition.isCdcStartCmd()) {
@@ -216,6 +232,18 @@ public class SearchTsoEventHandle implements EventHandle {
         if (xid != null) {
             tranPositionMap.remove(xid);
         }
+    }
+
+    private void onSequence(LogEvent event) {
+        SequenceLogEvent sequenceLogEvent = (SequenceLogEvent) event;
+        if (sequenceLogEvent.isCommitSequence()) {
+            checkCommitSequence(sequenceLogEvent.getSequenceNum());
+        }
+    }
+
+    private void onGcn(LogEvent event) {
+        GcnLogEvent gcnLogEvent = (GcnLogEvent) event;
+        lastGcn = gcnLogEvent.getGcn();
     }
 
     private void printProcess(long logPos, String fileName) {

@@ -19,6 +19,7 @@ package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.MarkType;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.domain.MarkInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
 import com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator;
 import com.aliyun.polardbx.binlog.dumper.metrics.Metrics;
@@ -356,8 +357,12 @@ public class BinlogFile {
                                     //如果tsoSize等于54(历史版本，ROWS_QUERY_LOG_EVENT只用来记录tso)
                                     //或者content的前缀是CTS(ROWS_QUERY_LOG_EVENT用来记录更多元信息)
                                     //则说明该Event记录的是一个commit tso
-                                    if (tsoSize == 54 || content.startsWith(MarkType.CTS.name())) {
-                                        lastTso = StringUtils.substringAfter(content, "::");
+                                    if (tsoSize == 54) {
+                                        lastTso = content;
+                                        seekPosition = nextEventAbsolutePos;
+                                    } else if (content.startsWith(MarkType.CTS.name())) {
+                                        MarkInfo markInfo = new MarkInfo(content);
+                                        lastTso = markInfo.getTso();
                                         seekPosition = nextEventAbsolutePos;
                                     }
                                 }
@@ -486,15 +491,5 @@ public class BinlogFile {
         public void setLastEventTimestamp(Long lastEventTimestamp) {
             this.lastEventTimestamp = lastEventTimestamp;
         }
-    }
-
-    public static void main(String args[]) {
-        long thisPosition = 4294965536L;
-        ByteArray ba = new ByteArray(new byte[10]);
-        ba.writeLong(thisPosition, 4);
-        ba.reset();
-        thisPosition = ba.readLong(4);
-
-        System.out.println(thisPosition);
     }
 }

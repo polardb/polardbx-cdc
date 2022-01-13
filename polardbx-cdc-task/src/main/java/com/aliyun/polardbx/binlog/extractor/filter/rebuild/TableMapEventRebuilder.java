@@ -24,13 +24,14 @@ import com.aliyun.polardbx.binlog.format.utils.BitMap;
 
 public class TableMapEventRebuilder {
 
-    public static TableMapEventBuilder convert(TableMapLogEvent event, int serverId) {
+    public static TableMapEventBuilder convert(TableMapLogEvent event, long serverId, String charSet) {
         LogHeader lg = event.getHeader();
         TableMapEventBuilder tableMapEventBuilder = new TableMapEventBuilder((int) event.getWhen(),
             serverId,
             event.getTableId(),
             event.getDbName(),
-            event.getTableName());
+            event.getTableName(),
+            charSet);
         tableMapEventBuilder.setFlags((short) lg.getFlags());
         tableMapEventBuilder.set_flags(event.getFlags());
 

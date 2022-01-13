@@ -17,18 +17,16 @@
 
 package com.aliyun.polardbx.binlog.daemon.rest;
 
-import com.alibaba.fastjson.support.jaxrs.FastJsonProvider;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
-import com.aliyun.polardbx.binlog.daemon.rest.errors.RestExceptionMapper;
-import com.aliyun.polardbx.binlog.daemon.rest.resources.EventsResource;
-import com.aliyun.polardbx.binlog.daemon.rest.resources.MetricsResource;
-import com.aliyun.polardbx.binlog.daemon.rest.resources.RootResource;
-import com.aliyun.polardbx.binlog.daemon.rest.resources.SystemControlResource;
+import com.aliyun.polardbx.binlog.daemon.rest.filter.ACLFilter;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.sun.jersey.spi.container.servlet.ServletContainer;
+import org.eclipse.jetty.server.ConnectionFactory;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.Slf4jRequestLog;
@@ -40,8 +38,6 @@ import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.servlets.CrossOriginFilter;
-import org.glassfish.jersey.server.ResourceConfig;
-import org.glassfish.jersey.servlet.ServletContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,36 +74,48 @@ public class RestServer {
         }
     }
 
+    public static void main(String[] args) {
+        // spring context
+        final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
+        appContextBootStrap.boot();
+
+        //rest server
+        RestServer restServer = new RestServer();
+        restServer.start();
+    }
+
     public void start() {
         log.info("Starting REST server");
 
-        ResourceConfig resourceConfig = new ResourceConfig();
-        resourceConfig.packages("com.aliyun.polardbx.binlog.daemon.rest.resources");
-        resourceConfig.register(new FastJsonProvider());
-        resourceConfig.register(RootResource.class);
-        resourceConfig.register(RestExceptionMapper.class);
-        resourceConfig.register(SystemControlResource.class);
-        resourceConfig.register(MetricsResource.class);
-        resourceConfig.register(EventsResource.class);
-
-        ServletContainer servletContainer = new ServletContainer(resourceConfig);
-        ServletHolder servletHolder = new ServletHolder(servletContainer);
+        ServletHolder servletHolder = new ServletHolder(ServletContainer.class);
+        // 设置初始化参数
+        servletHolder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass",
+            "com.sun.jersey.api.core.PackagesResourceConfig");
+        servletHolder.setInitParameter("com.sun.jersey.config.property.packages",
+            "com.aliyun.polardbx.binlog.daemon.rest.resources");
+        servletHolder.setInitParameter("com.sun.jersey.api.json.POJOMappingFeature", "true");
+        servletHolder.setInitParameter("com.sun.jersey.config.feature.DisableWADL", "true");
+        servletHolder.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
 
         ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
         context.setContextPath("/");
         context.addServlet(servletHolder, "/*");
+        context.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
 
-        String allowedOrigins = "";
+        String allowedOrigins = "";//TODO，暂时先不进行控制
         if (allowedOrigins != null && !allowedOrigins.trim().isEmpty()) {
             FilterHolder filterHolder = new FilterHolder(new CrossOriginFilter());
             filterHolder.setName("cross-origin");
             filterHolder.setInitParameter(CrossOriginFilter.ALLOWED_ORIGINS_PARAM, allowedOrigins);
-            String allowedMethods = "";
+            String allowedMethods = "";//TODO,暂时先不进行控制
             if (allowedMethods != null && !allowedOrigins.trim().isEmpty()) {
                 filterHolder.setInitParameter(CrossOriginFilter.ALLOWED_METHODS_PARAM, allowedMethods);
             }
             context.addFilter(filterHolder, "/*", EnumSet.of(DispatcherType.REQUEST));
         }
+
+        context.addFilter(new FilterHolder(new ACLFilter("com.aliyun.polardbx.binlog.daemon.rest.resources")), "/*",
+            EnumSet.of(DispatcherType.REQUEST));
 
         RequestLogHandler requestLogHandler = new RequestLogHandler();
         Slf4jRequestLog requestLog = new Slf4jRequestLog();
@@ -122,9 +130,17 @@ public class RestServer {
         StatisticsHandler statsHandler = new StatisticsHandler();
         statsHandler.setHandler(handlers);
         jettyServer.setHandler(statsHandler);
+
+        for (Connector y : jettyServer.getConnectors()) {
+            for (ConnectionFactory x : y.getConnectionFactories()) {
+                if (x instanceof HttpConnectionFactory) {
+                    ((HttpConnectionFactory) x).getHttpConfiguration().setSendServerVersion(false);
+                }
+            }
+        }
+
         jettyServer.setStopTimeout(GRACEFUL_SHUTDOWN_TIMEOUT_MS);
         jettyServer.setStopAtShutdown(true);
-
         try {
             jettyServer.start();
         } catch (Exception e) {
@@ -171,15 +187,5 @@ public class RestServer {
         public T body() {
             return body;
         }
-    }
-
-    public static void main(String[] args) {
-        // spring context
-        final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
-        //rest server
-        RestServer restServer = new RestServer();
-        restServer.start();
     }
 }

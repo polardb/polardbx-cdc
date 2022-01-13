@@ -51,8 +51,8 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
     private final NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
     private ICursorProvider cursorProvider;
 
-    public TaskHeartbeat(String cluster, String name, int interval, BinlogTaskConfig config) {
-        super(cluster, name, interval);
+    public TaskHeartbeat(String clusterId, String clusterType, String name, int interval, BinlogTaskConfig config) {
+        super(clusterId, clusterType, name, interval);
         this.config = config;
         this.version = config.getVersion();
     }
@@ -81,7 +81,7 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
                     .equalTo(new Date())
                     .set(DumperInfoDynamicSqlSupport.role)
                     .equalTo(dumperLeader ? DumperType.MASTER.getName() : DumperType.SLAVE.getName())
-                    .where(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(cluster))
+                    .where(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                     .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name))
             );
 
@@ -107,7 +107,7 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
                     u -> u
                         .set(NodeInfoDynamicSqlSupport.latestCursor)
                         .equalTo(JSONObject.toJSONString(cursor))
-                        .where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(cluster))
+                        .where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                         .and(NodeInfoDynamicSqlSupport.containerId,
                             SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.INST_ID)))
                 );
@@ -117,7 +117,7 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
             int result = taskInfoMapper.update(
                 u -> u
                     .set(RelayFinalTaskInfoDynamicSqlSupport.gmtHeartbeat).equalTo(new Date())
-                    .where(RelayFinalTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(cluster))
+                    .where(RelayFinalTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                     .and(RelayFinalTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name))
             );
 

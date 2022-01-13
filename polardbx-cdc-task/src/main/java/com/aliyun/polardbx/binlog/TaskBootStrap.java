@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
+import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TYPE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTERVAL;
 
@@ -76,7 +77,8 @@ public class TaskBootStrap {
             controller.start();
 
             final TaskHeartbeat taskHeartbeat =
-                new TaskHeartbeat(DynamicApplicationConfig.getString(CLUSTER_ID), taskName,
+                new TaskHeartbeat(DynamicApplicationConfig.getString(CLUSTER_ID),
+                    DynamicApplicationConfig.getString(CLUSTER_TYPE), taskName,
                     DynamicApplicationConfig.getInt(TOPOLOGY_TASK_HEARTBEAT_INTERVAL),
                     taskInfoProvider.get().getBinlogTaskConfig());
             taskHeartbeat.start();

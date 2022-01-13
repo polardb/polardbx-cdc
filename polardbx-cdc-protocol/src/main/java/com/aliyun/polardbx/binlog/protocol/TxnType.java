@@ -79,6 +79,15 @@ public enum TxnType
      * <code>META_HEARTBEAT = 5;</code>
      */
     META_HEARTBEAT(5),
+    /**
+     * <pre>
+     * *
+     * 元信息：config配置变更
+     * </pre>
+     *
+     * <code>META_CONFIG_ENV_CHANGE = 6;</code>
+     */
+    META_CONFIG_ENV_CHANGE(6),
     UNRECOGNIZED(-1),
     ;
 
@@ -136,6 +145,15 @@ public enum TxnType
      * <code>META_HEARTBEAT = 5;</code>
      */
     public static final int META_HEARTBEAT_VALUE = 5;
+    /**
+     * <pre>
+     * *
+     * 元信息：config配置变更
+     * </pre>
+     *
+     * <code>META_CONFIG_ENV_CHANGE = 6;</code>
+     */
+    public static final int META_CONFIG_ENV_CHANGE_VALUE = 6;
 
     public final int getNumber() {
         if (this == UNRECOGNIZED) {
@@ -173,6 +191,8 @@ public enum TxnType
             return META_DDL_PRIVATE;
         case 5:
             return META_HEARTBEAT;
+        case 6:
+            return META_CONFIG_ENV_CHANGE;
         default:
             return null;
         }

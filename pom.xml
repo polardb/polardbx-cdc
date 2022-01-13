@@ -121,7 +121,6 @@
             <artifactId>druid</artifactId>
             <version>${druid.version}</version>
         </dependency>
-
         <dependency>
             <groupId>com.alibaba.polardbx</groupId>
             <artifactId>polardbx-parser</artifactId>
@@ -248,6 +247,12 @@
             <id>release</id>
             <properties>
                 <env>release</env>
+            </properties>
+        </profile>
+        <profile>
+            <id>test</id>
+            <properties>
+                <env>test</env>
             </properties>
         </profile>
     </profiles>

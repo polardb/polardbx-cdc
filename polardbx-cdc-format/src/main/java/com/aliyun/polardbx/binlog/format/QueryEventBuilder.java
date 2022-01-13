@@ -168,7 +168,7 @@ public class QueryEventBuilder extends BinlogBuilder {
     private int serverCharset;
 
     public QueryEventBuilder(String schema, String queryString, int clientCharset, int connectionCharset,
-                             int serverCharset, boolean isDDL, int createTime, int serverId) {
+                             int serverCharset, boolean isDDL, int createTime, long serverId) {
         super(createTime, BinlogEventType.QUERY_EVENT.getType(), serverId);
         this.schema = schema;
         this.queryString = queryString;

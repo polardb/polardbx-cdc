@@ -111,7 +111,7 @@ public class FormatDescriptionEvent extends BinlogBuilder {
      * X.Y.Zabc (X,Y,Z numbers, a not a digit) -> {X,Y,Z}
      * X.Yabc -> {X,Y,0}
      */
-    public FormatDescriptionEvent(short binlogVersion, String mysqlServerVersion, int serverId) {
+    public FormatDescriptionEvent(short binlogVersion, String mysqlServerVersion, long serverId) {
         this.binlogVersion = binlogVersion;
         this.serverId = serverId;
         this.mysqlServerVersion = mysqlServerVersion;

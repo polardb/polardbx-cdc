@@ -313,7 +313,9 @@ public abstract class AbstractEventParser implements BinlogEventParser {
         eventHandler = null;
         parseThread.interrupt(); // 尝试中断
         try {
+            logger.info("prepare to join parseThread");
             parseThread.join();// 等待其结束
+            logger.info("join parseThread finished.");
         } catch (InterruptedException e) {
             // ignore
         }
@@ -345,7 +347,6 @@ public abstract class AbstractEventParser implements BinlogEventParser {
     public void start(final AuthenticationInfo master, final BinlogPosition position, final BinlogEventSink eventSink) {
         return;
     }
-
 
     protected TimerTask buildHeartBeatTimeTask(ErosaConnection connection) {
         return null;

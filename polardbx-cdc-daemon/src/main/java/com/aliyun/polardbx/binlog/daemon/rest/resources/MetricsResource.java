@@ -17,25 +17,24 @@
 
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
-import java.io.IOException;
-import java.io.StringWriter;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
+import com.aliyun.polardbx.binlog.CommonMetrics;
+import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.sun.jersey.spi.resource.Singleton;
+import io.prometheus.client.CollectorRegistry;
+import io.prometheus.client.Gauge;
+import io.prometheus.client.exporter.common.TextFormat;
 
-import javax.inject.Singleton;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
-
-import com.aliyun.polardbx.binlog.CommonMetrics;
-import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
-import io.prometheus.client.CollectorRegistry;
-import io.prometheus.client.Gauge;
-import io.prometheus.client.exporter.common.TextFormat;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Path("/cdc")
 @Singleton

@@ -147,6 +147,13 @@ public class BinlogGenerator extends LogBuffer {
         return new RowsQueryLogEvent(rebuild(builder), this, fde);
     }
 
+    public RowsQueryLogEvent generateRowQueryLogEvent(String trace) throws Exception {
+        RowsQueryEventBuilder builder = new RowsQueryEventBuilder((int) (System.currentTimeMillis() / 1000),
+            1,
+            trace);
+        return new RowsQueryLogEvent(rebuild(builder), this, fde);
+    }
+
     public FormatDescriptionLogEvent generateFDE() throws Exception {
         FormatDescriptionEvent _fde = new FormatDescriptionEvent((short) 4, "5.7.3", 1);
         fde = new FormatDescriptionLogEvent(rebuild(_fde), this, fde);
@@ -212,7 +219,8 @@ public class BinlogGenerator extends LogBuffer {
             1,
             1,
             db,
-            tb);
+            tb,
+            "utf8");
         List<TableMeta.FieldMeta> fieldMetaList = tableMeta.getFields();
         List<Field> fieldList = new ArrayList<>();
         for (int i = 0; i < fieldMetaList.size(); i++) {
@@ -221,7 +229,7 @@ public class BinlogGenerator extends LogBuffer {
             fieldList.add(f);
         }
         builder.setFieldList(fieldList);
-        lastTableMap = new TableMapLogEvent(rebuild(builder), this, fde);
+        lastTableMap = new TableMapLogEvent(rebuild(builder), this, fde, "utf8");
         return lastTableMap;
     }
 

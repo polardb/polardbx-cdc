@@ -30,6 +30,7 @@ public class TaskInfo {
     private TaskType type;
     private Integer serverPort;
     private String startTSO;
+    private boolean forceCompleteHbWindow;
     private List<MergeSourceInfo> mergeSourceInfos;
     private BinlogTaskConfig binlogTaskConfig;
 
@@ -71,6 +72,14 @@ public class TaskInfo {
 
     public void setStartTSO(String startTSO) {
         this.startTSO = startTSO;
+    }
+
+    public boolean isForceCompleteHbWindow() {
+        return forceCompleteHbWindow;
+    }
+
+    public void setForceCompleteHbWindow(boolean forceCompleteHbWindow) {
+        this.forceCompleteHbWindow = forceCompleteHbWindow;
     }
 
     public List<MergeSourceInfo> getMergeSourceInfos() {

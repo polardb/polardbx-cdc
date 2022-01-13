@@ -17,7 +17,7 @@ CREATE PROCEDURE add_column_binlog_dumper_info_v7()
 BEGIN
     IF NOT EXISTS(SELECT * FROM information_schema.columns WHERE table_schema=(select database()) AND table_name='binlog_dumper_info' AND column_name='container_id')
 	THEN
-	    Alter table `binlog_dumper_info` add column `container_id` varchar(128)  not null default '';
+	    Alter table `binlog_dumper_info` add column `container_id` varchar(50)  not null default '';
 	END IF;
 	IF NOT EXISTS(SELECT * FROM information_schema.columns WHERE table_schema=(select database()) AND table_name='binlog_dumper_info' AND column_name='version')
 	THEN
@@ -38,7 +38,7 @@ CREATE PROCEDURE add_column_binlog_task_info_v7()
 BEGIN
     IF NOT EXISTS(SELECT * FROM information_schema.columns WHERE table_schema=(select database()) AND table_name='binlog_task_info' AND column_name='container_id')
 	THEN
-	    Alter table `binlog_task_info` add column `container_id` varchar(128) not null default '';
+	    Alter table `binlog_task_info` add column `container_id` varchar(50) not null default '';
 	END IF;
 	IF NOT EXISTS(SELECT * FROM information_schema.columns WHERE table_schema=(select database()) AND table_name='binlog_task_info' AND column_name='version')
 	THEN

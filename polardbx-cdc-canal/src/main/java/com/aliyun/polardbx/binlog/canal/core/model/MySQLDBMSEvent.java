@@ -32,7 +32,7 @@ public class MySQLDBMSEvent {
     private BinlogPosition position;
     private DBMSXATransaction xaTransaction;
 
-    public MySQLDBMSEvent(DBMSEvent dbMessage, BinlogPosition position){
+    public MySQLDBMSEvent(DBMSEvent dbMessage, BinlogPosition position) {
         this.dbMessage = dbMessage;
         this.position = position;
     }

@@ -50,12 +50,4 @@ public class ServerConfigUtil {
         return Long.valueOf(CACHE.getUnchecked(var));
     }
 
-    public static void main(String[] args) throws InterruptedException {
-        final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-        System.out.println(getGlobalVar("SERVER_ID"));
-        TimeUnit.SECONDS.sleep(70);
-        System.out.println(getGlobalNumberVar("SERVER_ID"));
-    }
-
 }
