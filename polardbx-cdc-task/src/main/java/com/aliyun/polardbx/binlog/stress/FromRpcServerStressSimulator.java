@@ -178,7 +178,7 @@ public class FromRpcServerStressSimulator {
 
     private static TxnMergedToken buildToken() {
         return TxnMergedToken.newBuilder()
-            .setBeginSchema("test")
+            .setSchema("test")
             .setTso(generateTso())
             .setType(TxnType.DML)
             .build();

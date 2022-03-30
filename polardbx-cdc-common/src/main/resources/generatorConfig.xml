@@ -54,5 +54,24 @@
         <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_storage_history" domainObjectName="StorageHistoryInfo"/>-->
         <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_system_config" domainObjectName="SystemConfigInfo"/>-->
         <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_schedule_history" domainObjectName="BinlogScheduleHistory"/>-->
+        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_service" domainObjectName="RplService">-->
+        <!--                <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--                </table>-->
+        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_task" domainObjectName="RplTask">-->
+        <!--                    <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--                </table>-->
+        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_state_machine" domainObjectName="RplStateMachine">-->
+        <!--                <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--                </table>-->
+        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_ddl" domainObjectName="RplDdl">-->
+        <!--                <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--                </table>-->
+        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_table_position" domainObjectName="RplTablePosition">-->
+        <!--                    <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--                </table>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="node_info" domainObjectName="PolarxCNodeInfo"/>-->
+
+        <table schema="polardbx_meta_db_polardbx" tableName="binlog_logic_meta_history"
+               domainObjectName="BinlogLogicMetaHistory"/>
     </context>
 </generatorConfiguration>

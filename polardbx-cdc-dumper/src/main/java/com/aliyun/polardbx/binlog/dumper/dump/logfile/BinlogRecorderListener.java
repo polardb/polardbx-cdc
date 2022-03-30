@@ -221,7 +221,7 @@ public class BinlogRecorderListener implements LogFileListener, Runnable {
                 if (recordOptional.isPresent()) {
                     BinlogOssRecord record = recordOptional.get();
                     BinlogOssRecord newRecord = new BinlogOssRecord();
-                    newRecord.setLogSize(file.getTotalSpace());
+                    newRecord.setLogSize(file.length());
                     newRecord.setLogBegin(new Date(binlogFile.getLogBegin()));
                     newRecord.setLogEnd(new Date(binlogFile.getLogEnd()));
                     newRecord.setGmtModified(new Date());
@@ -243,7 +243,7 @@ public class BinlogRecorderListener implements LogFileListener, Runnable {
                     record.setPurgeStatus(BinlogPurgeStatusEnum.UN_COMPLETE.getValue());
                     record.setLogBegin(new Date(binlogFile.getLogBegin()));
                     record.setLogEnd(new Date(binlogFile.getLogEnd()));
-                    record.setLogSize(file.getTotalSpace());
+                    record.setLogSize(file.length());
                     recordMapper.insert(record);
                 }
             } finally {

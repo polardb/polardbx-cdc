@@ -301,6 +301,7 @@ public final class RowsLogBuffer {
                     case LogEvent.MYSQL_TYPE_SET:
                     case LogEvent.MYSQL_TYPE_ENUM:
                     case LogEvent.MYSQL_TYPE_STRING:
+                    case LogEvent.MYSQL_TYPE_VAR_STRING:
                         type = byte0;
                         len = byte1;
                         break;
@@ -435,7 +436,7 @@ public final class RowsLogBuffer {
             // value = bit;
             // }
             javaType = Types.BIT;
-            length = nbits;
+            length = len;
             break;
         }
         case LogEvent.MYSQL_TYPE_TIMESTAMP: {
@@ -964,8 +965,7 @@ public final class RowsLogBuffer {
             }
             break;
         }
-        case LogEvent.MYSQL_TYPE_VARCHAR:
-        case LogEvent.MYSQL_TYPE_VAR_STRING: {
+        case LogEvent.MYSQL_TYPE_VARCHAR: {
             /*
              * Except for the data length calculation, MYSQL_TYPE_VARCHAR, MYSQL_TYPE_VAR_STRING and
              * MYSQL_TYPE_STRING are handled the same way.
@@ -993,7 +993,8 @@ public final class RowsLogBuffer {
             length = len;
             break;
         }
-        case LogEvent.MYSQL_TYPE_STRING: {
+        case LogEvent.MYSQL_TYPE_STRING:
+        case LogEvent.MYSQL_TYPE_VAR_STRING: {
             if (len < 256) {
                 len = buffer.getUint8();
             } else {

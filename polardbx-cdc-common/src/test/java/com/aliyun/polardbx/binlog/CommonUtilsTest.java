@@ -46,7 +46,7 @@ public class CommonUtilsTest {
 
     @Test
     public void testGetTsoDatetime() {
-        long seconds = CommonUtils.getTsoPhysicalTime("681932084883116608013503860643882680350000000000754228",
+        long seconds = CommonUtils.getTsoPhysicalTime("690693687595761670414380020914056724480000000000000000",
             TimeUnit.SECONDS);
         System.out.println("seconds is :" + DateFormatUtils.format(seconds * 1000, "yyyy-MM-dd HH:mm:ss"));
     }

@@ -21,6 +21,8 @@ import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.daemon.cluster.ClusterBootstrapService;
+import com.aliyun.polardbx.binlog.daemon.schedule.RplLeaderJob;
+import com.aliyun.polardbx.binlog.daemon.schedule.RplWorkerJob;
 import com.aliyun.polardbx.binlog.daemon.schedule.TaskAliveWatcher;
 import com.aliyun.polardbx.binlog.daemon.schedule.TopologyWatcher;
 import com.aliyun.polardbx.binlog.heartbeat.TsoHeartbeat;
@@ -59,5 +61,12 @@ public class BinlogBootstrapService implements ClusterBootstrapService {
         TaskAliveWatcher taskAliveWatcher = new TaskAliveWatcher(cluster, clusterType, "TaskKeepAlive",
             DynamicApplicationConfig.getInt(DAEMON_TASK_WATCH_INTERVAL_MS));
         taskAliveWatcher.start();
+
+        // 运行replica task
+        // 定期抢 Leader，如抢到 Leader，则负责：调度所有 Rpl 状态机，分发任务到各个 worker
+        new RplLeaderJob(cluster, clusterType, "RplLeaderJob", 1 * 5 * 1000).start();
+        // 定期检测本地需要启动哪些 Rpl 任务，停止哪些 Rpl 任务
+        new RplWorkerJob(cluster, clusterType, "RplWorkerJob", 1 * 5 * 1000).start();
+
     }
 }

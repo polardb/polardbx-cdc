@@ -17,7 +17,7 @@
 
 package com.aliyun.polardbx.binlog.canal.binlog;
 
-import com.aliyun.polardbx.binlog.canal.LogEventUtil;
+import com.aliyun.polardbx.binlog.canal.IBinlogFileSizeFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.event.AppendBlockLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.BeginLoadQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.CreateFileLogEvent;
@@ -57,6 +57,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidListLogEve
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.StartEncryptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,6 +91,8 @@ public final class LogDecoder {
 
     protected final BitSet handleSet = new BitSet(LogEvent.ENUM_END_EVENT);
 
+    protected IBinlogFileSizeFetcher binlogFileSizeFetcher;
+
     public LogDecoder() {
     }
 
@@ -102,7 +105,7 @@ public final class LogDecoder {
      *
      * @return <code>UknownLogEvent</code> if event type is unknown or skipped.
      */
-    public static LogEvent decode(LogBuffer buffer, LogHeader header, LogContext context) throws IOException {
+    public LogEvent decode(LogBuffer buffer, LogHeader header, LogContext context) throws IOException {
         FormatDescriptionLogEvent descriptionEvent = context.getFormatDescription();
         LogPosition logPosition = context.getLogPosition();
 
@@ -156,9 +159,6 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
-            if (context.getServerId() != 0L) {
-                event.setServerId(context.getServerId());
-            }
             return event;
         }
         case LogEvent.UPDATE_ROWS_EVENT_V1: {
@@ -166,9 +166,6 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
-            if (context.getServerId() != 0L) {
-                event.setServerId(context.getServerId());
-            }
             return event;
         }
         case LogEvent.DELETE_ROWS_EVENT_V1: {
@@ -176,13 +173,11 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
-            if (context.getServerId() != 0L) {
-                event.setServerId(context.getServerId());
-            }
             return event;
         }
         case LogEvent.ROTATE_EVENT: {
             RotateLogEvent event = new RotateLogEvent(header, buffer, descriptionEvent);
+            event = tryFixRotateEvent(event, logPosition);
             /* updating position in context */
             logPosition = new LogPosition(event.getFilename(), event.getPosition());
             context.setLogPosition(logPosition);
@@ -323,7 +318,6 @@ public final class LogDecoder {
             RowsQueryLogEvent event = new RowsQueryLogEvent(header, buffer, descriptionEvent);
             /* updating position in context */
             logPosition.position = header.getLogPos();
-            context.setServerId(LogEventUtil.getServerIdFromRowQuery(event));
             return event;
         }
         case LogEvent.WRITE_ROWS_EVENT: {
@@ -331,9 +325,6 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
-            if (context.getServerId() != 0L) {
-                event.setServerId(context.getServerId());
-            }
             return event;
         }
         case LogEvent.UPDATE_ROWS_EVENT: {
@@ -341,9 +332,6 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
-            if (context.getServerId() != 0L) {
-                event.setServerId(context.getServerId());
-            }
             return event;
         }
         case LogEvent.DELETE_ROWS_EVENT: {
@@ -351,9 +339,6 @@ public final class LogDecoder {
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
-            if (context.getServerId() != 0L) {
-                event.setServerId(context.getServerId());
-            }
             return event;
         }
         case LogEvent.GTID_LOG_EVENT:
@@ -501,4 +486,32 @@ public final class LogDecoder {
         return null;
     }
 
+    private RotateLogEvent tryFixRotateEvent(RotateLogEvent event, LogPosition logPosition) throws IOException {
+        if (binlogFileSizeFetcher != null && logPosition != null && StringUtils.isNotBlank(logPosition.getFileName())
+            && !StringUtils.equals(logPosition.getFileName(), event.getFilename())) {
+             /*
+             xdb存在bug，可能会在binlog文件中的某个位置记录RotateEvent，这里做一下兼容性处理，判断rotate event是否出现在文件中
+             当收到rotate event时，判断logPosition是否已经到达文件的末尾，如果logPosition.getPosition() + length(rotateEvent)之和
+             小于binlog文件的size，则说明rotate event是出现在binlog文件中。但有一个例外情况，logPosition中的position字段虽然是long型，
+             但在binlog文件中LogHeader实际能记录的最大值是uint32(最大值对应4G)，即logPosition的position字段的值的最大上限是uint32，
+             当出现超大事务时(如20G的大事务)，logPosition.getPosition() + length(rotateEvent)之和肯定是小于binlog文件的size的，所以，
+             此中情况下，就不简单的判定rotate event是出现在binlog文件中间位置了。xdb中，可以对max_binlog_size参数设置的最大值为1073741824(1G)，
+             只有出现大事务的情况下，才会导致binlog文件的大小超过max_binlog_size，所以rotate event出现在binlog文件的中间位置只会发生在小于
+             max_binlog_size的位置，因此可以得出结论，当logPosition的position字段的值触达uint32阈值后，出现的rotate event一定是正常的rotate event
+              */
+            long fileSize = binlogFileSizeFetcher.fetch(logPosition.getFileName());
+            long length = logPosition.getPosition() + event.getEventLen();
+            if (length < fileSize && length < Integer.MAX_VALUE) {
+                RotateLogEvent newEvent = new RotateLogEvent(event.getHeader(), logPosition.getFileName(), length);
+                logger.warn("receive a invalid rotate event, will fix it, the event info before fix is :" + event.info()
+                    + " ,the event info after fix is :" + newEvent.info());
+                return newEvent;
+            }
+        }
+        return event;
+    }
+
+    public void setBinlogFileSizeFetcher(IBinlogFileSizeFetcher binlogFileSizeFetcher) {
+        this.binlogFileSizeFetcher = binlogFileSizeFetcher;
+    }
 }

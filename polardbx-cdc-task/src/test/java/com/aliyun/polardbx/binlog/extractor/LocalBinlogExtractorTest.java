@@ -33,7 +33,7 @@ import com.aliyun.polardbx.binlog.storage.Repository;
 public class LocalBinlogExtractorTest {
 
     public static void main(String args[]) {
-        LocalBinlogParser localBinlogParser = new LocalBinlogParser("/Users/yanfenglin/Downloads/mysql-bin.000004");
+        LocalBinlogParser localBinlogParser = new LocalBinlogParser("/Users/yanfenglin/Downloads/mysql-bin.000001");
         EventAcceptFilter acceptFilter = new EventAcceptFilter("", true);
         acceptFilter.addAcceptEvent(LogEvent.FORMAT_DESCRIPTION_EVENT);
         // accept dml

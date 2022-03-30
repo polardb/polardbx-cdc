@@ -17,6 +17,7 @@
 
 package com.aliyun.polardbx.binlog.storage;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import org.apache.commons.lang3.StringUtils;
@@ -32,12 +33,15 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRACEID_DISORDER_IGNORE;
+
 /**
  * Created by ziyang.lb
  **/
 public class TxnBuffer {
 
     private static final Logger logger = LoggerFactory.getLogger(TxnBuffer.class);
+    private static final Logger traceIdLogger = LoggerFactory.getLogger("traceIdDisorderLogger");
     private static final AtomicLong sequenceGenerator = new AtomicLong(0L);
 
     private final TxnKey txnKey;
@@ -135,11 +139,17 @@ public class TxnBuffer {
             throw new PolardbxException("can't push item to completed txn buffer.");
         }
 
-        if (StringUtils.isNotBlank(lastTraceId) && txnKey.isCheckTraceId()) {
-            //traceId是允许重复的，但不能回跳，所以此处只对乱序的情况进行校验
-            if (txnItem.getTraceId().compareTo(lastTraceId) < 0) {
+        //traceId是允许重复的，但不能回跳，所以此处只对乱序的情况进行校验
+        if (StringUtils.isNotBlank(lastTraceId) && txnItem.getTraceId().compareTo(lastTraceId) < 0) {
+            boolean ignoreDisorderedTraceId = DynamicApplicationConfig.getBoolean(TASK_TRACEID_DISORDER_IGNORE);
+            if (!ignoreDisorderedTraceId) {
                 throw new PolardbxException("detected disorderly traceId，current traceId is " + txnItem.getTraceId()
                     + ",last traceId is " + lastTraceId);
+            } else {
+                traceIdLogger.warn("detected disorderly traceId，current traceId is " + txnItem.getTraceId()
+                    + " , last traceId is " + lastTraceId + " , origin traceId is " + txnItem.getOriginTraceId()
+                    + " , binlog file name is " + txnItem.getBinlogFile() + " , binlog position is " + txnItem
+                    .getBinlogPosition());
             }
         }
 
@@ -148,9 +158,9 @@ public class TxnBuffer {
 
     private void doAdd(TxnBufferItem txnItem) {
         //add to list && try persist
-        TxnItemRef ref = new TxnItemRef(this,
-            txnItem.getTraceId(), txnItem.getEventType(),
-            txnItem.getPayload(), txnItem.getByteStringPayload(), repository);
+        TxnItemRef ref = new TxnItemRef(this, txnItem.getTraceId(), txnItem.getRowsQuery(),
+            txnItem.getEventType(), txnItem.getPayload(), txnItem.getByteStringPayload(), txnItem.getSchema(),
+            txnItem.getTable(), repository);
 
         refList.add(ref);
         memSize += txnItem.size();
@@ -230,14 +240,25 @@ public class TxnBuffer {
     private List<TxnItemRef> mergeTwoSortList(List<TxnItemRef> aList, List<TxnItemRef> bList) {
         int aLength = aList.size(), bLength = bList.size();
         List<TxnItemRef> mergeList = new ArrayList<>();
+        String lastTraceId = "";
         int i = 0, j = 0;
         while (aLength > i && bLength > j) {
             if (aList.get(i).getEventType() == LogEvent.TABLE_MAP_EVENT
                 && bList.get(j).getEventType() == LogEvent.TABLE_MAP_EVENT) {
                 if (aList.get(i).compareTo(bList.get(j)) > 0) {
+                    if (bList.get(j).getTraceId().equals(lastTraceId)) {
+                        bList.get(j).setRowsQuery("");
+                    } else {
+                        lastTraceId = bList.get(j).getTraceId();
+                    }
                     mergeList.add(i + j, bList.get(j));
                     j++;
                 } else {
+                    if (aList.get(i).getTraceId().equals(lastTraceId)) {
+                        aList.get(i).setRowsQuery("");
+                    } else {
+                        lastTraceId = aList.get(i).getTraceId();
+                    }
                     mergeList.add(i + j, aList.get(i));
                     i++;
                 }

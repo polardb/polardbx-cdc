@@ -33,31 +33,31 @@ public interface TableMetaTSDB {
     /**
      * 初始化
      */
-    public boolean init(String destination);
+    boolean init(String destination);
 
     /**
      * 销毁资源
      */
-    public void destory();
+    void destory();
 
     /**
      * 获取当前的表结构
      */
-    public TableMeta find(String schema, String table);
+    TableMeta find(String schema, String table);
 
     /**
      * 添加ddl到时间序列库中
      */
-    public boolean apply(BinlogPosition position, String schema, String ddl, String extra);
+    boolean apply(BinlogPosition position, String schema, String ddl, String extra);
 
     /**
      * 回滚到指定位点的表结构
      */
-    public boolean rollback(BinlogPosition position);
+    boolean rollback(BinlogPosition position);
 
     /**
      * 生成快照内容
      */
-    public Map<String/* schema */, String> snapshot();
+    Map<String/* schema */, String> snapshot();
 
 }

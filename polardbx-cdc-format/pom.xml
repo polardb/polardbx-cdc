@@ -5,7 +5,7 @@
     <parent>
         <artifactId>polardbx-cdc</artifactId>
         <groupId>com.aliyun.polardbx</groupId>
-        <version>5.4.12-SNAPSHOT</version>
+        <version>5.4.13-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -22,7 +22,7 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-canal</artifactId>
-            <version>5.4.12-SNAPSHOT</version>
+            <version>5.4.13-SNAPSHOT</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

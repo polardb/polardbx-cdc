@@ -17,6 +17,7 @@
 
 package com.aliyun.polardbx.binlog.extractor;
 
+import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.extractor.binlog.BinlogGenerator;
 import org.junit.Test;
@@ -29,6 +30,18 @@ public class TraceExtractTest {
             "test_tb",
             "create table tt(id bigint(20) default 1)");
         System.out.println(LogEventUtil.buildTrace(generator.generateRowQueryLogEvent()));
+    }
+
+    @Test
+    public void testTrace() throws Exception {
+        BinlogGenerator generator = new BinlogGenerator("test_db",
+            "test_tb",
+            "create table tt(id bigint(20) default 1)");
+        System.out.println(JSON.toJSONString(LogEventUtil.buildTrace(
+            generator.generateRowQueryLogEvent("/*DRDS /11.196.59.141/1322a3c35bc01000/0/1390188355/ */"))));
+
+        System.out.println(JSON.toJSONString(LogEventUtil.buildTrace(
+            generator.generateRowQueryLogEvent("/*DRDS /11.196.49.49/1322a3c37f401001-3/1// */"))));
     }
 
     @Test

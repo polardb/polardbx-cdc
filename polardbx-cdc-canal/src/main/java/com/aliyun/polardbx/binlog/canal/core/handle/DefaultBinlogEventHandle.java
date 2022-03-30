@@ -112,7 +112,13 @@ public class DefaultBinlogEventHandle implements EventHandle {
             head.setRuntimeContext(runtimeContext);
             head.doNext(event);
         } catch (Throwable e) {
-            throw new CanalParseException(e); // 继续抛出异常，让上层统一感知
+            if (logPosition != null) {
+                String message = String.format("meet fatal error when consume binlog at position %s:%s",
+                    logPosition.getFileName(), logPosition.getPosition());
+                throw new CanalParseException(message, e);
+            } else {
+                throw new CanalParseException(e);
+            }
         }
     }
 

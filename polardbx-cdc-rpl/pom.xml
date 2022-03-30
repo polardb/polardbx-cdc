@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.aliyun.polardbx</groupId>
+        <artifactId>polardbx-cdc</artifactId>
+        <version>5.4.13-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>polardbx-cdc-rpl</artifactId>
+    <dependencies>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-canal</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-task</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.12</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-api-mockito</artifactId>
+            <version>1.6.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-module-junit4</artifactId>
+            <version>1.6.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>commons-configuration</groupId>
+            <artifactId>commons-configuration</artifactId>
+            <version>1.8</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.ini4j</groupId>
+            <artifactId>ini4j</artifactId>
+            <version>0.5.4</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math</artifactId>
+            <version>2.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>4.2.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-transfer</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>commons-collections</groupId>
+            <artifactId>commons-collections</artifactId>
+            <version>3.2.2</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-canal</artifactId>
+            <version>5.4.13-SNAPSHOT</version>
+            <scope>compile</scope>
+        </dependency>
+    </dependencies>
+
+    <!--    <build>-->
+    <!--        <finalName>polardbx-rpl</finalName>-->
+    <!--        <plugins>-->
+    <!--            <plugin>-->
+    <!--                <artifactId>maven-jar-plugin</artifactId>-->
+    <!--                <configuration>-->
+    <!--                    <archive>-->
+    <!--                        <addMavenDescriptor>true</addMavenDescriptor>-->
+    <!--                    </archive>-->
+    <!--                    &lt;!&ndash;exclude all files in resources &ndash;&gt;-->
+    <!--                    <excludes>-->
+    <!--                        <exclude>/**/*.properties</exclude>-->
+    <!--                        <exclude>/**/*.xml</exclude>-->
+    <!--                        <exclude>/**/*.sh</exclude>-->
+    <!--                    </excludes>-->
+    <!--                </configuration>-->
+    <!--            </plugin>-->
+    <!--            <plugin>-->
+    <!--                <artifactId>maven-assembly-plugin</artifactId>-->
+    <!--                <executions>-->
+    <!--                    <execution>-->
+    <!--                        <phase>package</phase>-->
+    <!--                        <goals>-->
+    <!--                            <goal>single</goal>-->
+    <!--                        </goals>-->
+    <!--                        <configuration>-->
+    <!--                            <descriptors>-->
+    <!--                                <descriptor>assembly.xml</descriptor>-->
+    <!--                            </descriptors>-->
+    <!--                        </configuration>-->
+    <!--                    </execution>-->
+    <!--                </executions>-->
+    <!--            </plugin>-->
+    <!--        </plugins>-->
+    <!--    </build>-->
+</project>

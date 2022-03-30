@@ -17,6 +17,7 @@
 
 package com.aliyun.polardbx.binlog.canal.system;
 
+import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.BinlogParser;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.WriteRowsLogEvent;
@@ -30,6 +31,8 @@ import java.io.UnsupportedEncodingException;
 
 public class SystemDB {
 
+    public static final String DDL_RECORD_FIELD_DDL_ID = "ID";
+    public static final String DDL_RECORD_FIELD_JOB_ID = "JOB_ID";
     public static final String DDL_RECORD_FIELD_SQL_KIND = "SQL_KIND";
     public static final String DDL_RECORD_FIELD_DDL_SQL = "DDL_SQL";
     public static final String DDL_RECORD_FIELD_SCHEMA_NAME = "SCHEMA_NAME";
@@ -60,6 +63,7 @@ public class SystemDB {
      * DRDS隐藏主键
      */
     public static final String DRDS_IMPLICIT_ID = "_drds_implicit_id_";
+    public static final String AUTO_LOCAL_INDEX_PREFIX = "_local_";
 
     private static final SystemDB instance = new SystemDB();
     private final TableMeta ddlTableMeta;
@@ -116,7 +120,7 @@ public class SystemDB {
     }
 
     public static boolean isDrdsImplicitId(String colName) {
-        return DRDS_IMPLICIT_ID.equalsIgnoreCase(colName);
+        return DRDS_IMPLICIT_ID.equalsIgnoreCase(SQLUtils.normalize(colName));
     }
 
     public static SystemDB getInstance() {

@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.12-SNAPSHOT</version>
+        <version>5.4.13-SNAPSHOT</version>
     </parent>
     <groupId>com.aliyun.polardbx</groupId>
     <artifactId>polardbx-cdc-daemon</artifactId>
@@ -20,7 +20,7 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-common</artifactId>
-            <version>5.4.12-SNAPSHOT</version>
+            <version>5.4.13-SNAPSHOT</version>
             <exclusions>
                 <exclusion>
                     <groupId>*</groupId>
@@ -31,7 +31,7 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-meta</artifactId>
-            <version>5.4.12-SNAPSHOT</version>
+            <version>5.4.13-SNAPSHOT</version>
         </dependency>
 
         <dependency>
@@ -117,6 +117,12 @@
             <artifactId>junit</artifactId>
             <version>4.12</version>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-rpl</artifactId>
+            <version>5.4.13-SNAPSHOT</version>
+            <scope>compile</scope>
         </dependency>
 
     </dependencies>

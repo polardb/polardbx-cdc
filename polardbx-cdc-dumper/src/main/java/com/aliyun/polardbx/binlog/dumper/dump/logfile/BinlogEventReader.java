@@ -240,6 +240,9 @@ public class BinlogEventReader {
         list.forEach(pair -> {
             String variableName = pair.getLeft();
             String charset = pair.getRight();
+            if (StringUtils.equals("utf8mb3", charset)) {
+                charset = "utf8";
+            }
             log.info(variableName + " : " + charset);
             if ("character_set_client".equalsIgnoreCase(variableName)) {
                 set.setCharacterSetClient(charset);

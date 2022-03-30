@@ -58,14 +58,27 @@ public class Main {
         }
 
         int accountCount = 100;
-        int initialAmount = 1000;
-        int poolAccount = getValue(paramHashMap, "threadNum", 1);
+        int initialAmount = 100000;
+        int poolAccount = getValue(paramHashMap, "threadNum", 10);
 
+        boolean drds = false;
+
+        if (drds) {
+            paramHashMap.put("ip", "127.0.0.1");
+            paramHashMap.put("db", "");
+            paramHashMap.put("user", "");
+            paramHashMap.put("pwd", "");
+        } else {
+            paramHashMap.put("ip", "127.0.0.1");
+            paramHashMap.put("db", "");
+            paramHashMap.put("user", "");
+            paramHashMap.put("pwd", "");
+        }
         String dbHost = getValue(paramHashMap, "ip", "127.0.0.1");
-        String dbName = getValue(paramHashMap, "db", "transfer_test");
-        String username = getValue(paramHashMap, "user", "polardbx_root");
-        String password = getValue(paramHashMap, "pwd", "123456");
-        int port = getValue(paramHashMap, "port", 8527);
+        String dbName = getValue(paramHashMap, "db", "");
+        String username = getValue(paramHashMap, "user", "");
+        String password = getValue(paramHashMap, "pwd", "");
+        int port = getValue(paramHashMap, "port", 3306);
 
         boolean usetso = Boolean.parseBoolean(getValue(paramHashMap, "useTSO", "true"));
 
@@ -102,10 +115,11 @@ public class Main {
                 logger.info("init connection " + i);
                 connectionList.add(connection);
             }
-            PrepareData.init(connectionList.get(0), accountCount, initialAmount);
+//            PrepareData.init(connectionList.get(0), accountCount, initialAmount);
             logger.info("data prepared success!");
             Bank bank = new Bank(accountCount, initialAmount, usetso);
             logger.info("start transfer!");
+            bank.setPolarx(!drds);
             bank.startWork(connectionList);
             LockSupport.park();
         } finally {

@@ -143,7 +143,7 @@ public class FromTransmitterStressSimulator extends BaseStressSimulator {
         String virtualTso = CommonUtils.generateTSO(localTso, String.valueOf(xid), "111111");
 
         return TxnToken.newBuilder()
-            .setBeginSchema("test")
+            .setSchema("test")
             .setTso(virtualTso)
             .setType(TxnType.DML)
             .addAllAllParties(ALL_PARTIES)

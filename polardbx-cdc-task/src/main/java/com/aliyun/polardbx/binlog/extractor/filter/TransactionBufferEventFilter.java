@@ -163,9 +163,14 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
                 }
                 lastGcn = -1L;
             }
+            if (tran.isIgnore()) {
+                return;
+            }
             transactionStorage.add(tran);
         } catch (Exception e) {
-            throw new CanalParseException(e);
+            throw new CanalParseException(
+                "new tran error binlogFile : " + context.getRuntimeContext().getBinlogFile() + " , logPos : " + context
+                    .getRuntimeContext().getLogPos(), e);
         }
     }
 

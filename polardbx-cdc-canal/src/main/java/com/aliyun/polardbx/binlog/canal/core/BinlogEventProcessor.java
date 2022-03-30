@@ -17,6 +17,8 @@
 
 package com.aliyun.polardbx.binlog.canal.core;
 
+import com.aliyun.polardbx.binlog.canal.DefaultBinlogFileSizeFetcher;
+import com.aliyun.polardbx.binlog.canal.IBinlogFileSizeFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
@@ -37,7 +39,7 @@ public class BinlogEventProcessor {
     private LogFetcher fetcher;
     private String binlogFileName;
     private ServerCharactorSet serverCharactorSet;
-
+    private IBinlogFileSizeFetcher binlogFileSizeFetcher;
     private boolean run;
 
     public void setHandle(EventHandle handle) {
@@ -54,12 +56,14 @@ public class BinlogEventProcessor {
         this.fetcher = connection.providerFetcher(binlogFileName, position, search);
         this.binlogFileName = binlogFileName;
         this.serverCharactorSet = serverCharactorSet;
+        this.binlogFileSizeFetcher = new DefaultBinlogFileSizeFetcher(connection);
     }
 
     public void start() throws Exception {
         run = true;
         handle.onStart();
         LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
+        decoder.setBinlogFileSizeFetcher(binlogFileSizeFetcher);
         LogContext context = new LogContext();
         LogFetcher buffer = fetcher;
         LogPosition logPosition = new LogPosition(binlogFileName, 0);
@@ -74,7 +78,7 @@ public class BinlogEventProcessor {
             }
             handle.handle(event, context.getLogPosition());
             if (handle.interrupt()) {
-                logger.error(" handler interrupt");
+                logger.warn(" handler interrupt");
                 break;
             }
         }

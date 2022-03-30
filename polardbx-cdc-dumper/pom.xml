@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.12-SNAPSHOT</version>
+        <version>5.4.13-SNAPSHOT</version>
     </parent>
     <groupId>com.aliyun.polardbx</groupId>
     <artifactId>polardbx-cdc-dumper</artifactId>
@@ -42,6 +42,12 @@
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>
             <version>3.4.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-rpl</artifactId>
+            <version>5.4.13-SNAPSHOT</version>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 </project>

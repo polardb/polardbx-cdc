@@ -19,6 +19,7 @@ package com.aliyun.polardbx.binlog.extractor;
 
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.CanalBootstrap;
@@ -49,6 +50,8 @@ import java.net.InetSocketAddress;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.ASSIGNED_DN_IP;
 
 /**
  * @author chengjin.lyf on 2020/7/10 6:59 下午
@@ -98,7 +101,13 @@ public class BinlogExtractor implements Extractor {
         if (dataList.size() != 1) {
             throw new PolardbxException("storageInstId expect size 1 , but query meta db size " + dataList.size());
         }
-        String ip = (String) dataList.get(0).get("ip");
+
+        String ip;
+        if (StringUtils.isNotBlank(DynamicApplicationConfig.getString(ASSIGNED_DN_IP))) {
+            ip = DynamicApplicationConfig.getString(ASSIGNED_DN_IP);
+        } else {
+            ip = (String) dataList.get(0).get("ip");
+        }
         int port = (int) dataList.get(0).get("port");
         String user = (String) dataList.get(0).get("user");
         String passwordEnc = (String) dataList.get(0).get("passwd_enc");

@@ -260,7 +260,7 @@ public class TopologyService {
     private String selectDumperMasterNode(Set<String> containers, ClusterSnapshot preClusterSnapshot) {
 
         //如果强制指定了master node, 且node状态正常，则使用强制指定的node
-        String assignedDumperNode = SystemDbConfig.getSystemDbConfig(CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY);
+        String assignedDumperNode = DynamicApplicationConfig.getString(CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY);
         if (StringUtils.isNotBlank(assignedDumperNode) && containers.contains(assignedDumperNode)) {
             log.info("Dumper master node is selected by force mode, with name {}", assignedDumperNode);
             return assignedDumperNode;

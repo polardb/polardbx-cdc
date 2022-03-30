@@ -40,25 +40,25 @@ public class PolarDbXTableMetaManagerTest {
     @Test
     public void apply() {
 
-        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null, null);
-        metaManager.init("Final");
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master");
+        metaManager.init();
 
         metaManager.rollback(new BinlogPosition(null, "675548357978085952012865487953073274880000000000000000"));
 
-        System.out.println(metaManager.findLogic("ddl_test", "all_type"));
-        System.out.println(metaManager.find("ddl_test_single", "all_type"));
+        System.out.println(metaManager.findLogicTable("ddl_test", "all_type"));
+        System.out.println(metaManager.findPhyTable("ddl_test_single", "all_type"));
 
     }
 
     @Test
     public void rollback() {
 
-        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null, null);
-        metaManager.init("Final");
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master");
+        metaManager.init();
 
         metaManager.rollback(new BinlogPosition(null, "684854406688853196813796092824455782400000000000000000"));
-        System.out.println(metaManager.findLogic("d1", "t4"));
-        System.out.println(metaManager.findLogic("d1", "t5"));
+        System.out.println(metaManager.findLogicTable("d1", "t4"));
+        System.out.println(metaManager.findLogicTable("d1", "t5"));
 
     }
 
@@ -79,19 +79,19 @@ public class PolarDbXTableMetaManagerTest {
             + "type_text text DEFAULT '你好'"
             + ")";
 
-        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null, null);
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master");
 
-        metaManager.init("Final");
+        metaManager.init();
 
         DDLRecord record = DDLRecord.builder()
             .schemaName("d1")
             .ddlSql(create)
             .build();
 
-        metaManager.apply(new BinlogPosition(null, "2"), "d2", create, null);
+        metaManager.applyPhysical(new BinlogPosition(null, "2"), "d2", create, null);
 
         metaManager.applyLogic(new BinlogPosition(null, "2"), record, "");
-        System.out.println(metaManager.findLogic("d1", "t1"));
+        System.out.println(metaManager.findLogicTable("d1", "t1"));
 
     }
 
@@ -99,16 +99,16 @@ public class PolarDbXTableMetaManagerTest {
     public void apply2() {
 
         LogicMetaTopology x = gson.fromJson(MockData.BASE, LogicMetaTopology.class);
-        PolarDbXTableMetaManager metaManager1 = new PolarDbXTableMetaManager("polardbx-storage-0-master", null, null);
+        PolarDbXTableMetaManager metaManager1 = new PolarDbXTableMetaManager("polardbx-storage-0-master");
 
-        metaManager1.init("Final");
+        metaManager1.init();
         metaManager1.applyBase(new BinlogPosition(null, "1"), x);
 
         System.out.println(metaManager1.getPhyTables("polardbx-storage-0-master"));
 
-        PolarDbXTableMetaManager metaManager2 = new PolarDbXTableMetaManager("polardbx-storage-1-master", null, null);
+        PolarDbXTableMetaManager metaManager2 = new PolarDbXTableMetaManager("polardbx-storage-1-master");
 
-        metaManager2.init("Final");
+        metaManager2.init();
         metaManager2.applyBase(new BinlogPosition(null, "2"), x);
 
         System.out.println(metaManager2.getPhyTables("polardbx-storage-1-master"));
@@ -118,12 +118,12 @@ public class PolarDbXTableMetaManagerTest {
     @Test
     public void rollback1() {
 
-        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null, null);
-        metaManager.init("Final");
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master");
+        metaManager.init();
 
-        metaManager.rollback(new BinlogPosition(null, "684854406688853196813796092824455782400000000000000000"));
-        System.out.println(metaManager.findLogic("d1", "t4"));
-        System.out.println(metaManager.findLogic("d1", "t5"));
+        metaManager.rollback(new BinlogPosition(null, "88735321530669472014184184307253288970000000000000000"));
+        System.out.println(metaManager.findLogicTable("d1", "t4"));
+        System.out.println(metaManager.findLogicTable("d1", "t5"));
 
     }
 

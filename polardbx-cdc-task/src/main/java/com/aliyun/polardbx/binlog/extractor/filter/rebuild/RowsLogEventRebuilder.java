@@ -44,7 +44,7 @@ public class RowsLogEventRebuilder {
 
         int columnLen = rowsLogEvent.getColumnLen();
         // prepare prop
-        RowEventBuilder rowEvent = new RowEventBuilder((int) rowsLogEvent.getTableId(),
+        RowEventBuilder rowEvent = new RowEventBuilder(rowsLogEvent.getTableId(),
             rowsLogEvent.getColumnLen(),
             rowsLogEvent.getHeader().getType(),
             (int) rowsLogEvent.getWhen(),

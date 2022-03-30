@@ -6,6 +6,9 @@ function start_app() {
     sh /home/admin/bin/jdk8.sh
     chmod 755 /home/admin/polardbx-binlog.standalone/bin/*
     sudo -E su admin -c 'sh /home/admin/polardbx-binlog.standalone/bin/daemon.sh start'
+    if [ -f "/home/admin/drds-worker/bin/globalSchedule.sh" ]; then
+      sh /home/admin/drds-worker/bin/globalSchedule.sh
+    fi
 }
 
 function stop_app() {
@@ -25,8 +28,8 @@ function config_env() {
 
     if [ ! -f "/home/admin/env/env.properties" ]; then
         touch /home/admin/env/env.properties
+        echo "ins_ip=$(hostname -i)" >> /home/admin/env/env.properties
     fi
-    echo "ins_ip=$(hostname -i)" >> /home/admin/env/env.properties
     chown -R admin:admin /home/admin/.
 }
 

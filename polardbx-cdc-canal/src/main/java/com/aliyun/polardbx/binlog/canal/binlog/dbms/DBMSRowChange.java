@@ -17,6 +17,8 @@
 
 package com.aliyun.polardbx.binlog.canal.binlog.dbms;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -28,6 +30,7 @@ import java.util.List;
  * @author Changyuan.lh
  * @version 1.0
  */
+@Slf4j
 public abstract class DBMSRowChange extends DBMSEvent {
 
     private static final long serialVersionUID = -5725119493653542602L;
@@ -152,6 +155,7 @@ public abstract class DBMSRowChange extends DBMSEvent {
         if (column != null) {
             return column.getColumnIndex();
         }
+        log.error("columnName: {} not found, columnSet: {}.", columnName, columnSet);
         return -1;
     }
 

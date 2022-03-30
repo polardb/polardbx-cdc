@@ -51,15 +51,21 @@ public class RowEventBuilder extends BinlogBuilder {
     private int _flags;
     private String commitLog;
 
-    public RowEventBuilder(int tableId, int columnCount, BinlogEventType type, int createTime, long serverId) {
+    public RowEventBuilder(long tableId, int columnCount, BinlogEventType type, int createTime, long serverId) {
         this(tableId, columnCount, type.getType(), createTime, serverId);
     }
 
-    public RowEventBuilder(int tableId, int columnCount, int eventType, int createTime, long serverId) {
+    public RowEventBuilder(long tableId, int columnCount, int eventType, int createTime, long serverId) {
         super(createTime, eventType, serverId);
         this.tableId = tableId;
         this.columnCount = columnCount;
         _flags = ROW_FLAG_END_STATMENT;
+    }
+
+    @Override
+    protected void writeCommonHeader(AutoExpandBuffer outputData) {
+        convertType();
+        super.writeCommonHeader(outputData);
     }
 
     private boolean isEmpty(Collection collection) {
@@ -105,6 +111,27 @@ public class RowEventBuilder extends BinlogBuilder {
     public boolean isInsert() {
         return eventType == BinlogEventType.WRITE_ROWS_EVENT.getType()
             || eventType == BinlogEventType.WRITE_ROWS_EVENT_V1.getType();
+    }
+
+    public boolean isDelete() {
+        return eventType == BinlogEventType.DELETE_ROWS_EVENT.getType()
+            || eventType == BinlogEventType.DELETE_ROWS_EVENT_V1.getType();
+    }
+
+    private void convertType() {
+        if (isUpdate()) {
+            eventType = BinlogEventType.UPDATE_ROWS_EVENT.getType();
+            return;
+        }
+        if (isInsert()) {
+            eventType = BinlogEventType.WRITE_ROWS_EVENT.getType();
+            return;
+        }
+        if (isDelete()) {
+            eventType = BinlogEventType.DELETE_ROWS_EVENT.getType();
+            return;
+        }
+        throw new UnsupportedOperationException("not support event type : " + eventType);
     }
 
     @Override

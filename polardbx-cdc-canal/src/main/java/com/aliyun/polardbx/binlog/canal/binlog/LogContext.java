@@ -36,8 +36,6 @@ public final class LogContext {
 
     private LogPosition logPosition;
 
-    private long serverId;
-
     private ServerCharactorSet serverCharactorSet;
 
     public LogContext() {
@@ -88,13 +86,5 @@ public final class LogContext {
         formatDescription = FormatDescriptionLogEvent.FORMAT_DESCRIPTION_EVENT_5_x;
 
         mapOfTable.clear();
-    }
-
-    public long getServerId() {
-        return serverId;
-    }
-
-    public void setServerId(long serverId) {
-        this.serverId = serverId;
     }
 }

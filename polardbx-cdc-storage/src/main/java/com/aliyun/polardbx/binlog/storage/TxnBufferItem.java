@@ -28,9 +28,17 @@ import lombok.Data;
 @Builder
 public class TxnBufferItem {
     private String traceId;
+    private String rowsQuery;
     private int eventType;
     private byte[] payload;
     private ByteString byteStringPayload;
+    private String schema;
+    private String table;
+
+    //可选项
+    private String binlogFile;
+    private long binlogPosition;
+    private String originTraceId;
 
     public int size() {
         if (payload != null) {

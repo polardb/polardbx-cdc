@@ -26,7 +26,6 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
-import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -81,12 +80,9 @@ public class EventAcceptFilter implements LogEventFilter<LogEvent>, TableMetaCha
             delegate.addTableChangeListener(this);
             return;
         }
-        AuthenticationInfo authInfo = rc.getAuthenticationInfo();
         try {
-            PolarDbXTableMetaManager polarDbXTableMetaManager = new PolarDbXTableMetaManager(rc.getStorageInstId(),
-                null,
-                null);
-            polarDbXTableMetaManager.init(authInfo.getAddress().getHostName());
+            PolarDbXTableMetaManager polarDbXTableMetaManager = new PolarDbXTableMetaManager(rc.getStorageInstId());
+            polarDbXTableMetaManager.init();
             if (rc.isRecovery()) {
                 logger.info("start rollback to " + rc.getStartPosition().getRtso());
                 polarDbXTableMetaManager.rollback(rc.getStartPosition());
@@ -141,9 +137,15 @@ public class EventAcceptFilter implements LogEventFilter<LogEvent>, TableMetaCha
     }
 
     private void refreshFilter() {
-        logger.info("start rebuild table filter : " + new Gson().toJson(filter) + " => " + storageInstanceId);
+        if (logger.isDebugEnabled()) {
+            logger.debug("start rebuild table filter : " + new Gson().toJson(filter) + " => " + storageInstanceId);
+        }
+
         this.filter = delegate.buildTableFilter(storageInstanceId);
-        logger.info("success rebuild filter : " + new Gson().toJson(filter) + " => " + storageInstanceId);
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("success rebuild filter : " + new Gson().toJson(filter) + " => " + storageInstanceId);
+        }
     }
 
     @Override

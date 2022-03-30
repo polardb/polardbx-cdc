@@ -35,6 +35,10 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.util.zip.CRC32;
 
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.ROWS_QUERY_LOG_EVENT;
+import static com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager.containsTableId;
+import static com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager.getTableIdLength;
+
 /**
  * Created by ziyang.lb
  */
@@ -264,10 +268,10 @@ public class BinlogFile {
                         buffer.flip();
 
                         if (buffer.hasRemaining() && buffer.remaining() >= 19) {
-                            lastEventTimestamp = readLong(buffer);//read timestamp
+                            lastEventTimestamp = readInt32(buffer);//read timestamp
                             lastEventType = buffer.get();//read event_type
                             buffer.position(buffer.position() + 4);//skip server_id
-                            long eventSize = readLong(buffer);//read eventSizeer_id
+                            long eventSize = readInt32(buffer);//read eventSizeer_id
                             nextEventAbsolutePos += eventSize;
                             if (lastEventType == LogEvent.FORMAT_DESCRIPTION_EVENT) {
                                 continue;
@@ -311,6 +315,7 @@ public class BinlogFile {
             String lastTso = "";
             byte lastEventType = -1;
             Long lastEventTimestamp = null;
+            Long maxTableId = null;
 
             if (fileLength > 4) {
                 long nextEventAbsolutePos = 4;
@@ -326,10 +331,10 @@ public class BinlogFile {
 
                         int nextEventRelativePos = buffer.position();
                         while (buffer.hasRemaining() && buffer.remaining() >= 19) {
-                            lastEventTimestamp = readLong(buffer);//read timestamp
+                            lastEventTimestamp = readInt32(buffer);//read timestamp
                             lastEventType = buffer.get();//read event_type
                             buffer.position(buffer.position() + 4);//skip server_id
-                            long eventSize = readLong(buffer);//read eventSize
+                            long eventSize = readInt32(buffer);//read eventSize
 
                             // next position需要通过计算获取，不能直接用header中的log_pos字段的值
                             // 因为对于超大事务(>2G)，log_pos的四个字节已经无法准确表达下个事件的位置
@@ -338,12 +343,12 @@ public class BinlogFile {
 
                             if (nextEventRelativePos > buffer.limit()) {
                                 // 如果当前这个Event是ROWS_QUERY_LOG_EVENT，则不能直接跳过，需要将nextEventAbsolutePos进行回调后再break
-                                if (lastEventType == LogEvent.ROWS_QUERY_LOG_EVENT) {
+                                if (lastEventType == ROWS_QUERY_LOG_EVENT || containsTableId(lastEventType)) {
                                     nextEventAbsolutePos -= eventSize;
                                 }
                                 break;
                             } else {
-                                if (lastEventType == LogEvent.ROWS_QUERY_LOG_EVENT) {
+                                if (lastEventType == ROWS_QUERY_LOG_EVENT) {
                                     //跳过剩余的header
                                     buffer.position(buffer.position() + 6);
                                     //在之前的版本中，ROWS_QUERY_LOG_EVENT只用来记录tso，这个字段的值并不是1，而是tso的长度
@@ -365,6 +370,10 @@ public class BinlogFile {
                                         lastTso = markInfo.getTso();
                                         seekPosition = nextEventAbsolutePos;
                                     }
+                                } else if (containsTableId(lastEventType)) {
+                                    buffer.position(buffer.position() + 6);
+                                    long tableId = readTableId(buffer);
+                                    maxTableId = maxTableId == null ? tableId : Math.max(maxTableId, tableId);
                                 }
                                 buffer.position(nextEventRelativePos);
                                 seekEventCount++;
@@ -392,7 +401,7 @@ public class BinlogFile {
             log.info("seek last tso cost time:" + (System.currentTimeMillis() - startTime) + "ms, skipped event count:"
                 + seekEventCount);
 
-            return new SeekResult(lastTso, lastEventType, lastEventTimestamp);
+            return new SeekResult(lastTso, lastEventType, lastEventTimestamp, maxTableId);
         } catch (IOException e) {
             throw new PolardbxException("seek tso failed.", e);
         }
@@ -423,7 +432,7 @@ public class BinlogFile {
         }
     }
 
-    private long readLong(ByteBuffer buffer) {
+    private long readInt32(ByteBuffer buffer) {
         return ((long) (0xff & buffer.get())) | ((long) (0xff & buffer.get()) << 8) |
             ((long) (0xff & buffer.get()) << 16) | ((long) (0xff & buffer.get()) << 24);
     }
@@ -438,6 +447,19 @@ public class BinlogFile {
         byte[] bytes = new byte[(int) length];
         buffer.get(bytes);
         return new String(bytes);
+    }
+
+    private long readTableId(ByteBuffer buffer) {
+        int length = getTableIdLength();
+        return readLongByLength(buffer, length);
+    }
+
+    public long readLongByLength(ByteBuffer buffer, int length) {
+        long result = 0;
+        for (int i = 0; i < length; ++i) {
+            result |= (((long) (0xff & buffer.get())) << (i << 3));
+        }
+        return result;
     }
 
     public long getLogBegin() {
@@ -461,11 +483,19 @@ public class BinlogFile {
         private String lastTso;
         private Byte lastEventType;
         private Long lastEventTimestamp;
+        private Long maxTableId;
 
         public SeekResult(String lastTso, Byte lastEventType, Long lastEventTimestamp) {
             this.lastTso = lastTso;
             this.lastEventType = lastEventType;
             this.lastEventTimestamp = lastEventTimestamp;
+        }
+
+        public SeekResult(String lastTso, Byte lastEventType, Long lastEventTimestamp, Long maxTableId) {
+            this.lastTso = lastTso;
+            this.lastEventType = lastEventType;
+            this.lastEventTimestamp = lastEventTimestamp;
+            this.maxTableId = maxTableId;
         }
 
         public String getLastTso() {
@@ -490,6 +520,24 @@ public class BinlogFile {
 
         public void setLastEventTimestamp(Long lastEventTimestamp) {
             this.lastEventTimestamp = lastEventTimestamp;
+        }
+
+        public Long getMaxTableId() {
+            return maxTableId;
+        }
+
+        public void setMaxTableId(Long maxTableId) {
+            this.maxTableId = maxTableId;
+        }
+
+        @Override
+        public String toString() {
+            return "SeekResult{" +
+                "lastTso='" + lastTso + '\'' +
+                ", lastEventType=" + lastEventType +
+                ", lastEventTimestamp=" + lastEventTimestamp +
+                ", maxTableId=" + maxTableId +
+                '}';
         }
     }
 }

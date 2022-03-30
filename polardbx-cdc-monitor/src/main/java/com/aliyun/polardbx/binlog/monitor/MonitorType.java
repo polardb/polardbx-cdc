@@ -176,6 +176,14 @@ public enum MonitorType {
         5,
         10,
         true
+    ),
+    META_DATA_INCONSISTENT_WARNNIN(
+        "polarx_cdc_meta_data_inconsistent_warnning",
+        true,
+        "当前已经没有执行中的DDL任务，CDC元数据仍然存在不一致，请及时关注，DeltaChangeData: %s",
+        1,
+        10,
+        true
     );
 
     private String desc;

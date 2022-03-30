@@ -17,6 +17,19 @@ service CdcService {
   rpc Dump (DumpRequest) returns (stream DumpStream) {}
 
   rpc Sync (DumpRequest) returns (stream DumpStream) {}
+
+  ////////////////////////////// replicate   ///////////////////////////
+  rpc ChangeMaster (ChangeMasterRequest) returns (RplCommandResponse) {}
+
+  rpc ChangeReplicationFilter (ChangeReplicationFilterRequest) returns (RplCommandResponse) {}
+
+  rpc StartSlave (StartSlaveRequest) returns (RplCommandResponse) {}
+
+  rpc StopSlave (StopSlaveRequest) returns (RplCommandResponse) {}
+
+  rpc ResetSlave (ResetSlaveRequest) returns (RplCommandResponse) {}
+
+  rpc ShowSlaveStatus (ShowSlaveStatusRequest) returns (stream ShowSlaveStatusResponse) {}
 }
 
 message Request {
@@ -60,4 +73,38 @@ message BinlogEvent {
 
 message DumpStream {
   bytes       payload = 1;
+}
+
+////////////////////////////// replicate ///////////////////////////
+message RplCommandResponse{
+  int32     resultCode = 1;
+  string    error = 2;
+}
+
+message ChangeMasterRequest{
+  string    request = 1;
+}
+
+message StartSlaveRequest{
+  string    request = 1;
+}
+
+message StopSlaveRequest{
+  string    request = 1;
+}
+
+message ResetSlaveRequest{
+  string    request = 1;
+}
+
+message ChangeReplicationFilterRequest{
+  string    request = 1;
+}
+
+message ShowSlaveStatusRequest{
+  string    request = 1;
+}
+
+message ShowSlaveStatusResponse{
+  string    response = 1;
 }

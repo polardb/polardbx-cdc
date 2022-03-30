@@ -99,6 +99,10 @@ public abstract class ConfigKeys {
      * 密码配置是否使用密文，默认false
      */
     public static final String USE_ENCRYPTED_PASSWORD = "useEncryptedPassword";
+    /**
+     * 显示指定DN的ip，特殊情况下使用
+     */
+    public static final String ASSIGNED_DN_IP = "assignedDnIp";
 
     //******************************************************************************************************************
     //********************************************逻辑Binlog目录&文件&上传下载等相关配置**************************************
@@ -120,6 +124,10 @@ public abstract class ConfigKeys {
      */
     public static final String BINLOG_WRITE_DRYRUN = "binlog.write.dryrun";
     /**
+     * 写binlog文件时是否支持记录RowQueryLogEvent
+     */
+    public static final String BINLOG_WRITE_SUPPORT_ROWS_QUERY_LOG = "binlog.write.supportRowsQueryLog";
+    /**
      * 逻辑binlog写缓冲区的大小，单位字节，建议为2的倍数
      */
     public static final String BINLOG_WRITE_BUFFER_SIZE = "binlog.write.buffer.size";
@@ -135,6 +143,10 @@ public abstract class ConfigKeys {
      * 心跳刷盘频率，默认30秒
      */
     public static final String HEARTBEAT_FLUSH_INTERVAL = "binlog.write.heartbeatFlushInterval";
+    /**
+     * tableId的初始值
+     */
+    public static final String BINLOG_WRITE_TABLE_ID_BASE_VALUE = "binlog.write.tableId.baseValue";
     //******************************************************************************************************************
     //***************************************************Task运行时相关的配置**********************************************
     //******************************************************************************************************************
@@ -178,6 +190,19 @@ public abstract class ConfigKeys {
      * transmitter是否开启dry run，默认false
      */
     public static final String TASK_TRANSMITTER_DRYRUN = "task.transmitter.dryRun";
+    /**
+     * 是否支持binlog中显示隐藏主键
+     */
+    public static final String TASK_DRDS_HIDDEN_PK_SUPPORT = "task.support.drdsHiddenPk";
+    /**
+     * 是否忽略TraceId乱序，默认false
+     */
+    public static final String TASK_TRACEID_DISORDER_IGNORE = "task.traceid.disorder.ignore";
+
+    /**
+     * 忽略buffer key重复异常
+     */
+    public static final String TASK_EXCEPTION_SKIP_DUPLICATE_BUFFER_KEY = "task.skip.exception.bufferKey.duplicate";
 
     //******************************************************************************************************************
     //***********************************************Daemon和调度相关参数*************************************************
@@ -314,6 +339,49 @@ public abstract class ConfigKeys {
      * 是否优先使用HistoryTable中的记录构建Repository，修复数据场景使用
      */
     public static final String META_USE_HISTORY_TABLE_FIRST = "meta.useHistoryTableFirst";
+    /**
+     * Rollback时，元数据的构建方式
+     */
+    public static final String META_ROLLBACK_MODE = "meta.rollback.mode";
+    /**
+     * 查询不到物理表元数据时，支持instant create的rollback mode
+     */
+    public static final String META_ROLLBACK_MODE_SUPPORT_INSTANT_CREATE_TABLE =
+        "meta.rollback.mode.supportInstantCreatTable";
+    /**
+     * 每次执行完逻辑DDL后，是否对该DDL对应的表的元数据信息进行一致性检查
+     */
+    public static final String META_CHECK_CONSISTENCY_AFTER_EACH_APPLY = "meta.checkConsistencyAfterEachApply";
+    /**
+     * 每次执行完apply后是否打印当前表的汇总信息
+     */
+    public static final String META_PRINT_SUMMARY_AFTER_APPLY_SWITCH = "meta.printSummaryAfterApply.switch";
+    /**
+     * 每次执行完apply后，需要打印表汇总信息的表清单，支持正则表达式
+     */
+    public static final String META_PRINT_SUMMARY_AFTER_APPLY_TABLES = "meta.printSummaryAfterApply.tables";
+    /**
+     * 每次执行完apply后是否打印当前表的详细信息
+     */
+    public static final String META_PRINT_DETAIL_AFTER_APPLY_SWITCH = "meta.printDetailAfterApply.switch";
+    /**
+     * 每次执行完apply后，需要打印表汇总信息的表清单，支持正则表达式
+     */
+    public static final String META_PRINT_DETAIL_AFTER_APPLY_TABLES = "meta.printDetailAfterApply.tables";
+    /**
+     * SemiSnapshot的保存时间，超过该时间的snapshot会被移除，单位：小时
+     */
+    public static final String META_SEMI_SNAPSHOT_HOLDING_TIME = "meta.semiSnapshot.holdingTime";
+    /**
+     * 检查SemiSnapshot的holdingtime的时间间隔，单位：分钟
+     */
+    public static final String META_SEMI_SNAPSHOT_HOLDING_TIME_CHECK_INTERVAL =
+        "meta.semiSnapshot.holdingTime.checkInterval";
+    /**
+     * 对deltaChangeMap中全量进行一致性检测的周期，单位：秒
+     */
+    public static final String META_SEMI_SNAPSHOT_DELTA_CHANGE_CHECK_INTERVAL =
+        "meta.semiSnapshot.deltaChange.checkInterval";
 
     //******************************************************************************************************************
     //*********************************Binlog_System_Config表中有，但config文件中没有的一些配置******************************

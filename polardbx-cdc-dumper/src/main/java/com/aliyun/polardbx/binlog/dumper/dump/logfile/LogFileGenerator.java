@@ -50,6 +50,7 @@ import com.aliyun.polardbx.binlog.domain.po.RelayFinalTaskInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator;
+import com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager;
 import com.aliyun.polardbx.binlog.dumper.metrics.Metrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
@@ -65,6 +66,7 @@ import com.aliyun.polardbx.binlog.rpc.TxnStreamRpcClient;
 import com.aliyun.polardbx.binlog.scheduler.model.TaskConfig;
 import com.aliyun.polardbx.binlog.util.StorageUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -77,6 +79,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 
@@ -92,6 +95,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.CommonUtils.getTsoPhysicalTime;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_SUPPORT_ROWS_QUERY_LOG;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_TABLE_ID_BASE_VALUE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.EXPECTED_STORAGE_TSO_KEY;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.instructionId;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.tso;
@@ -102,6 +107,8 @@ import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.status
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeBegin;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeCommit;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeMarkEvent;
+import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeRowsQuery;
+import static com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager.containsTableId;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isIn;
 import static org.mybatis.dynamic.sql.SqlBuilder.isLessThanOrEqualTo;
@@ -125,6 +132,7 @@ public class LogFileGenerator {
     private final int flushInterval;
     private final int writeBufferSize;
     private final int seekBufferSize;
+    private final boolean supportWriteRowQueryLogEvent;
 
     private byte[] formatDescData;
     private ExecutorService executor;
@@ -133,6 +141,7 @@ public class LogFileGenerator {
     private BinlogFile binlogFile;
     private String targetTaskAddress;
     private FlushPolicy currentFlushPolicy;
+    private TableIdManager tableIdManager;
     private volatile boolean running;
 
     public LogFileGenerator(LogFileManager logFileManager, int binlogFileSize, boolean dryRun, FlushPolicy flushPolicy,
@@ -146,6 +155,7 @@ public class LogFileGenerator {
         this.writeBufferSize = writeBufferSize;
         this.seekBufferSize = seekBufferSize;
         this.startTso = "";
+        this.supportWriteRowQueryLogEvent = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_SUPPORT_ROWS_QUERY_LOG);
     }
 
     public void start() {
@@ -304,6 +314,7 @@ public class LogFileGenerator {
             currentToken = message.getTxnTag().getTxnMergedToken();
             if (currentToken.getType() == TxnType.META_DDL) {
                 writeDdl(currentToken.getPayload().toByteArray());
+                tryInvalidateTableId();
                 tryFlush(true);
             } else if (currentToken.getType() == TxnType.META_DDL_PRIVATE) {
                 writePrivateDdl(currentToken.getPayload().toByteArray());
@@ -334,6 +345,13 @@ public class LogFileGenerator {
             break;
         default:
             throw new PolardbxException("invalid message type for logfile generator: " + processType);
+        }
+    }
+
+    private void tryInvalidateTableId() {
+        if (StringUtils.isNotBlank(currentToken.getSchema()) && StringUtils
+            .isNotBlank(currentToken.getTable())) {
+            tableIdManager.invalidate(currentToken.getSchema(), currentToken.getTable());
         }
     }
 
@@ -382,6 +400,8 @@ public class LogFileGenerator {
      */
     private void buildBinlogFile() throws IOException {
         File file = logFileManager.getMaxBinlogFile();
+        long maxTableId = DynamicApplicationConfig.getLong(BINLOG_WRITE_TABLE_ID_BASE_VALUE);
+
         if (file == null) {
             file = logFileManager.createFirstLogFile();
             binlogFile = new BinlogFile(file, MODE, writeBufferSize, seekBufferSize);
@@ -426,9 +446,14 @@ public class LogFileGenerator {
                 }
             }
 
+            logger.info("seek result is : " + seekResult);
             startTso = seekResult.getLastTso();
+            if (seekResult.getMaxTableId() != null) {
+                maxTableId = seekResult.getMaxTableId();
+            }
         }
 
+        tableIdManager = new TableIdManager(maxTableId, binlogFile.position() == 0);
         logger.info("start tso is :[" + startTso + "]");
     }
 
@@ -453,7 +478,7 @@ public class LogFileGenerator {
 
     private void writeBegin(long serverId) throws IOException {
         Pair<byte[], Integer> begin = makeBegin(getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS),
-            currentToken.getBeginSchema(), serverId);
+            currentToken.getSchema(), serverId);
         binlogFile.writeEvent(begin.getLeft(), 0, begin.getRight(), true);
 
         if (logger.isDebugEnabled()) {
@@ -463,12 +488,28 @@ public class LogFileGenerator {
 
     private void writeDml(List<TxnItem> itemsList) throws IOException {
         for (TxnItem txnItem : itemsList) {
+            // 从TableMap中取之前暂存的RowsQuery，生成一个RowsQuery Event
+            if (txnItem.getEventType() == LogEvent.TABLE_MAP_EVENT && StringUtils.isNotBlank(txnItem.getRowsQuery())
+                && supportWriteRowQueryLogEvent) {
+                writeRowsQuery(txnItem.getRowsQuery());
+            }
+
             final byte[] data = txnItem.getPayload().toByteArray();
-            EventGenerator.updateTimeStamp(data,
-                CommonUtils.getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS));
+            EventGenerator.updateTimeStamp(data, getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS));
+            if (StringUtils.isNotBlank(txnItem.getSchema()) && StringUtils.isNotBlank(txnItem.getTable())
+                && containsTableId((byte) txnItem.getEventType())) {
+                long tableId = tableIdManager.getTableId(txnItem.getSchema(), txnItem.getTable());
+                EventGenerator.updateTableId(data, tableId);
+            }
             binlogFile.writeEvent(data, 0, data.length, true);
             Metrics.get().incrementTotalWriteDmlEventCount();
         }
+    }
+
+    private void writeRowsQuery(String rowsQuery) throws IOException {
+        final Pair<byte[], Integer> rowsQueryEvent =
+            makeRowsQuery(getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS), rowsQuery);
+        binlogFile.writeEvent(rowsQueryEvent.getLeft(), 0, rowsQueryEvent.getRight(), true);
     }
 
     private void writeCommit(long serverId) throws IOException {
@@ -481,7 +522,6 @@ public class LogFileGenerator {
 
     private void writeDdl(byte[] data) throws IOException {
         EventGenerator.updateTimeStamp(data, CommonUtils.getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS));
-//        EventGenerator.updateServerId(data);
         binlogFile.writeEvent(data, 0, data.length, true);
 
         writeTso();
@@ -640,6 +680,12 @@ public class LogFileGenerator {
     }
 
     private boolean tryRepairStorageList(String instructionIdParam, List<String> storageList) {
+        if (!needTryRepairStorage()) {
+            logger.info("no need to repair storage.");
+            return false;
+        }
+
+        logger.info("start try repairing storage.");
         BinlogPolarxCommandMapper commandMapper = SpringContextHolder.getObject(BinlogPolarxCommandMapper.class);
         StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
         Optional<BinlogPolarxCommand> optional = commandMapper
@@ -684,6 +730,7 @@ public class LogFileGenerator {
         }
         boolean needRotate = checkRotate(getTsoPhysicalTime(currentToken.getTso(), TimeUnit.SECONDS), false);
         if (needRotate) {
+            tableIdManager.tryReset();
             tryWriteFileHeader();
         }
     }
@@ -779,5 +826,17 @@ public class LogFileGenerator {
                 break;
             }
         }
+    }
+
+    private boolean needTryRepairStorage() {
+        Set<String> needRepairVersions = Sets.newHashSet("5.4.9", "5.4.10", "5.4.11");
+        JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+        String version = polarxTemplate.queryForObject("select version()", String.class);
+        String[] versionArray = version.split("-");
+        if (!StringUtils.equals("TDDL", versionArray[1])) {
+            throw new PolardbxException("invalid polardbx version " + version);
+        }
+        String kernelVersion = versionArray[2];
+        return needRepairVersions.contains(kernelVersion);
     }
 }

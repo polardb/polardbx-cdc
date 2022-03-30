@@ -58,6 +58,7 @@ import java.util.List;
  * @author agapple 2017年7月27日 下午4:05:34
  * @since 3.2.5
  */
+
 public class DruidDdlParser {
 
     public static List<DdlResult> parse(String queryString, String schmeaName) {
@@ -82,6 +83,12 @@ public class DruidDdlParser {
                 ddlResults.add(ddlResult);
             } else if (statement instanceof SQLAlterTableStatement) {
                 SQLAlterTableStatement alterTable = (SQLAlterTableStatement) statement;
+                if (alterTable.getTableOptions().size() > 0) {
+                    DdlResult ddlResult = new DdlResult();
+                    processName(ddlResult, schmeaName, alterTable.getName(), false);
+                    ddlResult.setType(DBMSAction.ALTER);
+                    ddlResults.add(ddlResult);
+                }
                 for (SQLAlterTableItem item : alterTable.getItems()) {
                     if (item instanceof SQLAlterTableRename) {
                         DdlResult ddlResult = new DdlResult();

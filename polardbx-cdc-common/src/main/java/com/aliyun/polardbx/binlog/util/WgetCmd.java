@@ -17,15 +17,20 @@
 
 package com.aliyun.polardbx.binlog.util;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
+import java.util.Scanner;
 
 /**
  * @author chengjin.lyf on 2019/3/3 3:08 PM
  * @since 1.0.25
  */
 public class WgetCmd {
+
+    private static final Logger logger = LoggerFactory.getLogger(WgetCmd.class);
 
     private String link;
     private String fileName;
@@ -39,35 +44,22 @@ public class WgetCmd {
         ProcessBuilder pb = new ProcessBuilder("wget", "--no-check-certificate", link, "-O", fileName + "_tmp_wget");
         pb.redirectErrorStream(true);
         Process process = pb.start();
-        final InputStream inputStream = process.getInputStream();
-        Thread t = new Thread() {
+        final Scanner scanner = new Scanner(process.getInputStream());
+        scanner.useDelimiter("\n");
+        Thread t = new Thread("wget-progress") {
             @Override
             public void run() {
 
-                byte[] cache = new byte[512];
-                int idx = 0;
-                int data = 0;
-                long st = 0;
                 try {
-                    while ((data = inputStream.read()) != -1) {
-                        long now = System.currentTimeMillis();
-                        if (idx >= cache.length) {
-                            System.out.write(cache, 0, idx);
-                            idx = 0;
-                            continue;
-                        }
-                        cache[idx++] = (byte) data;
-                        if (data == '\n') {
-                            if (now - st > 30000) {
-                                st = now;
-                                System.out.write(cache, 0, idx);
-                            }
-                            idx = 0;
-                            continue;
-                        }
+                    while (scanner.hasNext()) {
+                        String line = scanner.next();
+                        WgetContext.add(line);
                     }
                 } catch (Exception e) {
-
+                    logger.error("print wget progress error! link : " + link, e);
+                } finally {
+                    WgetContext.finish();
+                    scanner.close();
                 }
             }
         };

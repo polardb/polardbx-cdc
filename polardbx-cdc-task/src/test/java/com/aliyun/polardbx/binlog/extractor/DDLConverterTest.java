@@ -20,6 +20,8 @@ package com.aliyun.polardbx.binlog.extractor;
 import com.alibaba.polardbx.druid.DbType;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
@@ -298,4 +300,31 @@ public class DDLConverterTest {
             + "TBPARTITION BY hash(JOB_ID) TBPARTITIONS 16";
         System.out.println(DDLConverter.convertNormalDDL(sql, null, null, 1, "123456666"));
     }
+
+    @Test
+    public void testImplicit() {
+        String sql = "CREATE TABLE `zqhz0kzsecxfgdf` (\n"
+            + "  `zsjzmjsoidxxtr` int(6) unsigned zerofill DEFAULT NULL,\n"
+            + "  `7jg0ekks` int(6) unsigned zerofill DEFAULT NULL,\n"
+            + "  `3pf6xdowmaf` int(6) unsigned zerofill DEFAULT NULL,\n"
+            + "  `hkqh6gd` int(6) unsigned zerofill DEFAULT NULL,\n"
+            + "  _drds_implicit_id_ bigint(20) NOT NULL AUTO_INCREMENT,\n"
+            + "  PRIMARY KEY (_drds_implicit_id_)\n"
+            + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+        System.out.println(DDLConverter.convertNormalDDL(sql, null, null, 1, "123456666"));
+    }
+
+    @Test
+    public void testConstraint() {
+        String sql = "alter table `xxx` drop key k1(`u`)";
+        SQLStatementParser parser =
+            SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FastSQLConstant.FEATURES);
+        List<SQLStatement> stmtList = parser.parseStatementList();
+        System.out.println(stmtList.get(0).getClass());
+        SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) stmtList.get(0);
+        for (SQLAlterTableItem item : sqlAlterTableStatement.getItems()) {
+            System.out.println(item.getClass());
+        }
+    }
+
 }

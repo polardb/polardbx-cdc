@@ -77,6 +77,10 @@ public class MysqlConnection implements ErosaConnection {
         this.authInfo = authInfo;
     }
 
+    public MysqlConnection(Connection conn) {
+        this.conn = conn;
+    }
+
     @Override
     public void connect() throws IOException {
         Properties info = new Properties();
@@ -133,6 +137,7 @@ public class MysqlConnection implements ErosaConnection {
         decoder.handle(LogEvent.WRITE_ROWS_EVENT_V1);
         decoder.handle(LogEvent.WRITE_ROWS_EVENT);
         decoder.handle(LogEvent.TABLE_MAP_EVENT);
+        decoder.handle(LogEvent.ROWS_QUERY_LOG_EVENT);
         LogContext context = new LogContext();
         context.setServerCharactorSet(getDefaultDatabaseCharset());
         LogPosition logPosition = new LogPosition(binlogfilename, binlogPosition);
@@ -315,6 +320,9 @@ public class MysqlConnection implements ErosaConnection {
                 while (rs.next()) {
                     String variableName = rs.getString(1);
                     String charset = rs.getString(2);
+                    if (StringUtils.equals("utf8mb3", charset)) {
+                        charset = "utf8";
+                    }
                     logger.info(variableName + " : " + charset);
                     if ("character_set_client".equalsIgnoreCase(variableName)) {
                         set.setCharacterSetClient(charset);
@@ -402,16 +410,18 @@ public class MysqlConnection implements ErosaConnection {
                 rs = stmt.executeQuery(sql);
                 return processor.process(rs);
             } catch (SQLException e) {
-                logger.error("SQLException: original sql: {}, actual statement:{}", sql, stmt);
+                logger.error("SQLException: original sql: {}, actual statement:{}, exception:{}", sql, stmt, e);
                 throw new SQLExecuteException(e);
             } finally {
-                if (stmt != null) {
-                    try {
+                try {
+                    if (rs != null) {
                         rs.close();
-                        stmt.close();
-                    } catch (SQLException e) {
-                        // ignore
                     }
+                    if (stmt != null) {
+                        stmt.close();
+                    }
+                } catch (SQLException e) {
+                    // ignore
                 }
             }
         }

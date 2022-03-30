@@ -123,13 +123,13 @@ public class CanalBootstrap {
             realTso = CommonUtils.getTsoTimestamp(requestTso);
         }
         logger.info("dump mysql with start tso " + realTso);
-        BinlogPosition position = searchPosition(connection, realTso);
+        BinlogPosition position = searchPosition(connection, requestTso, realTso);
         if (position != null) {
             consume(connection, position, requestTso);
             return;
         }
         logger.warn("can not find " + requestTso + " in [" + mySqlInfo.getStartPosition() + "," + mySqlInfo
-            .getEndPosition() + "] try backup store!");
+            .getEndPosition() + "] try oss!");
         consumeFromBackup(requestTso);
     }
 
@@ -161,17 +161,18 @@ public class CanalBootstrap {
         }
     }
 
-    private BinlogPosition searchPosition(ErosaConnection connection, long requestTso) throws Exception {
-        logger.info("search position by tso : " + requestTso);
+    private BinlogPosition searchPosition(ErosaConnection connection, String requestTso, long searchTso)
+        throws Exception {
+        logger.info("search position by tso : " + searchTso);
         long startCmdTSO = -1;
         if (StringUtils.isNotBlank(this.startCmdTSO)) {
             startCmdTSO = CommonUtils.getTsoTimestamp(this.startCmdTSO);
         }
         SearchTsoEventHandle searchTsoEventHandle =
-            new SearchTsoEventHandle(requestTso, authenticationInfo, startCmdTSO);
+            new SearchTsoEventHandle(authenticationInfo, requestTso, searchTso, startCmdTSO);
         processor.setHandle(searchTsoEventHandle);
         connection.connect();
-        BinlogPosition endPosition = connection.findEndPosition(requestTso);
+        BinlogPosition endPosition = connection.findEndPosition(searchTso);
         String searchFile = endPosition.getFileName();
         while (true) {
             searchTsoEventHandle.reset();
@@ -181,7 +182,7 @@ public class CanalBootstrap {
                 //找不到这个文件，直接break
                 break;
             }
-            logger.info("start search " + requestTso + " in " + searchFile);
+            logger.info("start search " + searchTso + " in " + searchFile);
             searchTsoEventHandle.setCurrentFile(searchFile);
             searchTsoEventHandle
                 .setEndPosition(new BinlogPosition(searchFile, binlogFileSize, -1, -1));

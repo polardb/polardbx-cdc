@@ -25,6 +25,8 @@ import org.apache.commons.lang3.tuple.Pair;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.CRC32;
 
+import static com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager.getTableIdLength;
+
 /**
  * Created by ziyang.lb
  */
@@ -32,7 +34,7 @@ import java.util.zip.CRC32;
 public class EventGenerator {
 
     private static final int EVENT_LEN_OFFSET = 9;
-    private static final ThreadLocal<byte[]> BYTES = ThreadLocal.withInitial(() -> new byte[256]);
+    private static final ThreadLocal<byte[]> BYTES = ThreadLocal.withInitial(() -> new byte[1024]);
     private static final AtomicLong XID_SEQ = new AtomicLong(0);
 
     //高频使用，为了性能，复用byte数组
@@ -51,7 +53,7 @@ public class EventGenerator {
         //write tso event body
         byte[] bytes = markContent.getBytes();
         tsoEvent.write((byte) 1);//
-        tsoEvent.writeString(markContent, markContent.length());// content
+        tsoEvent.writeString(markContent, bytes.length);// content
         tsoEvent.writeLong(0, 4);//crc32  checksum
 
         // rewrite size, log pos
@@ -208,6 +210,10 @@ public class EventGenerator {
         return Pair.of(data, length);
     }
 
+    public static Pair<byte[], Integer> makeRowsQuery(long timestamp, String rowsQuery) {
+        return makeMarkEvent(timestamp, rowsQuery);
+    }
+
     public static void updatePos(byte[] data, long newPos) {
         if (log.isDebugEnabled()) {
             log.debug("updatePos {}", newPos);
@@ -226,6 +232,17 @@ public class EventGenerator {
 
         ByteArray byteArray = new ByteArray(data);
         byteArray.writeLong(timeStamp, 4);
+    }
+
+    public static void updateTableId(byte[] data, long tableId) {
+        if (log.isDebugEnabled()) {
+            log.debug("updateTableId {}", tableId);
+        }
+
+        int length = getTableIdLength();
+        ByteArray byteArray = new ByteArray(data);
+        byteArray.skip(19);
+        byteArray.writeLong(tableId, length);
     }
 
     public static void updateServerId(byte[] data) {

@@ -23,11 +23,19 @@
             <outputDirectory>polardbx-binlog.standalone/conf</outputDirectory>
         </file>
         <file>
+            <source>target/classes/rpl-logback.xml</source>
+            <outputDirectory>polardbx-binlog.standalone/conf</outputDirectory>
+        </file>
+        <file>
             <source>../polardbx-cdc-common/target/classes/config.properties</source>
             <outputDirectory>polardbx-binlog.standalone/conf</outputDirectory>
         </file>
         <file>
             <source>../polardbx-cdc-common/target/classes/metrics.txt</source>
+            <outputDirectory>polardbx-binlog.standalone/conf</outputDirectory>
+        </file>
+        <file>
+            <source>target/classes/git.properties</source>
             <outputDirectory>polardbx-binlog.standalone/conf</outputDirectory>
         </file>
     </files>

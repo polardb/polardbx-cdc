@@ -302,8 +302,11 @@ public class LogEventTransmitter implements Transmitter {
                 TxnItemRef txnItemRef = iterator.next();
                 items.add(TxnItem.newBuilder()
                     .setTraceId(txnItemRef.getTraceId())
+                    .setRowsQuery(txnItemRef.getRowsQuery())
                     .setEventType(txnItemRef.getEventType())
                     .setPayload(txnItemRef.getByteStringPayload())
+                    .setSchema(txnItemRef.getSchema())
+                    .setTable(txnItemRef.getTable())
                     .build());
                 txnItemRef.clearPayload();//尽快释放内存空间，防止内存溢出
             }
@@ -356,8 +359,11 @@ public class LogEventTransmitter implements Transmitter {
 
             items.add(TxnItem.newBuilder()
                 .setTraceId(txnItemRef.getTraceId())
+                .setRowsQuery(txnItemRef.getRowsQuery())
                 .setEventType(txnItemRef.getEventType())
                 .setPayload(payload)
+                .setSchema(txnItemRef.getSchema())
+                .setTable(txnItemRef.getTable())
                 .build());
 
             if ((chunkMode == ChunkMode.MEMSIZE && memSize >= chunkItemSize * CHUNK_MEM_UNIT) ||
@@ -406,9 +412,10 @@ public class LogEventTransmitter implements Transmitter {
     private TxnMergedToken buildTxnMergedToken(TxnToken token) {
         return TxnMergedToken.newBuilder()
             .setType(token.getType())
-            .setBeginSchema(token.getBeginSchema())
+            .setSchema(token.getSchema())
             .setTso(token.getTso())
             .setPayload(token.getPayload())
+            .setTable(token.getTable())
             .build();
     }
 

@@ -187,7 +187,6 @@ public class QueryEventBuilder extends BinlogBuilder {
         statuVarPars.putInt(Q_FLAGS2_CODE, 0);
         statuVarPars.putLong(Q_SQL_MODE_CODE,
             SQLModeConsts.MODE_ONLY_FULL_GROUP_BY | SQLModeConsts.MODE_STRICT_TRANS_TABLES
-                | SQLModeConsts.MODE_NO_ZERO_IN_DATE | SQLModeConsts.MODE_NO_ZERO_DATE
                 | SQLModeConsts.MODE_ERROR_FOR_DIVISION_BY_ZERO | SQLModeConsts.MODE_NO_ENGINE_SUBSTITUTION);
         statuVarPars.putString(Q_CATALOG_NZ_CODE, "std");
         statuVarPars.putString(Q_TIME_ZONE_CODE, "SYSTEM");

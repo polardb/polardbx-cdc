@@ -22,7 +22,7 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicTableMetaT
 import lombok.Data;
 
 /**
- * Created by Shuguang
+ * created by ziyang.lb
  */
 @Data
 public class TopologyRecord {

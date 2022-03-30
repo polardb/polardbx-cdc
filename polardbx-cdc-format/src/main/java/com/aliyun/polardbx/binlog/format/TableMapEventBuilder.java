@@ -119,10 +119,10 @@ public class TableMapEventBuilder extends BinlogBuilder {
 
     @Override
     protected void writePostHeader(AutoExpandBuffer outputData) throws Exception {
-        if (FormatDescriptionEvent.EVENT_HEADER_LENGTH[BinlogEventType.TABLE_MAP_EVENT.getType() - 1] == 8) {
-            numberToBytes(outputData, tableId, 6);
-        } else {
+        if (FormatDescriptionEvent.EVENT_HEADER_LENGTH[BinlogEventType.TABLE_MAP_EVENT.getType() - 1] == 6) {
             numberToBytes(outputData, tableId, INT32);
+        } else {
+            numberToBytes(outputData, tableId, 6);
         }
         numberToBytes(outputData, _flags, INT16);
     }

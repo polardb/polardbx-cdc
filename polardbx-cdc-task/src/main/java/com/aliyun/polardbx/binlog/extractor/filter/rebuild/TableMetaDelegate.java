@@ -27,7 +27,6 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
@@ -52,8 +51,8 @@ import java.util.stream.Collectors;
 public class TableMetaDelegate implements ITableMetaDelegate {
 
     private static final Logger logger = LoggerFactory.getLogger(TableMetaDelegate.class);
-    private PolarDbXTableMetaManager target;
-    private List<TableMetaChangeListener> changeListenerList = new CopyOnWriteArrayList<>();
+    private final PolarDbXTableMetaManager target;
+    private final List<TableMetaChangeListener> changeListenerList = new CopyOnWriteArrayList<>();
     private String lastApplyLogicTSO;
 
     public TableMetaDelegate(PolarDbXTableMetaManager target) {
@@ -62,12 +61,12 @@ public class TableMetaDelegate implements ITableMetaDelegate {
 
     @Override
     public TableMeta find(String phyDbName, String phyTableName) {
-        return target.find(phyDbName, phyTableName);
+        return target.findPhyTable(phyDbName, phyTableName);
     }
 
     @Override
     public void apply(BinlogPosition position, String schema, String ddl, String extra, RuntimeContext rc) {
-        target.apply(position, schema, ddl, extra);
+        target.applyPhysical(position, schema, ddl, extra);
         fireEvent(schema, ddl, true, false, rc);
     }
 
@@ -166,13 +165,14 @@ public class TableMetaDelegate implements ITableMetaDelegate {
 
     @Override
     public void destroy() {
-        target.destory();
+        target.destroy();
     }
 
     @Override
     public TableMeta findLogic(String phySchema, String phyTable) {
         LogicMetaTopology.LogicDbTopology logicTopology = target.getLogicSchema(phySchema, phyTable);
-        return target.findLogic(logicTopology.getSchema(), logicTopology.getLogicTableMetas().get(0).getTableName());
+        return target
+            .findLogicTable(logicTopology.getSchema(), logicTopology.getLogicTableMetas().get(0).getTableName());
     }
 
     @Override
@@ -182,10 +182,9 @@ public class TableMetaDelegate implements ITableMetaDelegate {
         phyTableTopologyList.forEach(s -> {
             final Set<String> phyTables = s.getPhyTables()
                 .stream()
-                .map(t -> CommonUtils.unwrap(t.toLowerCase()))
+                .map(String::toLowerCase)
                 .collect(Collectors.toSet());
-            final String schema = CommonUtils.unwrap(s.getSchema().toLowerCase());
-            //            removeUnAcceptTable(phyTables, schema, s.getGroup(), delegate);
+            final String schema = s.getSchema().toLowerCase();
             Set<String> tmpTablesSet = tmpFilter.computeIfAbsent(schema, k -> new HashSet<>());
             tmpTablesSet.addAll(phyTables);
         });
@@ -195,7 +194,7 @@ public class TableMetaDelegate implements ITableMetaDelegate {
         logicDbTopologyList.forEach(t -> {
             t.getPhySchemas().forEach(phyDbTopology -> {
                 if (phyDbTopology.getStorageInstId().equalsIgnoreCase(storageInstanceId)) {
-                    String phySchema = CommonUtils.unwrap(phyDbTopology.getSchema().toLowerCase());
+                    String phySchema = phyDbTopology.getSchema().toLowerCase();
                     if (!tmpFilter.containsKey(phySchema)) {
                         tmpFilter.put(phySchema, new HashSet<>());
                     }
@@ -232,5 +231,10 @@ public class TableMetaDelegate implements ITableMetaDelegate {
     @Override
     public LogicTableMeta compare(String schema, String table) {
         return target.compare(schema, table);
+    }
+
+    @Override
+    public Set<String> findIndexes(String schema, String table) {
+        return target.findIndexes(schema, table);
     }
 }

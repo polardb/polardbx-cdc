@@ -51,7 +51,6 @@ public class TableMetaCache {
         this.connection = connection;
         this.memoryTableMeta = new MemoryTableMeta(logger);
     }
-
     public TableMeta getTableMeta(String schema, String table) throws Throwable {
         TableMeta tableMeta = memoryTableMeta.find(schema, table);
         if (tableMeta == null) {

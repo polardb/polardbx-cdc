@@ -84,6 +84,7 @@ public class SystemControlResource {
     private static final String CDC_METADB_RESET_10 =
         String.format("delete from binlog_system_config where config_key='%s';",
             CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY);
+    private static final String CDC_METADB_RESET_11 = "truncate binlog_semi_snapshot";
 
     private static final String QUERY_VIP_STORAGE =
         "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";

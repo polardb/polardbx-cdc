@@ -25,6 +25,7 @@ import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ITableMetaDelegate;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.TableMetaChangeListener;
+import com.google.common.collect.Sets;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -101,5 +102,10 @@ public class MockTableMetaDelegate implements ITableMetaDelegate {
         logicTableMeta.setPhySchema(schema);
         logicTableMeta.setPhyTable(table);
         return logicTableMeta;
+    }
+
+    @Override
+    public Set<String> findIndexes(String schema, String table) {
+        return Sets.newHashSet();
     }
 }

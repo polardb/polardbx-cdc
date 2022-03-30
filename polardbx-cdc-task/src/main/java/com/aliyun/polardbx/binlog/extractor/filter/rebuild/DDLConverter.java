@@ -96,7 +96,7 @@ public class DDLConverter {
             }
             ddl = tryLowercase(ddl, lowerCaseTableNames);
         } catch (Exception e) {
-            logger.error("parse ddl failed! ", e);
+            logger.error("parse ddl failed when format polarx ddl sql! ", e);
         }
         return ddl;
     }
@@ -141,6 +141,7 @@ public class DDLConverter {
             createTableStatement.setPrefixBroadcast(false);
             createTableStatement.setPrefixPartition(false);
             createTableStatement.setTableGroup(null);
+            createTableStatement.setAutoSplit(null);
             if (StringUtils.isNotBlank(tbCollation)) {
                 String charset = CharsetConversion.getCharsetByCollation(tbCollation);
                 if (StringUtils.isNotBlank(charset)) {
@@ -250,7 +251,8 @@ public class DDLConverter {
         }
         return false;
     }
-    
+
+    //hack reason : https://aone.alibaba-inc.com/issue/36088240
     private static void hack4RepairTableName(String tableName, SQLCreateTableStatement createTableStatement,
                                              String ddlSql) {
         if (StringUtils.isBlank(tableName)) {
@@ -261,8 +263,6 @@ public class DDLConverter {
         String tableNameInSqlNormal = SQLUtils.normalize(tableNameInSql);
 
         if (!StringUtils.equals(tableName, tableNameInSqlNormal)) {
-            logger.warn("prepare to repair table name for sql {}, new tableName is {}, old tableName is {}.",
-                ddlSql, tableName, tableNameInSqlNormal);
             createTableStatement.setTableName("`" + escape(tableName) + "`");
             logger.warn("repair table name in create sql, before : {}, after :{}", tableNameInSql, tableName);
         }

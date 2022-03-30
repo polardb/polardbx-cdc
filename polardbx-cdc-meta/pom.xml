@@ -5,7 +5,7 @@
     <parent>
         <artifactId>polardbx-cdc</artifactId>
         <groupId>com.aliyun.polardbx</groupId>
-        <version>5.4.12-SNAPSHOT</version>
+        <version>5.4.13-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -21,7 +21,7 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-common</artifactId>
-            <version>5.4.12-SNAPSHOT</version>
+            <version>5.4.13-SNAPSHOT</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.alibaba.fastsql</groupId>
@@ -32,13 +32,19 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-canal</artifactId>
-            <version>5.4.12-SNAPSHOT</version>
+            <version>5.4.13-SNAPSHOT</version>
         </dependency>
 
         <dependency>
             <groupId>com.alibaba.polardbx</groupId>
             <artifactId>polardbx-parser</artifactId>
             <version>${polardbx-parser.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-monitor</artifactId>
+            <version>5.4.13-SNAPSHOT</version>
         </dependency>
     </dependencies>
 

@@ -49,4 +49,6 @@ public interface ITableMetaDelegate {
     LogicMetaTopology.LogicDbTopology getLogicSchema(String phySchema, String phyTable);
 
     LogicTableMeta compare(String schema, String table);
+
+    Set<String> findIndexes(String schema, String table);
 }

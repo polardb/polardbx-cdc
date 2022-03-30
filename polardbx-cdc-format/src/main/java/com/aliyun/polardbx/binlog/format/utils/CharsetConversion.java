@@ -423,6 +423,11 @@ public final class CharsetConversion {
             return mysqlCharset;
         }
 
+        //https://dev.mysql.com/doc/refman/8.0/en/charset-unicode-utf8mb3.html
+        if ("utf8mb3".equalsIgnoreCase(mysqlCharset)) {
+            mysqlCharset = "utf8";
+        }
+
         Entry entry = mysqlCharsetMap.get(mysqlCharset.toUpperCase());
         if (entry == null) {
             return mysqlCharset;

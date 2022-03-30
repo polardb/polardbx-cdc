@@ -25,17 +25,28 @@ import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.rpc.cdc.BinaryLog;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc;
+import com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest;
+import com.aliyun.polardbx.rpc.cdc.ChangeReplicationFilterRequest;
 import com.aliyun.polardbx.rpc.cdc.DumpRequest;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.rpc.cdc.MasterStatus;
 import com.aliyun.polardbx.rpc.cdc.Request;
+import com.aliyun.polardbx.rpc.cdc.ResetSlaveRequest;
+import com.aliyun.polardbx.rpc.cdc.RplCommandResponse;
 import com.aliyun.polardbx.rpc.cdc.ShowBinlogEventsRequest;
+import com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusRequest;
+import com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusResponse;
+import com.aliyun.polardbx.rpc.cdc.StartSlaveRequest;
+import com.aliyun.polardbx.rpc.cdc.StopSlaveRequest;
+import com.aliyun.polardbx.rpl.common.LogUtil;
+import com.aliyun.polardbx.rpl.taskmeta.RplServiceManager;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
@@ -59,6 +70,7 @@ public class CdcServer {
     private Server server;
     private boolean localMode;
     private final ExecutorService executor;
+    private static Logger metaLogger = LogUtil.getMetaLogger();
 
     public CdcServer(String taskName, LogFileManager logFileManager, int port) {
         this.taskName = taskName;
@@ -93,7 +105,7 @@ public class CdcServer {
                     (ServerCallStreamObserver<BinlogEvent>) responseObserver;
                 LogFileReader logFileReader = new LogFileReader(logFileManager);
                 String fileName = StringUtils.isEmpty(request.getLogName()) ? logFileManager
-                    .getMaxBinlogFileName()
+                    .getMinBinlogFileName()
                     : request.getLogName();
                 logFileReader.showBinlogEvent(fileName, request.getPos(), request.getOffset(), request.getRowCount(),
                     serverCallStreamObserver);
@@ -143,6 +155,45 @@ public class CdcServer {
                     txnOutputStream.setExecutingThead(Thread.currentThread());
                     logFileReader.binlogSync(request.getFileName(), request.getPosition(), txnOutputStream);
                 });
+            }
+
+            ///////////////////////////// Replicate /////////////////////////
+            @Override
+            public void changeMaster(ChangeMasterRequest request, StreamObserver<RplCommandResponse> responseObserver) {
+                metaLogger.info("changeMaster: " + request.getRequest());
+                RplServiceManager.changeMaster(request, responseObserver);
+            }
+
+            @Override
+            public void changeReplicationFilter(ChangeReplicationFilterRequest request,
+                                                StreamObserver<RplCommandResponse> responseObserver) {
+                metaLogger.info("changeReplicationFilter: " + request.getRequest());
+                RplServiceManager.changeReplicationFilter(request, responseObserver);
+            }
+
+            @Override
+            public void startSlave(StartSlaveRequest request, StreamObserver<RplCommandResponse> responseObserver) {
+                metaLogger.info("startSlave: " + request.getRequest());
+                RplServiceManager.startSlave(request, responseObserver);
+            }
+
+            @Override
+            public void stopSlave(StopSlaveRequest request, StreamObserver<RplCommandResponse> responseObserver) {
+                metaLogger.info("stopSlave: " + request.getRequest());
+                RplServiceManager.stopSlave(request, responseObserver);
+            }
+
+            @Override
+            public void resetSlave(ResetSlaveRequest request, StreamObserver<RplCommandResponse> responseObserver) {
+                metaLogger.info("resetSlave: " + request.getRequest());
+                RplServiceManager.resetSlave(request, responseObserver);
+            }
+
+            @Override
+            public void showSlaveStatus(ShowSlaveStatusRequest request,
+                                        StreamObserver<ShowSlaveStatusResponse> responseObserver) {
+                metaLogger.info("showSlaveStatus: " + request.getRequest());
+                RplServiceManager.showSlaveStatus(request, responseObserver);
             }
         };
 

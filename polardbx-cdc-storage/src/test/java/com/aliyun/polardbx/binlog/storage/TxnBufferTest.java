@@ -45,7 +45,8 @@ public class TxnBufferTest {
         Assert.assertEquals(size * (count + 1), txnBuffer.itemSize());
 
         // 验证是否有序
-        final TxnItemRef lastRef = new TxnItemRef(txnBuffer, "", 19, null, null, null);
+        final TxnItemRef lastRef = new TxnItemRef(txnBuffer, "", "", 19, null,
+            null, null, null, null);
         txnBuffer.iterator().forEachRemaining(i -> {
             int result = i.compareTo(lastRef);
             Assert.assertTrue(result > 0);
@@ -62,8 +63,9 @@ public class TxnBufferTest {
         boolean result = txnBuffer.seek(seed);
         Assert.assertTrue(result);
         Assert.assertEquals(index, txnBuffer.itemSize());
-        Assert
-            .assertFalse(txnBuffer.seek(new TxnItemRef(txnBuffer, UUID.randomUUID().toString(), 19, null, null, null)));
+        Assert.assertFalse(txnBuffer.seek(
+            new TxnItemRef(txnBuffer, UUID.randomUUID().toString(), "", 19, null,
+                null, null, null, null)));
     }
 
     private static void testMergePerformance() {

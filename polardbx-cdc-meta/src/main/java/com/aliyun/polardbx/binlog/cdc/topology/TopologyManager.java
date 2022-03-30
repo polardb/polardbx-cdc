@@ -162,6 +162,19 @@ public class TopologyManager {
         return null;
     }
 
+    public String getStorageInstIdByPhySchema(String phySchema) {
+        Preconditions.checkNotNull(phySchema);
+        toLowerCase(phySchema);
+        for (LogicDbTopology logicSchema : topology.getLogicDbMetas()) {
+            for (PhyDbTopology phyDbTopology : logicSchema.getPhySchemas()) {
+                if (phySchema.equals(phyDbTopology.getSchema())) {
+                    return phyDbTopology.getStorageInstId();
+                }
+            }
+        }
+        return "";
+    }
+
     public LogicDbTopology getLogicSchema(String phySchema, String phyTable) {
         Preconditions.checkNotNull(phySchema);
         Preconditions.checkNotNull(phyTable);

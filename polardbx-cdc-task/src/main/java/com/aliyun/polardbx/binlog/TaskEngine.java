@@ -60,6 +60,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_PATH;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_REPO_UNIT_COUNT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_TXNITEM_PERSIST_THRESHOLDE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_TXN_PERSIST_THRESHOLD;
+import static com.aliyun.polardbx.binlog.scheduler.model.TaskConfig.ORIGIN_TSO;
 
 /**
  * Created by ziyang.lb
@@ -252,13 +253,15 @@ public class TaskEngine implements TxnMessageProvider {
     }
 
     private LogEventMerger buildMerger(String startTSO) {
+        String expectedStorageTso = StorageUtil.buildExpectedStorageTso(startTSO);
         LogEventMerger result = new LogEventMerger(taskInfo.getType(),
             collector,
             DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_MERGER_MERGE_NOTSO_XA),
             startTSO,
             DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_MERGER_DRYRUN),
             DynamicApplicationConfig.getInt(ConfigKeys.TASK_MERGER_DRYRUN_MODE),
-            storage);
+            storage,
+            StringUtils.equals(expectedStorageTso, ORIGIN_TSO) ? null : expectedStorageTso);
         result.addHeartBeatWindowAware(collector);
         result.setForceCompleteHbWindow(taskInfo.isForceCompleteHbWindow());
         return result;

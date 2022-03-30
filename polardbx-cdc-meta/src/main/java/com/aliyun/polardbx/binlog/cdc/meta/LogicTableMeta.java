@@ -23,7 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Created by Shuguang
+ * created by ziyang.lb
  */
 public class LogicTableMeta {
     private boolean compatible;//是否兼容

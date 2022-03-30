@@ -22,12 +22,18 @@ import lombok.Data;
 import lombok.ToString;
 
 /**
- *
+ * created by ziyang.lb
  */
 @Data
 @Builder
 @ToString
 public class DDLRecord {
-    private String sqlKind, schemaName, tableName, ddlSql, metaInfo, originDdlSql;
+    private Long id;
+    private Long jobId;
+    private String sqlKind;
+    private String schemaName;
+    private String tableName;
+    private String ddlSql;
+    private String metaInfo;
     private DDLExtInfo extInfo;
 }

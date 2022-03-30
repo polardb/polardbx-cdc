@@ -23,9 +23,9 @@ See [Quick Start](https://github.com/ApsaraDB/galaxysql#to-quick-start-with-pola
 
 PolarDB-X is fully compatible with MySQL binary log related commands, such as `SHOW BINARY LOGS`, `SHOW BINLOG EVENTS`, etc. All commands can be found in the [official MySQL documentation](https://dev.mysql.com/doc/refman/8.0/en/binary-log-formats.html).
    
-3. PolarDB-X as MySQL Slave (WIP)
+3. PolarDB-X as MySQL Slave
 
-PolarDB-X supports MySQL `CHANGE MASTER TO` command, you can use PolarDB-X as MySQL slave, refer to MySQL [official document](https://dev.mysql.com/doc/refman/8.0/en/change-master-to.html) for command details.
+PolarDB-X supports MySQL Replica related commands, such as `CHANGE MASTER TO`，`START/STOP/RESET SLAVE`，`SHOW SLAVE STATUS`, etc. you can use PolarDB-X as MySQL slave, refer to  [Replica Reference Manual](https://github.com/ApsaraDB/galaxycdc/tree/main/polardbx-cdc-rpl/README.md) for command details.
 
 See [more docs](https://github.com/ApsaraDB/galaxysql#quick-start) about PolarDB-X.
 

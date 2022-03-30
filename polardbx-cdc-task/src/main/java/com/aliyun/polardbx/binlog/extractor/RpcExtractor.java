@@ -133,7 +133,9 @@ public class RpcExtractor implements Extractor {
                                     txnBuffer.get().push(
                                         message.getTxnData().getTxnItemsList().stream()
                                             .map(i -> TxnBufferItem.builder().eventType(i.getEventType())
-                                                .traceId(i.getTraceId()).byteStringPayload(i.getPayload()).build())
+                                                .traceId(i.getTraceId()).byteStringPayload(i.getPayload())
+                                                .rowsQuery(i.getRowsQuery()).schema(i.getSchema()).table(i.getTable())
+                                                .build())
                                             .collect(Collectors.toList())
                                     );
                                 } else if (processType == MessageType.END) {

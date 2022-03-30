@@ -35,19 +35,9 @@ public class TxnKey {
      */
     private final String partitionId;
 
-    /**
-     * 是否验证traceId的顺序,默认为true
-     */
-    private final boolean checkTraceId;
-
     public TxnKey(String txnId, String partitionId) {
-        this(txnId, partitionId, true);
-    }
-
-    public TxnKey(String txnId, String partitionId, boolean checkTraceId) {
         this.txnId = txnId;
         this.partitionId = partitionId;
-        this.checkTraceId = checkTraceId;
     }
 
     public String getTxnId() {
@@ -56,10 +46,6 @@ public class TxnKey {
 
     public String getPartitionId() {
         return partitionId;
-    }
-
-    public boolean isCheckTraceId() {
-        return checkTraceId;
     }
 
     // equals和hashcode，用txnId和partitionId就够了
@@ -82,7 +68,6 @@ public class TxnKey {
 
     @Override
     public String toString() {
-        return "TxnKey{" + "txnId='" + txnId + '\'' + ", partitionId='" + partitionId + '\'' + ", checkTraceId="
-            + checkTraceId + '}';
+        return "TxnKey{" + "txnId='" + txnId + '\'' + ", partitionId='" + partitionId + '\'' + '}';
     }
 }

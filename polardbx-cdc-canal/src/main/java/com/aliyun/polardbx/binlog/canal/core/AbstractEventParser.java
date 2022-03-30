@@ -96,6 +96,17 @@ public abstract class AbstractEventParser implements BinlogEventParser {
     protected abstract BinlogPosition findStartPosition(ErosaConnection connection, BinlogPosition position)
         throws IOException;
 
+    public BinlogPosition findStartPositionOnceBeforeStart(ErosaConnection connection, BinlogPosition position)
+        throws IOException {
+        if (running) {
+            return null;
+        }
+        running = true;
+        BinlogPosition returnPos = findStartPosition(connection, position);
+        running = false;
+        return returnPos;
+    }
+
     protected void preDump(ErosaConnection connection) {
     }
 
@@ -396,6 +407,10 @@ public abstract class AbstractEventParser implements BinlogEventParser {
         this.polarxInstanceId = polarxInstanceId;
     }
 
+    public void setNeedTransactionPosition(boolean value) {
+        this.needTransactionPosition.set(value);
+    }
+
     private class DefaultTailEventFilter implements LogEventFilter {
 
         @Override
@@ -423,5 +438,6 @@ public abstract class AbstractEventParser implements BinlogEventParser {
         public void onStartConsume(HandlerContext context) {
 
         }
+
     }
 }

@@ -44,6 +44,7 @@ public class Bank {
     private boolean start = false;
     private AtomicLong counter = new AtomicLong(0);
     private long interval = 15;
+    private long lastTimestamp = System.currentTimeMillis();
     private Random random = new Random(System.currentTimeMillis());
     private ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(
         new ThreadFactory() {
@@ -191,8 +192,9 @@ public class Bank {
         //            long counter = Bank.this.counter.getAndSet(0);
         //            throw new RuntimeException("unexpected total balance : " + sum + " tps : (" + counter / interval + ")/s");
         //        } else {
+        long now = System.currentTimeMillis();
         long counter = this.counter.getAndSet(0);
-        logger.info("tps : (" + counter / interval + ")/s");
+        logger.info("tps : (" + counter / TimeUnit.MILLISECONDS.toSeconds(now - lastTimestamp) + ")/s");
         //        }
 
     }

@@ -130,7 +130,7 @@ clean_log() {
         print "dir[$clean_log_path] removed!" $2
         sudo rm -rvf $clean_log_path
     else
-        if [[ ${clean_log_path: -6} == ".hprof" ]] || [[ "$clean_log_path" == *"gc.log-20"* ]] || [[ "$clean_log_path" == *"console.log-20"* ]]; then
+        if [[ ${clean_log_path: -6} == ".hprof" ]] || [[ "$clean_log_path" == *"gc.log-20"* ]] || [[ "$clean_log_path" == *"console.log-20"* ]] || [[ ${clean_log_path: -4} == ".tmp" ]]; then
             sudo rm -fv $clean_log_path
         elif [[ ${clean_log_path: -4} == ".pid" ]]; then
             print "skip the ${clean_log_path} file"
@@ -168,6 +168,9 @@ do
         process_path="$cdc_log_path/polardbx-binlog"
         clean_process_log $process_path $clean_level
 
+        process_path_2="$cdc_log_path/polardbx-rpl"
+        clean_db_log $process_path_2 $clean_level
+
     else
         print "clean finish! current usage[$use GB] `date`===================="
         exit
@@ -186,3 +189,36 @@ sudo find /var/log/ -type f -size +500M -exec cp /dev/null {} \;
 #use=`df -h $cdc_log_path|sed '1d'|awk '{print $5+0}'`
 get_dir_size
 print "clean finish! current useage $use GB `date`===================="
+
+
+########################### binlog-rpl log 清理 #############################
+# 删除超过 30 天未更新过的文件和文件夹
+day=30
+maxGb=30
+folder=/home/admin/logs/polardbx-rpl
+
+#  -path 排除 folder 本身
+find $folder -path "$folder" -type d -mtime +$day -exec rm -rf {} \;
+find $folder -type f -mtime +$day -exec rm -rf {} \;
+# statistic.log, position.log, commit.log，gc.log 总是保存 30 天，因为每个文件大小比较固定，每天约 5M
+
+while [ $day -ge 1 ]
+do
+day=`expr $day - 1`
+rpl_log_size=`du -sb $folder | awk '{print $1}'`
+rpl_log_size_g=`expr $rpl_log_size / 1024 / 1024 / 1024`
+echo "rpl log size: " $rpl_log_size_g GB
+
+if [ $rpl_log_size_g -ge $maxGb ];then
+    # 如果还是很大，删除所有已经归档的 default.*.gz 和 meta.*.gz 文件
+    echo remove $day day .gz log files
+    find $folder -type f -mtime +$day -name 'default.*.gz' -exec ls -Shl {} +;
+    find $folder -type f -mtime +$day -name 'meta.*.gz' -exec ls -Shl {} +;
+
+    find $folder -type f -mtime +$day -name 'default.*.gz' -exec rm -rf {} \;
+    find $folder -type f -mtime +$day -name 'meta.*.gz' -exec rm -rf {} \;
+else
+    echo break
+    break
+fi
+done

@@ -53,7 +53,7 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
     @Override
     public void handle(Transaction transaction) throws Exception {
         if (logger.isDebugEnabled()) {
-            logger.error("output transaction : " + transaction.toString());
+            logger.debug("output transaction : " + transaction.toString());
         }
 
         pushToken(transaction);
@@ -95,7 +95,7 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             .setTxnSize(transaction.getEventCount())
             .setTxnId(txnId)
             .setType(TxnType.DML)
-            .setBeginSchema(transaction.getStartSchema())
+            .setSchema(transaction.getStartSchema())
             .setTsoTransaction(transaction.isTsoTransaction())
             .setXaTxn(transaction.isXa())
             .setSnapshotSeq(transaction.getSnapshotSeq() == null ? -1 : transaction.getSnapshotSeq());
@@ -114,6 +114,10 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
         if (transaction.isDDL()) {
             txnTokenBuilder.setPayload(ByteString.copyFrom(transaction.getDdlEvent().getData()));
             txnTokenBuilder.setType(TxnType.META_DDL);
+            String schema = transaction.getDdlEvent().getDdlRecord().getSchemaName();
+            String table = transaction.getDdlEvent().getDdlRecord().getTableName();
+            txnTokenBuilder.setSchema(schema == null ? "" : schema);
+            txnTokenBuilder.setTable(table == null ? "" : table);
             logger.info("output logic ddl : " + transaction.getDdlEvent().getDdlRecord().getDdlSql() + " for : "
                 + transaction.getVirtualTSO());
         }

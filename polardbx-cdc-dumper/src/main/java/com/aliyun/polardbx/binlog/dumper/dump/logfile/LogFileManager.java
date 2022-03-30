@@ -23,6 +23,8 @@ import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.task.ICursorProvider;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -40,6 +42,7 @@ public class LogFileManager implements ICursorProvider {
 
     private static final String BINLOG_FILE_PREFIX = "binlog.";
     private static final int BINLOG_FILE_SUFFIX_LENGTH = 6;        // TODO binlog file name的数字编号是可以大于6位的
+    private static final Logger logger = LoggerFactory.getLogger(LogFileManager.class);
 
     private String taskName;
     private String binlogFileDirPath;

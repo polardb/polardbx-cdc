@@ -98,7 +98,7 @@ public class LogEventMergerTest {
             public void setCurrentHeartBeatWindow(HeartBeatWindow window) {
 
             }
-        }, false, "", false, 1, null);
+        }, false, "", false, 1, null, null);
         return merger;
     }
 

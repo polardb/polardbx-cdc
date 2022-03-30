@@ -76,7 +76,7 @@ public class LogEventMerger implements Merger {
     private final AtomicReference<TxnToken> firstDmlToken;
 
     private MergeItem lastMergeItem;
-    private TxnToken lastScaleToken;
+    private String lastScaleTso;
     private long forceCountAfterLastScale;
     private String lastTso;
     private HeartBeatWindow currentWindow;
@@ -87,13 +87,14 @@ public class LogEventMerger implements Merger {
     private volatile boolean running;
 
     public LogEventMerger(TaskType taskType, Collector collector, boolean isMergeNoTsoXa, String startTso,
-                          boolean dryRun, int dryRunMode, Storage storage) {
+                          boolean dryRun, int dryRunMode, Storage storage, String lastScaleTso) {
         this.taskType = taskType;
         this.collector = collector;
         this.startTso = startTso;
         this.dryRun = dryRun;
         this.dryRunMode = dryRunMode;
         this.storage = storage;
+        this.lastScaleTso = lastScaleTso;
 
         if (StringUtils.isNotBlank(startTso)) {
             this.aligned = new AtomicBoolean(true);// 如果startTso不为空，则默认为"已对齐"状态
@@ -209,7 +210,7 @@ public class LogEventMerger implements Merger {
                     lastTso = minTso;
                     doMetricsAfter(minItem.getTxnToken());
                     if (minItem.getTxnToken().getType() == TxnType.META_SCALE) {
-                        lastScaleToken = minItem.getTxnToken();
+                        lastScaleTso = minItem.getTxnToken().getTso();
                         forceCountAfterLastScale = 0;
                         logger.info("reset last scale token to : " + minItem.getTxnToken());
                     }
@@ -262,7 +263,7 @@ public class LogEventMerger implements Merger {
             // 当前的Window还未达到complete状态，又收到了下一批次的心跳Token，属于异常现象，抛异常处理
             // 未对齐之前不进行验证
             if (currentWindow != null && !currentWindow.isSameWindow(item.getTxnToken()) && aligned.get()) {
-                tryForceComplete();
+                tryForceComplete(item.getTxnToken());
                 if (!currentWindow.isComplete()) {
                     throw new PolardbxException(
                         "Received heartbeat token for next window，but current window is not complete yet. The received "
@@ -277,7 +278,7 @@ public class LogEventMerger implements Merger {
         } else {
             // 当前Window还未达到complete状态，收到了非心跳Token，属于异常现象，抛异常处理
             if (currentWindow != null && aligned.get()) {// 未对齐之前不进行验证
-                tryForceComplete();
+                tryForceComplete(item.getTxnToken());
                 if (!currentWindow.isComplete()) {
                     throw new PolardbxException(
                         "Received none heartbeat token, but current window is not ready yet. The received token is "
@@ -288,17 +289,14 @@ public class LogEventMerger implements Merger {
         }
     }
 
-    private void tryForceComplete() {
+    private void tryForceComplete(TxnToken latestToken) {
         if (!currentWindow.isComplete()) {
             if (forceCompleteHbWindow) {
                 currentWindow.forceComplete();
                 return;
             }
 
-            if (lastScaleToken != null) {
-                long commitSeq = CommonUtils.getTsoTimestamp(lastScaleToken.getTso());
-                long snapshotSeq = currentWindow.getSnapshotSeq();
-
+            if (lastScaleTso != null) {
                 // 需要考虑：打标事务和心跳事务并发执行的情况
                 // <p>
                 // 之前的一个策略是：使用旧拓扑的心跳事务的snapshotSeq一定小于打标事务的commitSeq，所以，如果snapshotSeq < commitSeq则执行
@@ -308,16 +306,21 @@ public class LogEventMerger implements Merger {
                 // 新策略：最优的方案是Server内核在打标的时候，确认持有老拓扑的心跳事务都已经排空，然后再执行打标操作，但分布式场景下不太好做，另外
                 // 有很多老版本的Server，需要考略兼容性。考虑到心跳事务和打标事务之间的并发度很低，正常来说打标事务之后只会出现一次基于老拓扑的心跳事务，
                 // 除非Daemon发生脑裂，所以暂时采取一种宽松的策略，如果foreComplete的次数没有超过阈值，则也直接进行force
-                int forceCompleteThreshold = DynamicApplicationConfig.getInt(TASK_HB_WINDOW_FORCE_COMPLETE_THRESHOLD);
-                if (forceCountAfterLastScale < forceCompleteThreshold) {
+                long forceCompleteThreshold = DynamicApplicationConfig.getLong(TASK_HB_WINDOW_FORCE_COMPLETE_THRESHOLD);
+                long interval = getTsoPhysicalTime(latestToken.getTso(), TimeUnit.SECONDS) - getTsoPhysicalTime(
+                    lastScaleTso, TimeUnit.SECONDS);
+
+                if (interval <= forceCompleteThreshold) {
                     currentWindow.forceComplete();
-                    logger.warn("Force complete heart beat window, last scale token`s commitSeq is {}, "
-                            + "this heart beat window`s snapshot seq is{}.",
-                        commitSeq, snapshotSeq);
+                    logger.warn("Force complete heartbeat window, last scale token`s commit tso is {},"
+                            + " current heartbeat window`s commit tso is {}, latest txn token`s commit tso is {},"
+                            + " forceCountAfterLastScale is {}, interval is {}.", lastScaleTso,
+                        currentWindow.getActualTso(), latestToken.getTso(), forceCountAfterLastScale, interval);
                 } else {
-                    logger.error(
-                        "snapshot seq {} is large than commit seq {}, but heartbeat window is not complete, maybe it`s a bug.",
-                        snapshotSeq, commitSeq);
+                    logger.warn("Can`t force complete heartbeat window, last scale token`s commit tso is {},"
+                            + " current heartbeat window`s commit tso is {}, latest txn token`s commit tso is {},"
+                            + " forceCountAfterLastScale is {}, interval is {}.", lastScaleTso,
+                        currentWindow.getActualTso(), latestToken.getTso(), forceCountAfterLastScale, interval);
                 }
             }
         }
@@ -366,7 +369,7 @@ public class LogEventMerger implements Merger {
             }
         }
 
-        if (currentWindow != null && currentWindow.isForceComplete() && lastScaleToken != null) {
+        if (currentWindow != null && currentWindow.isForceComplete() && lastScaleTso != null) {
             forceCountAfterLastScale++;
         }
 

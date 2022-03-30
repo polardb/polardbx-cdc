@@ -24,6 +24,9 @@ import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Enumeration;
 import java.util.Objects;
 import java.util.Random;
@@ -239,4 +242,8 @@ public class CommonUtils {
         return new MarkInfo(rowLogsQuery);
     }
 
+    public static Date parse(String date, String pattern) throws ParseException {
+        SimpleDateFormat sdf = new SimpleDateFormat(pattern);
+        return sdf.parse(date);
+    }
 }

@@ -25,6 +25,7 @@ import com.aliyun.polardbx.binlog.canal.core.dump.SinkFunction;
 import com.aliyun.polardbx.binlog.canal.core.dump.SinkResult;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
 
 import java.io.IOException;
@@ -59,6 +60,9 @@ public class LocalBinlogParser extends AbstractEventParser {
         decoder.handle(LogEvent.ROWS_QUERY_LOG_EVENT);
         decoder.handle(LogEvent.XA_PREPARE_LOG_EVENT);
         LogContext context = new LogContext();
+        context.setServerCharactorSet(
+            ServerCharactorSet.builder().characterSetServer("utf8mb4").characterSetClient("utf8mb4")
+                .characterSetConnection("utf8mb4").characterSetDatabase("utf8mb4").build());
         LogPosition logPosition = new LogPosition(binlogfilename, 0);
         context.setLogPosition(logPosition);
         while (fetcher.fetch()) {
@@ -121,6 +125,7 @@ public class LocalBinlogParser extends AbstractEventParser {
                     try {
                         head.doNext(event);
                     } catch (Exception e) {
+                        System.out.println("fatal error at position " + logPosition);
                         e.printStackTrace();
                         return false;
                     }

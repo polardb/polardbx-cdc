@@ -88,9 +88,13 @@ message TxnToken{
    */
   int32           txnSize = 8;
   /**
-    dumper生成事务的begin头时使用
+    1.dumper生成事务的begin头时使用
+    2.ddl场景下标识ddl sql对应的库名
    */
-  string          beginSchema = 9;
+  string          schema = 9;
+  /**
+    该事务的所有参与者
+   */
   repeated string allParties = 10;
   /**
     一些特殊的TxnToken，没有TxnItem的概念，此时通过payload字段传输数据
@@ -100,13 +104,18 @@ message TxnToken{
     Tso事务专用
    */
   int64           snapshotSeq = 12;
+  /**
+     表名，非必须
+   */
+  string          table = 13;
 }
 
 message TxnMergedToken{
   string          tso = 1;
   TxnType         type = 2;
-  string          beginSchema = 3;
+  string          schema = 3;
   bytes           payload = 4;
+  string          table = 5;
 }
 
 message TxnItem{
@@ -116,15 +125,26 @@ message TxnItem{
     3.如果物理binlog中带有traceId标识，直接使用即可；如果物理binlog中不带有traceId标识，通过"时间戳+自增序列"手动生成 </br>
   */
   string          traceId = 1;
-  string          rowsQuery = 2;
   /**
     1.对应mysql的EventType
    */
-  int32           eventType = 3;
+  int32           eventType = 2;
   /**
     1.二进制数据
    */
-  bytes           payload = 4;
+  bytes           payload = 3;
+  /**
+    1.保存RowsQuery信息
+   */
+  string          rowsQuery = 4;
+  /**
+    对应的库名
+   */
+  string          schema = 5;
+  /**
+   对应的表名
+   */
+  string          table = 6;
 }
 
 enum TxnType{

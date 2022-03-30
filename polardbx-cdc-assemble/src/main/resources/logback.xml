@@ -76,6 +76,49 @@
         </encoder>
     </appender>
 
+    <appender name="duplicateTransactionAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${HOME}/logs/polardbx-binlog/${taskName}/duplicateTransaction.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/duplicateTransaction.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>5</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="traceIdDisorderAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${HOME}/logs/polardbx-binlog/${taskName}/traceid-disorder.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/traceid-disorder.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>5</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
 
     <appender name="file.async.commit" class="ch.qos.logback.classic.AsyncAppender">
         <!-- 不丢失日志.默认的,如果队列的80%已满,则会丢弃TRACT、DEBUG、INFO级别的日志 -->
@@ -148,6 +191,10 @@
         <appender-ref ref="fileAppender"/>
     </logger>
 
+    <logger name="duplicateTransactionLogger" level="INFO" additivity="false">
+        <appender-ref ref="duplicateTransactionAppender"/>
+    </logger>
+
     <logger name="FileTest" level="INFO" additivity="false">
         <appender-ref ref="FILE_TEST"/>
     </logger>
@@ -162,6 +209,10 @@
 
     <logger name="METRICS" level="INFO" additivity="false">
         <appender-ref ref="metricsAppender"/>
+    </logger>
+
+    <logger name="traceIdDisorderLogger" level="WARN" additivity="false">
+        <appender-ref ref="traceIdDisorderAppender"/>
     </logger>
 
     <root level="INFO">

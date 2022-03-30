@@ -33,12 +33,17 @@ public class TxnItemRef implements Comparable<TxnItemRef> {
     private final int eventType;
     private final Repository repository;
     private final AtomicBoolean persisted;
-    private byte[] referenceKey;
-    private volatile byte[] payload;
-    private volatile ByteString byteStringPayload;
     private final int payloadSize;
 
-    TxnItemRef(TxnBuffer txnBuffer, String traceId, int eventType, byte[] payload, ByteString byteStringPayload,
+    private byte[] referenceKey;
+    private String rowsQuery;
+    private String schema;
+    private String table;
+    private volatile byte[] payload;
+    private volatile ByteString byteStringPayload;
+
+    TxnItemRef(TxnBuffer txnBuffer, String traceId, String rowsQuery, int eventType, byte[] payload,
+               ByteString byteStringPayload, String schema, String table,
                Repository repository) {
         if (payload != null && byteStringPayload != null) {
             throw new IllegalStateException(
@@ -52,9 +57,12 @@ public class TxnItemRef implements Comparable<TxnItemRef> {
 
         this.txnBuffer = txnBuffer;
         this.traceId = traceId;
+        this.rowsQuery = rowsQuery == null ? "" : rowsQuery;
         this.eventType = eventType;
         this.payload = payload;
         this.byteStringPayload = byteStringPayload;
+        this.schema = schema;
+        this.table = table;
         this.payloadSize = payload != null ? payload.length : byteStringPayload.size();
         this.repository = repository;
         this.persisted = new AtomicBoolean(false);
@@ -90,12 +98,36 @@ public class TxnItemRef implements Comparable<TxnItemRef> {
         return eventType;
     }
 
+    public String getRowsQuery() {
+        return rowsQuery;
+    }
+
+    public void setRowsQuery(String rowsQuery) {
+        this.rowsQuery = rowsQuery;
+    }
+
     public boolean isPersisted() {
         return persisted.get();
     }
 
     public int getPayloadSize() {
         return payloadSize;
+    }
+
+    public String getSchema() {
+        return schema;
+    }
+
+    public void setSchema(String schema) {
+        this.schema = schema;
+    }
+
+    public String getTable() {
+        return table;
+    }
+
+    public void setTable(String table) {
+        this.table = table;
     }
 
     public ByteString getByteStringPayload() {

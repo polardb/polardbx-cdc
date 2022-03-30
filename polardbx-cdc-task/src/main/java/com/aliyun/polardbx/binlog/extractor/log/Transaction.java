@@ -18,6 +18,8 @@
 package com.aliyun.polardbx.binlog.extractor.log;
 
 import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.HandlerEvent;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
@@ -56,6 +58,10 @@ import org.slf4j.LoggerFactory;
 import java.io.UnsupportedEncodingException;
 import java.util.Iterator;
 
+import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_DDL_ID;
+import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_DDL_SQL;
+import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_JOB_ID;
+
 /**
  * 只输出 全局有序唯一TSO，下游合并自己去做 真实TSO+Xid 合并
  *
@@ -64,6 +70,7 @@ import java.util.Iterator;
  */
 public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, Iterable<TxnItemRef> {
 
+    private static final Logger duplicateTransactionLogger = LoggerFactory.getLogger("duplicateTransactionLogger");
     private static final Logger logger = LoggerFactory.getLogger(Transaction.class);
     private static final String encoding = "UTF-8";
     private static final String ZERO_19_PADDING = StringUtils.leftPad("0", 10, "0");
@@ -76,6 +83,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     private String orginalTraceId;
     private Long serverId;
     private String lastTraceId;
+    private String lastRowsQuery;
     private String charset;
     private boolean txGlobal = false;
     private Long txGlobalTso;
@@ -101,6 +109,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     private Long snapshotSeq;
     private String storageInstanceId;
     private TxnBuffer buffer;
+    private boolean ignore = false;
     private Storage storage;
     private String sourceCdcSchema;
     private String groupName;
@@ -166,8 +175,25 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     }
 
     private void buildBuffer() throws AlreadyExistException {
-        this.bufferKey = new TxnKey(transactionId + "", partitionId);
-        buffer = storage.create(bufferKey);
+        try {
+            this.bufferKey = new TxnKey(transactionId + "", partitionId);
+            buffer = storage.create(bufferKey);
+        } catch (AlreadyExistException e) {
+            if (!DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXCEPTION_SKIP_DUPLICATE_BUFFER_KEY)) {
+                throw e;
+            }
+            duplicateTransactionLogger
+                .warn("ignore duplicate txnKey Exception, skip transaction : " + transactionId + " , partition: "
+                    + partitionId + " , storageId : " + storageInstanceId + ", binlogFile: " + binlogFileName
+                    + ", logPos: "
+                    + startLogPos + ", xid: " + xid);
+            buffer = null;
+            ignore = true;
+        }
+    }
+
+    public boolean isIgnore() {
+        return ignore;
     }
 
     public TxnKey getBufferKey() {
@@ -225,6 +251,8 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
                 logger.error("parser trace error " + queryLogEvent.getRowsQuery(), e);
                 throw e;
             }
+            // 暂存Rows_Query_Event的内容，放到相邻的下一个Table_Map_Event中
+            lastRowsQuery = queryLogEvent.getRowsQuery();
             return;
         }
         if (filter(event)) {
@@ -256,17 +284,29 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         if (buffer == null) {
             return;
         }
+
+        if (StringUtils.isNotBlank(lastRowsQuery) && !lastRowsQuery.endsWith("*/")) {
+            lastRowsQuery = StringUtils.substringBetween(lastRowsQuery, "/*DRDS", "*/");
+            lastRowsQuery = "/*DRDS" + lastRowsQuery + "*/";
+        }
         TxnBufferItem txnItem = TxnBufferItem.builder()
             .traceId(logEvent.getTrace())
+            .rowsQuery(lastRowsQuery)
             .payload(logEvent.toBytes())
             .eventType(logEvent.getHeader().getType())
+            .originTraceId(orginalTraceId)
+            .binlogFile(binlogFileName)
+            .binlogPosition(logEvent.getLogPos())
             .build();
+
+        // RowsQuery Event后跟紧Table_Map，所以第一个lastRowsQuery不为空
+        // 这里将lastRowsQuery设为空之后，后面的Table_Map中的rowsQuery将为空，直到获得下一个RowsQuery中的内容
+        lastRowsQuery = "";
         try {
             buffer.push(txnItem);
         } catch (Exception e) {
-            logger.error(
-                "push to buffer error local trace : " + orginalTraceId + " with : " + binlogFileName + ":" + logEvent
-                    .getLogPos() + " buffer : " + buffer.getTxnKey() + " " + buffer.itemSize(), e);
+            logger.error("push to buffer error local trace : " + orginalTraceId + " with : " + binlogFileName + ":"
+                + logEvent.getLogPos() + " buffer : " + buffer.getTxnKey() + " " + buffer.itemSize(), e);
             logger.error("buffer cache:");
             Iterator<TxnItemRef> it = buffer.iterator();
             while (it.hasNext()) {
@@ -357,7 +397,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     private void processDDL(WriteRowsLogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
         BinlogParser binlogParser = new BinlogParser();
         binlogParser.parse(SystemDB.getInstance().getDdlTableMeta(), event, "utf8");
-        String ddl = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_DDL_SQL);
+        String id = (String) binlogParser.getField(DDL_RECORD_FIELD_DDL_ID);
+        String jobId = (String) binlogParser.getField(DDL_RECORD_FIELD_JOB_ID);
+        String ddl = (String) binlogParser.getField(DDL_RECORD_FIELD_DDL_SQL);
         String metaInfo = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_META_INFO);
         String sqlKind = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_SQL_KIND);
         String logicSchema = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_SCHEMA_NAME);
@@ -365,10 +407,12 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         String visible = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_VISIBILITY);
         String ext = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_EXT);
         DDLRecord ddlRecord = DDLRecord.builder()
+            .id(Long.valueOf(id))
+            .jobId(StringUtils.isBlank(jobId) ? null : Long.valueOf(jobId))
             .ddlSql(ddl)
             .sqlKind(sqlKind)
-            .schemaName(logicSchema)
-            .tableName(tableName)
+            .schemaName(StringUtils.lowerCase(logicSchema))
+            .tableName(StringUtils.lowerCase(tableName))
             .metaInfo(metaInfo)
             .build();
         ddlEvent = new DDLEvent();

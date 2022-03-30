@@ -25,10 +25,12 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.alibaba.polardbx.druid.sql.repository.Schema;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
@@ -39,7 +41,8 @@ import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogLogicMetaHistory;
-import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
+import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.google.common.base.Preconditions;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -48,33 +51,28 @@ import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.aliyun.polardbx.binlog.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.util.FastSQLConstant.FEATURES;
 
 /**
- * Created by Shuguang
+ * Created by ShuGuang,ziyang.lb
  */
-public class PolarDbXLogicTableMeta extends MemoryTableMeta {
+public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTableMeta {
     private static final Logger logger = LoggerFactory.getLogger(PolarDbXLogicTableMeta.class);
-    private static final byte TYPE_SNAPSHOT = 1;
-    private static final byte TYPE_DDL = 2;
-    private static final int SIZE = 100;
+    private static final int PAGE_SIZE = 100;
     private static final Gson GSON = new GsonBuilder().create();
+
+    private final TopologyManager topologyManager;
+    private final MemoryTableMeta distinctPhyMeta = new MemoryTableMeta(logger);//保存逻辑表和物理表列序不一致的meta
     private final BinlogLogicMetaHistoryMapper binlogLogicMetaHistoryMapper = SpringContextHolder.getObject(
         BinlogLogicMetaHistoryMapper.class);
-
-    private AtomicBoolean initialized = new AtomicBoolean(false);
-    private String destination;
-    private TopologyManager topologyManager;
-
-    private MemoryTableMeta phyMeta = new MemoryTableMeta(logger);
 
     public PolarDbXLogicTableMeta(TopologyManager topologyManager) {
         super(logger);
@@ -83,130 +81,165 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta {
 
     @Override
     public boolean init(final String destination) {
-        if (initialized.compareAndSet(false, true)) {
-            this.destination = destination;
-        }
         return true;
     }
 
-    public boolean applyBase(BinlogPosition position, LogicMetaTopology topology) {
+    public void applyBase(BinlogPosition position, LogicMetaTopology topology) {
+        applySnapshotInternal(topology);
+        DDLRecord record = DDLRecord.builder().schemaName("*").ddlSql(GSON.toJson(snapshot()))
+            .metaInfo(GSON.toJson(topology)).build();
+        applyToDb(position, record, MetaType.SNAPSHOT.getValue(), null);
+    }
+
+    public boolean apply(BinlogPosition position, DDLRecord record, String extra) {
+        boolean result = false;
+        if (checkBeforeApply(position.getRtso(), record.getSchemaName(), record.getTableName(), record.getDdlSql(),
+            record.getId(), record.getJobId())) {
+            apply(position, record.getSchemaName(), record.getDdlSql(), extra);
+
+            //apply distinct phy meta
+            if (record.getExtInfo() != null) {
+                String createSql4PhyTable = record.getExtInfo().getCreateSql4PhyTable();
+                if (StringUtils.isNotEmpty(createSql4PhyTable)) {
+                    distinctPhyMeta.apply(position, record.getSchemaName(), StringUtils.lowerCase(createSql4PhyTable),
+                        extra);
+                }
+            }
+
+            //apply topology
+            TopologyRecord r = GSON.fromJson(record.getMetaInfo(), TopologyRecord.class);
+            tryRepair1(position.getRtso(), r, record);
+            updateOrDropDistinctPhyMeta(position.getRtso(), record.getSchemaName(), record.getTableName(),
+                record.getSqlKind(), record.getDdlSql(), record.getExtInfo());
+            dropTopology(position.getRtso(), record.getSchemaName(), record.getTableName(), record.getDdlSql());
+            topologyManager.apply(position.getRtso(), record.getSchemaName(), record.getTableName(), r);
+
+            result = true;
+        }
+
+        applyToDb(position, record, MetaType.DDL.getValue(), extra);
+        Printer.tryPrint(position, record.getSchemaName(), record.getTableName(), this);
+        return result;
+    }
+
+    @Override
+    public void applySnapshot(String snapshotTso) {
+        // log before apply snapshot
+        AtomicLong applyCount = new AtomicLong(0L);
+        long startTime = System.currentTimeMillis();
+        JvmSnapshot jvmSnapshot = JvmUtils.buildJvmSnapshot();
+        logger.info("build logic meta snapshot started, current used memory -> young:{}, old:{}",
+            jvmSnapshot.getYoungUsed(), jvmSnapshot.getOldUsed());
+
+        // do apply
+        destory();
+        Optional<BinlogLogicMetaHistory> snapshot = binlogLogicMetaHistoryMapper.selectOne(s -> s
+            .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isEqualTo(snapshotTso)));
+        snapshot.ifPresent(s -> {
+            logger.warn("apply logic snapshot: [id={}, dbName={}, tso={}]", s.getId(), s.getDbName(), s.getTso());
+            LogicMetaTopology topology = GSON.fromJson(s.getTopology(), LogicMetaTopology.class);
+            applyCount.set(applySnapshotInternal(topology));
+        });
+
+        //log after apply snapshot
+        long costTime = System.currentTimeMillis() - startTime;
+        jvmSnapshot = JvmUtils.buildJvmSnapshot();
+        logger.info("build logic meta snapshot finished, applyCount {}, cost time {}(ms), current used memory -> "
+            + "young:{}, old:{}", costTime, applyCount.get(), jvmSnapshot.getYoungUsed(), jvmSnapshot.getOldUsed());
+    }
+
+    private long applySnapshotInternal(LogicMetaTopology topology) {
+        AtomicLong applyCount = new AtomicLong(0L);
         topology.getLogicDbMetas().forEach(s -> {
             String schema = s.getSchema();
             s.getLogicTableMetas().forEach(t -> {
                 String createSql = t.getCreateSql();
-                apply(position, schema, createSql, null);
+                apply(null, schema, createSql, null);
                 if (StringUtils.isNotEmpty(t.getCreateSql4Phy())) {
-                    phyMeta.apply(position, schema, t.getCreateSql4Phy(), null);
+                    distinctPhyMeta.apply(null, schema, t.getCreateSql4Phy(), null);
                 }
+                applyCount.incrementAndGet();
             });
         });
         topologyManager.setTopology(topology);
-        DDLRecord record = DDLRecord.builder().schemaName("*").ddlSql(GSON.toJson(snapshot())).metaInfo(
-            GSON.toJson(topology)).build();
-        applySnapshotToDB(position, record, TYPE_SNAPSHOT, null);
-        return true;
-    }
-
-    public boolean apply(BinlogPosition position, DDLRecord record, String extra) {
-        //apply meta
-        if (checkBeforeApply(position.getRtso(), record.getSchemaName(), record.getTableName(), record.getDdlSql())) {
-            apply(position, record.getSchemaName(), record.getDdlSql(), extra);
-            if (record.getExtInfo() != null && StringUtils.isNotEmpty(record.getExtInfo().getCreateSql4PhyTable())) {
-                phyMeta.apply(position, record.getSchemaName(), record.getExtInfo().getCreateSql4PhyTable(), extra);
-            }
-            //apply topology
-            TopologyRecord r = GSON.fromJson(record.getMetaInfo(), TopologyRecord.class);
-
-            fixOrDropPhyMeta(position.getRtso(), record.getSchemaName(), record.getTableName(), record.getSqlKind(),
-                record.getDdlSql());
-            dropTopology(position.getRtso(), record.getSchemaName(), record.getTableName(), record.getDdlSql());
-
-            topologyManager.apply(position.getRtso(), record.getSchemaName(), record.getTableName(), r);
-        }
-
-        // store with db
-        applySnapshotToDB(position, record, TYPE_DDL, extra);
-        return true;
+        return applyCount.get();
     }
 
     @Override
-    public boolean rollback(BinlogPosition position) {
-        // 每次rollback需要重新构建一次memory data
-        destory();
-        //获取快照tso
-        BinlogPosition snapshotPosition = getSnapshotPosition(position);
-        if (snapshotPosition.getRtso() != null) {
-            //apply snapshot
-            applySnapshot(snapshotPosition.getRtso());
-            //重放ddl和topology
-            applyHistory(snapshotPosition.getRtso(), position.getRtso());
-        }
-        return true;
-    }
+    public void applyHistory(String snapshotTso, String rollbackTso) {
+        // log before apply
+        long startTime = System.currentTimeMillis();
+        long applyCount = 0;
+        JvmSnapshot jvmSnapshot = JvmUtils.buildJvmSnapshot();
+        logger.info("apply logic ddl history started, current used memory -> young:{}, old:{}",
+            jvmSnapshot.getYoungUsed(), jvmSnapshot.getOldUsed());
 
-    private void applySnapshot(String snapshotTso) {
-        Optional<BinlogLogicMetaHistory> snapshot = binlogLogicMetaHistoryMapper.selectOne(s -> s
-            .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isEqualTo(snapshotTso))
-        );
-
-        snapshot.ifPresent(s -> {
-            logger.warn("apply logic snapshot: [id={}, dbName={}, tso={}]", s.getId(), s.getDbName(), s.getTso());
-            LogicMetaTopology topology = GSON.fromJson(s.getTopology(), LogicMetaTopology.class);
-            topology.getLogicDbMetas().forEach(x -> {
-                String schema = x.getSchema();
-                x.getLogicTableMetas().forEach(t -> {
-                    String createSql = t.getCreateSql();
-                    apply(null, schema, createSql, null);
-                    if (StringUtils.isNotEmpty(t.getCreateSql4Phy())) {
-                        phyMeta.apply(null, schema, t.getCreateSql4Phy(), null);
-                    }
-                });
-            });
-            topologyManager.setTopology(topology);
-        });
-    }
-
-    private void applyHistory(String snapshotTso, String rollbackTso) {
-        BinlogPosition position = new BinlogPosition(null, snapshotTso);
+        //apply history
         while (true) {
+            final String snapshotTsoCondition = snapshotTso;
             List<BinlogLogicMetaHistory> histories = binlogLogicMetaHistoryMapper.select(s -> s
-                .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isGreaterThan(position.getRtso()))
+                .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isGreaterThan(snapshotTsoCondition))
                 .and(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isLessThanOrEqualTo(rollbackTso))
-                .orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso).limit(SIZE)
+                .and(BinlogLogicMetaHistoryDynamicSqlSupport.type, SqlBuilder.isEqualTo(MetaType.DDL.getValue()))
+                .orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso).limit(PAGE_SIZE)
             );
             histories.forEach(h -> {
-                if (checkBeforeApply(position.getRtso(), h.getDbName(), h.getTableName(), h.getDdl())) {
-                    super.apply(null, h.getDbName(), h.getDdl(), null);
-                    if (StringUtils.isNotEmpty(h.getExtInfo())) {
-                        DDLExtInfo extInfo = GSON.fromJson(h.getExtInfo(), DDLExtInfo.class);
-                        if (extInfo != null && StringUtils.isNotEmpty(extInfo.getCreateSql4PhyTable())) {
-                            phyMeta.apply(null, h.getDbName(), extInfo.getCreateSql4PhyTable(), null);
-                        }
+                toLowerCase(h);
+                BinlogPosition position = new BinlogPosition(null, h.getTso());
+                if (checkBeforeApply(h.getTso(), h.getDbName(), h.getTableName(), h.getDdl(), h.getDdlRecordId(),
+                    h.getDdlJobId())) {
+                    super.apply(position, h.getDbName(), h.getDdl(), null);
+
+                    // apply create sql for distinct phy meta
+                    DDLExtInfo extInfo = parseExtInfo(h.getExtInfo());
+                    if (extInfo != null && StringUtils.isNotEmpty(extInfo.getCreateSql4PhyTable())) {
+                        distinctPhyMeta.apply(position, h.getDbName(), extInfo.getCreateSql4PhyTable(), null);
                     }
+
+                    // apply topology
                     if (StringUtils.isNotEmpty(h.getTopology())) {
                         TopologyRecord topologyRecord = GSON.fromJson(h.getTopology(), TopologyRecord.class);
-                        logger
-                            .warn("apply logic ddl: [id={}, dbName={}, tso={}]", h.getId(), h.getDbName(), h.getTso());
                         topologyManager.apply(h.getTso(), h.getDbName(), h.getTableName(), topologyRecord);
                     }
-                    fixOrDropPhyMeta(h.getTso(), h.getDbName(), h.getTableName(), h.getSqlKind(), h.getDdl());
+
+                    // try update distinct phy meta
+                    updateOrDropDistinctPhyMeta(h.getTso(), h.getDbName(), h.getTableName(), h.getSqlKind(),
+                        h.getDdl(), extInfo);
+
+                    //try drop topology
                     dropTopology(h.getTso(), h.getDbName(), h.getTableName(), h.getDdl());
+
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("apply one history logic ddl : [id={}, dbName={}, tableName={}, tso={}]",
+                            h.getId(), h.getDbName(), h.getTableName(), h.getTso());
+                    }
                 }
+
+                Printer.tryPrint(position, h.getDbName(), h.getTableName(), this);
             });
-            if (histories.size() == SIZE) {
-                position.setRtso(histories.get(SIZE - 1).getTso());
+
+            applyCount += histories.size();
+            if (histories.size() == PAGE_SIZE) {
+                snapshotTso = histories.get(PAGE_SIZE - 1).getTso();
             } else {
                 break;
             }
         }
+
+        //log after apply
+        long costTime = System.currentTimeMillis() - startTime;
+        jvmSnapshot = JvmUtils.buildJvmSnapshot();
+        logger.info("apply logic ddl history finished, snapshot tso {}, rollback tso {}, cost time {}(ms),"
+                + " applyCount {}" + ", current used memory -> young:{}, old:{}", snapshotTso, rollbackTso, costTime,
+            applyCount, jvmSnapshot.getYoungUsed(), jvmSnapshot.getOldUsed());
     }
 
     /**
      * 快照备份到存储, 这里只需要备份变动的table
      */
-    private boolean applySnapshotToDB(BinlogPosition position, DDLRecord record, byte type, String extra) {
+    private void applyToDb(BinlogPosition position, DDLRecord record, byte type, String extra) {
         if (position == null) {
-            return false;
+            return;
         }
         try {
             BinlogLogicMetaHistory history = BinlogLogicMetaHistory.builder()
@@ -217,37 +250,54 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta {
                 .ddl(record.getDdlSql())
                 .topology(record.getMetaInfo()).type(type)
                 .extInfo(record.getExtInfo() != null ? GSON.toJson(record.getExtInfo()) : null)
+                .ddlRecordId(record.getId())
+                .ddlJobId(record.getJobId())
                 .build();
             binlogLogicMetaHistoryMapper.insert(history);
         } catch (DuplicateKeyException e) {
-            logger.warn("ddl record already applied, ignore this time, record info is " + record);
+            if (logger.isDebugEnabled()) {
+                logger.debug("ddl record already applied, ignore this time, record tso is " + position.getRtso());
+            }
         }
-        return true;
     }
 
-    /**
-     * 从存储从获取快照位点
-     */
-    protected BinlogPosition getSnapshotPosition(BinlogPosition position) {
-        JdbcTemplate metaJdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
-        String tso = metaJdbcTemplate.queryForObject(
-            "select max(tso) tso from binlog_logic_meta_history where tso <= '" + position.getRtso() + "' and type = "
-                + TYPE_SNAPSHOT,
-            String.class);
-        return new BinlogPosition(null, tso);
-    }
-
-    public Map<String, String> phySnapshot() {
-        Collection<Schema> schemas = phyMeta.getRepository().getSchemas();
+    public Map<String, String> distinctPhySnapshot() {
+        Collection<Schema> schemas = distinctPhyMeta.getRepository().getSchemas();
         schemas.forEach(schema -> {
             logger.warn("to be replaced phySchema:{}, tables:{}", schema.getCatalog(), schema.showTables());
         });
-        return phyMeta.snapshot();
+        return distinctPhyMeta.snapshot();
+    }
+
+    public TableMeta findDistinctPhy(String schema, String table) {
+        return distinctPhyMeta.find(schema, table);
+    }
+
+    public String distinctPhySnapshot(String schema, String table) {
+        return distinctPhyMeta.snapshot(schema, table);
+    }
+
+    /**
+     * 兼容性方法，主要为了兼容很老之前的一个内核版本，在Rename场景下，Topology中记录的tablename不是Rename后的名字，而是rename前的名字
+     */
+    private void tryRepair1(String tso, TopologyRecord r, DDLRecord record) {
+        if (r != null && StringUtils.isNotEmpty(record.getDdlSql())) {
+            SQLStatementParser parser = SQLParserUtils.createSQLStatementParser(record.getDdlSql(), DbType.mysql,
+                FEATURES);
+            SQLStatement stmt = parser.parseStatementList().get(0);
+            if (stmt instanceof MySqlRenameTableStatement) {
+                String renameTo = ((MySqlRenameTableStatement) stmt).getItems().get(0).getTo().getSimpleName();
+                if (r.getLogicTableMeta() != null) {
+                    renameTo = SQLUtils.normalize(renameTo);
+                    r.getLogicTableMeta().setTableName(renameTo);
+                    record.setMetaInfo(GSON.toJson(r));
+                }
+            }
+        }
     }
 
     private void dropTopology(String tso, String schema, String tableName, String ddl) {
-        SQLStatementParser parser = SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql,
-            FastSQLConstant.FEATURES);
+        SQLStatementParser parser = SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FEATURES);
         SQLStatement stmt = parser.parseStatementList().get(0);
         if (stmt instanceof SQLDropDatabaseStatement) {
             String databaseName = ((SQLDropDatabaseStatement) stmt).getDatabaseName();
@@ -266,40 +316,98 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta {
         }
     }
 
-    private boolean checkBeforeApply(String tso, String schema, String tableName, String ddl) {
+    private boolean checkBeforeApply(String tso, String schema, String tableName, String ddl, Long ddlRecordId,
+                                     Long ddlJobId) {
         SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.FEATURES);
+            SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FEATURES);
         SQLStatement stmt = parser.parseStatementList().get(0);
 
-        // 如果是create database sql，做一下double check，将元数据尝试进行一下清理
-        // 正常不应该有元数据的，但是不排除意外情况，比如：polarx内核针对drop database未接入ddl引擎，sql执行和cdc打标无法保证原子性
+        boolean result = true;
         if (stmt instanceof SQLCreateDatabaseStatement) {
+            tryRemovePreviousMeta((SQLCreateDatabaseStatement) stmt, schema, tso);
             SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) stmt;
-            // 对于含有if not exist的sql来说，无法判断当前create database操作是否是有效操作，所以不予处理
-            if (!createDatabaseStatement.isIfNotExists()) {
-                String databaseName = createDatabaseStatement.getDatabaseName();
-                databaseName = SQLUtils.normalize(databaseName);
-                Preconditions.checkArgument(StringUtils.equalsIgnoreCase(databaseName, schema),
-                    "create database record should be coincident DDL(" + databaseName + "), History(" + schema + ")");
-                super.apply(null, schema, "drop database if exists `" + escape(databaseName) + "`", null);
-                topologyManager.removeTopology(tso, schema.toLowerCase(), null);
+            result = !createDatabaseStatement.isIfNotExists()
+                || (topologyManager.getTopology(schema) == null && !isSchemaExists(schema));
+        } else if (stmt instanceof MySqlCreateTableStatement) {
+            // fix https://aone.alibaba-inc.com/issue/38023203
+            // fix https://aone.alibaba-inc.com/issue/39665786
+            MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) stmt;
+            boolean isIfNotExists = createTableStatement.isIfNotExists();
+            if (isIfNotExists) {
+                if (ddlRecordId != null) {
+                    result = ddlJobId != null;
+                } else {
+                    result = find(schema, tableName) == null;
+                }
+            } else {
+                result = true;
+            }
+            //result = !isIfNotExists || find(schema, tableName) == null;
+        } else if (stmt instanceof SQLDropTableStatement) {
+            SQLDropTableStatement dropTableStatement = (SQLDropTableStatement) stmt;
+            boolean isIfExists = dropTableStatement.isIfExists();
+            if (isIfExists) {
+                if (ddlRecordId != null) {
+                    result = ddlJobId != null;
+                } else {
+                    result = true;
+                }
+            } else {
+                result = true;
             }
         }
 
-        if (stmt instanceof MySqlCreateTableStatement) {
-            MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) stmt;
-            return !createTableStatement.isIfNotExists() || find(schema, tableName) == null;
+        if (!result) {
+            logger.warn("ignore logic ddl sql， with tso {}, schema {}, tableName {}.", tso, schema, tableName);
         }
-
-        return true;
+        return result;
     }
 
-    private void fixOrDropPhyMeta(String tso, String schema, String tableName, String sqlKind, String ddlSql) {
-        if (phyMeta.find(schema, tableName) != null) {
+    private void updateOrDropDistinctPhyMeta(String tso, String schema, String tableName, String sqlKind, String ddlSql,
+                                             DDLExtInfo extInfo) {
+        if (distinctPhyMeta.find(schema, tableName) != null) {
             if (StringUtils.equals(sqlKind, "DROP_DATABASE") || StringUtils.equals(sqlKind, "DROP_TABLE")
                 || StringUtils.equals(sqlKind, "RENAME_TABLE")) {
-                phyMeta.apply(new BinlogPosition(null, tso), schema, ddlSql, null);
+                distinctPhyMeta.apply(new BinlogPosition(null, tso), schema, ddlSql, null);
+            } else if (StringUtils.equals(sqlKind, "ALTER_TABLE") && (extInfo == null || StringUtils
+                .isEmpty(extInfo.getCreateSql4PhyTable()))) {
+                //如果是一个普通的ALTER SQL，还是要在distinct phy meta执行的，否则会取到不一致的数据
+                distinctPhyMeta.apply(new BinlogPosition(null, tso), schema, ddlSql, null);
             }
         }
+    }
+
+    private void tryRemovePreviousMeta(SQLCreateDatabaseStatement createDatabaseStatement, String schema, String tso) {
+        // 如果是create database，将元数据尝试进行一下清理，正常不应该有元数据的，但是不排除意外情况
+        // 比如：polarx内核针对drop database未接入ddl引擎，sql执行和cdc打标无法保证原子性
+        // 但对于含有if not exist的sql来说，无法判断当前create database操作是否是有效操作，所以不予处理
+        if (!createDatabaseStatement.isIfNotExists()) {
+            String databaseName = createDatabaseStatement.getDatabaseName();
+            databaseName = SQLUtils.normalize(databaseName);
+            Preconditions.checkArgument(StringUtils.equalsIgnoreCase(databaseName, schema),
+                "create database record should be coincident DDL(" + databaseName + "), History(" + schema + ")");
+            super.apply(null, schema, "drop database if exists `" + escape(databaseName) + "`", null);
+            topologyManager.removeTopology(tso, schema.toLowerCase(), null);
+
+            logger.warn("remove previous meta for newly create database sql, tso :{}, sql :{} ", tso,
+                createDatabaseStatement.toUnformattedString());
+        }
+    }
+
+    private void toLowerCase(BinlogLogicMetaHistory logicMetaHistory) {
+        logicMetaHistory.setDbName(StringUtils.lowerCase(logicMetaHistory.getDbName()));
+        logicMetaHistory.setTableName(StringUtils.lowerCase(logicMetaHistory.getTableName()));
+        logicMetaHistory.setDdl(StringUtils.lowerCase(logicMetaHistory.getDdl()));
+    }
+
+    private DDLExtInfo parseExtInfo(String str) {
+        DDLExtInfo extInfo = null;
+        if (StringUtils.isNotEmpty(str)) {
+            extInfo = GSON.fromJson(str, DDLExtInfo.class);
+            if (extInfo != null && StringUtils.isNotBlank(extInfo.getCreateSql4PhyTable())) {
+                extInfo.setCreateSql4PhyTable(StringUtils.lowerCase(extInfo.getCreateSql4PhyTable()));
+            }
+        }
+        return extInfo;
     }
 }

@@ -126,6 +126,12 @@ public final class RotateLogEvent extends LogEvent {
         this.position = position;
     }
 
+    public RotateLogEvent(LogHeader logHeader, String filename, long position) {
+        super(logHeader);
+        this.filename = filename;
+        this.position = position;
+    }
+
     public final String getFilename() {
         return filename;
     }

@@ -19,9 +19,9 @@ GalaxyCDC 组件内置于 PolarDB-X 实例中，提供完全兼容 MySQL Binary 
 
 PolarDB-X 完全兼容 MySQL Binlog 相关指令，例如 `SHOW BINARY LOGS`，`SHOW BINLOG EVENTS` 等，全部相关命令可参考 [MySQL 官方文档](https://dev.mysql.com/doc/refman/8.0/en/binary-log-formats.html) 。
    
-3. 将 PolarDB-X 作为 MySQL 的备库（开发中）
+3. 将 PolarDB-X 作为 MySQL 的备库
 
-PolarDB-X 支持 MySQL `CHANGE MASTER TO` 命令，可将 PolarDB-X 直接作为 MySQL 的备库，命令详细说明请参考 [MySQL 官方文档](https://dev.mysql.com/doc/refman/8.0/en/change-master-to.html) 。
+PolarDB-X 支持 MySQL Replica 相关指令，例如 `CHANGE MASTER TO`，`START/STOP/RESET SLAVE`，`SHOW SLAVE STATUS` 等，可将 PolarDB-X 直接作为 MySQL 的备库，命令详细说明请参考 [MySQL 官方文档](https://dev.mysql.com/doc/refman/8.0/en/change-master-to.html) 。
    
 可在 [PolarDB-X 介绍页](https://github.com/ApsaraDB/galaxysql#quick-start) 查看更多文档。
 
