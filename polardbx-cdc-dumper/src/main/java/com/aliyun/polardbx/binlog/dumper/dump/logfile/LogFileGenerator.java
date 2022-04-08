@@ -30,25 +30,20 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.core.gtid.ByteHelper;
 import com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryMapper;
-import com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
 import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
-import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
 import com.aliyun.polardbx.binlog.domain.Cursor;
 import com.aliyun.polardbx.binlog.domain.EnvConfigChangeInfo;
 import com.aliyun.polardbx.binlog.domain.StorageChangeInfo;
 import com.aliyun.polardbx.binlog.domain.StorageContent;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogEnvConfigHistory;
-import com.aliyun.polardbx.binlog.domain.po.BinlogPolarxCommand;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.RelayFinalTaskInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
-import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator;
 import com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager;
 import com.aliyun.polardbx.binlog.dumper.metrics.Metrics;
@@ -66,7 +61,6 @@ import com.aliyun.polardbx.binlog.rpc.TxnStreamRpcClient;
 import com.aliyun.polardbx.binlog.scheduler.model.TaskConfig;
 import com.aliyun.polardbx.binlog.util.StorageUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
-import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -79,7 +73,6 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 
@@ -87,7 +80,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -100,10 +92,6 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_TABLE_ID_BASE_V
 import static com.aliyun.polardbx.binlog.ConfigKeys.EXPECTED_STORAGE_TSO_KEY;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.instructionId;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.tso;
-import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.gmtCreated;
-import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
-import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
-import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.status;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeBegin;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeCommit;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeMarkEvent;
@@ -111,8 +99,6 @@ import static com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator.makeRow
 import static com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager.containsTableId;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isIn;
-import static org.mybatis.dynamic.sql.SqlBuilder.isLessThanOrEqualTo;
-import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
 
 /**
  * Created by ziyang.lb
@@ -629,10 +615,9 @@ public class LogFileGenerator {
                 s -> s.where(tso, isEqualTo(tsoParam))
                     .or(instructionId, isEqualTo(instructionIdParam)));
             if (storageHistoryInfos.isEmpty()) {
-                boolean repaired = tryRepairStorageList(instructionIdParam, storageList);
                 StorageContent content = new StorageContent();
                 content.setStorageInstIds(storageList);
-                content.setRepaired(repaired);
+                content.setRepaired(false);
 
                 StorageHistoryInfo info = new StorageHistoryInfo();
                 info.setStatus(0);
@@ -677,49 +662,6 @@ public class LogFileGenerator {
             }
             return null;
         });
-    }
-
-    private boolean tryRepairStorageList(String instructionIdParam, List<String> storageList) {
-        if (!needTryRepairStorage()) {
-            logger.info("no need to repair storage.");
-            return false;
-        }
-
-        logger.info("start try repairing storage.");
-        BinlogPolarxCommandMapper commandMapper = SpringContextHolder.getObject(BinlogPolarxCommandMapper.class);
-        StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
-        Optional<BinlogPolarxCommand> optional = commandMapper
-            .selectOne(s -> s.where(BinlogPolarxCommandDynamicSqlSupport.cmdId, isEqualTo(instructionIdParam)));
-
-        if (optional.isPresent()) {
-            BinlogPolarxCommand command = optional.get();
-            if ("ADD_STORAGE".equals(command.getCmdType())) {
-                logger.info("storage list before trying to repair is " + storageList);
-                List<StorageInfo> storageInfosInDb = storageInfoMapper.select(c ->
-                    c.where(instKind, isEqualTo(0))//0:master, 1:slave, 2:metadb
-                        .and(status, isNotEqualTo(2))//0:storage ready, 1:prepare offline, 2:storage offline
-                        .and(gmtCreated, isLessThanOrEqualTo(command.getGmtCreated()))
-                        .orderBy(id));
-                Set<String> storageIdsInDb = storageInfosInDb.stream().collect(
-                    Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1, (s1, s2) -> s1)).values().stream()
-                    .map(StorageInfo::getStorageInstId)
-                    .collect(Collectors.toSet());
-
-                boolean repaired = false;
-                for (String id : storageIdsInDb) {
-                    if (!storageList.contains(id)) {
-                        logger.warn("storage inst id {} is not exist in instruction storage list.", id);
-                        storageList.add(id);
-                        repaired = true;
-                    }
-                }
-                logger.info("storage list after trying to repair is " + storageList);
-                return repaired;
-            }
-        } else {
-            logger.error("can`t find the polarx command record for instruction-id " + instructionIdParam);
-        }
-        return false;
     }
 
     private void tryFlush(boolean forceFlush) throws IOException {
@@ -826,17 +768,5 @@ public class LogFileGenerator {
                 break;
             }
         }
-    }
-
-    private boolean needTryRepairStorage() {
-        Set<String> needRepairVersions = Sets.newHashSet("5.4.9", "5.4.10", "5.4.11");
-        JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
-        String version = polarxTemplate.queryForObject("select version()", String.class);
-        String[] versionArray = version.split("-");
-        if (!StringUtils.equals("TDDL", versionArray[1])) {
-            throw new PolardbxException("invalid polardbx version " + version);
-        }
-        String kernelVersion = versionArray[2];
-        return needRepairVersions.contains(kernelVersion);
     }
 }
