@@ -63,7 +63,7 @@ public class BinlogExtractor implements Extractor {
     private static final String QUERY_VIP_STORAGE =
         "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";
     private static final String QUERY_STORAGE_LIMIT_1 =
-        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
+        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' and xport <> -1 limit 1";
     private static final String QUERY_CDC_INFO =
         "select d.phy_db_name from db_group_info d inner join group_detail_info g on d.group_name = g.group_name where storage_inst_id = '%s';";
     private static final String QUERY_FOR_VERSION = "select version()";

@@ -118,11 +118,10 @@ public class DDLConverter {
         List<SQLStatement> statementList = parser.parseStatementList();
         SQLStatement sqlStatement = statementList.get(0);
 
-        //暂不支持私有DDL
-        StringBuilder hintsBuilder = new StringBuilder();
-        // hintsBuilder.append("/*POLARX_ORIGIN_SQL=").append(sqlStatement.toString()).append("*//*").append("TSO=")
-        //    .append(tso)
-        //    .append("*/");
+        StringBuilder commentsBuilder = new StringBuilder();
+        String privateDdlSql = SQLUtils.toSQLString(sqlStatement, DbType.mysql, new SQLUtils.FormatOption(true, false));
+        commentsBuilder.append("# POLARX_ORIGIN_SQL=").append(privateDdlSql).append("\n");
+        commentsBuilder.append("# POLARX_TSO=").append(tso).append("\n");
 
         if (sqlStatement instanceof SQLCreateDatabaseStatement) {
             SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) sqlStatement;
@@ -185,7 +184,7 @@ public class DDLConverter {
                 }
             }
             hack4RepairTableName(tableName, createTableStatement, polarxDDL);
-            return hintsBuilder.toString() + tryLowercase(createTableStatement.toUnformattedString(),
+            return commentsBuilder.toString() + tryLowercase(createTableStatement.toUnformattedString(),
                 lowerCaseTableNames);
         } else if (sqlStatement instanceof SQLAlterTableStatement) {
             SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
@@ -237,7 +236,7 @@ public class DDLConverter {
             sqlDropTableStatement.setPurge(false);
         }
 
-        return hintsBuilder.toString() + sqlStatement.toString();
+        return commentsBuilder.toString() + sqlStatement.toString();
     }
 
     private static boolean hasImplicit(SQLIndexDefinition indexDefinition) {
