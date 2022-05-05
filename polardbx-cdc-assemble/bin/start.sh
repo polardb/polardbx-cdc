@@ -54,10 +54,11 @@ JAVA_OPTS="${JAVA_OPTS} -server -Xms${MEMORY}m -Xmx${MEMORY}m -Xss1m -DtaskName=
 if [[ ! "$JVM_PARAMS" =~ "PermSize" ]]; then
   JAVA_OPTS="${JAVA_OPTS} -XX:PermSize=${PERM_MEMORY}m -XX:MaxPermSize=${PERM_MEMORY}m"
 fi
-JAVA_OPTS="${JAVA_OPTS} -XX:+UseParallelGC"
-JAVA_OPTS="${JAVA_OPTS} -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRatio=1 -XX:ParallelGCThreads=6"
+JAVA_OPTS="${JAVA_OPTS} -XX:+UseConcMarkSweepGC"
+JAVA_OPTS="${JAVA_OPTS} -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRatio=3"
 JAVA_OPTS="${JAVA_OPTS} -XX:-OmitStackTraceInFastThrow"
-
+JAVA_OPTS="${JAVA_OPTS} -XX:CMSInitiatingOccupancyFraction=80"
+JAVA_OPTS="${JAVA_OPTS} -XX:+UseCMSInitiatingOccupancyOnly"
 JAVA_OPTS="${JAVA_OPTS} -Djava.net.preferIPv4Stack=true"
 JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDetails"
 JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDateStamps"

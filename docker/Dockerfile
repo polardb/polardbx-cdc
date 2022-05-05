@@ -2,7 +2,7 @@ FROM centos:7
 
 # Install essential utils
 RUN yum update -y && \
-    yum install sudo hostname telnet net-tools vim tree less file java-1.8.0-openjdk -y && \
+    yum install sudo hostname telnet net-tools vim tree less file java-1.8.0-openjdk-devel mysql -y && \
     yum clean all && rm -rf /var/cache/yum && rm -rf /var/tmp/yum-*
 
 # Create user "admin" and add it into sudo group
