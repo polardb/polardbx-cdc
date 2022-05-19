@@ -17,8 +17,11 @@
 
 package com.aliyun.polardbx.rpl.common;
 
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
+import com.aliyun.polardbx.rpl.applier.ApplyHelper;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
 import org.apache.commons.lang3.StringUtils;
 
@@ -152,5 +155,13 @@ public class CommonUtil {
 
     public static String getRplInitialPosition() {
         return "0:4#0.0";
+    }
+
+    public static boolean isPolarDBXHeartbeat(DBMSEvent event) {
+        return (event instanceof DefaultQueryLog && ((DefaultQueryLog)event).getQuery().contains("CTS::"));
+    }
+
+    public static boolean isDDL(DBMSEvent event) {
+        return ApplyHelper.isDdl(event);
     }
 }

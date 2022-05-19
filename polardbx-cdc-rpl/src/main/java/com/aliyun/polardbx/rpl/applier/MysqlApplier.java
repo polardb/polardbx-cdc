@@ -124,6 +124,10 @@ public class MysqlApplier extends BaseApplier {
 
         // get sqlExeContext
         DdlSqlContext sqlContext = ApplyHelper.getDdlSqlExeContext(queryLog, tso);
+        if (sqlContext == null) {
+            log.warn("get ddl sql context error");
+            return true;
+        }
         log.info("ddlApply start, schema: {}, sql: {}", sqlContext.getSchema(), sqlContext.getSql());
         if (!applierConfig.isEnableDdl()) {
             log.info("ddlApply ignore since ddl is not enabled");
@@ -303,7 +307,7 @@ public class MysqlApplier extends BaseApplier {
         }
 
         TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
-        List<String> identifyColumnNames = ApplyHelper.getIdentifyColumns(tbInfo);
+        List<String> identifyColumnNames = tbInfo.getIdentifyKeyList();
         List<Integer> whereColumns = new ArrayList<>();
         for (String columnName : identifyColumnNames) {
             whereColumns.add(rowChange.getColumnIndex(columnName));

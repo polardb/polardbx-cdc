@@ -334,7 +334,8 @@ public class NoTsoMysqlEventParser extends MysqlEventParser {
 
                         DBMSEvent dbmsEvent = entry.getDbMessage();
                         // 直接查询第一条业务数据，确认是否为事务Begin/End
-                        if (dbmsEvent instanceof DBMSTransactionBegin || dbmsEvent instanceof DBMSTransactionEnd) {
+                        if (dbmsEvent instanceof DBMSTransactionBegin || dbmsEvent instanceof DBMSTransactionEnd ||
+                            CommonUtil.isPolarDBXHeartbeat(dbmsEvent) || CommonUtil.isDDL(dbmsEvent)) {
                             lastPosition = buildLastPosition(entry);
                             return false;
                         } else {
@@ -377,7 +378,8 @@ public class NoTsoMysqlEventParser extends MysqlEventParser {
                             DBMSEvent dbmsEvent = entry.getDbMessage();
                             // 直接查询第一条业务数据，确认是否为事务Begin
                             // 记录一下transaction begin position
-                            if (dbmsEvent instanceof DBMSTransactionBegin
+                            if ((dbmsEvent instanceof DBMSTransactionBegin ||
+                                CommonUtil.isPolarDBXHeartbeat(dbmsEvent) || CommonUtil.isDDL(dbmsEvent))
                                 && entry.getPosition().getPosition() < entryPosition.getPosition()) {
                                 preTransactionStartPosition.set(entry.getPosition().getPosition());
                             }

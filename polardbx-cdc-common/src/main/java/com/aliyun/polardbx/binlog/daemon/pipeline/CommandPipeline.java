@@ -73,11 +73,11 @@ public class CommandPipeline {
     }
 
     public void startRplTask(long taskId, String taskName) throws Exception {
-        execCommand(new String[] {"bash", "-c", "sh $HOME/polardbx-binlog.standalone/bin/start_rpl.sh " + taskId + " " + taskName}, 1000);
+        execCommand(new String[] {"bash", "-c", "sh bin/start_rpl.sh " + taskId + " " + taskName}, 1000);
     }
 
     public void stopRplTask(long taskId) throws Exception {
-        execCommand(new String[] {"bash", "-c", "sh $HOME/polardbx-binlog.standalone/bin/stop_rpl.sh " + taskId}, 1000);
+        execCommand(new String[] {"bash", "-c", "sh bin/stop_rpl.sh " + taskId}, 1000);
     }
 
     public CommandResult execCommand(String[] commands, long timeout) throws Exception {

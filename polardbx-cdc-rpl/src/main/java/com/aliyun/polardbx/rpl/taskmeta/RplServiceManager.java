@@ -313,7 +313,8 @@ public class RplServiceManager {
                     replicateMeta.setPosition(CommonUtil.getRplInitialPosition());
                 }
                 if (params.containsKey(RplConstants.IGNORE_SERVER_IDS)) {
-                    replicateMeta.setIgnoreServerIds(params.get(RplConstants.IGNORE_SERVER_IDS));
+                    String ignoreServerIds = CommonUtil.removeBracket(params.get(RplConstants.IGNORE_SERVER_IDS));
+                    replicateMeta.setIgnoreServerIds(ignoreServerIds);
                 }
 
                 if (params.containsKey(RplConstants.SOURCE_HOST_TYPE)) {

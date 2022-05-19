@@ -12,7 +12,6 @@ TASK_ID=$1
 TASK_NAME=$2
 MEMORY=3072
 PERM_MEMORY=256
-BASE_HOME=$HOME/polardbx-binlog.standalone
 LOG_DIR=$HOME/logs/polardbx-rpl/$TASK_NAME
 
 #get param from 16th to end
@@ -31,6 +30,20 @@ if [ $(whoami) == "root" ]; then
   echo DO NOT use root user to launch me.
   exit 1
 fi
+
+case "$(uname)" in
+Linux)
+  BASE_HOME=$(readlink -f $(dirname $0))
+  ;;
+*)
+  BASE_HOME=$(
+    cd $(dirname $0)
+    pwd
+  )
+  ;;
+esac
+BASE_HOME=${BASE_HOME}/../
+
 
 export LD_LIBRARY_PATH=${BASE_HOME}/lib:${LD_LIBRARY_PATH}
 export NLS_LANG=AMERICAN_AMERICA.ZHS16GBK

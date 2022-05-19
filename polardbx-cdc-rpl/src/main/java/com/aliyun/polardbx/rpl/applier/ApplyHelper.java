@@ -33,6 +33,7 @@ import com.aliyun.polardbx.rpl.taskmeta.DdlState;
 import com.google.common.collect.Lists;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import javax.sql.DataSource;
@@ -196,7 +197,12 @@ public class ApplyHelper {
         String originSql = DdlHelper.getOriginSql(queryLog.getQuery());
         String sql = StringUtils.isBlank(originSql) ? queryLog.getQuery() : originSql;
         // use actual schemaName
-        DdlResult result = DruidDdlParser.parse(sql, queryLog.getSchema()).get(0);
+        List<DdlResult> resultList = DruidDdlParser.parse(sql, queryLog.getSchema());
+        if (CollectionUtils.isEmpty(resultList)) {
+            log.warn("DruidDdlParser parse error, origin sql: {}, queryLog sql: {}", sql, queryLog.getQuery());
+            return null;
+        }
+        DdlResult result = resultList.get(0);
         sqlContext.setSchema(result.getSchemaName());
 
         switch (queryLog.getAction()) {
@@ -511,38 +517,8 @@ public class ApplyHelper {
     }
 
     public static List<String> getWhereColumns(TableInfo tableInfo) {
-        List<String> whereColumns = new ArrayList<>();
-        if (tableInfo.getPks().size() > 0) {
-            whereColumns.addAll(tableInfo.getPks());
-        } else {
-            whereColumns.addAll(tableInfo.getUks());
-        }
-
-        // 无主键表
-        if (whereColumns.isEmpty()) {
-            for (ColumnInfo column: tableInfo.getColumns()) {
-                whereColumns.add(column.getName());
-            }
-            return whereColumns;
-        }
-
-        // add shard key to where sql if exists
-        if (StringUtils.isNotBlank(tableInfo.getDbShardKey()) && !whereColumns.contains(tableInfo.getDbShardKey())) {
-            whereColumns.add(tableInfo.getDbShardKey());
-        }
-        if (StringUtils.isNotBlank(tableInfo.getTbShardKey()) && !whereColumns.contains(tableInfo.getTbShardKey())) {
-            whereColumns.add(tableInfo.getTbShardKey());
-        }
-
+        List<String> whereColumns = tableInfo.getKeyList();
         return whereColumns;
-    }
-
-    public static List<String> getIdentifyColumns(TableInfo tableInfo) {
-        List<String> identifyColumns = getWhereColumns(tableInfo);
-        if (tableInfo.getPks().size() > 0) {
-            identifyColumns.addAll(tableInfo.getUks());
-        }
-        return identifyColumns;
     }
 
     private static void getWhereSql(DBMSRowChange rowChange, int rowIndex, TableInfo tableInfo,

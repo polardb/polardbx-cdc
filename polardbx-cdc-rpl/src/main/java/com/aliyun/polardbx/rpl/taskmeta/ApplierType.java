@@ -23,7 +23,7 @@ package com.aliyun.polardbx.rpl.taskmeta;
  */
 public enum ApplierType {
     // 保持原 binlog 中的事务完整性
-    TRANSACTION(0),
+    TRANSACTION(1),
 
     // 按照原 binlog 中的 event 顺序执行，但不保证事务完整性
     SERIAL(10),
