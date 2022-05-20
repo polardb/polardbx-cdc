@@ -18,6 +18,7 @@
 package com.aliyun.polardbx.rpl.dbmeta;
 
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
@@ -30,6 +31,7 @@ import java.util.List;
  * @since 5.0.0.0
  */
 @Data
+@Slf4j
 public class TableInfo {
 
     private String schema;
@@ -57,6 +59,8 @@ public class TableInfo {
                     keyList.add(column.getName());
                 }
                 return keyList;
+            } else {
+                keyList.addAll(pks);
             }
 
             if (StringUtils.isNotBlank(dbShardKey)) {
@@ -84,7 +88,6 @@ public class TableInfo {
                     }
                 }
             }
-            keyList = Collections.unmodifiableList(keyList);
         }
         return keyList;
     }
@@ -97,7 +100,6 @@ public class TableInfo {
                     identifyKeyList.add(uk);
                 }
             }
-            identifyKeyList = Collections.unmodifiableList(identifyKeyList);
         }
         return identifyKeyList;
     }
