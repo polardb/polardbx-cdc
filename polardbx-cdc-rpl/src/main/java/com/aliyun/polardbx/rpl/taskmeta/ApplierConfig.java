@@ -33,6 +33,6 @@ public class ApplierConfig {
     protected int maxPoolSize = 256;
     protected int minPoolSize = 64;
     protected int statisticIntervalSec = 5;
-    protected int applierType = ApplierType.SPLIT.getValue();
+    protected int applierType = ApplierType.MERGE.getValue();
     protected HostInfo hostInfo;
 }
