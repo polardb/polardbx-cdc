@@ -189,4 +189,8 @@ public class ACLFilter extends RequestFilter {
     protected Log getLogger() {
         return log;
     }
+
+    @Override
+    public void destroy() {
+    }
 }
