@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.storage;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -118,7 +115,7 @@ public class LogEventStorage implements Storage {
         cleanTimer.scheduleAtFixedRate(() -> {
             try {
                 checkDeleteBuffer();
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 logger.error("clean timer process error!", e);
             }
         }, 1000, 1000, TimeUnit.MILLISECONDS);
@@ -147,7 +144,7 @@ public class LogEventStorage implements Storage {
     public TxnBuffer create(TxnKey key) throws AlreadyExistException {
         check();
 
-        SubCache cache = txnCache.getUnchecked(key.getPartitionId());
+        SubCache cache = txnCache.getUnchecked(key.getPartitionGroupId());
         TxnBuffer buffer = cache.getUnchecked(key);
 
         // mark失败，说明是在进行重复创建，so，抛出异常。这是一个乐观锁控制机制，在我们的场景中用乐观锁足够了，
@@ -166,14 +163,14 @@ public class LogEventStorage implements Storage {
     @Override
     public TxnBuffer fetch(TxnKey key) {
         check();
-        SubCache cache = txnCache.getUnchecked(key.getPartitionId());
+        SubCache cache = txnCache.getUnchecked(key.getPartitionGroupId());
         return cache.getIfPresent(key);
     }
 
     @Override
     public void delete(TxnKey key) {
         check();
-        SubCache cache = txnCache.getUnchecked(key.getPartitionId());
+        SubCache cache = txnCache.getUnchecked(key.getPartitionGroupId());
         cache.invalidate(key);
 
         if (logger.isDebugEnabled()) {
@@ -195,7 +192,7 @@ public class LogEventStorage implements Storage {
     @Override
     public boolean exist(TxnKey key) {
         check();
-        SubCache cache = txnCache.getUnchecked(key.getPartitionId());
+        SubCache cache = txnCache.getUnchecked(key.getPartitionGroupId());
         return cache.getIfPresent(key) != null;
     }
 
@@ -229,7 +226,7 @@ public class LogEventStorage implements Storage {
             }
             try {
                 List<TxnKey> list = Arrays.asList(array);
-                list.stream().collect(Collectors.groupingBy(TxnKey::getPartitionId)).entrySet().forEach(entry -> {
+                list.stream().collect(Collectors.groupingBy(TxnKey::getPartitionGroupId)).entrySet().forEach(entry -> {
                     int index = Math.abs(entry.getKey().hashCode()) % DEFAULT_WORKER_COUNT;
                     try {
                         cleanWorkers[index].put(entry);
@@ -262,7 +259,12 @@ public class LogEventStorage implements Storage {
 
                     @Override
                     public TxnBuffer load(TxnKey key) {
-                        return new TxnBuffer(key, LogEventStorage.this.repository);
+                        long startTime = System.nanoTime();
+                        TxnBuffer buffer = new TxnBuffer(key, LogEventStorage.this.repository);
+                        long endTime = System.nanoTime();
+                        StorageMetrics.get().getTxnCreateCostTime().getAndAdd(endTime - startTime);
+                        StorageMetrics.get().getTxnCreateCount().incrementAndGet();
+                        return buffer;
                     }
                 });
         }

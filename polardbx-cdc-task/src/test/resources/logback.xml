@@ -80,7 +80,7 @@
         <appender-ref ref="fileAppender"/>
     </logger>
 
-    <logger name="com.aliyun.polardbx.binlog.collect.handle.TxnShuffleStageHandler" level="INFO" additivity="false">
+    <logger name="com.aliyun.polardbx.binlog.collect.handle.TxnMergeStageHandler" level="INFO" additivity="false">
         <appender-ref ref="console"/>
     </logger>
 
@@ -99,7 +99,7 @@
         <appender-ref ref="console"/>
     </logger>
 
-    <logger name="com.aliyun.polardbx.binlog.canal.core.MysqlEventParser" level="INFO" additivity="false">
+    <logger name="com.aliyun.polardbx.binlog.canal.core.MysqlWithTsoEventParser" level="INFO" additivity="false">
         <appender-ref ref="console"/>
     </logger>
 

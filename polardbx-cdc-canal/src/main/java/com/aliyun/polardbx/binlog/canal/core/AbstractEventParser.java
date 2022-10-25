@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.core;
 
 import com.aliyun.polardbx.binlog.canal.BinlogEventParser;
@@ -78,7 +75,6 @@ public abstract class AbstractEventParser implements BinlogEventParser {
 
         }
     };
-    protected int transactionSize = 1024;
     protected AtomicBoolean needTransactionPosition = new AtomicBoolean(false);
     protected long lastEntryTime = 0L;
     protected volatile boolean detectingEnable = true; // 是否开启心跳检查
@@ -210,7 +206,7 @@ public abstract class AbstractEventParser implements BinlogEventParser {
                     runtimeContext.setHostAddress(master.getAddress().getAddress().getHostAddress());
                     runtimeContext.setLowerCaseTableNames(((MysqlConnection) erosaConnection).getLowerCaseTableNames());
                     if (searchFunction instanceof SinkResult) {
-                        runtimeContext.setTopology(((SinkResult) searchFunction).getTopologyContext());
+                        RuntimeContext.setInitTopology(((SinkResult) searchFunction).getTopologyContext());
                     }
                     head.fireStart();
 
@@ -379,10 +375,6 @@ public abstract class AbstractEventParser implements BinlogEventParser {
         return processingInterval;
     }
 
-    public void setTransactionSize(int transactionSize) {
-        this.transactionSize = transactionSize;
-    }
-
     public void setDetectingEnable(boolean detectingEnable) {
         this.detectingEnable = detectingEnable;
     }
@@ -405,10 +397,6 @@ public abstract class AbstractEventParser implements BinlogEventParser {
 
     public void setPolarxInstanceId(String polarxInstanceId) {
         this.polarxInstanceId = polarxInstanceId;
-    }
-
-    public void setNeedTransactionPosition(boolean value) {
-        this.needTransactionPosition.set(value);
     }
 
     private class DefaultTailEventFilter implements LogEventFilter {
@@ -438,6 +426,5 @@ public abstract class AbstractEventParser implements BinlogEventParser {
         public void onStartConsume(HandlerContext context) {
 
         }
-
     }
 }

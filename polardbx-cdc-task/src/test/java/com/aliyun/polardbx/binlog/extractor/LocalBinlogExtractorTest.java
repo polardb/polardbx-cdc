@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,11 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor;
 
+import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.canal.binlog.LocalBinlogParser;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
@@ -26,6 +24,7 @@ import com.aliyun.polardbx.binlog.extractor.filter.MinTSOFilter;
 import com.aliyun.polardbx.binlog.extractor.filter.TransactionBufferEventFilter;
 import com.aliyun.polardbx.binlog.storage.DeleteMode;
 import com.aliyun.polardbx.binlog.storage.LogEventStorage;
+import com.aliyun.polardbx.binlog.storage.PersistMode;
 import com.aliyun.polardbx.binlog.storage.Repository;
 
 //import com.aliyun.polardbx.binlog.extractor.filter.DisrupterFilter;
@@ -33,7 +32,11 @@ import com.aliyun.polardbx.binlog.storage.Repository;
 public class LocalBinlogExtractorTest {
 
     public static void main(String args[]) {
-        LocalBinlogParser localBinlogParser = new LocalBinlogParser("/Users/yanfenglin/Downloads/mysql-bin.000001");
+        final SpringContextBootStrap appContextBootStrap =
+            new SpringContextBootStrap("spring/spring.xml");
+        appContextBootStrap.boot();
+
+        LocalBinlogParser localBinlogParser = new LocalBinlogParser("/Users/lubiao/Downloads/mysql_bin.000005");
         EventAcceptFilter acceptFilter = new EventAcceptFilter("", true);
         acceptFilter.addAcceptEvent(LogEvent.FORMAT_DESCRIPTION_EVENT);
         // accept dml
@@ -63,7 +66,8 @@ public class LocalBinlogExtractorTest {
         // 先合并事务
         // 合并完事务后,要在合并事务是识别出逻辑DDL，，可以并发整形
         LogEventStorage storage = new LogEventStorage(
-            new Repository(false, "/Users/yanfenglin/Downloads/db", false, 80, 80, 80, DeleteMode.RANGE, 1000));
+            new Repository(false, "/Users/lubiao/Downloads/db", PersistMode.AUTO, 80, 80, 80, DeleteMode.RANGE,
+                1000));
         storage.start();
         localBinlogParser.addFilter(new TransactionBufferEventFilter(storage));
         // 整形
@@ -89,7 +93,7 @@ public class LocalBinlogExtractorTest {
 //            }
 //        });
         localBinlogParser.start(authenticationInfo,
-            new BinlogPosition("", "682996183695755398413610270520519024780000000008192210"));
+            new BinlogPosition("", "693079021510773971214618554306564055040000000000000000"));
         try {
             Thread.sleep(100000L);
         } catch (InterruptedException e) {

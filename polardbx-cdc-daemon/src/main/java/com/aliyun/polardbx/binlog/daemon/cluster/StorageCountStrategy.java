@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.daemon.cluster;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
@@ -30,11 +27,14 @@ import com.google.common.collect.Lists;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_SLAVE_MAX_MEM;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_WEIGHT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_TASK_WEIGHT;
 
@@ -46,34 +46,25 @@ public class StorageCountStrategy implements TaskDistributionFunction {
     private static final Gson GSON = new GsonBuilder().create();
 
     private final String clusterId;
-    private int threshold = 4;//单个task上承载的binlog流个数
 
     public StorageCountStrategy(String clusterId) {
         this.clusterId = clusterId;
     }
 
-    public StorageCountStrategy(String clusterId, int threshold) {
-        this.clusterId = clusterId;
-        this.threshold = threshold;
-    }
-
     @Override
     public List<BinlogTaskConfig> apply(List<Container> containerList, List<StorageInfo> storageInfoList,
-                                        String expectedStorageTso, long newVersion, String dumperMasterNode) {
+                                        String expectedStorageTso, long newVersion, String dumperMasterNodeId) {
 
         int containerCount = containerList.size();
-        int storageCount = storageInfoList.size();
-        int relayTaskCount = 0;//短期不考虑实现Relay了
 
-        // dumper + 1 * Final + relay
-        int totalTaskCount = containerCount + 1 + relayTaskCount;
+        // dumper + 1 * Final
+        int totalTaskCount = containerCount + 1;
 
         List<BinlogTaskConfig> result = Lists.newArrayListWithCapacity(totalTaskCount);
 
         int dumperWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_DUMPER_WEIGHT);
         int taskWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_TASK_WEIGHT);
         int rasterize = dumperWeight + taskWeight;
-        //int rasterize = rasterize(totalTaskCount, containerCount);
 
         int mem = containerList.get(0).getCapability().getFreeMemMb() / rasterize;
         int cpu = containerList.get(0).getCapability().getVirCpu() / rasterize;
@@ -86,57 +77,61 @@ public class StorageCountStrategy implements TaskDistributionFunction {
             tc.setTso(expectedStorageTso);
             Container container = containerList.get(i);
             container.deductMem(mem);
-            BinlogTaskConfig config = makeTask((long) (i + 1), TaskType.Dumper, container,
+            BinlogTaskConfig dumperConfig = makeTask((long) (i + 1), TaskType.Dumper, container,
                 GSON.toJson(tc), newVersion);
-            config.setClusterId(clusterId);
-            config.setMem(mem * dumperWeight);
-            config.setVcpu(cpu * dumperWeight);
-            result.add(config);
+            dumperConfig.setClusterId(clusterId);
+            dumperConfig.setMem(mem * dumperWeight);
+            dumperConfig.setVcpu(cpu * dumperWeight);
+            result.add(dumperConfig);
         }
 
         //Final
-        Container finalContainer = deduct(containerList, mem * 2, dumperMasterNode);
-        TaskConfig finalTaskConfig = new TaskConfig();
-        finalTaskConfig.setType(relayTaskCount == 0 ? MergeSourceType.BINLOG.name() : MergeSourceType.RPC.name());
-        finalTaskConfig.setSources(relayTaskCount == 0 ?
-            storageInfoList.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toList())
-            : relayTaskNames(relayTaskCount));
-        finalTaskConfig.setTso(expectedStorageTso);
-        BinlogTaskConfig finalConfig = makeTask(0L, TaskType.Final, finalContainer,
-            GSON.toJson(finalTaskConfig), newVersion);
+        Container finalContainer = deduct(containerList, mem * dumperWeight, dumperMasterNodeId);
+        TaskConfig config = new TaskConfig();
+        config.setType(MergeSourceType.BINLOG.name());
+        config.setSources(storageInfoList.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toList()));
+        config.setTso(expectedStorageTso);
+        BinlogTaskConfig finalConfig = makeTask(0L, TaskType.Final, finalContainer, GSON.toJson(config), newVersion);
         finalConfig.setClusterId(clusterId);
         finalConfig.setMem(mem * taskWeight);
         finalConfig.setVcpu(cpu * taskWeight);
         finalConfig.setStatus(BinlogTaskConfigStatus.ENABLE_AUTO_SCHEDULE);
         result.add(finalConfig);
 
-        if (relayTaskCount > 0) {
-            int size = storageCount / relayTaskCount + (storageCount % relayTaskCount == 0 ? 0 : 1);
-            List<List<StorageInfo>> partition = Lists.partition(storageInfoList, size);
-            //Relay
-            for (int i = 0; i < relayTaskCount; i++) {
-                TaskConfig tc = new TaskConfig();
-                tc.setType(MergeSourceType.BINLOG.name());
-                List<String> storageConfigs = partition.get(i).stream().map(StorageInfo::getStorageInstId).collect(
-                    Collectors.toList());
-                tc.setSources(storageConfigs);
-                tc.setTso(expectedStorageTso);
-                Container container = deduct(containerList, mem, dumperMasterNode);
-                BinlogTaskConfig config = makeTask((long) (i + 1), TaskType.Relay, container,
-                    GSON.toJson(tc), newVersion);
-                config.setClusterId(clusterId);
-                config.setMem(mem);
-                config.setVcpu(cpu);
-                result.add(config);
+        // rewrite dumper master memory
+        // 如果dumper master和final task不在一个容器，则尝试调高dumper master的内存占用
+        if (!StringUtils.equals(dumperMasterNodeId, finalContainer.getContainerId())) {
+            int newWeight = dumperWeight + taskWeight;
+            Optional<BinlogTaskConfig> optional = result.stream().filter(t -> TaskType.Dumper.name().equals(t.getRole())
+                && StringUtils.equals(t.getContainerId(), dumperMasterNodeId)).findFirst();
+            if (optional.isPresent()) {
+                optional.get().setMem(mem * newWeight);
+                optional.get().setVcpu(cpu * newWeight);
             }
         }
 
+        // 如果dumper master和final task不在一个容器，则dumper salve和final是放在一个容器的，尝试调低dumper slave的内存
+        // 如果dumper slave的内存大于设定的最大值，将多出的内存分配给task，task对内存的需求dumper要旺盛的多
+        if (!StringUtils.equals(dumperMasterNodeId, finalContainer.getContainerId())) {
+            Optional<BinlogTaskConfig> optional = result.stream().filter(t -> TaskType.Dumper.name().equals(t.getRole())
+                && StringUtils.equals(t.getContainerId(), finalContainer.getContainerId())).findFirst();
+            if (optional.isPresent()) {
+                int slaveMem = optional.get().getMem();
+                int finalMem = finalConfig.getMem();
+                int maxSlaveMem = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_DUMPER_SLAVE_MAX_MEM);
+                if (slaveMem > maxSlaveMem) {
+                    int deduct = slaveMem - maxSlaveMem;
+                    optional.get().setMem(maxSlaveMem);
+                    finalConfig.setMem(finalMem + deduct);
+                }
+            }
+        }
         return result;
     }
 
     private static BinlogTaskConfig makeTask(Long id, TaskType taskType, Container container, String ext,
                                              long version) {
-        BinlogTaskConfig config = BinlogTaskConfig.builder()
+        return BinlogTaskConfig.builder()
             .taskName(id == 0 ? taskType.name() : taskType.name() + "-" + id)
             .containerId(container.getContainerId())
             .ip(container.getNodeHttpAddress())
@@ -146,15 +141,6 @@ public class StorageCountStrategy implements TaskDistributionFunction {
             .status(BinlogTaskConfigStatus.ENABLE_AUTO_SCHEDULE)
             .version(version)
             .build();
-        return config;
-    }
-
-    private static List<String> relayTaskNames(int taskCount) {
-        List<String> result = Lists.newArrayListWithCapacity(taskCount);
-        for (int i = 0; i < taskCount; i++) {
-            result.add(TaskType.Relay.name() + "-" + (i + 1));
-        }
-        return result;
     }
 
     /**

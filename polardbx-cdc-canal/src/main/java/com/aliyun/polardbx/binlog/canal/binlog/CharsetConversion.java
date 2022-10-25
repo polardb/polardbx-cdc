@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.binlog;
 
 import org.apache.commons.lang3.StringUtils;
@@ -321,7 +318,7 @@ public final class CharsetConversion {
         putEntry(2047, "utf8", "utf8_maxuserid_ci", "UTF-8");
     }
 
-    static Entry getEntry(final int id) {
+    public static Entry getEntry(final int id) {
         if (id >= 0 && id < entries.length) {
             return entries[id];
         } else {
@@ -332,8 +329,7 @@ public final class CharsetConversion {
     // Loads character set information.
     static void putEntry(final int charsetId, String mysqlCharset, String mysqlCollation, String javaCharset) {
         entries[charsetId] = new Entry(charsetId, mysqlCharset, // NL
-            mysqlCollation,
-            javaCharset);
+            mysqlCollation, javaCharset);
         mysqlCharsetMap.put(mysqlCharset.toUpperCase(), entries[charsetId]);
     }
 
@@ -357,6 +353,32 @@ public final class CharsetConversion {
             logger.warn("Unexpect mysql charset: " + id);
             return null;
         }
+    }
+
+    public static Integer getCharsetId(String javaName) {
+        for (Entry entry : entries) {
+            if (entry == null) {
+                continue;
+            }
+            if (entry.mysqlCharset.equalsIgnoreCase(javaName)) {
+                return entry.charsetId;
+            }
+        }
+
+        logger.warn("Unknown java charset for: name = " + javaName);
+        return null;
+    }
+
+    public static String getCharsetByCollation(String collationName) {
+        for (Entry entry : entries) {
+            if (entry == null) {
+                continue;
+            }
+            if (entry.mysqlCollation.equalsIgnoreCase(collationName)) {
+                return entry.mysqlCharset;
+            }
+        }
+        return null;
     }
 
     /**
@@ -398,6 +420,11 @@ public final class CharsetConversion {
             return mysqlCharset;
         }
 
+        //https://dev.mysql.com/doc/refman/8.0/en/charset-unicode-utf8mb3.html
+        if ("utf8mb3".equalsIgnoreCase(mysqlCharset)) {
+            mysqlCharset = "utf8";
+        }
+
         Entry entry = mysqlCharsetMap.get(mysqlCharset.toUpperCase());
         if (entry == null) {
             return mysqlCharset;
@@ -430,12 +457,12 @@ public final class CharsetConversion {
         }
     }
 
-    static final class Entry {
+    public static final class Entry {
 
-        protected final int charsetId;
-        protected final String mysqlCharset;
-        protected final String mysqlCollation;
-        protected final String javaCharset;
+        public final int charsetId;
+        public final String mysqlCharset;
+        public final String mysqlCollation;
+        public final String javaCharset;
 
         Entry(final int id, String mysqlCharset, // NL
               String mysqlCollation, String javaCharset) {

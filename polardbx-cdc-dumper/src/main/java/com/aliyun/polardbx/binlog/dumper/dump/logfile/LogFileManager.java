@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,11 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.aliyun.polardbx.binlog.BinlogBackupManager;
+import com.aliyun.polardbx.binlog.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.domain.Cursor;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
@@ -57,6 +56,7 @@ public class LogFileManager implements ICursorProvider {
     private LogFileCopier logFileCopier;
     private volatile Cursor latestFileCursor;
     private volatile boolean running;
+    private BinlogBackupManager binlogBackupManager;
     private LogFileListenerWrapper wrapper = new LogFileListenerWrapper();
 
     public void start() {
@@ -69,6 +69,11 @@ public class LogFileManager implements ICursorProvider {
             tryCreateBinlogDir();
             this.wrapper
                 .addLogFileListener(new BinlogRecorderListener(binlogFileDirPath, taskName, BINLOG_FILE_PREFIX));
+
+            if (RemoteBinlogProxy.getInstance().isBackupOn()) {
+                binlogBackupManager = new BinlogBackupManager();
+                binlogBackupManager.start(binlogFileDirPath, new LogFileCursorProvider(this), taskName);
+            }
             if (RuntimeLeaderElector.isDumperLeader(taskName)) {
                 logFileGenerator = new LogFileGenerator(this,
                     binlogFileSize,
@@ -98,6 +103,9 @@ public class LogFileManager implements ICursorProvider {
         }
         if (logFileGenerator != null) {
             logFileGenerator.stop();
+        }
+        if (binlogBackupManager != null) {
+            binlogBackupManager.shutdown();
         }
     }
 
@@ -192,14 +200,19 @@ public class LogFileManager implements ICursorProvider {
         return createFile(binlogFileDirPath + "/" + BINLOG_FILE_PREFIX + "000001");
     }
 
-    public File rotateFile(File file) {
+    public int parseFileNumber(String fileName) {
+        String suffix = fileName.split("\\.")[1];
+        return Integer.parseInt(suffix);
+    }
+
+    public File rotateFile(File file, Long logEndTime) {
         String maxFileName = getMaxBinlogFileName();
         if (!StringUtils.equals(file.getName(), maxFileName)) {
             throw new IllegalArgumentException(
                 "Rotating file is not the max file, rotating file is " + file.getName() + ", max file is "
                     + maxFileName);
         }
-        wrapper.onFinishFile(file);
+        wrapper.onFinishFile(file, logEndTime);
         String nextBinlogFile = nextBinlogFileName(file.getName());
         wrapper.onRotateFile(file, nextBinlogFile);
         File newFile = createFile(binlogFileDirPath + "/" + nextBinlogFile);

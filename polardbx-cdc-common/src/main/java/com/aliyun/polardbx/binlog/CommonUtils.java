@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog;
 
 import com.aliyun.polardbx.binlog.domain.MarkInfo;
@@ -38,8 +35,8 @@ import java.util.regex.Pattern;
  * Created by ziyang.lb
  **/
 public class CommonUtils {
+    public static final String RDS_HIDDEN_PK_NAME = "__#alibaba_rds_row_id#__";
     private static final Logger logger = LoggerFactory.getLogger(CommonUtils.class);
-
     private static final long TWEPOCH = 1303895660503L;
     private static final String LOCALHOST_IP = "127.0.0.1";
     private static final String EMPTY_IP = "0.0.0.0";
@@ -245,5 +242,25 @@ public class CommonUtils {
     public static Date parse(String date, String pattern) throws ParseException {
         SimpleDateFormat sdf = new SimpleDateFormat(pattern);
         return sdf.parse(date);
+    }
+
+    public static String nextBinlogFileName(String fileName) {
+        String[] array = fileName.split("\\.");
+        String prefix = array[0];
+        String suffix = array[1];
+        int suffixLength = suffix.length();
+        int suffixNbr = Integer.parseInt(suffix);
+        String newSuffix = String.format("%0" + suffixLength + "d", ++suffixNbr);
+        return prefix + "." + newSuffix;
+    }
+
+    /**
+     * 根据指定概率随机true值
+     * rate取值为 0~100
+     *
+     * @param rate 0~100
+     */
+    public static boolean randomBoolean(int rate) {
+        return random.nextInt(100) < rate;
     }
 }

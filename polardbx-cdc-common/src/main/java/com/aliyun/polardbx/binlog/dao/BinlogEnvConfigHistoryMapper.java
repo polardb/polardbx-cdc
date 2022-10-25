@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,12 +11,20 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dao;
 
+import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.*;
+import static org.mybatis.dynamic.sql.SqlBuilder.*;
+
 import com.aliyun.polardbx.binlog.domain.po.BinlogEnvConfigHistory;
+
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.Optional;
+import javax.annotation.Generated;
+
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.DeleteProvider;
@@ -40,22 +47,6 @@ import org.mybatis.dynamic.sql.update.UpdateModel;
 import org.mybatis.dynamic.sql.update.render.UpdateStatementProvider;
 import org.mybatis.dynamic.sql.util.SqlProviderAdapter;
 import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
-
-import javax.annotation.Generated;
-import java.util.Collection;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
-
-import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.*;
-import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.binlogEnvConfigHistory;
-import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.changeEnvContent;
-import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.gmtCreated;
-import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.gmtModified;
-import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.id;
-import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.instructionId;
-import static com.aliyun.polardbx.binlog.dao.BinlogEnvConfigHistoryDynamicSqlSupport.tso;
-import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 @Mapper
 public interface BinlogEnvConfigHistoryMapper {

@@ -5,10 +5,8 @@ source /etc/profile
 function start_app() {
     sh /home/admin/bin/jdk8.sh
     chmod 755 /home/admin/polardbx-binlog.standalone/bin/*
+    sudo /usr/sbin/crond -i
     sudo -E su admin -c 'sh /home/admin/polardbx-binlog.standalone/bin/daemon.sh start'
-    if [ -f "/home/admin/drds-worker/bin/globalSchedule.sh" ]; then
-      sh /home/admin/drds-worker/bin/globalSchedule.sh
-    fi
 }
 
 function stop_app() {
@@ -16,7 +14,11 @@ function stop_app() {
 }
 
 function config_env() {
+    if [ ! -d "/home/admin/bin" ]; then
+        mkdir -p /home/admin/bin
+    fi
     rm -f /home/admin/bin/env.sh
+    touch /home/admin/bin/env.sh
     declare -xp > /home/admin/bin/env.sh
     sed -i '/declare -x HOME/d' /home/admin/bin/env.sh
     sed -i '/declare -x LOGNAME/d' /home/admin/bin/env.sh

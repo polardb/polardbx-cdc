@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,11 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.storage;
 
+import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -38,15 +36,17 @@ public class TxnBufferTest {
         int size = 10000;
         int count = 15;
         TxnBuffer txnBuffer = buildOneBuffer(size);
+        txnBuffer.markComplete();
         List<TxnBuffer> buffers = buildBufferList(size, count);
+        buffers.forEach(TxnBuffer::markComplete);
 
         // 验证个数是否一致
         buffers.stream().forEach(b -> txnBuffer.merge(b));
         Assert.assertEquals(size * (count + 1), txnBuffer.itemSize());
 
         // 验证是否有序
-        final TxnItemRef lastRef = new TxnItemRef(txnBuffer, "", "", 19, null,
-            null, null, null, null);
+        final TxnItemRef lastRef = new TxnItemRef(txnBuffer, "", "", 19, new byte[1],
+            null, null);
         txnBuffer.iterator().forEachRemaining(i -> {
             int result = i.compareTo(lastRef);
             Assert.assertTrue(result > 0);
@@ -65,7 +65,7 @@ public class TxnBufferTest {
         Assert.assertEquals(index, txnBuffer.itemSize());
         Assert.assertFalse(txnBuffer.seek(
             new TxnItemRef(txnBuffer, UUID.randomUUID().toString(), "", 19, null,
-                null, null, null, null)));
+                null, null)));
     }
 
     private static void testMergePerformance() {
@@ -91,6 +91,7 @@ public class TxnBufferTest {
     private static TxnBuffer buildOneBuffer(int size) {
         TxnBuffer txnBuffer =
             new TxnBuffer(new TxnKey(UUID.randomUUID().toString(), UUID.randomUUID().toString()), null);
+        txnBuffer.markStart();
         long seed = System.currentTimeMillis();
         String suffix = UUID.randomUUID().toString();
 
@@ -98,6 +99,7 @@ public class TxnBufferTest {
             TxnBufferItem txnItem = TxnBufferItem.builder()
                 .traceId((seed++) + "-" + suffix)
                 .payload(new byte[0])
+                .eventType(i % 2 == 0 ? LogEvent.TABLE_MAP_EVENT : LogEvent.WRITE_ROWS_EVENT)
                 .build();
             txnBuffer.push(txnItem);
         }

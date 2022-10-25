@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
 import com.alibaba.fastjson.JSON;
@@ -85,11 +82,13 @@ public class SystemControlResource {
         String.format("delete from binlog_system_config where config_key='%s';",
             CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY);
     private static final String CDC_METADB_RESET_11 = "truncate binlog_semi_snapshot";
+    private static final String CDC_METADB_RESET_12 = "truncate binlog_task_config";
+    private static final String CDC_METADB_RESET_13 = "truncate binlog_phy_ddl_hist_clean_point";
 
     private static final String QUERY_VIP_STORAGE =
         "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";
     private static final String QUERY_STORAGE_LIMIT_1 =
-        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' and xport <> -1 limit 1";
+        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
 
     private static final String TRANSACTION_POLICY = "set drds_transaction_policy='TSO'";
 
@@ -117,6 +116,9 @@ public class SystemControlResource {
         metaTemplate.execute(CDC_METADB_RESET_8);
         metaTemplate.execute(CDC_METADB_RESET_9);
         metaTemplate.execute(CDC_METADB_RESET_10);
+        metaTemplate.execute(CDC_METADB_RESET_11);
+        metaTemplate.execute(CDC_METADB_RESET_12);
+        metaTemplate.execute(CDC_METADB_RESET_13);
         logger.info("metadb is reset.");
 
         final StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
@@ -150,7 +152,7 @@ public class SystemControlResource {
             try {
                 Class.forName("com.mysql.jdbc.Driver");
                 try (Connection conn = DriverManager
-                    .getConnection(String.format("jdbc:mysql://%s:%s", ip, port), user, password)) {
+                    .getConnection(String.format("jdbc:mysql://%s:%s?useSSL=false", ip, port), user, password)) {
                     try (Statement stmt = conn.createStatement()) {
                         stmt.execute("flush logs");
                     }

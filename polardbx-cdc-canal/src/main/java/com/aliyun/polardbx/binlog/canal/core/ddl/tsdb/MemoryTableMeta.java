@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 
 import com.alibaba.polardbx.druid.DbType;
@@ -55,6 +52,7 @@ import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.alibaba.polardbx.druid.sql.repository.Schema;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObject;
+import com.alibaba.polardbx.druid.sql.repository.SchemaObjectStoreProvider;
 import com.alibaba.polardbx.druid.sql.repository.SchemaRepository;
 import com.alibaba.polardbx.druid.util.FnvHash;
 import com.alibaba.polardbx.druid.util.JdbcConstants;
@@ -62,7 +60,10 @@ import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DruidDdlParser;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 
@@ -74,7 +75,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 基于DDL维护的内存表结构
@@ -83,13 +84,31 @@ import java.util.concurrent.ConcurrentHashMap;
  * @since 3.2.5
  */
 public class MemoryTableMeta implements TableMetaTSDB {
+    private final static int DEFAULT_MAX_CACHE_SIZE = 8192;
+    private final static int DEFAULT_CACHE_EXPIRE_TIME_MINUTES = 60;
 
-    private final Map<List<String>, TableMeta> tableMetas = new ConcurrentHashMap<List<String>, TableMeta>();
-    private SchemaRepository repository = new SchemaRepository(JdbcConstants.MYSQL);
+    private final Cache<List<String>, TableMeta> tableMetas;
     private final Logger logger;
+    private final boolean ignoreApplyError;
+    protected SchemaRepository repository = new SchemaRepository(JdbcConstants.MYSQL);
 
-    public MemoryTableMeta(Logger logger) {
+    public MemoryTableMeta(Logger logger, boolean ignoreApplyError) {
+        this(logger, DEFAULT_MAX_CACHE_SIZE, DEFAULT_CACHE_EXPIRE_TIME_MINUTES, ignoreApplyError);
+    }
+
+    public MemoryTableMeta(Logger logger, SchemaObjectStoreProvider provider, int maxCacheSize,
+                           int cacheExpireTimeMinutes, boolean ignoreApplyError) {
+        this(logger, maxCacheSize, cacheExpireTimeMinutes, ignoreApplyError);
+        this.repository.setSchemaObjectStoreProvider(provider);
+    }
+
+    private MemoryTableMeta(Logger logger, int maxCacheSize, int expireTimeMinutes, boolean ignoreApplyError) {
         this.logger = logger;
+        this.tableMetas = CacheBuilder.newBuilder()
+            .maximumSize(maxCacheSize)
+            .expireAfterWrite(expireTimeMinutes, TimeUnit.MINUTES)
+            .build();
+        this.ignoreApplyError = ignoreApplyError;
     }
 
     @Override
@@ -99,7 +118,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
 
     @Override
     public void destory() {
-        tableMetas.clear();
+        tableMetas.invalidateAll();
         repository = new SchemaRepository(JdbcConstants.MYSQL);
     }
 
@@ -108,8 +127,8 @@ public class MemoryTableMeta implements TableMetaTSDB {
         if (StringUtils.isBlank(ddl)) {
             return true;
         }
-
-        tableMetas.clear();
+        ddl = ddl.toLowerCase();
+        tableMetas.invalidateAll();
         synchronized (this) {
             if (StringUtils.isNotEmpty(schema)) {
                 repository.setDefaultSchema(schema);
@@ -125,7 +144,11 @@ public class MemoryTableMeta implements TableMetaTSDB {
                     tryRemoveSchema(position, ddl, schema);
                 }
             } catch (Throwable e) {
-                logger.warn("parse failed : " + ddl, e);
+                if (ignoreApplyError) {
+                    logger.error("parse failed : " + ddl, e);
+                } else {
+                    throw new PolardbxException("Table meta apply failed, schema: " + schema + ", ddl: " + ddl, e);
+                }
             }
         }
 
@@ -134,42 +157,46 @@ public class MemoryTableMeta implements TableMetaTSDB {
 
     @Override
     public TableMeta find(String schema, String table) {
-        List<String> keys = Arrays.asList(schema, table);
-        TableMeta tableMeta = tableMetas.get(keys);
-        if (tableMeta == null) {
-            synchronized (this) {
-                tableMeta = tableMetas.get(keys);
-                if (tableMeta == null) {
-                    Schema schemaRep = repository.findSchema(schema);
-                    if (schemaRep == null) {
-                        return null;
-                    }
-                    SchemaObject data = schemaRep.findTable(table);
-                    if (data == null) {
-                        return null;
-                    }
-                    SQLStatement statement = data.getStatement();
-                    if (statement == null) {
-                        return null;
-                    }
-                    if (statement instanceof SQLCreateTableStatement) {
-                        tableMeta = parse((SQLCreateTableStatement) statement);
-                    }
-                    if (tableMeta != null) {
-                        if (table != null) {
-                            tableMeta.setTable(table);
+        try {
+            List<String> keys = Arrays.asList(schema, table);
+            TableMeta tableMeta = tableMetas.getIfPresent(keys);
+            if (tableMeta == null) {
+                synchronized (this) {
+                    tableMeta = tableMetas.getIfPresent(keys);
+                    if (tableMeta == null) {
+                        Schema schemaRep = repository.findSchema(schema);
+                        if (schemaRep == null) {
+                            return null;
                         }
-                        if (schema != null) {
-                            tableMeta.setSchema(schema);
+                        SchemaObject data = schemaRep.findTable(table);
+                        if (data == null) {
+                            return null;
                         }
+                        SQLStatement statement = data.getStatement();
+                        if (statement == null) {
+                            return null;
+                        }
+                        if (statement instanceof SQLCreateTableStatement) {
+                            tableMeta = parse((SQLCreateTableStatement) statement);
+                        }
+                        if (tableMeta != null) {
+                            if (table != null) {
+                                tableMeta.setTable(table);
+                            }
+                            if (schema != null) {
+                                tableMeta.setSchema(schema);
+                            }
 
-                        tableMetas.put(keys, tableMeta);
+                            tableMetas.put(keys, tableMeta);
+                        }
                     }
                 }
             }
+            return tableMeta;
+        } catch (Throwable t) {
+            throw new PolardbxException(
+                String.format("find table meta failed, schema %s, table %s.", schema, table), t);
         }
-
-        return tableMeta;
     }
 
     @Override
@@ -198,12 +225,17 @@ public class MemoryTableMeta implements TableMetaTSDB {
     }
 
     public String snapshot(String schemaName, String tableName) {
-        Schema schema = repository.findSchema(schemaName);
-        SchemaObject schemaObject = schema.findTable(tableName);
-        StringBuffer data = new StringBuffer(1024);
-        schemaObject.getStatement().output(data);
-        data.append(";");
-        return data.toString();
+        try {
+            Schema schema = repository.findSchema(schemaName);
+            SchemaObject schemaObject = schema.findTable(tableName);
+            StringBuffer data = new StringBuffer(1024);
+            schemaObject.getStatement().output(data);
+            data.append(";");
+            return data.toString();
+        } catch (Throwable t) {
+            throw new PolardbxException(String.format("get snapshot failed, schemaName :%s , tableName %s.",
+                schemaName, tableName));
+        }
     }
 
     private TableMeta parse(SQLCreateTableStatement statement) {
@@ -224,10 +256,22 @@ public class MemoryTableMeta implements TableMetaTSDB {
                     continue;
                 }
             }
+
+            // 先对SQLColumnDefinition进行一轮处理
             for (int i = 0; i < size; ++i) {
                 SQLTableElement element = statement.getTableElementList().get(i);
-                processTableElement(element, tableMeta);
+                if (element instanceof SQLColumnDefinition) {
+                    processTableElement(element, tableMeta);
+                }
             }
+            // 再对MySqlPrimaryKey和MySqlUnique进行处理，避免当MySqlPrimaryKey或MySqlUnique比对应的SQLColumnDefinition位置还靠前时触发NPE
+            for (int i = 0; i < size; ++i) {
+                SQLTableElement element = statement.getTableElementList().get(i);
+                if (element instanceof MySqlPrimaryKey || element instanceof MySqlUnique) {
+                    processTableElement(element, tableMeta);
+                }
+            }
+
             return tableMeta;
         }
 
@@ -276,9 +320,16 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 if (StringUtils.isNotEmpty(charSetName)) {
                     fieldMeta.setCharset(charSetName);
                 } else {
-                    final SQLCharExpr charsetExpr = (SQLCharExpr) ((SQLColumnDefinition) element).getCharsetExpr();
-                    if (charsetExpr != null) {
-                        fieldMeta.setCharset(charsetExpr.getText());
+                    SQLExpr expr = ((SQLColumnDefinition) element).getCharsetExpr();
+                    if (expr instanceof SQLIdentifierExpr) {
+                        if (StringUtils.isNotEmpty(((SQLIdentifierExpr) expr).getName())) {
+                            fieldMeta.setCharset(((SQLIdentifierExpr) expr).getName());
+                        }
+                    }
+                    if (expr instanceof SQLCharExpr) {
+                        if (StringUtils.isNotEmpty(((SQLCharExpr) expr).getText())) {
+                            fieldMeta.setCharset(((SQLCharExpr) expr).getText());
+                        }
                     }
                 }
             }
@@ -409,9 +460,13 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 if ("schemas".equalsIgnoreCase(name)) {
                     field.setAccessible(true);
                     Map schemas = (Map) field.get(repository);
-                    schemas.remove(schema);
-                    logger.warn("schema is removed from schema repository, tso {}, schema {}, ddlSql {}.",
-                        position == null ? "" : position.getRtso(), schema, ddlSql);
+                    if (schemas.containsKey(schema)) {
+                        Schema schemaObj = (Schema) schemas.get(schema);
+                        schemaObj.getStore().clearAll();
+                        schemas.remove(schema);
+                        logger.warn("schema is removed from schema repository, tso {}, schema {}, ddlSql {}.",
+                            position == null ? "" : position.getRtso(), schema, ddlSql);
+                    }
                     break;
                 }
             }

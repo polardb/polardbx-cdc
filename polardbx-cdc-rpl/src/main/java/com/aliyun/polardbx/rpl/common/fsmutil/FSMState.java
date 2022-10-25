@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,10 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.common.fsmutil;
+
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -29,8 +28,18 @@ public enum FSMState {
     for non use
     * */
     NULL(-1),
-    REPLICA(201);
-
+    INITIAL(0),
+    FINISHED(1),
+    FULL_COPY(101),
+    INC_COPY(102),
+    CATCH_UP_VALIDATION(104),
+    RECONCILIATION(105),
+    RECON_FINISHED_WAIT_CATCH_UP(108),
+    RECON_FINISHED_CATCH_UP(106),
+    BACK_FLOW(107),
+    REPLICA(201),
+    REC_SEARCH(301),
+    REC_COMBINE(302);
     private final int value;
 
     FSMState(int value) {
@@ -50,7 +59,9 @@ public enum FSMState {
         List<FSMState> stateList = new LinkedList<>();
         String[] strList = stateListStr.split(",");
         for (String str : strList) {
-            stateList.add(from(Integer.parseInt(str)));
+            if (StringUtils.isNotBlank(str)) {
+                stateList.add(from(Integer.parseInt(str)));
+            }
         }
         return stateList;
     }

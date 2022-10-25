@@ -5,11 +5,15 @@
     <parent>
         <artifactId>polardbx-cdc</artifactId>
         <groupId>com.aliyun.polardbx</groupId>
-        <version>5.4.13-SNAPSHOT</version>
+        <version>5.4.15-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>polardbx-cdc-meta</artifactId>
+
+    <properties>
+        <license.dir>${project.parent.basedir}</license.dir>
+    </properties>
 
     <dependencies>
         <dependency>
@@ -21,7 +25,7 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-common</artifactId>
-            <version>5.4.13-SNAPSHOT</version>
+            <version>5.4.15-SNAPSHOT</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.alibaba.fastsql</groupId>
@@ -32,7 +36,13 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-canal</artifactId>
-            <version>5.4.13-SNAPSHOT</version>
+            <version>5.4.15-SNAPSHOT</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-storage</artifactId>
+            <version>${project.version}</version>
         </dependency>
 
         <dependency>
@@ -44,7 +54,7 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-monitor</artifactId>
-            <version>5.4.13-SNAPSHOT</version>
+            <version>5.4.15-SNAPSHOT</version>
         </dependency>
     </dependencies>
 

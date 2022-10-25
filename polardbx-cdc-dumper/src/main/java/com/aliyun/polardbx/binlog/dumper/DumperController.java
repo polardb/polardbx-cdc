@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper;
 
 import com.alibaba.fastjson.JSONObject;
@@ -23,6 +20,7 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.RuntimeMode;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.TaskInfoProvider;
+import com.aliyun.polardbx.binlog.cleaner.LocalBinlogCleaner;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.DumperType;
@@ -51,6 +49,7 @@ public class DumperController {
     private final TaskInfoProvider taskInfoProvider;
     private LogFileManager logFileManager;
     private CdcServer cdcServer;
+    private LocalBinlogCleaner cleaner;
     private MetricsManager metricsManager;
     private volatile boolean running;
     private volatile boolean leader;
@@ -69,6 +68,8 @@ public class DumperController {
         TaskInfo taskInfo = taskInfoProvider.get();
         this.logFileManager.start();
         this.cdcServer.start();
+        this.cleaner.setTaskName(taskInfo.getName());
+        this.cleaner.start();
         this.metricsManager.start();
         logger.info("Dumper controller started({}).", leader ? "M" : "S");
     }
@@ -81,6 +82,7 @@ public class DumperController {
 
         this.logFileManager.stop();
         this.cdcServer.stop();
+        this.cleaner.stop();
         this.metricsManager.stop();
         logger.info("Dumper controller stopped.");
     }
@@ -100,8 +102,8 @@ public class DumperController {
 
         this.cdcServer = new CdcServer(taskInfoProvider.get().getName(), logFileManager,
             taskInfoProvider.get().getServerPort());
-
         this.metricsManager = new MetricsManager(RuntimeLeaderElector.isDumperLeader(taskInfoProvider.get().getName()));
+        cleaner = new LocalBinlogCleaner(DynamicApplicationConfig.getString(ConfigKeys.BINLOG_DIR_PATH));
         updateDumperInfo(taskInfoProvider.get());
     }
 

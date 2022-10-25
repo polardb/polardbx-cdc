@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.alibaba.fastjson.JSON;
@@ -23,6 +20,7 @@ import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
+import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import io.grpc.Status;
@@ -31,6 +29,12 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_PACKET_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_READ_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_PACKET_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_READ_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 
 /**
  * Created by ShuGuang
@@ -93,7 +97,8 @@ public class LogFileReader {
         }
         BinlogDumpReader dumpReader = null;
         try {
-            dumpReader = new BinlogDumpReader(logFileManager, fileName, position);
+            dumpReader = new BinlogDumpReader(logFileManager, fileName, position, getInt(BINLOG_DUMP_PACKET_SIZE),
+                getInt(BINLOG_DUMP_READ_BUFFER_SIZE));
             dumpReader.valid();
             ByteString fakeRotateEvent = dumpReader.fakeRotateEvent();
             ByteString fakeFormatEvent = dumpReader.fakeFormatEvent();
@@ -150,7 +155,7 @@ public class LogFileReader {
         }
     }
 
-    public void binlogSync(String fileName, long position,
+    public void binlogSync(String fileName, long position, EventSplitMode eventSplitMode,
                            TxnOutputStream<DumpStream> outputStream) {
         log.info("binlogSync from {}@{}", fileName, position);
         if (logFileManager.getLatestFileCursor() == null) {
@@ -160,7 +165,8 @@ public class LogFileReader {
         }
         BinlogSyncReader binlogSyncReader = null;
         try {
-            binlogSyncReader = new BinlogSyncReader(logFileManager, fileName, position);
+            binlogSyncReader = new BinlogSyncReader(logFileManager, fileName, position, eventSplitMode,
+                getInt(BINLOG_SYNC_PACKET_SIZE), getInt(BINLOG_SYNC_READ_BUFFER_SIZE));
             binlogSyncReader.start();
             int timeout = 100, noData = 0;
             while (true) {
@@ -171,17 +177,15 @@ public class LogFileReader {
                         if (log.isDebugEnabled()) {
                             show("BinlogSync", pack);
                         }
-                        outputStream.onNext(
-                            DumpStream.newBuilder().setPayload(pack).build());
+                        outputStream.onNext(DumpStream.newBuilder().setPayload(pack).build());
                     } else {
                         TimeUnit.MILLISECONDS.sleep(timeout);
                         noData += timeout;
-                        //30s一次心跳(mysql 默认 SELECT Heartbeat FROM MYSQL.SLAVE_MASTER_INFO)
                         if (noData > 2000) {
-                            outputStream.onNext(
-                                DumpStream.newBuilder()
-                                    .setPayload(binlogSyncReader.heartbeatEvent())
-                                    .build());
+                            outputStream.onNext(DumpStream.newBuilder()
+                                .setPayload(binlogSyncReader.heartbeatEvent())
+                                .setIsHeartBeat(true)
+                                .build());
                             noData = 0;
                         }
                     }

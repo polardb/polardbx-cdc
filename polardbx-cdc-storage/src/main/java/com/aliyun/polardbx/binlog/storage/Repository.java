@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,32 +11,27 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.storage;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.jvm.JvmUtils;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
-import org.rocksdb.Options;
-import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
-import org.rocksdb.RocksDBException;
-import org.rocksdb.WriteOptions;
 
 import java.io.File;
-import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryMXBean;
-import java.lang.management.MemoryPoolMXBean;
-import java.lang.management.MemoryType;
-import java.lang.management.MemoryUsage;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_CHECK_INTERVAL_MILLS;
 
 /**
  * 磁盘存储
@@ -45,8 +39,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public class Repository {
     private final String basePath;
-    private final Boolean forcePersist;
-    private final Double persistMemoryThreshold;
+    private final PersistMode persistMode;
+    private final Double persistNewThreshold;
     private final int txnPersistThreshold;
     private final int txnItemPersistThreshold;
     private final boolean isPersistOn;
@@ -55,14 +49,14 @@ public class Repository {
     private final List<RepoUnit> repoUnits;
     private final AtomicBoolean exceedPersistThreshold;
     private final AtomicBoolean isStarted;
+    private PersistCheckResult persistCheckResult;
 
-    public Repository(boolean isPersistOn, String basePath, boolean forcePersist, double persistMemoryThreshold,
-                      int txnPersistThreshold, int txnItemPersistThreshold,
-                      DeleteMode deleteMode, int repoUnitCount) {
+    public Repository(boolean isPersistOn, String basePath, PersistMode persistMode, double persistNewThreshold,
+                      int txnPersistThreshold, int txnItemPersistThreshold, DeleteMode deleteMode, int repoUnitCount) {
         this.isPersistOn = isPersistOn;
         this.basePath = basePath;
-        this.forcePersist = forcePersist;
-        this.persistMemoryThreshold = persistMemoryThreshold;
+        this.persistMode = persistMode;
+        this.persistNewThreshold = persistNewThreshold;
         this.txnPersistThreshold = txnPersistThreshold;
         this.txnItemPersistThreshold = txnItemPersistThreshold;
         this.deleteMode = deleteMode;
@@ -70,6 +64,7 @@ public class Repository {
         this.repoUnits = new ArrayList<>(repoUnitCount);
         this.exceedPersistThreshold = new AtomicBoolean(false);
         this.isStarted = new AtomicBoolean(false);
+        this.persistCheckResult = new PersistCheckResult(false, System.currentTimeMillis());
     }
 
     public void open() {
@@ -81,7 +76,7 @@ public class Repository {
                 FileUtils.cleanDirectory(new File(basePath));
 
                 for (int i = 0; i < repoUnitCount; i++) {
-                    RepoUnit unit = new RepoUnit(basePath + "/" + UUID.randomUUID().toString());
+                    RepoUnit unit = new RepoUnit(basePath + "/" + UUID.randomUUID().toString(), true, true);
                     repoUnits.add(unit);
                     unit.open();
                 }
@@ -105,33 +100,17 @@ public class Repository {
         }
     }
 
-    public void put(byte[] key, byte[] value) throws RocksDBException {
-        checkKeyNotNull(key);
-        checkValueNotNull(value);
-        selectUnit(key).put(key, value);
-    }
-
-    public void del(byte[] key) throws RocksDBException {
-        checkKeyNotNull(key);
-        selectUnit(key).delete(key);
-    }
-
-    public void delRange(byte[] beginKey, byte[] endKey) throws RocksDBException {
-        checkKeyNotNull(beginKey);
-        checkKeyNotNull(endKey);
-        for (RepoUnit repoUnit : repoUnits) {
-            repoUnit.deleteRange(beginKey, endKey);
-        }
-    }
-
-    public byte[] get(byte[] key) throws RocksDBException {
-        byte[] value = selectUnit(key).get(key);
-        checkValueNotNull(value);
-        return value;
-    }
-
     public boolean isForcePersist() {
-        return forcePersist;
+        if (persistMode == PersistMode.AUTO) {
+            return false;
+        } else if (persistMode == PersistMode.FORCE) {
+            return true;
+        } else if (persistMode == PersistMode.RANDOM) {
+            Random random = new Random();
+            return random.nextBoolean();
+        } else {
+            throw new PolardbxException("unsupported persist mode " + persistMode);
+        }
     }
 
     public boolean isPersistOn() {
@@ -151,48 +130,30 @@ public class Repository {
     }
 
     public boolean isReachPersistThreshold() {
-        MemoryMXBean totalMemoryMXBean = ManagementFactory.getMemoryMXBean();
-        MemoryUsage totalMemoryUsage = totalMemoryMXBean.getHeapMemoryUsage();
-        long totalMaxMemorySize = totalMemoryUsage.getMax(); //最大可用内存
-        long totalUsedMemorySize = totalMemoryUsage.getUsed(); //已使用的内存
-        double totalRatio = (double) totalUsedMemorySize / (double) totalMaxMemorySize;
+        int checkInterval = DynamicApplicationConfig.getInt(STORAGE_PERSIST_CHECK_INTERVAL_MILLS);
+        if (System.currentTimeMillis() - persistCheckResult.checkTime >= checkInterval) {
+            double totalRatio = JvmUtils.getTotalUsedRatio();
+            double oldRatio = JvmUtils.getOldUsedRatio();
+            boolean result = (totalRatio >= persistNewThreshold) || (oldRatio >= persistNewThreshold);
 
-        MemoryUsage oldMemoryUsage = null;
-        List<MemoryPoolMXBean> mps = ManagementFactory.getMemoryPoolMXBeans();
-        for (MemoryPoolMXBean mp : mps) {
-            MemoryType type = mp.getType();
-            String name = mp.getName();
-            if (type == MemoryType.HEAP) {
-                switch (name) {
-                case "CMS Old Gen":
-                case "PS Old Gen": {
-                    oldMemoryUsage = mp.getUsage();
-                    break;
-                }
-                }
+            if (result && exceedPersistThreshold.compareAndSet(false, true)) {
+                log.info(
+                    "Memory usage ratio changed greater than the persist threshold {}, totalRatio is {}, oldRatio is {}.",
+                    persistNewThreshold, totalRatio, oldRatio);
             }
-        }
-        long oldMaxMemorySize = Objects.requireNonNull(oldMemoryUsage).getMax();
-        long oldUsedMemorySize = oldMemoryUsage.getUsed();
-        double oldRatio = (double) oldUsedMemorySize / (double) oldMaxMemorySize;
+            if (!result && exceedPersistThreshold.compareAndSet(true, false)) {
+                log.info(
+                    "Memory usage ratio changed lower than the persist threshold {}, totalRatio is {}, oldRatio is {}.",
+                    persistNewThreshold, totalRatio, oldRatio);
+            }
 
-        boolean result = (totalRatio >= persistMemoryThreshold) || (oldRatio >= persistMemoryThreshold);
-
-        if (result && exceedPersistThreshold.compareAndSet(false, true)) {
-            log.info(
-                "Memory usage ratio changed greater than the persist threshold {}, totalRatio is {}, oldRatio is {}.",
-                persistMemoryThreshold, totalRatio, oldRatio);
-        }
-        if (!result && exceedPersistThreshold.compareAndSet(true, false)) {
-            log.info(
-                "Memory usage ratio changed lower than the persist threshold {}, totalRatio is {}, oldRatio is {}.",
-                persistMemoryThreshold, totalRatio, oldRatio);
+            this.persistCheckResult = new PersistCheckResult(result, System.currentTimeMillis());
         }
 
-        return result;
+        return persistCheckResult.shouldPersist;
     }
 
-    private RepoUnit selectUnit(byte[] key) {
+    public RepoUnit selectUnit(byte[] key) {
         if (repoUnits.size() == 1) {
             return repoUnits.get(0);
         } else {
@@ -201,15 +162,12 @@ public class Repository {
         }
     }
 
-    private void checkKeyNotNull(byte[] key) {
-        if (key == null || key.length == 0) {
-            throw new PolardbxException("key is null or empty.");
-        }
-    }
-
-    private void checkValueNotNull(byte[] value) {
-        if (value == null || value.length == 0) {
-            throw new PolardbxException("value is null or empty.");
+    public RepoUnit selectUnit(Long seed) {
+        if (repoUnits.size() == 1) {
+            return repoUnits.get(0);
+        } else {
+            int index = Math.abs(seed.hashCode() % repoUnits.size());
+            return repoUnits.get(index);
         }
     }
 
@@ -240,76 +198,10 @@ public class Repository {
         }
     }
 
-    private static class RepoUnit {
-        RocksDB rocksDB;
-        String persistPath;
-        Options options;
-        WriteOptions writeOptions;
-        ReadOptions readOptions;
-
-        RepoUnit(String persistPath) {
-            this.persistPath = persistPath;
-        }
-
-        void put(byte[] key, byte[] value) throws RocksDBException {
-            rocksDB.put(writeOptions, key, value);
-        }
-
-        byte[] get(byte[] key) throws RocksDBException {
-            return rocksDB.get(readOptions, key);
-        }
-
-        void delete(byte[] key) throws RocksDBException {
-            rocksDB.delete(writeOptions, key);
-        }
-
-        void deleteRange(byte[] beginKey, byte[] endKey) throws RocksDBException {
-            rocksDB.deleteRange(writeOptions, beginKey, endKey);
-        }
-
-        void open() throws Throwable {
-            try {
-                options = new Options().setCreateIfMissing(true);
-                writeOptions = new WriteOptions();
-                writeOptions.disableWAL();
-                readOptions = new ReadOptions();
-                readOptions.setIgnoreRangeDeletions(true);
-
-                FileUtils.forceMkdir(new File(persistPath));
-                rocksDB = RocksDB.open(options, persistPath);
-
-                log.info("Repo Unit is opened with path : " + persistPath);
-            } catch (Throwable t) {
-                log.error("Repo Unit is open failed with path : " + persistPath, t);
-                throw t;
-            }
-        }
-
-        void close() throws Throwable {
-            try {
-                if (options != null) {
-                    options.close();
-                }
-                if (writeOptions != null) {
-                    writeOptions.close();
-                }
-                if (readOptions != null) {
-                    readOptions.close();
-                }
-                if (rocksDB != null) {
-                    rocksDB.close();
-                }
-
-                File path = new File(persistPath);
-                if (path.exists()) {
-                    FileUtils.deleteDirectory(path);
-                }
-
-                log.info("Repo Unit is closed with path : " + persistPath);
-            } catch (Throwable t) {
-                log.error("Repo Unit is closing failed with path : " + persistPath, t);
-                throw t;
-            }
-        }
+    @Data
+    @AllArgsConstructor
+    static class PersistCheckResult {
+        boolean shouldPersist;
+        long checkTime;
     }
 }

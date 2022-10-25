@@ -11,7 +11,7 @@
     <import resource="polarx_datasource.xml"/>
 
     <context:annotation-config/>
-    <context:component-scan base-package="com.aliyun.polardbx.binlog"/>
+    <context:component-scan base-package="com.aliyun.polardbx.binlog, com.aliyun.polardbx.rpl"/>
     <!--
         1.system-properties-mode采用OVERRIDE模式，优先从系统环境变量获取，环境变量没有再从配置文件获取；
         2.公有云环境的很多配置，由管控生成，会放到${HOME}/env/env.properties文件中，所以location需要配置两个文件

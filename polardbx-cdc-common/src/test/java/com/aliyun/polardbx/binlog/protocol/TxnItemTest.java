@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,27 +11,23 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.protocol;
 
+import com.aliyun.polardbx.binlog.base.BaseTest;
+import com.google.protobuf.AbstractMessageLite;
 import com.google.protobuf.ByteString;
+import org.junit.Ignore;
+import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.UUID;
 
-/**
- *
- **/
-public class TxnItemTest {
+public class TxnItemTest extends BaseTest {
 
-    public static void main(String args[]) {
-        testSerializePerformance();
-        testSizeCalculate();
-    }
-
-    private static void testSerializePerformance() {
+    @Test
+    @Ignore
+    public void testSerializePerformance() {
         ArrayList<TxnItem> list = new ArrayList<>();
         for (int i = 0; i < 100000; i++) {
             list.add(TxnItem.newBuilder()
@@ -43,22 +38,20 @@ public class TxnItemTest {
 
         // 序列化
         long start = System.currentTimeMillis();
-        list.forEach(i -> {
-            i.toByteArray();
-        });
+        list.forEach(AbstractMessageLite::toByteArray);
         long end = System.currentTimeMillis();
         System.out.println(end - start);
 
         // 序列化size
         start = System.currentTimeMillis();
-        list.forEach(i -> {
-            i.getSerializedSize();
-        });
+        list.forEach(TxnItem::getSerializedSize);
         end = System.currentTimeMillis();
         System.out.println(end - start);
     }
 
-    private static void testSizeCalculate() {
+    @Test
+    @Ignore
+    public void testSizeCalculate() {
         TxnItem item = TxnItem.newBuilder()
             .setTraceId(UUID.randomUUID().toString())
             .setPayload(ByteString.copyFrom(new byte[100]))

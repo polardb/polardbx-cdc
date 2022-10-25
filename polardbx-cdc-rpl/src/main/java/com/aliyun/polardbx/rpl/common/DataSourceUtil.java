@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,17 +11,17 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.common;
 
 import com.alibaba.druid.pool.DruidDataSource;
 import com.alibaba.druid.pool.vendor.MySqlExceptionSorter;
 import com.alibaba.druid.pool.vendor.MySqlValidConnectionChecker;
 import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.rpl.applier.SqlContext;
 import com.google.common.collect.Maps;
 
+import java.io.Serializable;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -352,23 +351,41 @@ public class DataSourceUtil {
         return null;
     }
 
-    /**
-     * SQL query helper
-     */
-    public static ResultSet query(Connection conn, String sql, int fetchSize)
-        throws SQLException {
-        return query(conn, sql, fetchSize, QUERY_TIMEOUT);
-    }
 
     /**
-     * SQL query helper
+     * Execute query and process with mapper
      */
-    public static ResultSet query(Connection conn, String sql, int fetchSize, int queryTimeout)
-        throws SQLException {
-        Statement stmt = conn.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
-        stmt.setFetchSize(fetchSize);
-        stmt.setQueryTimeout(queryTimeout);
-        return query(stmt, sql);
+    public static <T> T query(Connection conn, SqlContext sqlContext, int fetchSize, int tryTimes, ResultSetMapper<T> mapper) throws SQLException {
+        Objects.requireNonNull(mapper, "ResultSetMapper should not be null");
+        for (int i = 0; i < tryTimes; i++) {
+            try (PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql(), ResultSet.TYPE_FORWARD_ONLY,
+                ResultSet.CONCUR_READ_ONLY)) {
+                stmt.setFetchSize(fetchSize);
+                log.debug("Executing query: {}", sqlContext);
+                if (sqlContext.getParams() != null) {
+                    // set value
+                    int j = 1;
+                    for (Serializable dataValue : sqlContext.getParams()) {
+                        stmt.setObject(j, dataValue);
+                        j++;
+                    }
+                }
+                try (ResultSet rs = stmt.executeQuery()) {
+                    return mapper.process(rs);
+                }
+            } catch (Exception e) {
+                log.error("TryTimes: {}, current round: {}, Error query: {}", tryTimes, i, sqlContext);
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e2) {
+                    log.error("Query retry interrupted.", e2);
+                }
+                if (i == tryTimes - 1) {
+                    throw e;
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -412,7 +429,7 @@ public class DataSourceUtil {
             url = url + "/" + dbName;
         }
         // remove warning msg
-        url = url + "?useSSL=false";
+        url = url + "?allowPublicKeyRetrieval=true&useSSL=false";
         ds.setUrl(url);
         ds.setUsername(user);
         ds.setPassword(passwd);

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
@@ -22,6 +19,7 @@ import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.MockData;
+import com.google.common.collect.Sets;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import org.junit.Before;
@@ -40,7 +38,7 @@ public class PolarDbXTableMetaManagerTest {
     @Test
     public void apply() {
 
-        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master");
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null);
         metaManager.init();
 
         metaManager.rollback(new BinlogPosition(null, "675548357978085952012865487953073274880000000000000000"));
@@ -53,7 +51,7 @@ public class PolarDbXTableMetaManagerTest {
     @Test
     public void rollback() {
 
-        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master");
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null);
         metaManager.init();
 
         metaManager.rollback(new BinlogPosition(null, "684854406688853196813796092824455782400000000000000000"));
@@ -79,7 +77,7 @@ public class PolarDbXTableMetaManagerTest {
             + "type_text text DEFAULT '你好'"
             + ")";
 
-        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master");
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null);
 
         metaManager.init();
 
@@ -99,26 +97,28 @@ public class PolarDbXTableMetaManagerTest {
     public void apply2() {
 
         LogicMetaTopology x = gson.fromJson(MockData.BASE, LogicMetaTopology.class);
-        PolarDbXTableMetaManager metaManager1 = new PolarDbXTableMetaManager("polardbx-storage-0-master");
+        PolarDbXTableMetaManager metaManager1 = new PolarDbXTableMetaManager("polardbx-storage-0-master", null);
 
         metaManager1.init();
         metaManager1.applyBase(new BinlogPosition(null, "1"), x);
 
-        System.out.println(metaManager1.getPhyTables("polardbx-storage-0-master"));
+        System.out
+            .println(metaManager1.getPhyTables("polardbx-storage-0-master", Sets.newHashSet(), Sets.newHashSet()));
 
-        PolarDbXTableMetaManager metaManager2 = new PolarDbXTableMetaManager("polardbx-storage-1-master");
+        PolarDbXTableMetaManager metaManager2 = new PolarDbXTableMetaManager("polardbx-storage-1-master", null);
 
         metaManager2.init();
         metaManager2.applyBase(new BinlogPosition(null, "2"), x);
 
-        System.out.println(metaManager2.getPhyTables("polardbx-storage-1-master"));
+        System.out
+            .println(metaManager2.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet()));
 
     }
 
     @Test
     public void rollback1() {
 
-        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master");
+        PolarDbXTableMetaManager metaManager = new PolarDbXTableMetaManager("polardbx-storage-0-master", null);
         metaManager.init();
 
         metaManager.rollback(new BinlogPosition(null, "88735321530669472014184184307253288970000000000000000"));

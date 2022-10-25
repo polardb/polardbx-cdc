@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,11 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.rpc;
 
+import com.aliyun.polardbx.binlog.base.BaseTest;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
 import com.aliyun.polardbx.binlog.protocol.MessageType;
 import com.aliyun.polardbx.binlog.protocol.TxnBegin;
@@ -25,21 +23,22 @@ import com.aliyun.polardbx.binlog.protocol.TxnItem;
 import com.aliyun.polardbx.binlog.protocol.TxnMessage;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.google.protobuf.ByteString;
+import org.junit.Ignore;
+import org.junit.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.UUID;
 
-/**
- *
- **/
-public class TxnStreamRpcServerTest {
+public class TxnStreamRpcServerTest extends BaseTest {
 
-    public static void main(String[] args) throws Exception {
+    @Test
+    @Ignore
+    public void testServer() throws InterruptedException, IOException {
         TxnStreamRpcServer server = new TxnStreamRpcServer(8980, new TxnMessageProvider() {
 
             @Override
-            public boolean checkTSO(String startTSO, TxnOutputStream outputStream, boolean keepWaiting)
-                throws InterruptedException {
+            public boolean checkTSO(String startTSO, TxnOutputStream outputStream, boolean keepWaiting) {
                 return false;
             }
 

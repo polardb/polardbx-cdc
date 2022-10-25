@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,10 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.util;
+
+import org.springframework.util.Assert;
 
 /**
  * Created by ShuGuang
@@ -36,6 +35,13 @@ public class ByteArray {
         this.limit = data.length;
     }
 
+    public ByteArray(byte[] data, int offset) {
+        this.data = data;
+        this.origin = offset;
+        this.pos = origin;
+        this.limit = data.length;
+    }
+
     public ByteArray(byte[] data, int offset, int length) {
         if (offset + length > data.length) {
             throw new IllegalArgumentException("capacity exceed: " + (offset + length));
@@ -44,7 +50,7 @@ public class ByteArray {
         this.data = data;
         this.origin = offset;
         this.pos = origin;
-        this.limit = length;
+        this.limit = offset + length;
     }
 
     /**
@@ -121,20 +127,21 @@ public class ByteArray {
     }
 
     /**
-     * Write fixed length string.
+     * Write fixed length string, only for ascii code.
      */
-    public void writeString(String value, int length) {
+    public void writeString(String value) {
         final byte[] bytes = value.getBytes();
-        for (int i = 0; i < length && i < bytes.length; ++i) {
-            write((byte) (bytes[i] & 0xff));
-        }
-        if (length > bytes.length) {
-            skip(length - bytes.length);
+        writeString(bytes);
+    }
+
+    public void writeString(byte[] bytes) {
+        for (byte aByte : bytes) {
+            write((byte) (aByte & 0xff));
         }
     }
 
     public int read() {
-        assert pos < data.length;
+        Assert.isTrue(pos < limit);
         return data[pos++] & 0xff;
     }
 
@@ -145,7 +152,7 @@ public class ByteArray {
     }
 
     public void write(byte b) {
-        assert pos < data.length;
+        Assert.isTrue(pos < limit);
         data[pos++] = b;
     }
 

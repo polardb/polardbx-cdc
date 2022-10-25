@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,16 +11,16 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.collect;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.handle.HandleContext;
-import com.aliyun.polardbx.binlog.collect.handle.TxnShuffleStageHandler;
+import com.aliyun.polardbx.binlog.collect.handle.TxnMergeStageHandler;
 import com.aliyun.polardbx.binlog.collect.handle.TxnSinkStageHandler;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.collect.message.MessageEventExceptionHandler;
+import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.CollectException;
 import com.aliyun.polardbx.binlog.merge.HeartBeatWindow;
 import com.aliyun.polardbx.binlog.storage.Storage;
@@ -41,8 +40,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_COLLECTOR_MERGE_STAGE_PARALLELISM;
+
 /**
- *
+ * created by ziyang.lb
  **/
 public class CollectStrategyFinal implements CollectStrategy {
 
@@ -52,20 +53,22 @@ public class CollectStrategyFinal implements CollectStrategy {
     private final Transmitter transmitter;
     private final HandleContext handleContext;
     private final boolean isMergeNoTsoXa;
-    private final int txnShuffleThreadCount = 4;
+    private final TaskType taskType;
 
     private RingBuffer<MessageEvent> disruptorMsgBuffer;
     private Storage storage;
-    private ExecutorService txnShuffleExecutor;
+    private ExecutorService txnMergeExecutor;
     private ExecutorService txnSinkExecutor;
-    private WorkerPool<MessageEvent> txnShuffleWorkerPool;
+    private WorkerPool<MessageEvent> txnMergeWorkerPool;
     private BatchEventProcessor<MessageEvent> txnSinkStage;
     private volatile boolean running;
 
-    public CollectStrategyFinal(Collector collector, Transmitter transmitter, boolean isMergeNoTsoXa) {
+    public CollectStrategyFinal(Collector collector, Transmitter transmitter, boolean isMergeNoTsoXa,
+                                TaskType taskType) {
         this.collector = collector;
         this.transmitter = transmitter;
         this.isMergeNoTsoXa = isMergeNoTsoXa;
+        this.taskType = taskType;
         this.handleContext = new HandleContext();
     }
 
@@ -76,24 +79,25 @@ public class CollectStrategyFinal implements CollectStrategy {
         }
         running = true;
 
-        this.txnShuffleExecutor = Executors.newFixedThreadPool(txnShuffleThreadCount,
-            new ThreadFactoryBuilder().setNameFormat("collector-shuffle-%d").build());
+        int txnMergeThreadCount = DynamicApplicationConfig.getInt(TASK_COLLECTOR_MERGE_STAGE_PARALLELISM);
+        this.txnMergeExecutor = Executors.newFixedThreadPool(txnMergeThreadCount,
+            new ThreadFactoryBuilder().setNameFormat("collector-merge-%d").build());
 
         this.txnSinkExecutor = Executors
             .newSingleThreadExecutor(new ThreadFactoryBuilder().setNameFormat("collector-sink-%d").build());
 
         // stage 1
         ExceptionHandler<Object> exceptionHandler = new MessageEventExceptionHandler();
-        SequenceBarrier txnShuffleSequenceBarrier = disruptorMsgBuffer.newBarrier();
-        WorkHandler<MessageEvent>[] workHandlers = new TxnShuffleStageHandler[txnShuffleThreadCount];
-        for (int i = 0; i < txnShuffleThreadCount; i++) {
-            workHandlers[i] = new TxnShuffleStageHandler(handleContext, storage, isMergeNoTsoXa);
+        SequenceBarrier txnMergeSequenceBarrier = disruptorMsgBuffer.newBarrier();
+        WorkHandler<MessageEvent>[] workHandlers = new TxnMergeStageHandler[txnMergeThreadCount];
+        for (int i = 0; i < txnMergeThreadCount; i++) {
+            workHandlers[i] = new TxnMergeStageHandler(handleContext, storage, isMergeNoTsoXa, taskType);
         }
-        txnShuffleWorkerPool = new WorkerPool<>(disruptorMsgBuffer,
-            txnShuffleSequenceBarrier,
+        txnMergeWorkerPool = new WorkerPool<>(disruptorMsgBuffer,
+            txnMergeSequenceBarrier,
             exceptionHandler,
             workHandlers);
-        Sequence[] sequence = txnShuffleWorkerPool.getWorkerSequences();
+        Sequence[] sequence = txnMergeWorkerPool.getWorkerSequences();
         disruptorMsgBuffer.addGatingSequences(sequence);
 
         // stage 2
@@ -106,7 +110,7 @@ public class CollectStrategyFinal implements CollectStrategy {
 
         // start
         txnSinkExecutor.submit(txnSinkStage);
-        txnShuffleWorkerPool.start(txnShuffleExecutor);
+        txnMergeWorkerPool.start(txnMergeExecutor);
 
         logger.info("Final collect strategy started.");
     }
@@ -118,16 +122,16 @@ public class CollectStrategyFinal implements CollectStrategy {
         }
         running = false;
 
-        txnShuffleWorkerPool.halt();
+        txnMergeWorkerPool.halt();
         txnSinkStage.halt();
         try {
-            txnShuffleExecutor.shutdownNow();
-            while (!txnShuffleExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
-                if (txnShuffleExecutor.isShutdown() || txnShuffleExecutor.isTerminated()) {
+            txnMergeExecutor.shutdownNow();
+            while (!txnMergeExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+                if (txnMergeExecutor.isShutdown() || txnMergeExecutor.isTerminated()) {
                     break;
                 }
 
-                txnShuffleExecutor.shutdownNow();
+                txnMergeExecutor.shutdownNow();
             }
         } catch (Throwable e) {
             // ignore

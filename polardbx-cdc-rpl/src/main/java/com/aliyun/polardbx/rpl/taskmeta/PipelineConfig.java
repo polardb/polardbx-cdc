@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.taskmeta;
 
 import lombok.Data;
@@ -27,9 +24,12 @@ import lombok.Data;
 public class PipelineConfig {
 
     private int consumerParallelCount = 32;
-    private int bufferSize = 2048;
+    private int bufferSize = 1024;
     private boolean supportXa = false;
     private int fixedTpsLimit = -1;
+    private boolean useIncValidation = false;
+    // 需要即时感知的配置，后续考虑放到applierconfig里去
     private boolean skipException = false;
-    private boolean useIncValidation = true;
+    private boolean safeMode = true;
+    private PersistConfig persistConfig = new PersistConfig();
 }

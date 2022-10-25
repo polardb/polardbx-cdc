@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.scheduler.model;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
@@ -46,7 +43,20 @@ public class Resource {
      * cdc进程最多占用90%的内存，daemon最多占用min（10%内存，256Mb）
      */
     public int getFreeMemMb() {
-        double mem = memory_mb * DynamicApplicationConfig.getDouble(TOPOLOGY_RESOURCE_USE_RATIO);
+        double mem = memory_mb * getRatio();
         return Double.valueOf(mem).intValue() - used;
+    }
+
+    //如果节点的内存比较小，ratio则不能太大，需要给daemon和rocksdb预留一部分空间
+    private double getRatio() {
+        double ratio = DynamicApplicationConfig.getDouble(TOPOLOGY_RESOURCE_USE_RATIO);
+        if (memory_mb <= 1024) {
+            ratio = Math.min(0.7, ratio);
+        } else if (memory_mb <= 2048) {
+            ratio = Math.min(0.8, ratio);
+        } else if (memory_mb <= 4096) {
+            ratio = Math.min(0.85, ratio);
+        }
+        return ratio;
     }
 }

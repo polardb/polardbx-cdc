@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.dbmeta;
 
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
@@ -63,7 +60,7 @@ public class DbMetaManager {
         tableInfo.setPks(pks);
         tableInfo.setUks(uks);
 
-        if (hostType.getValue() == HostType.POLARX2.getValue()) {
+        if (hostType.getValue() == HostType.POLARX1.getValue() || hostType.getValue() == HostType.POLARX2.getValue()) {
             List<String> shardKeys = getTableShardKeys(dataSource, tbName);
             if (shardKeys.size() > 0) {
                 tableInfo.setDbShardKey(shardKeys.get(0));
@@ -199,11 +196,12 @@ public class DbMetaManager {
                         break;
                     }
                 }
-                if (!columnName.equals(RplConstants.POLARX_IMPLICIT_ID) &&
-                    !columnName.equals(RplConstants.RDS_IMPLICIT_ID)) {
-                    columnList.add(new ColumnInfo(columnName, columnType, "",
-                        (nullable != DatabaseMetaData.columnNoNulls)));
+                if (StringUtils.equalsIgnoreCase(RplConstants.POLARX_IMPLICIT_ID, columnName) ||
+                    StringUtils.equalsIgnoreCase(RplConstants.RDS_IMPLICIT_ID, columnName)) {
+                    continue;
                 }
+                columnList.add(new ColumnInfo(columnName.toLowerCase(), columnType, "",
+                    (nullable != DatabaseMetaData.columnNoNulls)));
             }
         } catch (Throwable e) {
             log.error("failed in getTableColumnInfos, schema:{}, tbName:{}", schema, tbName);
@@ -232,7 +230,7 @@ public class DbMetaManager {
 
             SortedMap<Integer, String> pmap = new TreeMap<Integer, String>();
             while (rs.next()) {
-                pmap.put(rs.getInt(5), rs.getString(4));
+                pmap.put(rs.getInt(5), rs.getString(4).toLowerCase());
             }
             pks.addAll(pmap.values());
         } catch (SQLException e) {
@@ -260,7 +258,7 @@ public class DbMetaManager {
 
         if (StringUtils.isNotBlank(minGroupKey)) {
             for (KeyColumnInfo column : ukGroups.get(minGroupKey)) {
-                uks.add(column.getColumnName());
+                uks.add(column.getColumnName().toLowerCase());
             }
         }
 
@@ -285,10 +283,10 @@ public class DbMetaManager {
                 String dbShardKey = rs.getString("DB_PARTITION_KEY");
                 String tbShardKey = rs.getString("TB_PARTITION_KEY");
                 if (StringUtils.isNotBlank(dbShardKey)) {
-                    shardKeys.add(dbShardKey);
+                    shardKeys.add(dbShardKey.toLowerCase());
                 }
                 if (StringUtils.isNotBlank(tbShardKey)) {
-                    shardKeys.add(tbShardKey);
+                    shardKeys.add(tbShardKey.toLowerCase());
                 }
             }
         } catch (Throwable e) {

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,11 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor.log;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
@@ -38,6 +36,7 @@ import com.aliyun.polardbx.binlog.canal.core.model.IXaTransaction;
 import com.aliyun.polardbx.binlog.canal.system.InstructionType;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
 import com.aliyun.polardbx.binlog.canal.system.TxGlobalEvent;
+import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.TransactionMemoryLeakDectorManager;
@@ -49,6 +48,7 @@ import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnBufferItem;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
+import com.google.common.collect.Sets;
 import com.google.gson.Gson;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
@@ -57,7 +57,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.UnsupportedEncodingException;
 import java.util.Iterator;
+import java.util.Set;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSACTION_SKIP_WHITELIST;
 import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_DDL_ID;
 import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_DDL_SQL;
 import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_JOB_ID;
@@ -68,72 +70,79 @@ import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_
  * @author chengjin.lyf on 2020/7/17 5:55 下午
  * @since 1.0.25
  */
-public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, Iterable<TxnItemRef> {
+public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     private static final Logger duplicateTransactionLogger = LoggerFactory.getLogger("duplicateTransactionLogger");
     private static final Logger logger = LoggerFactory.getLogger(Transaction.class);
+    private static final Logger skipTranslogger = LoggerFactory.getLogger("SKIP_TRANS_LOG");
     private static final String encoding = "UTF-8";
     private static final String ZERO_19_PADDING = StringUtils.leftPad("0", 10, "0");
-    private String virtualTSO;
-    private String xid;
-    private Long transactionId;
+    private static final String skipWhiteList = DynamicApplicationConfig.getString(TASK_TRANSACTION_SKIP_WHITELIST);
+    private final RuntimeContext runtimeContext;
+    private final String binlogFileName;
+    private final long startLogPos;
+    //basic component reference
+    private TransactionCommitListener listener;
+    private Storage storage;
+    //common variables
     private TRANSACTION_STATE state = TRANSACTION_STATE.STATE_START;
-    private String partitionId;
-    private String nextTraceId;
-    private String orginalTraceId;
     private Long serverId;
-    private String lastTraceId;
-    private String lastRowsQuery;
     private String charset;
+    private boolean ignore = false;
+    private long stopLogPos;
+    private boolean isCdcSingle;
+    private boolean heartbeat = false;
+    private DDLEvent ddlEvent;
+    private TxnBuffer buffer;
+    private String sourceCdcSchema;
+    private String groupWithReadViewSeq;
+
+    //事务&tso
+    private String xid;
+    private boolean hasRealXid;
+    private Long transactionId;
+    private String virtualTSO;
     private boolean txGlobal = false;
     private Long txGlobalTso;
     private Long txGlobalTid;
     private boolean xa = false;
     private boolean tsoTransaction = false;
+    private VirtualTSO virtualTSOModel;
+    private Long snapshotSeq;
+    private long realTSO = -1;
+
+    //trace id
+    private String nextTraceId;
+    private String originalTraceId;
+    private String lastTraceId;
+    private String lastRowsQuery;
+
+    //format desc event
     private boolean descriptionEvent = false;
-    private long startTime;
-    private String startSchema;
-    private boolean heartbeat = false;
+    private FormatDescriptionEvent fde;
+    private FormatDescriptionLogEvent fdle;
+
+    //instruction
     private InstructionType instructionType = null;
     private String instructionContent = null;
     private String instructionId = null;
-    private long startLogPos;
-    private long stopLogPos;
-    private String binlogFileName;
-    private DDLEvent ddlEvent;
-    private FormatDescriptionEvent fde;
-    private FormatDescriptionLogEvent fdle;
-    private long realTSO = -1;
-    private TransactionCommitListener listener;
-    private VirtualTSO virtualTSOModel;
-    private Long snapshotSeq;
-    private String storageInstanceId;
-    private TxnBuffer buffer;
-    private boolean ignore = false;
-    private Storage storage;
-    private String sourceCdcSchema;
-    private String groupName;
-    private TxnKey bufferKey;
 
     public Transaction(FormatDescriptionLogEvent fdle, FormatDescriptionEvent fde, RuntimeContext rc) {
         this.fde = fde;
         this.fdle = fdle;
+        this.runtimeContext = rc;
         this.descriptionEvent = true;
-        startSchema = "";
         this.transactionId = Math.abs(CommonUtils.randomXid());
-        this.partitionId = rc.getStorageInstId() + startSchema;
-        this.xid = transactionId + partitionId + "00000-FDE";
-        this.storageInstanceId = rc.getStorageInstId();
+        this.xid = transactionId + rc.getStorageInstId() + "00000-FDE";
         this.binlogFileName = rc.getBinlogFile();
         this.startLogPos = 0;
         TransactionMemoryLeakDectorManager.getInstance().watch(this);
     }
 
     public Transaction(QueryLogEvent qwe, RuntimeContext rc, Storage storage) throws AlreadyExistException {
+        this.runtimeContext = rc;
         this.storage = storage;
-        startSchema = "";
-        generateKey(qwe, rc);
-        this.storageInstanceId = rc.getStorageInstId();
+        this.generateKey(qwe, rc);
         this.binlogFileName = rc.getBinlogFile();
         this.startLogPos = qwe.getLogPos();
         buildBuffer();
@@ -143,29 +152,31 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     }
 
     public Transaction(LogEvent logEvent, RuntimeContext rc, Storage storage) throws Exception {
+        this.runtimeContext = rc;
         this.storage = storage;
         this.xid = LogEventUtil.getXid(logEvent);
+
+        //rewrite charset
         this.charset = encoding;
-        this.storageInstanceId = rc.getStorageInstId();
         if (logEvent.getHeader().getType() == LogEvent.QUERY_EVENT) {
             QueryLogEvent queryLogEvent = (QueryLogEvent) logEvent;
             if (queryLogEvent.getClientCharset() > 0) {
                 this.charset = CharsetConversion.getJavaCharset(queryLogEvent.getClientCharset());
             }
-            this.startSchema = queryLogEvent.getDbName();
         }
+
+        // build transaction info
         if (StringUtils.isNotBlank(this.xid)) {
             // 真实事务id，如果是tso事务，则参与排序，否则不参与排序
             this.transactionId = LogEventUtil.getTranIdFromXid(xid, encoding);
-            String groupName = LogEventUtil.getGroupFromXid(xid, encoding);
-            this.groupName = groupName;
-            this.partitionId = rc.getStorageInstId() + groupName;
+            this.groupWithReadViewSeq = LogEventUtil.getGroupWithReadViewSeqFromXid(xid, encoding);
             this.xa = true;
+            this.hasRealXid = true;
+            this.isCdcSingle = SystemDB.isCdcSingleGroup(StringUtils.substringBefore(groupWithReadViewSeq, "@"));
         } else {
             // 随机生成一下，不参与排序
             generateKey(logEvent, rc);
         }
-        this.startTime = logEvent.getWhen();
         this.startLogPos = logEvent.getLogPos();
         this.binlogFileName = rc.getBinlogFile();
         if (!isCdcSingle()) {
@@ -174,19 +185,41 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         TransactionMemoryLeakDectorManager.getInstance().watch(this);
     }
 
-    private void buildBuffer() throws AlreadyExistException {
+    private String generatePartitionId() {
         try {
-            this.bufferKey = new TxnKey(transactionId + "", partitionId);
-            buffer = storage.create(bufferKey);
+            if (hasRealXid) {
+                return runtimeContext.getStorageHashCode() + "_" + groupWithReadViewSeq;
+            } else {
+                return runtimeContext.getStorageHashCode();
+            }
+        } catch (Exception e) {
+            throw new PolardbxException("generate partition id failed", e);
+        }
+    }
+
+    private void buildBuffer() throws AlreadyExistException {
+        if (StringUtils.isNotBlank(skipWhiteList)) {
+            String[] array = StringUtils.split(skipWhiteList, "#");
+            Set<String> sets = Sets.newHashSet(array);
+            if (sets.contains(xid)) {
+                logger.info("hit the whitelist, skip transaction with xid {}.", xid);
+                skipTranslogger.info("skip : " + xid);
+                ignore = true;
+                return;
+            }
+        }
+
+        String partitionId = generatePartitionId();
+        try {
+            TxnKey key = new TxnKey(transactionId + "", partitionId);
+            buffer = storage.create(key);
         } catch (AlreadyExistException e) {
             if (!DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXCEPTION_SKIP_DUPLICATE_BUFFER_KEY)) {
                 throw e;
             }
             duplicateTransactionLogger
                 .warn("ignore duplicate txnKey Exception, skip transaction : " + transactionId + " , partition: "
-                    + partitionId + " , storageId : " + storageInstanceId + ", binlogFile: " + binlogFileName
-                    + ", logPos: "
-                    + startLogPos + ", xid: " + xid);
+                    + partitionId + ", binlogFile: " + binlogFileName + ", logPos: " + startLogPos + ", xid: " + xid);
             buffer = null;
             ignore = true;
         }
@@ -197,17 +230,19 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     }
 
     public TxnKey getBufferKey() {
-        return bufferKey;
+        if (buffer != null) {
+            return buffer.getTxnKey();
+        }
+        return null;
     }
 
     public boolean isCdcSingle() {
-        return SystemDB.isCdcSingleGroup(groupName);
+        return isCdcSingle;
     }
 
     private void generateKey(LogEvent logEvent, RuntimeContext rc) {
         this.transactionId = Math.abs(CommonUtils.randomXid());
-        this.partitionId = rc.getStorageInstId();
-        this.xid = transactionId + partitionId + logEvent.getLogPos();
+        this.xid = transactionId + rc.getStorageInstId() + logEvent.getLogPos();
     }
 
     public void setListener(TransactionCommitListener listener) {
@@ -238,7 +273,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         if (LogEventUtil.isRowsQueryEvent(event)) {
             RowsQueryLogEvent queryLogEvent = (RowsQueryLogEvent) event;
             try {
-                orginalTraceId = queryLogEvent.getRowsQuery();
+                originalTraceId = queryLogEvent.getRowsQuery();
                 String results[] = LogEventUtil.buildTrace(queryLogEvent);
                 if (results != null) {
                     nextTraceId = results[0];
@@ -294,7 +329,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
             .rowsQuery(lastRowsQuery)
             .payload(logEvent.toBytes())
             .eventType(logEvent.getHeader().getType())
-            .originTraceId(orginalTraceId)
+            .originTraceId(originalTraceId)
             .binlogFile(binlogFileName)
             .binlogPosition(logEvent.getLogPos())
             .build();
@@ -305,7 +340,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         try {
             buffer.push(txnItem);
         } catch (Exception e) {
-            logger.error("push to buffer error local trace : " + orginalTraceId + " with : " + binlogFileName + ":"
+            logger.error("push to buffer error local trace : " + originalTraceId + " with : " + binlogFileName + ":"
                 + logEvent.getLogPos() + " buffer : " + buffer.getTxnKey() + " " + buffer.itemSize(), e);
             logger.error("buffer cache:");
             Iterator<TxnItemRef> it = buffer.iterator();
@@ -406,6 +441,13 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         String tableName = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_TABLE_NAME);
         String visible = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_VISIBILITY);
         String ext = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_EXT);
+        if (StringUtils.isNotBlank(ext)) {
+            DDLExtInfo ddlExtInfo = JSONObject.parseObject(ext, DDLExtInfo.class);
+            if (ddlExtInfo != null && StringUtils.isNotBlank(ddlExtInfo.getServerId()) && NumberUtils
+                .isCreatable(ddlExtInfo.getServerId())) {
+                serverId = NumberUtils.createLong(ddlExtInfo.getServerId());
+            }
+        }
         DDLRecord ddlRecord = DDLRecord.builder()
             .id(Long.valueOf(id))
             .jobId(StringUtils.isBlank(jobId) ? null : Long.valueOf(jobId))
@@ -423,8 +465,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
             -1,
             event.getHeader().getWhen()));
         ddlEvent.setVisible(Integer.parseInt(visible) == 1);
-        logger.warn("receive logic ddl " + new Gson().toJson(ddlRecord));
-
+        if (logger.isDebugEnabled()) {
+            logger.debug("receive logic ddl " + new Gson().toJson(ddlRecord));
+        }
     }
 
     public void afterCommit(RuntimeContext rc) {
@@ -440,6 +483,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         if (isDDL()) {
             ddlEvent.getPosition().setRtso(virtualTSO);
         }
+
+        //尽快释放内存空间
+        clearTraceId();
     }
 
     public boolean needRevert() {
@@ -485,13 +531,13 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
 
     private void processTxGlobleEvent(WriteRowsLogEvent rowsLogEvent) {
         TxGlobalEvent txGlobalEvent = SystemDB.getInstance().parseTxGlobalEvent(rowsLogEvent, charset);
-        txGlobalTid = txGlobalEvent.getTxGlobalTid();
-        txGlobalTso = txGlobalEvent.getTxGlobalTso();
+        this.txGlobalTid = txGlobalEvent.getTxGlobalTid();
+        this.txGlobalTso = txGlobalEvent.getTxGlobalTso();
         this.transactionId = txGlobalTid;
-        txGlobal = true;
-        xa = true;
+        this.txGlobal = true;
+        this.xa = true;
         if (txGlobalTso != null && txGlobalTso > 0) {
-            tsoTransaction = true;
+            this.tsoTransaction = true;
         }
     }
 
@@ -532,7 +578,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
 
         String storageInstId = rc.getStorageInstId();
 
-        if (isDDL() || isDescriptionEvent() || isInstructionCommand()) {
+        if (isDDL() || isDescriptionEvent() || isInstructionCommand() || isTsoTransaction()) {
             storageInstId = null;
         }
 
@@ -560,7 +606,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         this.state = TRANSACTION_STATE.STATE_COMMIT;
 
         afterCommit(rc);
-        listener.onCommit(this);
+        if (listener != null) {
+            listener.onCommit(this);
+        }
     }
 
     public boolean isPrepare() {
@@ -616,7 +664,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     }
 
     public String getPartitionId() {
-        return partitionId;
+        return generatePartitionId();
     }
 
     public int getEventCount() {
@@ -662,8 +710,14 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         if (buffer != null && !buffer.isCompleted()) {
             storage.delete(buffer.getTxnKey());
             buffer = null;
-            bufferKey = null;
         }
+    }
+
+    private void clearTraceId() {
+        this.lastTraceId = null;
+        this.nextTraceId = null;
+        this.originalTraceId = null;
+        this.lastRowsQuery = null;
     }
 
     public void release() {
@@ -674,14 +728,6 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     @Override
     public boolean isComplete() {
         return isCommit() || isRollback();
-    }
-
-    public long getStartTime() {
-        return startTime;
-    }
-
-    public String getStartSchema() {
-        return startSchema;
     }
 
     public boolean isHeartbeat() {
@@ -732,7 +778,8 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
     public String toString() {
         StringBuilder sb = new StringBuilder();
         return "Transaction {" + "tso = '" + virtualTSO + '\'' + ", xid = '" + xid + '\'' + ", transactionId = '"
-            + transactionId + '\'' + ", eventCount = " + getEventCount() + ", partitionId = '" + partitionId + '\''
+            + transactionId + '\'' + ", eventCount = " + getEventCount() + ", partitionId = '" + generatePartitionId()
+            + '\''
             + ", txGlobal = " + txGlobal + ", txGlobalTso = '" + txGlobalTso + '\'' + ", txGlobalTid = '" + txGlobalTid
             + '\'' + ", xa = " + xa + ", tsoTransaction = " + tsoTransaction + ", heartbeat = " + heartbeat
             + ", hasBuffer = " + (buffer != null) + ", startLogPos = " + binlogFileName + ":" + startLogPos
@@ -747,10 +794,6 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
 
     public String getInstructionContent() {
         return instructionContent;
-    }
-
-    public String getInstrunctionCommitKey() {
-        return storageInstanceId + ":" + instructionType + ":" + instructionContent;
     }
 
     public String getInstructionId() {
@@ -793,13 +836,30 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction>, I
         return fdle;
     }
 
+    public boolean persistBuffer() {
+        if (buffer != null) {
+            return buffer.persist();
+        }
+        return false;
+    }
+
+    public boolean isBufferPersisted() {
+        if (buffer != null) {
+            return buffer.isPersisted();
+        }
+        return false;
+    }
+
     public void markBufferComplete() {
         if (buffer != null && buffer.itemSize() > 0) {
             buffer.markComplete();
         }
     }
 
-    @Override
+    public long getSize() {
+        return buffer != null ? buffer.memSize() : 0;
+    }
+
     public Iterator<TxnItemRef> iterator() {
         if (buffer == null) {
             return null;

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.metrics;
 
 /**
@@ -26,10 +23,6 @@ public class Metrics {
      * 从dumper启动开始计算，截止到当前，已经收到的Event的总个数(ddl & dml)
      */
     private long totalRevEventCount;
-    /**
-     * 从dumper启动开始计算，截止到当前，已经收到的Event的总字节数(ddl & dml)
-     */
-    private long totalRevEventBytes;
     /**
      * 从dumper启动开始计算，截止到当前，已经收到的dml event的总个数
      */
@@ -52,10 +45,6 @@ public class Metrics {
      */
     private long totalWriteEventCount;
     /**
-     * 从dumper启动开始计算，截止到当前，完成totalWriteEventCount个事件写入的总耗时
-     */
-    private long totalWriteEventTime;
-    /**
      * 从dumper启动开始计算，截止到当前，已经向binlog文件写入的总字节数
      */
     private long totalWriteEventBytes;
@@ -68,10 +57,6 @@ public class Metrics {
      */
     private long totalForceFlushWriteCount;
     /**
-     * 当前最新的延迟时间(on receive)
-     */
-    private long latestDelayTimeOnReceive;
-    /**
      * 当前最新的延迟时间(on commit)
      */
     private long latestDelayTimeOnCommit;
@@ -79,6 +64,14 @@ public class Metrics {
      * 最近一次收到数据的时间(单位：ms)
      */
     private long latestDataReceiveTime;
+    /**
+     * 并行写入RingBuffer队列的大小
+     */
+    private long parallelBufferSize;
+    /**
+     * TxnMessage接收队列的大小
+     */
+    private long receiveQueueSize;
 
     private long beginTime;
     private long endTime;
@@ -101,17 +94,16 @@ public class Metrics {
         result.totalWriteDdlEventCount = this.totalWriteDdlEventCount;
         result.totalWriteDmlEventCount = this.totalWriteDmlEventCount;
         result.totalRevEventCount = this.totalRevEventCount;
-        result.totalRevEventBytes = this.totalRevEventBytes;
         result.totalWriteEventBytes = this.totalWriteEventBytes;
         result.totalWriteEventCount = this.totalWriteEventCount;
-        result.totalWriteEventTime = this.totalWriteEventTime;
         result.totalWriteTxnCount = this.totalWriteTxnCount;
         result.totalWriteTxnTime = this.totalWriteTxnTime;
         result.totalFlushWriteCount = this.totalFlushWriteCount;
         result.totalForceFlushWriteCount = this.totalForceFlushWriteCount;
-        result.latestDelayTimeOnReceive = this.latestDelayTimeOnReceive;
         result.latestDelayTimeOnCommit = this.latestDelayTimeOnCommit;
         result.latestDataReceiveTime = this.latestDataReceiveTime;
+        result.parallelBufferSize = this.parallelBufferSize;
+        result.receiveQueueSize = this.receiveQueueSize;
         return result;
     }
 
@@ -144,14 +136,6 @@ public class Metrics {
         totalWriteEventCount++;
     }
 
-    public void incrementTotalWriteTime(long costTime) {
-        totalWriteEventTime += costTime;
-    }
-
-    public void incrementTotalRevBytes(long byteSize) {
-        totalRevEventBytes += byteSize;
-    }
-
     public void incrementTotalWriteBytes(long byteSize) {
         totalWriteEventBytes += byteSize;
     }
@@ -168,19 +152,11 @@ public class Metrics {
         this.latestDelayTimeOnCommit = latestDelayTimeOnCommit;
     }
 
-    public void setLatestDelayTimeOnReceive(long latestDelayTimeOnReceive) {
-        this.latestDelayTimeOnReceive = latestDelayTimeOnReceive;
-    }
-
     public void setLatestDataReceiveTime(long latestDataReceiveTime) {
         this.latestDataReceiveTime = latestDataReceiveTime;
     }
 
     // ---------------------------------getters---------------------------------
-
-    public long getTotalRevEventBytes() {
-        return totalRevEventBytes;
-    }
 
     public long getTotalWriteTxnCount() {
         return totalWriteTxnCount;
@@ -206,16 +182,8 @@ public class Metrics {
         return totalWriteEventCount;
     }
 
-    public long getTotalWriteEventTime() {
-        return totalWriteEventTime;
-    }
-
     public long getTotalWriteEventBytes() {
         return totalWriteEventBytes;
-    }
-
-    public long getLatestDelayTimeOnReceive() {
-        return latestDelayTimeOnReceive;
     }
 
     public long getLatestDelayTimeOnCommit() {
@@ -232,5 +200,21 @@ public class Metrics {
 
     public long getLatestDataReceiveTime() {
         return latestDataReceiveTime;
+    }
+
+    public long getParallelBufferSize() {
+        return parallelBufferSize;
+    }
+
+    public void setParallelBufferSize(long parallelBufferSize) {
+        this.parallelBufferSize = parallelBufferSize;
+    }
+
+    public long getReceiveQueueSize() {
+        return receiveQueueSize;
+    }
+
+    public void setReceiveQueueSize(long receiveQueueSize) {
+        this.receiveQueueSize = receiveQueueSize;
     }
 }

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -23,7 +20,6 @@ import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
 import com.aliyun.polardbx.rpl.common.LogUtil;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
-import com.aliyun.polardbx.rpl.taskmeta.RplServiceManager;
 import org.slf4j.Logger;
 
 /**
@@ -34,8 +30,8 @@ public class RplLeaderJob extends AbstractBinlogTimerTask {
 
     private static Logger metaLogger = LogUtil.getMetaLogger();
 
-    public RplLeaderJob(String clusterId, String clusterType, String name, int interval) {
-        super(clusterId, clusterType, name, interval);
+    public RplLeaderJob(String cluster, String clusterType, String name, int interval) {
+        super(cluster, clusterType, name, interval);
     }
 
     @Override

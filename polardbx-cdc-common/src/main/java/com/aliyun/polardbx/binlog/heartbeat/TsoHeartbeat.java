@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,13 +11,14 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.heartbeat;
 
+import com.aliyun.polardbx.binlog.CommonMetrics;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
+import lombok.SneakyThrows;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.DateFormatUtils;
 import org.slf4j.Logger;
@@ -28,12 +28,17 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_ENABLE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_TARGET_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_THRESHOLD_EPS;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 
 ;
 
@@ -60,21 +65,25 @@ public class TsoHeartbeat implements Runnable {
     private static final String UPDATE_SQL =
         "replace into `__cdc__`.`__cdc_heartbeat__`(id, sname, gmt_modified) values(1, 'heartbeat', '%s')";
 
-    private final ScheduledExecutorService scheduledExecutorService = new ScheduledThreadPoolExecutor(1,
-        r -> new Thread(r, "binlog_heartbeat"));
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor(
+        r -> new Thread(r, "cdc_heartbeat"));
     private Future<?> future;
-    private final long interval;
     private final AtomicBoolean heartbeatTableInitFlag = new AtomicBoolean(false);
     private final JdbcTemplate template;
     private final TransactionTemplate transactionTemplate;
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private Alarm alarm;
     private final AtomicInteger errorCount = new AtomicInteger(0);
+    private final EpsHolder epsHolder;
+    private long currentHeartBeatInterval;
+    private Alarm alarm;
+    private MetricsProvider metricsProvider;
+    private long lastCheckAdjustTime;
 
-    public TsoHeartbeat(long interval) {
-        this.interval = interval;
+    public TsoHeartbeat() {
         this.template = SpringContextHolder.getObject("polarxJdbcTemplate");
         this.transactionTemplate = SpringContextHolder.getObject("polarxTransactionTemplate");
+        this.currentHeartBeatInterval = getInt(DAEMON_TSO_HEARTBEAT_INTERVAL);
+        this.epsHolder = new EpsHolder();
     }
 
     public void start() {
@@ -82,7 +91,7 @@ public class TsoHeartbeat implements Runnable {
             return;
         }
         logger.info("start heartbeat now!");
-        future = scheduledExecutorService.scheduleAtFixedRate(this, 0, interval, TimeUnit.MILLISECONDS);
+        future = executorService.submit(this);
         Runtime.getRuntime().addShutdownHook(new Thread(TsoHeartbeat.this::stop));
     }
 
@@ -97,18 +106,24 @@ public class TsoHeartbeat implements Runnable {
         }
     }
 
+    @SneakyThrows
     @Override
     public void run() {
-        if (!running.get()) {
-            return;
-        }
-        try {
-            heartbeat();
-            errorCount.set(0);
-        } catch (Throwable e) {
-            logger.error(" execute heartbeat failed ! ", e);
-            if (alarm != null && errorCount.incrementAndGet() > 15) {
-                alarm.send(e);
+        while (true) {
+            if (!running.get()) {
+                return;
+            }
+            try {
+                heartbeat();
+                tryAdjustInterval();
+                errorCount.set(0);
+            } catch (Throwable e) {
+                logger.error(" execute heartbeat failed ! ", e);
+                if (alarm != null && errorCount.incrementAndGet() > 15) {
+                    alarm.send(e);
+                }
+            } finally {
+                Thread.sleep(currentHeartBeatInterval);
             }
         }
     }
@@ -121,19 +136,45 @@ public class TsoHeartbeat implements Runnable {
         this.alarm = alarm;
     }
 
+    public MetricsProvider getMetricsProvider() {
+        return metricsProvider;
+    }
+
+    public void setMetricsProvider(MetricsProvider metricsProvider) {
+        this.metricsProvider = metricsProvider;
+    }
+
     private void heartbeat() {
         if (RuntimeLeaderElector.isDaemonLeader()) {
             try {
                 if (heartbeatTableInitFlag.compareAndSet(false, true)) {
                     template.execute(CREATE_HEARTBEAT_TABLE_SQL);
+
+                    // update schema info
                     Optional<Map<String, Object>> optional = template.queryForList("desc __cdc_ddl_record__").stream()
                         .filter(e -> StringUtils.equals(e.get("Field").toString(), "META_INFO")).findFirst();
-                    if (optional.isPresent() && "text".equals(optional.get().get("Type").toString())) {
+                    if (optional.isPresent() && "text".equalsIgnoreCase(optional.get().get("Type").toString())) {
                         template.execute(
                             "alter table `__cdc_ddl_record__` modify column `META_INFO` MEDIUMTEXT DEFAULT NULL");
                         template.execute(
                             "alter table `__cdc_ddl_record__` modify column `EXT` MEDIUMTEXT DEFAULT NULL");
                         logger.info("Change column type from text to mediumtext for column META_INFO and EXT");
+                    }
+
+                    Optional<Map<String, Object>> optional2 =
+                        template.queryForList("show index from `__cdc_ddl_record__`").stream()
+                            .filter(e -> StringUtils.equals(e.get("Key_name").toString(), "idx_gmt_created"))
+                            .findFirst();
+                    if (!optional2.isPresent()) {
+                        template.execute("alter table `__cdc_ddl_record__` add index `idx_gmt_created`(`GMT_CREATED`)");
+                    }
+
+                    Optional<Map<String, Object>> optional3 =
+                        template.queryForList("show index from `__cdc_ddl_record__`").stream()
+                            .filter(e -> StringUtils.equals(e.get("Key_name").toString(), "idx_job_id"))
+                            .findFirst();
+                    if (!optional3.isPresent()) {
+                        template.execute("alter table `__cdc_ddl_record__` add index `idx_job_id`(`JOB_ID`)");
                     }
                 }
             } catch (Throwable t) {
@@ -152,7 +193,60 @@ public class TsoHeartbeat implements Runnable {
         }
     }
 
+    private void tryAdjustInterval() {
+        boolean selfAdaption = DynamicApplicationConfig.getBoolean(DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_ENABLE);
+        if (selfAdaption && metricsProvider != null && System.currentTimeMillis() - lastCheckAdjustTime >= 1000) {
+            double latestEps = 0;
+
+            CommonMetrics m1 = metricsProvider.get("polardbx_cdc_dumper_m_eps");
+            if (m1 == null) {
+                CommonMetrics m2 = metricsProvider.get("polardbx_cdc_dumper_s_eps");
+                if (m2 != null) {
+                    latestEps = m2.getValue();
+                }
+            } else {
+                latestEps = m1.getValue();
+            }
+
+            double epsAverage = epsHolder.calcAverage(latestEps);
+            long originValue = currentHeartBeatInterval;
+            if (epsAverage > getInt(DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_THRESHOLD_EPS)) {
+                currentHeartBeatInterval = getInt(DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_TARGET_INTERVAL);
+            } else {
+                currentHeartBeatInterval = getInt(DAEMON_TSO_HEARTBEAT_INTERVAL);
+            }
+
+            if (originValue != currentHeartBeatInterval) {
+                logger.info("tso heartbeat interval is changed from {} to {} , with eps {}.", originValue,
+                    currentHeartBeatInterval, epsAverage);
+            }
+
+            lastCheckAdjustTime = System.currentTimeMillis();
+        }
+    }
+
     public interface Alarm {
         void send(Throwable t);
+    }
+
+    public interface MetricsProvider {
+        CommonMetrics get(String key);
+    }
+
+    private static class EpsHolder {
+        private final double[] array = new double[10];
+        private double sum = 0;
+        private long count = 0;
+
+        public double calcAverage(double latestEps) {
+            int index = (int) count % array.length;
+            double old = array[index];
+            sum -= old;
+            sum += latestEps;
+            array[index] = latestEps;
+
+            count++;
+            return sum / Math.min(array.length, count);
+        }
     }
 }

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,16 +11,13 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig;
-import com.aliyun.polardbx.binlog.MetaCoopCommandEnum;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
@@ -30,20 +26,21 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RotateLogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.event.RowsQueryLogEvent;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.Cursor;
-import com.aliyun.polardbx.binlog.domain.MarkInfo;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
-import com.aliyun.polardbx.binlog.dumper.dump.client.DumpClientV2;
+import com.aliyun.polardbx.binlog.dumper.dump.client.DumpClient;
 import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
 import com.aliyun.polardbx.binlog.dumper.metrics.Metrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
+import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import lombok.ToString;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -55,12 +52,22 @@ import org.springframework.retry.support.RetryTemplate;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CLIENT_RECEIVE_QUEUE_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CLIENT_USE_ASYNC_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_EVENT_SPLIT_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_FLOW_CONTROL_WINDOW_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_INJECT_TROUBLE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_DRYRUN;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_USE_DIRECT_BYTE_BUFFER;
 
 /**
  * Created by ziyang.lb
@@ -74,12 +81,22 @@ public class LogFileCopier {
     private final LogContext logContext;
     private final int writeBufferSize;
     private final int seekBufferSize;
+    private final boolean useDirectByteBuffer;
+    private final boolean dryRun;
+    private final boolean rpcUseAsyncMode;
+    private final int asyncQueueSize;
+    private final ByteBuffer contactBuffer;
+    private final int flowControlWindowSize;
+    private final boolean injectTrouble;
 
     private ExecutorService executor;
     private BinlogFile binlogFile;
     private String leaderHost;
     private int leaderPort;
     private byte lastEventType;
+    private ContactContext currentContactContext;
+    private EventSplitMode splitMode;
+    private long lastInjectTroubleTime;
     private volatile boolean running;
 
     public LogFileCopier(LogFileManager logFileManager, int writeBufferSize, int seekBufferSize) {
@@ -89,6 +106,14 @@ public class LogFileCopier {
         this.logDecoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
         this.logContext = new LogContext();
         this.logContext.setFormatDescription(new FormatDescriptionLogEvent(4, LogEvent.BINLOG_CHECKSUM_ALG_CRC32));
+        this.useDirectByteBuffer = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_USE_DIRECT_BYTE_BUFFER);
+        this.dryRun = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_DRYRUN);
+        this.rpcUseAsyncMode = DynamicApplicationConfig.getBoolean(BINLOG_SYNC_CLIENT_USE_ASYNC_MODE);
+        this.asyncQueueSize = DynamicApplicationConfig.getInt(BINLOG_SYNC_CLIENT_RECEIVE_QUEUE_SIZE);
+        this.flowControlWindowSize = DynamicApplicationConfig.getInt(BINLOG_SYNC_FLOW_CONTROL_WINDOW_SIZE);
+        this.injectTrouble = DynamicApplicationConfig.getBoolean(BINLOG_SYNC_INJECT_TROUBLE);
+        this.lastInjectTroubleTime = System.currentTimeMillis();
+        this.contactBuffer = ByteBuffer.allocate(65536);
     }
 
     public void start() {
@@ -100,15 +125,17 @@ public class LogFileCopier {
         executor = Executors.newFixedThreadPool(1,
             new ThreadFactoryBuilder().setNameFormat("log-file-copier-%d").build());
         executor.execute(() -> {
-            DumpClientV2 dumpClient = null;
+            DumpClient dumpClient = null;
             long sleepInterval = 1000L;
             while (running) {
                 try {
                     prepare();
-                    dumpClient = new DumpClientV2(leaderHost, leaderPort);
+                    dumpClient =
+                        new DumpClient(leaderHost, leaderPort, rpcUseAsyncMode, asyncQueueSize, flowControlWindowSize);
                     dumpClient.connect();
-                    logContext.setLogPosition(new LogPosition(binlogFile.getFileName(), binlogFile.position()));
-                    dumpClient.dump(binlogFile.getFileName(), binlogFile.position(), this::consume);
+                    logContext.setLogPosition(new LogPosition(binlogFile.getFileName(), binlogFile.filePointer()));
+                    dumpClient
+                        .dump(binlogFile.getFileName(), binlogFile.filePointer(), buildSplitMode(), this::consume);
                 } catch (InterruptedException e) {
                     break;
                 } catch (Throwable t) {
@@ -157,6 +184,7 @@ public class LogFileCopier {
     }
 
     private void prepare() throws IOException {
+        clearContactInfo();
         buildTarget();
         buildBinlogFile();
         String lastTso = seekLastTso();
@@ -194,58 +222,164 @@ public class LogFileCopier {
         }
     }
 
-    public void consume(byte[] packet) throws IOException {
+    private void clearContactInfo() {
+        currentContactContext = null;
+        contactBuffer.clear();
+    }
+
+    public void consume(byte[] packet, boolean isHeartBeat) throws IOException {
         Metrics.get().setLatestDataReceiveTime(System.currentTimeMillis());
 
+        if (dryRun) {
+            Metrics.get().incrementTotalWriteBytes(packet.length);
+            return;
+        }
+
+        if (splitMode == EventSplitMode.CLIENT && isHeartBeat) {
+            processHeartBeat();
+            return;
+        }
+
         int offset = 0;
+        if (contactBuffer.position() > 0 || currentContactContext != null) {
+            if (splitMode == EventSplitMode.SERVER) {
+                throw new PolardbxException("event contact is not support when split mode is SERVER, contact buffer " +
+                    contactBuffer + " , contact context " + currentContactContext);
+            }
+
+            if (currentContactContext != null) {
+                int remaining = currentContactContext.eventLength - currentContactContext.currentWriteLength;
+                if (remaining > packet.length) {
+                    binlogFile.writeData(packet, 0, packet.length);
+                    currentContactContext.currentWriteLength = currentContactContext.currentWriteLength + packet.length;
+                    offset += packet.length;
+                } else {
+                    binlogFile.writeData(packet, 0, remaining);
+                    binlogFile.checkPosition(currentContactContext.eventPos, binlogFile.writePointer());
+                    offset += remaining;
+                    currentContactContext = null;
+                }
+            } else {
+                if (contactBuffer.position() < 19) {
+                    int readSize = 19 - contactBuffer.position();
+                    contactBuffer.put(packet, 0, readSize);
+                    offset += readSize;
+                }
+
+                ByteArray array = new ByteArray(contactBuffer.array());
+                array.skip(9);
+                int eventLength = array.readInteger(4);
+                long eventPos = array.readLong(4);
+                if (contactBuffer.position() + packet.length - offset >= eventLength) {
+                    int readSize1 = contactBuffer.position();
+                    int readSize2 = eventLength - readSize1;
+                    byte[] bytes = new byte[readSize1 + readSize2];
+                    System.arraycopy(contactBuffer.array(), 0, bytes, 0, readSize1);
+                    System.arraycopy(packet, offset, bytes, readSize1, readSize2);
+                    consumeSinglePacket(bytes, 0, bytes.length);
+                    offset += readSize2;
+                } else {
+                    currentContactContext = new ContactContext();
+                    currentContactContext.eventLength = eventLength;
+                    currentContactContext.eventPos = eventPos;
+                    currentContactContext.currentWriteLength = contactBuffer.position() + packet.length - offset;
+                    binlogFile.writeData(contactBuffer.array(), 0, contactBuffer.position());
+                    binlogFile.writeData(packet, offset, packet.length - offset);
+                    offset = packet.length;
+                }
+            }
+        }
+
+        int eventLength = 0;
+        long eventPos = 0;
         while (offset < packet.length) {
+            //check event header
+            if (packet.length - offset < 19) {
+                break;
+            }
+            //get event size
             ByteArray array = new ByteArray(packet, offset, 19);
             array.skip(9);
-            int size = array.readInteger(4);
-            consumeSinglePacket(packet, offset, size);
-            offset += size;
+            eventLength = array.readInteger(4);
+            eventPos = array.readLong(4);
+            //check event size
+            if (packet.length - offset < eventLength) {
+                break;
+            }
+            //consume
+            consumeSinglePacket(packet, offset, eventLength);
+            offset += eventLength;
         }
-        logFileManager.setLatestFileCursor(new Cursor(binlogFile.getFileName(), binlogFile.position()));
+
+        contactBuffer.clear();
+        if (offset < packet.length) {
+            checkOffset(offset, packet.length);
+            if (packet.length - offset <= contactBuffer.capacity()) {
+                contactBuffer.put(packet, offset, packet.length - offset);
+            } else {
+                currentContactContext = new ContactContext();
+                currentContactContext.eventLength = eventLength;
+                currentContactContext.eventPos = eventPos;
+                currentContactContext.currentWriteLength = packet.length - offset;
+                binlogFile.writeData(packet, offset, packet.length - offset);
+            }
+        }
+
+        logFileManager.setLatestFileCursor(new Cursor(binlogFile.getFileName(), binlogFile.filePointer()));
+    }
+
+    private void checkOffset(int offset, int length) {
+        if (currentContactContext != null) {
+            throw new PolardbxException(String.format("current contact context is not null , but offset is not equal"
+                + " to packet length, %s,%s,%s", currentContactContext, offset, length));
+        }
+        if (splitMode == EventSplitMode.SERVER) {
+            throw new PolardbxException("offset must equal to packet length when split mode is SERVER, "
+                + "offset " + offset + " ,packet length " + length);
+        }
     }
 
     public void consumeSinglePacket(byte[] data, int offset, int length) throws IOException {
         byte eventType = data[offset + 4];
         if (eventType == LogEvent.ROTATE_EVENT) {
-            logger.info("Receive a rotate event.");
             RotateLogEvent event = (RotateLogEvent) logDecoder.decode(new LogBuffer(data, offset, length), logContext);
+            logger.info("Receive a rotate event, file name {}, pos {}",
+                Objects.requireNonNull(event).getFilename(), event.getPosition());
             if (!StringUtils.equals(Objects.requireNonNull(event).getFilename(), binlogFile.getFileName())) {
-                binlogFile.writeEventWithoutUpdate(data, offset, length);
+                binlogFile.writeEventForSync(data, offset, length);
                 rotate(event.getFilename());
             }
         } else if (eventType == LogEvent.FORMAT_DESCRIPTION_EVENT) {
             logger.info("Receive a format desc event.");
             logDecoder.decode(new LogBuffer(data, offset, length), logContext);
-            if (binlogFile.length() == 4) {
-                binlogFile.writeEventWithoutUpdate(data, offset, length);
-            }
-        } else if (eventType == LogEvent.HEARTBEAT_LOG_EVENT) {
-            if (binlogFile.hasBufferedData() && binlogFile.getLastFlushTime() < System.currentTimeMillis() - 5000) {
+            if (binlogFile.fileSize() == 4) {
+                binlogFile.writeEventForSync(data, offset, length);
                 binlogFile.flush();
             }
+        } else if (eventType == LogEvent.HEARTBEAT_LOG_EVENT) {
+            processHeartBeat();
         } else {
             checkDelay(eventType, data, offset);
-            binlogFile.writeEventWithoutUpdate(data, offset, length);
+            binlogFile.writeEventForSync(data, offset, length);
         }
 
         if (eventType == LogEvent.XID_EVENT) {
             Metrics.get().incrementTotalWriteTxnCount();
         }
 
-        if (eventType == LogEvent.ROWS_QUERY_LOG_EVENT) {
-            RowsQueryLogEvent rowsQueryLogEvent =
-                (RowsQueryLogEvent) logDecoder.decode(new LogBuffer(data, offset, length), logContext);
-            MarkInfo markInfo = CommonUtils.getCommand(rowsQueryLogEvent.getRowsQuery());
-            if (markInfo.isValid() && markInfo.getCommand() == MetaCoopCommandEnum.ConfigChange) {
-                DynamicApplicationVersionConfig.setConfigByTso(markInfo.getTso());
-            }
+        if (injectTrouble && System.currentTimeMillis() - lastInjectTroubleTime > 5 * 60 * 1000) {
+            lastInjectTroubleTime = System.currentTimeMillis();
+            throw new PolardbxException("inject trouble");
         }
 
         lastEventType = eventType;
+    }
+
+    private void processHeartBeat() throws IOException {
+        if (binlogFile.hasBufferedData() && binlogFile.getLastFlushTime() < System.currentTimeMillis() - 5000) {
+            binlogFile.flush();
+            logFileManager.setLatestFileCursor(new Cursor(binlogFile.getFileName(), binlogFile.filePointer()));
+        }
     }
 
     public void buildBinlogFile() throws IOException {
@@ -254,26 +388,33 @@ public class LogFileCopier {
         if (maxFile == null) {
             maxFile = findFirstFile();
             logFileManager.createFile(maxFile);
-            binlogFile = new BinlogFile(maxFile, "rw", writeBufferSize, seekBufferSize);
+            binlogFile = new BinlogFile(maxFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer);
             binlogFile.writeHeader();
         } else {
-            binlogFile = new BinlogFile(maxFile, "rw", writeBufferSize, seekBufferSize);
-            if (binlogFile.length() == 0) {
+            binlogFile = new BinlogFile(maxFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer);
+            if (binlogFile.fileSize() == 0) {
                 binlogFile.writeHeader();
             } else {
                 BinlogFile.SeekResult seekResult = binlogFile.seekLastTso();
-                if (seekResult.getLastEventType() == LogEvent.ROTATE_EVENT) {
+                logger.info("seek result is " + seekResult);
+
+                if (binlogFile.filePointer() == 0) {
+                    binlogFile.writeHeader();
+                } else if (seekResult.getLastEventType() == LogEvent.ROTATE_EVENT) {
                     String oldFileName = binlogFile.getFileName();
-                    File newFile = logFileManager.rotateFile(binlogFile.getFile());
-                    binlogFile = new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize);
+                    File newFile = logFileManager.rotateFile(binlogFile.getFile(), null);
+                    binlogFile = new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer);
                     binlogFile.writeHeader();
                     logger.info("Last event in file [{}] is a rotate event, will start sync from next file [{}].",
                         oldFileName, newFile.getName());
                 }
-                binlogFile.seekLast();
             }
         }
-        logger.info("buildBinlogFile {}#{}", binlogFile.getFileName(), binlogFile.position());
+
+        if (binlogFile.filePointer() < binlogFile.fileSize()) {
+            binlogFile.truncate(binlogFile.filePointer());
+        }
+        logger.info("buildBinlogFile {}#{}", binlogFile.getFileName(), binlogFile.filePointer());
     }
 
     public String seekLastTso() throws IOException {
@@ -281,8 +422,8 @@ public class LogFileCopier {
         for (int i = binlogFileNames.size() - 1; i >= 0; i--) {
             String fileName = binlogFileNames.get(i);
             BinlogFile binlogFile =
-                new BinlogFile(new File(logFileManager.getBinlogFileDirPath() + File.separator + fileName), "r",
-                    writeBufferSize, seekBufferSize);
+                new BinlogFile(new File(logFileManager.getBinlogFileDirPath() + File.separator + fileName), "rw",
+                    writeBufferSize, seekBufferSize, useDirectByteBuffer);
             BinlogFile.SeekResult result = binlogFile.seekLastTso();
             binlogFile.close();
             if (StringUtils.isNotBlank(result.getLastTso())) {
@@ -299,15 +440,15 @@ public class LogFileCopier {
         }
 
         binlogFile.close();
-        File newFile = logFileManager.rotateFile(binlogFile.getFile());
-        binlogFile = new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize);
+        File newFile = logFileManager.rotateFile(binlogFile.getFile(), null);
+        binlogFile = new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer);
         binlogFile.writeHeader();
     }
 
     private File findFirstFile() {
-        DumpClientV2 dumpClient = null;
+        DumpClient dumpClient = null;
         try {
-            dumpClient = new DumpClientV2(leaderHost, leaderPort);
+            dumpClient = new DumpClient(leaderHost, leaderPort, rpcUseAsyncMode, asyncQueueSize, flowControlWindowSize);
             dumpClient.connect();
             File file = new File(logFileManager.getFullName(dumpClient.findMasterFirstLogFile()));
             return file;
@@ -330,5 +471,26 @@ public class LogFileCopier {
             long delayTime = System.currentTimeMillis() - timestamp * 1000;//Binlog中时间戳的单位是秒，需要转化为毫秒再计算
             Metrics.get().setLatestDelayTimeOnCommit(delayTime);
         }
+    }
+
+    private EventSplitMode buildSplitMode() {
+        String configValue = DynamicApplicationConfig.getString(BINLOG_SYNC_EVENT_SPLIT_MODE);
+        EventSplitMode mode = EventSplitMode.valueOf(configValue);
+        if (mode == EventSplitMode.RANDOM) {
+            List<EventSplitMode> list = Lists.newArrayList(EventSplitMode.SERVER, EventSplitMode.CLIENT);
+            Collections.shuffle(list);
+            this.splitMode = list.get(0);
+        } else {
+            this.splitMode = mode;
+        }
+
+        return splitMode;
+    }
+
+    @ToString
+    private static class ContactContext {
+        int eventLength;
+        int currentWriteLength;
+        long eventPos;
     }
 }

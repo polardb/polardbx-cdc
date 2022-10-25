@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,12 +11,20 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dao;
 
+import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.*;
+import static org.mybatis.dynamic.sql.SqlBuilder.*;
+
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
+
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.Optional;
+import javax.annotation.Generated;
+
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.DeleteProvider;
@@ -40,30 +47,6 @@ import org.mybatis.dynamic.sql.update.UpdateModel;
 import org.mybatis.dynamic.sql.update.render.UpdateStatementProvider;
 import org.mybatis.dynamic.sql.util.SqlProviderAdapter;
 import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
-
-import javax.annotation.Generated;
-import java.util.Collection;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
-
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.availablePorts;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.clusterId;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.clusterType;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.containerId;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.core;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.daemonPort;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.gmtCreated;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.gmtHeartbeat;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.gmtModified;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.id;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.ip;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.latestCursor;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.mem;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.nodeInfo;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.role;
-import static com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport.status;
-import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 @Mapper
 public interface NodeInfoMapper {

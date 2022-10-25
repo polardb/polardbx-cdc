@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
@@ -85,19 +82,19 @@ public class LogEventUtil {
     }
 
     public static Long getTranIdFromXid(String xid, String encoding) throws Exception {
-        String[] xidArgs = xid.split(",");
-        return processTranId(xidArgs[0], encoding);
+        return processTranId(StringUtils.substringBefore(xid, ","), encoding);
     }
 
     public static String getGroupFromXid(String xid, String encoding) throws Exception {
-        String[] xidArgs = xid.split(",");
-        return new String(Hex.decodeHex(unwrap(xidArgs[1])), encoding);
+        String str = getGroupWithReadViewSeqFromXid(xid, encoding);
+        return StringUtils.substringBefore(str, "@");
     }
 
-    public static void main(String[] args) throws Exception {
-        System.out.println(getGroupFromXid(
-            "X'647264732d313236373530636261653030383030314062623236613963383163636433386265',X'5f5f4344435f5f5f3030303030305f47524f5550',1",
-            "UTF-8"));
+    // 单靠group不能唯一标识一个事务提交分支
+    // 在开启写并行策略时，一个group可以对应多个事务提交分支，此时需要通过 group + readViewSeq 来唯一标识一个事务提交分支
+    public static String getGroupWithReadViewSeqFromXid(String xid, String encoding) throws Exception {
+        String partTwo = StringUtils.substringAfter(xid, ",");
+        return new String(Hex.decodeHex(unwrap(StringUtils.substringBefore(partTwo, ","))), encoding);
     }
 
     private static String unwrap(String str) {

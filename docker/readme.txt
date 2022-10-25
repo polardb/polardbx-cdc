@@ -1,0 +1,1 @@
+this docker directory is only for open source

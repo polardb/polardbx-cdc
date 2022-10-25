@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.metrics;
 
 import com.aliyun.polardbx.binlog.CommonMetrics;
@@ -49,7 +46,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.PRINT_METRICS;
  **/
 public class MetricsManager {
 
-    private static final Logger logger = LoggerFactory.getLogger("METRICS");
+    private static final Logger METRICS_LOGGER = LoggerFactory.getLogger("METRICS");
     private static final long INTERVAL = TimeUnit.SECONDS.toMillis(5);
 
     private final ScheduledExecutorService scheduledExecutorService;
@@ -86,10 +83,10 @@ public class MetricsManager {
                 tryAlarm(snapshot);
                 lastSnapshot = snapshot;
             } catch (Throwable e) {
-                logger.error("metrics print error!", e);
+                METRICS_LOGGER.error("metrics print error!", e);
             }
         }, INTERVAL, INTERVAL, TimeUnit.MILLISECONDS);
-        logger.info("metrics manager started.");
+        METRICS_LOGGER.info("metrics manager started.");
     }
 
     public void stop() {
@@ -99,7 +96,7 @@ public class MetricsManager {
         running = false;
 
         scheduledExecutorService.shutdownNow();
-        logger.info("metrics manager stopped.");
+        METRICS_LOGGER.info("metrics manager stopped.");
     }
 
     private void tryAlarm(MetricsSnapshot snapshot) {
@@ -121,7 +118,7 @@ public class MetricsManager {
         }
 
         if (doAlarm) {
-            logger.warn("trigger no data alarm.");
+            METRICS_LOGGER.warn("trigger no data alarm.");
             if (leader) {
                 MonitorManager.getInstance()
                     .triggerAlarm(MonitorType.DUMPER_STAGE_LEADER_NODATA_ERROR, new MonitorValue(noDataTime / 1000),
@@ -138,7 +135,7 @@ public class MetricsManager {
         int threshold = DynamicApplicationConfig.getInt(ALARM_DELAY_THRESHOLD) * 1000;
         long delayTime = snapshot.metrics.getLatestDelayTimeOnCommit();
         if (delayTime > threshold) {
-            logger.warn("trigger delay alarm.");
+            METRICS_LOGGER.warn("trigger delay alarm.");
             if (leader) {
                 MonitorManager.getInstance()
                     .triggerAlarm(MonitorType.DUMPER_STAGE_LEADER_DELAY, new MonitorValue(delayTime), delayTime);
@@ -159,17 +156,17 @@ public class MetricsManager {
         sb.append("Total Metrics:");
         sb.append("\r\n");
         sb.append(String.format("totalRevEventCount : %s, totalWriteEventCount : %s,totalWriteTxnCount : %s, \r\n"
-                + "totalWriteEventTime(ms): %s, totalWriteTxnTime(ms) : %s, totalWriteEventBytes : %s, \r\n"
-                + "totalRevEventBytes : %s, totalFlushWriteCount : %s, totalForceFlushWriteCount : %s ",
+                + "totalWriteTxnTime(ms) : %s, totalWriteEventBytes : %s, parallelBufferSize: %s, \r\n"
+                + "totalFlushWriteCount : %s, totalForceFlushWriteCount : %s, receiveQueueSize : %s",
             snapshot.metrics.getTotalRevEventCount(),
             snapshot.metrics.getTotalWriteEventCount(),
             snapshot.metrics.getTotalWriteTxnCount(),
-            snapshot.metrics.getTotalWriteEventTime(),
             snapshot.metrics.getTotalWriteTxnTime(),
             snapshot.metrics.getTotalWriteEventBytes(),
-            snapshot.metrics.getTotalRevEventBytes(),
+            snapshot.metrics.getParallelBufferSize(),
             snapshot.metrics.getTotalFlushWriteCount(),
-            snapshot.metrics.getTotalForceFlushWriteCount()));
+            snapshot.metrics.getTotalForceFlushWriteCount(),
+            snapshot.metrics.getReceiveQueueSize()));
         sb.append("\r\n");
         sb.append("\r\n");
 
@@ -207,15 +204,13 @@ public class MetricsManager {
 
         sb.append("Delay Time Metrics:");
         sb.append("\r\n");
-        sb.append(String.format("latestDelayTimeOnReceive(ms) : %s, latestDelayTimeOnCommit(ms) : %s ",
-            snapshot.metrics.getLatestDelayTimeOnReceive(),
-            snapshot.metrics.getLatestDelayTimeOnCommit()));
+        sb.append(String.format("latestDelayTimeOnCommit(ms) : %s ", snapshot.metrics.getLatestDelayTimeOnCommit()));
         sb.append("\r\n");
 
         sb.append("--------------------------------dumper metrics end--------------------------------------");
         sb.append("\r\n");
 
-        logger.info(sb.toString());
+        METRICS_LOGGER.info(sb.toString());
     }
 
     @SneakyThrows
@@ -328,39 +323,28 @@ public class MetricsManager {
 
         long period;
         long periodWriteEventCount;
-        double periodWriteEventTime;
         long periodWriteTxnCount;
         double periodWriteTxnTime;
         long periodRevEventWriteCount;
         long periodWriteEventBytes;
-        long periodRevWriteEventBytes;
 
         if (lastSnapshot == null) {
             period = (currentTime - startTime) / 1000;
             periodWriteEventCount = metrics.getTotalWriteEventCount();
-            periodWriteEventTime = (double) (metrics.getTotalWriteEventTime());
             periodWriteTxnCount = metrics.getTotalWriteTxnCount();
             periodWriteTxnTime = (double) (metrics.getTotalWriteTxnTime());
             periodRevEventWriteCount = metrics.getTotalRevEventCount();
             periodWriteEventBytes = metrics.getTotalWriteEventBytes();
-            periodRevWriteEventBytes = metrics.getTotalRevEventBytes();
         } else {
             period = (currentTime - lastSnapshot.timestamp) / 1000;
             periodWriteEventCount = metrics.getTotalWriteEventCount() - lastSnapshot.metrics.getTotalWriteEventCount();
-            periodWriteEventTime = (double) (metrics.getTotalWriteEventTime()
-                - lastSnapshot.metrics.getTotalWriteEventTime());
             periodWriteTxnCount = metrics.getTotalWriteTxnCount() - lastSnapshot.metrics.getTotalWriteTxnCount();
             periodWriteTxnTime = (double) (metrics.getTotalWriteTxnTime()
                 - lastSnapshot.metrics.getTotalWriteTxnTime());
             periodRevEventWriteCount = metrics.getTotalRevEventCount() - lastSnapshot.metrics.getTotalRevEventCount();
             periodWriteEventBytes = metrics.getTotalWriteEventBytes() - lastSnapshot.metrics.getTotalWriteEventBytes();
-            periodRevWriteEventBytes = metrics.getTotalRevEventBytes() - lastSnapshot.metrics.getTotalRevEventBytes();
         }
 
-        periodAverage.avgWriteTimePerEvent =
-            periodWriteEventCount == 0 ? BigDecimal.ZERO :
-                new BigDecimal(periodWriteEventTime).divide(new BigDecimal(periodWriteEventCount), 2,
-                    BigDecimal.ROUND_HALF_UP);
         periodAverage.avgWriteTimePerTxn = periodWriteTxnCount == 0 ? BigDecimal.ZERO :
             new BigDecimal(periodWriteTxnTime).divide(new BigDecimal(periodWriteTxnCount), 2,
                 BigDecimal.ROUND_HALF_UP);
@@ -368,7 +352,6 @@ public class MetricsManager {
         periodAverage.avgTxnWriteTps = periodWriteTxnCount / period;
         periodAverage.avgEventWriteTps = periodWriteEventCount / period;
         periodAverage.avgRevEventWriteTps = periodRevEventWriteCount / period;
-        periodAverage.avgRevWriteBytesTps = periodRevWriteEventBytes / period;
         periodAverage.avgYoungUsed = snapshot.jvmSnapshot.getYoungUsed();
         periodAverage.avgOldUsed = snapshot.jvmSnapshot.getOldUsed();
 

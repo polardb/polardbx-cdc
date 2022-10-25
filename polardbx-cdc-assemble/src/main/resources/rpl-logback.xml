@@ -60,26 +60,6 @@
         </encoder>
     </appender>
 
-    <appender name="rplAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${HOME}/logs/polardbx-rpl/rpl.log</file>
-        <append>true</append>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${HOME}/logs/polardbx-rpl/%d{yyyy-MM-dd}/rpl.%i.log.gz</fileNamePattern>
-            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
-                <maxFileSize>200MB</maxFileSize>
-            </timeBasedFileNamingAndTriggeringPolicy>
-            <maxHistory>14</maxHistory>
-        </rollingPolicy>
-        <encoder>
-            <pattern>
-                <![CDATA[
-                    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %class{0}: %-5level - %msg%n
-                ]]>
-            </pattern>
-            <charset class="java.nio.charset.Charset">UTF-8</charset>
-        </encoder>
-    </appender>
-
     <appender name="commitAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
         <discriminator class="com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator">
             <Key>taskName</Key>
@@ -109,6 +89,26 @@
                 </encoder>
             </appender>
         </sift>
+    </appender>
+
+    <appender name="rplAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${HOME}/logs/polardbx-rpl/rpl.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${HOME}/logs/polardbx-rpl/%d{yyyy-MM-dd}/rpl.%i.log.gz</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>14</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+                    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %class{0}: %-5level - %msg%n
+                ]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
     </appender>
 
     <appender name="checkResultAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
@@ -162,7 +162,7 @@
         </discriminator>
         <sift>
             <appender name="positionAppender-${taskName}"
-                      class="ch.qos.logback.core.FileAppender">
+                      class="ch.qos.logback.core.rolling.RollingFileAppender">
                 <file>${HOME}/logs/polardbx-rpl/${taskName}/position.log</file>
                 <append>true</append>
                 <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
@@ -177,7 +177,7 @@
                 <encoder>
                     <pattern>
                         <![CDATA[
-                        %m%n
+                        %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %class{0}: %-5level - %msg%n
                         ]]>
                     </pattern>
                     <charset class="java.nio.charset.Charset">UTF-8</charset>
@@ -193,7 +193,7 @@
         </discriminator>
         <sift>
             <appender name="statisticAppender-${taskName}"
-                      class="ch.qos.logback.core.FileAppender">
+                      class="ch.qos.logback.core.RollingFileAppender">
                 <file>${HOME}/logs/polardbx-rpl/${taskName}/statistic.log</file>
                 <append>true</append>
                 <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
@@ -225,10 +225,6 @@
         <appender-ref ref="metaAppender"/>
     </logger>
 
-    <logger name="rplLogger" level="INFO">
-        <appender-ref ref="rplAppender"/>
-    </logger>
-
     <logger name="consoleLogger" level="INFO">
         <appender-ref ref="consoleAppender"/>
     </logger>
@@ -253,6 +249,11 @@
         <appender-ref ref="positionAppender" additivity="false"/>
     </logger>
 
+    <logger name="com.aliyun.polardbx.rpl.pipeline.SerialPipeline" additivity="false">
+        <level value="INFO"/>
+        <appender-ref ref="defaultAppender" additivity="false"/>
+    </logger>
+
     <logger name="statisticLogger" additivity="false">
         <level value="INFO"/>
         <appender-ref ref="statisticAppender" additivity="false"/>
@@ -262,4 +263,8 @@
         <appender-ref ref="defaultAppender"/>
         <!--        <appender-ref ref="consoleAppender"/>-->
     </root>
+
+    <logger name="rplLogger" level="INFO">
+        <appender-ref ref="rplAppender"/>
+    </logger>
 </configuration>

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,20 +11,20 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.jvm;
 
 import org.apache.commons.lang3.StringUtils;
 
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryPoolMXBean;
 import java.lang.management.MemoryType;
 import java.lang.management.MemoryUsage;
 import java.lang.management.ThreadMXBean;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Created by ziyang.lb on 2021/01/21.
@@ -106,7 +105,32 @@ public class JvmUtils {
         return jvmSnapshot;
     }
 
-    public static void main(String[] args) {
-        buildJvmSnapshot();
+    public static double getOldUsedRatio() {
+        MemoryUsage oldMemoryUsage = null;
+        List<MemoryPoolMXBean> mps = ManagementFactory.getMemoryPoolMXBeans();
+        for (MemoryPoolMXBean mp : mps) {
+            MemoryType type = mp.getType();
+            String name = mp.getName();
+            if (type == MemoryType.HEAP) {
+                switch (name) {
+                case "CMS Old Gen":
+                case "PS Old Gen": {
+                    oldMemoryUsage = mp.getUsage();
+                    break;
+                }
+                }
+            }
+        }
+        long oldMaxMemorySize = Objects.requireNonNull(oldMemoryUsage).getMax();
+        long oldUsedMemorySize = oldMemoryUsage.getUsed();
+        return (double) oldUsedMemorySize / (double) oldMaxMemorySize;
+    }
+
+    public static double getTotalUsedRatio() {
+        MemoryMXBean totalMemoryMXBean = ManagementFactory.getMemoryMXBean();
+        MemoryUsage totalMemoryUsage = totalMemoryMXBean.getHeapMemoryUsage();
+        long totalMaxMemorySize = totalMemoryUsage.getMax(); //最大可用内存
+        long totalUsedMemorySize = totalMemoryUsage.getUsed(); //已使用的内存
+        return (double) totalUsedMemorySize / (double) totalMaxMemorySize;
     }
 }

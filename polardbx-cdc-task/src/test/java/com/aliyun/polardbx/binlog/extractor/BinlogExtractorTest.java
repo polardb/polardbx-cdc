@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor;
 
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
@@ -51,7 +48,7 @@ public class BinlogExtractorTest {
         //        parameterList.add(parameter2);
         final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
         appContextBootStrap.boot();
-        heartbeat = new TsoHeartbeat(1000L);
+        heartbeat = new TsoHeartbeat();
         heartbeat.start();
     }
 
@@ -99,7 +96,7 @@ public class BinlogExtractorTest {
                 }
             });
             //            extractor.setProcessLogEventFilter(filters);
-            extractor.init(parameter, new LogEventStorage(null));
+            extractor.init(parameter, new LogEventStorage(null), null);
             extractor.setLogEventHandler(new LogEventHandler<Transaction>() {
 
                 private boolean isFirst = true;

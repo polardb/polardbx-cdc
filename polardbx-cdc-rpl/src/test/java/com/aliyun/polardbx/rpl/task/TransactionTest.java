@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.task;
 
 import java.util.ArrayList;
@@ -85,16 +82,20 @@ public class TransactionTest extends TestBase {
         for (int i = start; i < start + 10; i++) {
             SqlContext context1 = new SqlContext(
                 "INSERT INTO `rpl`.`t1`(id,value) VALUES (?,?) ON DUPLICATE KEY UPDATE id=?,value=?",
+                "rpl",
                 "t1",
                 Arrays.asList(i, i, i, i));
             SqlContext context2 = new SqlContext(
                 "INSERT INTO `rpl`.`t2`(id,value) VALUES (?,?) ON DUPLICATE KEY UPDATE id=?,value=?",
+                "rpl",
                 "t2",
                 Arrays.asList(i, i, i, i));
             SqlContext context3 = new SqlContext("UPDATE `rpl`.`t1` SET value= ? WHERE id=?",
+                "rpl",
                 "t1",
                 Arrays.asList(i + 1, i));
             SqlContext context4 = new SqlContext("UPDATE `rpl`.`t2` SET value= ? WHERE id=?",
+                "rpl",
                 "t2",
                 Arrays.asList(i + 1, i));
             contexts.add(context1);
@@ -112,9 +113,11 @@ public class TransactionTest extends TestBase {
         for (int i = start; i < start + 10; i++) {
             SqlContext context1 = new SqlContext(
                 "INSERT INTO `rpl`.`t3`(id,value) VALUES (?,?) ON DUPLICATE KEY UPDATE id=?,value=?",
+                "rpl",
                 "t3",
                 Arrays.asList(i, i, i, i));
             SqlContext context2 = new SqlContext("UPDATE `rpl`.`t3` SET value= ? WHERE id=?",
+                "rpl",
                 "t3",
                 Arrays.asList(i + 2, i));
             contexts.add(context1);
@@ -130,12 +133,15 @@ public class TransactionTest extends TestBase {
         for (int i = start; i < start + 10; i++) {
             SqlContext context1 = new SqlContext(
                 "INSERT INTO `rpl`.`t4`(id,value) VALUES (?,?) ON DUPLICATE KEY UPDATE id=?,value=?",
+                "rpl",
                 "t4",
                 Arrays.asList(i, i, i, i));
             SqlContext context2 = new SqlContext("UPDATE `rpl`.`t4` SET value= ? WHERE id=?",
+                "rpl",
                 "t4",
                 Arrays.asList(i + 3, i));
             SqlContext context3 = new SqlContext("UPDATE `rpl`.`t4` SET value= ? WHERE id=?",
+                "rpl",
                 "t4",
                 Arrays.asList(i + 4, i));
             contexts.add(context1);
@@ -150,8 +156,8 @@ public class TransactionTest extends TestBase {
         List<SqlContext> contexts = new ArrayList<>();
 
         for (int i = start; i < start + 5; i++) {
-            SqlContext context1 = new SqlContext("DELETE FROM `rpl`.`t3` WHERE id=?", "t3", Arrays.asList(i));
-            SqlContext context2 = new SqlContext("DELETE FROM `rpl`.`t4` WHERE id=?", "t4", Arrays.asList(i));
+            SqlContext context1 = new SqlContext("DELETE FROM `rpl`.`t3` WHERE id=?", "rpl","t3", Arrays.asList(i));
+            SqlContext context2 = new SqlContext("DELETE FROM `rpl`.`t4` WHERE id=?", "rpl","t4", Arrays.asList(i));
             contexts.add(context1);
             contexts.add(context2);
         }

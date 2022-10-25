@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.common;
 
 import com.aliyun.polardbx.binlog.ServerConfigUtil;
@@ -34,10 +31,6 @@ public class RplConstants {
      * canal 中，将当前binlog position 写入option
      */
     public static final String BINLOG_EVENT_OPTION_POSITION = "message_event_option_offset";
-    /**
-     * canal 中，将当前binlog position 写入option
-     */
-    public static final String BINLOG_EVENT_OPTION_POSITION_STR = "message_event_option_position_str";
     /**
      * 将source schema name 写入option
      */
@@ -71,7 +64,20 @@ public class RplConstants {
 
     public static final int DEFAULT_FETCH_BATCH_SIZE = 5000;
 
-    public static final int PRODUCER_DEFAULT_PARALLEL_COUNT = 16;
+    /**
+     * default java heap memory for task
+     */
+    public static final int DEFAULT_MEMORY_SIZE = 2048;
+
+    /**
+     * default java heap memory for full copy tasks
+     */
+    public static final int DEFAULT_MEMORY_SIZE_FOR_FULL_COPY = 3072;
+
+    /**
+     * extract 并行度 for full copy and full validation
+     */
+    public static final int PRODUCER_DEFAULT_PARALLEL_COUNT = 20;
 
     public static final int CONSUMER_DEFAULT_PARALLEL_COUNT = 64;
 
@@ -80,7 +86,7 @@ public class RplConstants {
      */
     public final static String ROLLBACK_STRING = "-2";
 
-    public final static int TASK_KEEP_ALIVE_INTERVAL_SECONDS = 15;
+    public final static int TASK_KEEP_ALIVE_INTERVAL_SECONDS = 300;
 
     public final static int HTTP_PORT = 10183;
 

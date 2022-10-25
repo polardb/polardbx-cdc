@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,25 +11,28 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.pipeline;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSXATransaction;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultOption;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.monitor.MonitorManager;
+import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.ApplyHelper;
 import com.aliyun.polardbx.rpl.applier.BaseApplier;
+import com.aliyun.polardbx.rpl.applier.RecoveryApplier;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.applier.Transaction;
 import com.aliyun.polardbx.rpl.applier.TransactionApplier;
-import com.aliyun.polardbx.rpl.common.RplConstants;
+import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
+import com.aliyun.polardbx.rpl.extractor.full.MysqlFullExtractor;
+import com.aliyun.polardbx.rpl.storage.RplStorage;
 import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
 import com.lmax.disruptor.BatchEventProcessor;
 import com.lmax.disruptor.BlockingWaitStrategy;
@@ -38,7 +40,6 @@ import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.LifecycleAware;
 import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.SequenceBarrier;
-import com.lmax.disruptor.WorkerPool;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -67,7 +68,6 @@ public class SerialPipeline extends BasePipeline {
     private AtomicLong periodBatchCost = new AtomicLong(0);
     private final long LOG_STAT_PERIOD_MILLS = 10000;
 
-
     public SerialPipeline(PipelineConfig pipeLineConfig, BaseExtractor extractor, BaseApplier applier) {
         this.pipeLineConfig = pipeLineConfig;
         this.extractor = extractor;
@@ -77,6 +77,7 @@ public class SerialPipeline extends BasePipeline {
     @Override
     public boolean init() {
         try {
+            if (!(extractor instanceof MysqlFullExtractor)) {
                 messageEventFactory = new MessageEventFactory();
                 offerExecutor = ThreadPoolUtil.createExecutorWithFixedNum(1, "applier");
                 // create ringBuffer and set ringBuffer eventFactory
@@ -89,11 +90,14 @@ public class SerialPipeline extends BasePipeline {
                     eventHandler = new XaTranRingBufferEventHandler(pipeLineConfig.getBufferSize());
                 } else if (applier instanceof TransactionApplier) {
                     eventHandler = new TranRingBufferEventHandler(pipeLineConfig.getBufferSize());
+                } else if (applier instanceof RecoveryApplier) {
+                    eventHandler = new RecoveryEventHandler(pipeLineConfig.getBufferSize());
                 } else {
                     eventHandler = new RingBufferEventHandler(pipeLineConfig.getBufferSize());
                 }
                 offerProcessor = new BatchEventProcessor<>(msgRingBuffer, sequenceBarrier, eventHandler);
                 msgRingBuffer.addGatingSequences(offerProcessor.getSequence());
+            }
             return true;
         } catch (Throwable e) {
             log.error("SerialPipeline init failed", e);
@@ -112,8 +116,18 @@ public class SerialPipeline extends BasePipeline {
 
             // start offerProcessor thread which will call APPLIER to consume events from
             // ringBuffer
-            offerExecutor.submit(offerProcessor);
+            if (!(extractor instanceof MysqlFullExtractor)) {
+                offerExecutor.submit(offerProcessor);
+            }
         } catch (Throwable e) {
+            log.error("startDisruptorThread occur error", e);
+            if (extractor instanceof MysqlFullExtractor) {
+                MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_FULL_ERROR,
+                    TaskContext.getInstance().getTaskId(), e.getMessage());
+            } else {
+                MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                    TaskContext.getInstance().getTaskId(), e.getMessage());
+            }
             log.error("start extractor occur error", e);
             Runtime.getRuntime().halt(1);
         }
@@ -155,11 +169,13 @@ public class SerialPipeline extends BasePipeline {
                 }
                 hi = next;
                 MessageEvent e = msgRingBuffer.get(next);
-                e.setDbmsEvent(event.getDbmsEvent());
+                e.setDbmsEvent(event.getUnderlyingDbmsEvent());
                 e.setPosition(event.getPosition());
                 e.setXaTransaction(event.getXaTransaction());
                 e.setSourceTimestamp(event.getSourceTimestamp());
                 e.setExtractTimestamp(event.getExtractTimestamp());
+                e.setPersistKey(event.getPersistKey());
+                e.setRepoUnit(event.getRepoUnit());
             }
         } catch (Throwable e) {
             log.error("writeRingBuffer exception ", e);
@@ -175,13 +191,15 @@ public class SerialPipeline extends BasePipeline {
     public void directApply(List<DBMSEvent> events) {
         if (!StatisticalProxy.getInstance().apply(events)) {
             log.error("failed to call applier, exit");
+            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_FULL_ERROR,
+                TaskContext.getInstance().getTaskId(), "apply error");
             Runtime.getRuntime().halt(1);
         }
         StatisticalProxy.getInstance().addMessageCount(events.size());
     }
 
-    private void takeStatisticsWithFlowControl(long currentBatchSize, long sequence, long start) {
-        StatisticalProxy.getInstance().recordPosition(position, false);
+    private void takeStatisticsWithFlowControl(long currentBatchSize, long sequence, long start, int xaNum) {
+        StatisticalProxy.getInstance().recordPosition(position, log.isDebugEnabled());
         if (currentBatchSize != 0) {
             StatisticalProxy.getInstance().addMessageCount(currentBatchSize);
         }
@@ -196,9 +214,12 @@ public class SerialPipeline extends BasePipeline {
             long avgBatchSize = periodBatchSize.get() / periodBatchCount.get();
             long avgCost = periodBatchCost.get() / periodBatchCount.get();
             long queueSize = msgRingBuffer.getCursor() - sequence;
-            log.warn(
+            log.info(
                 "RingBuffer queue size : " + queueSize + ", average batch size : " + avgBatchSize + ", avg cost : "
                     + avgCost + ", current batch size : " + currentBatchSize + ", current cost : " + (now - start));
+            if (xaNum != 0) {
+                log.info("Exist unfinished xa num: {}", xaNum);
+            }
             // reset参数
             periodBatchCount.set(0);
             periodBatchSize.set(0);
@@ -218,28 +239,29 @@ public class SerialPipeline extends BasePipeline {
         }
 
         @Override
-        public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
+        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) throws Exception {
             boolean isDdl = false;
-            if (event.getDbmsEvent() instanceof DBMSRowChange) {
-                eventBatch.add(event.getDbmsEvent());
-            } else if (ApplyHelper.isDdl(event.getDbmsEvent())) {
+            DBMSEvent dbmsEvent = messageEvent.getDbmsEventWithEffect();
+            if (dbmsEvent instanceof DBMSRowChange) {
+                eventBatch.add(dbmsEvent);
+            } else if (ApplyHelper.isDdl(dbmsEvent)) {
                 isDdl = true;
                 // first apply all exist events
                 StatisticalProxy.getInstance().apply(eventBatch);
                 eventBatch.clear();
                 // apply DDL one by one
-                event.getDbmsEvent().putOption(
-                    new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION_STR, event.getPosition()));
-                eventBatch.add(event.getDbmsEvent());
+                eventBatch.add(dbmsEvent);
                 endOfBatch = true;
-                position = event.getPosition();
-            } else if (event.getDbmsEvent() instanceof DBMSTransactionEnd) {
-                position = event.getPosition();
+                position = messageEvent.getPosition();
+            } else if (dbmsEvent instanceof DBMSTransactionEnd) {
+                position = messageEvent.getPosition();
             } else {
-                position = event.getPosition();
+                position = messageEvent.getPosition();
             }
+            messageEvent.tryRelease();
 
             if (endOfBatch) {
+                log.info("pipeline received events, count: {}", eventBatch.size());
                 try {
                     StatisticalProxy.getInstance()
                         .setTotalInCache(msgRingBuffer.getBufferSize() - msgRingBuffer.remainingCapacity());
@@ -248,7 +270,7 @@ public class SerialPipeline extends BasePipeline {
                         log.error("failed to call applier, exit");
                         Runtime.getRuntime().halt(1);
                     }
-                    takeStatisticsWithFlowControl(eventBatch.size(), sequence, start);
+                    takeStatisticsWithFlowControl(eventBatch.size(), sequence, start, 0);
                     // force flush position info if Ddl happened
                     if (isDdl) {
                         StatisticalProxy.getInstance().flushPosition();
@@ -283,31 +305,31 @@ public class SerialPipeline extends BasePipeline {
         }
 
         @Override
-        public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
+        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) throws Exception {
             Transaction transaction = getTransactionToApply();
             boolean isDdl = false;
-            if (event.getDbmsEvent() instanceof DBMSRowChange) {
-                transaction.appendRowChange(event.getDbmsEvent());
+            DBMSEvent dbmsEvent = messageEvent.getDbmsEventWithEffect();
+            if (dbmsEvent instanceof DBMSRowChange) {
+                transaction.appendRowChange(dbmsEvent);
                 eventCount++;
-            } else if (ApplyHelper.isDdl(event.getDbmsEvent())) {
+            } else if (ApplyHelper.isDdl(dbmsEvent)) {
                 // first apply all exist events
                 StatisticalProxy.getInstance().tranApply(transactionBatch);
                 transactionBatch.clear();
                 transaction = getTransactionToApply();
-                transaction.appendQueryLog(event.getDbmsEvent());
-                position = event.getPosition();
-                event.getDbmsEvent().putOption(
-                    new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION_STR, event.getPosition()));
+                transaction.appendQueryLog(dbmsEvent);
+                position = messageEvent.getPosition();
                 transaction.setFinished(true);
                 isDdl = true;
                 endOfBatch = true;
-            } else if (event.getDbmsEvent() instanceof DBMSTransactionEnd) {
-                position = event.getPosition();
+            } else if (dbmsEvent instanceof DBMSTransactionEnd) {
+                position = messageEvent.getPosition();
                 transaction.setFinished(true);
             } else {
-                position = event.getPosition();
+                position = messageEvent.getPosition();
             }
 
+            messageEvent.tryRelease();
             if (endOfBatch) {
                 try {
                     // do NOT apply unfinished transaction
@@ -318,13 +340,16 @@ public class SerialPipeline extends BasePipeline {
                             transactionBatch.remove(transactionBatch.size() - 1);
                         }
                     }
+                    log.info("pipeline received events, count: {}, transaction count: {}",
+                        eventCount,
+                        transactionBatch.size());
                     long start = System.currentTimeMillis();
                     // apply
                     if (!StatisticalProxy.getInstance().tranApply(transactionBatch)) {
                         log.error("failed to call applier, exit");
                         Runtime.getRuntime().halt(1);
                     }
-                    takeStatisticsWithFlowControl(eventCount, sequence, start);
+                    takeStatisticsWithFlowControl(eventCount, sequence, start, 0);
                     eventCount = 0;
                     // force flush position info if Ddl happened
                     // 位点不能跨ddl
@@ -335,7 +360,6 @@ public class SerialPipeline extends BasePipeline {
                     transactionBatch.clear();
                     if (lastTransaction != null && !lastTransaction.isFinished()) {
                         transactionBatch.add(lastTransaction);
-                        log.info("lastTransaction NOT finished, waiting for DBMSTransactionEnd");
                     }
                 } catch (Throwable e) {
                     log.error("failed to call applier, exit", e);
@@ -366,8 +390,12 @@ public class SerialPipeline extends BasePipeline {
      * TranRingBufferEventHandler, this will construct Transactions to call APPLIER
      */
     private class XaTranRingBufferEventHandler implements EventHandler<MessageEvent>, LifecycleAware {
-
-        String nextPosition = null;
+        // 即将记录的位点
+        String nextRecordPosition = null;
+        // 用上一个event的结束位点来近似代表本次event的开始位点
+        String lastPosition = null;
+        // 本次event的结束位点
+        String nowPosition = null;
         private List<Transaction> transactionBatch;
         private Map<String, Transaction> transactionMap;
         private LinkedHashMap<String, String> transactionPositionMap;
@@ -380,50 +408,90 @@ public class SerialPipeline extends BasePipeline {
         }
 
         @Override
-        public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
-            boolean isDdl = false;
-            DBMSXATransaction xaTransaction = event.getXaTransaction();
-            if (event.getDbmsEvent() instanceof DBMSRowChange) {
+        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) throws Exception {
+            // lastPosition记录本个event的开始位置
+            lastPosition = nowPosition;
+            nowPosition = messageEvent.getPosition();
+            DBMSXATransaction xaTransaction = messageEvent.getXaTransaction();
+            DBMSEvent dbmsEvent = messageEvent.getDbmsEventWithEffect();
+            if (dbmsEvent instanceof DBMSRowChange) {
                 if (xaTransaction == null) {
                     Transaction transaction = getTransactionToApply();
-                    transaction.appendRowChange(event.getDbmsEvent());
+                    transaction.appendRowChange(dbmsEvent);
                 } else {
-                    transactionMap.get(event.getXaTransaction().getXid()).appendRowChange(event.getDbmsEvent());
+                    if (log.isDebugEnabled()) {
+                        log.debug("prepare to get transaction from map for DBMSRowChange, xid {}, now event position {}"
+                            , messageEvent.getXaTransaction().getXid(), nowPosition);
+                    }
+                    transactionMap.get(messageEvent.getXaTransaction().getXid()).appendRowChange(dbmsEvent);
                 }
-            } else if (ApplyHelper.isDdl(event.getDbmsEvent())) {
-                log.error("receive ddl event which will not be processed: {} ", event);
-            } else if (event.getDbmsEvent() instanceof DBMSTransactionEnd) {
+            } else if (ApplyHelper.isDdl(dbmsEvent)) {
+                log.error("receive ddl event which will not be processed, position: {}， event: {} "
+                    , messageEvent.getPosition(), dbmsEvent);
+                // 没有未结束的xa事务，则位点直接推进为常规事务end position
+                if (transactionPositionMap.size() == 0) {
+                    nextRecordPosition = messageEvent.getPosition();
+                }
+            } else if (dbmsEvent instanceof DBMSTransactionEnd) {
                 Transaction transaction = getTransactionToApply();
                 transaction.setFinished(true);
-                // 没有未结束的xa事务
+                // 没有未结束的xa事务，则位点直接推进为常规事务end position
                 if (transactionPositionMap.size() == 0) {
-                    nextPosition = event.getPosition();
+                    nextRecordPosition = messageEvent.getPosition();
                 }
             } else if (xaTransaction != null) {
-                switch (event.getXaTransaction().getType()) {
+                switch (messageEvent.getXaTransaction().getType()) {
                 case XA_START:
-                    transactionMap.put(event.getXaTransaction().getXid(), new Transaction());
-                    transactionPositionMap.put(event.getXaTransaction().getXid(), event.getPosition());
+                    if (log.isDebugEnabled()) {
+                        log.debug("put xid to transaction map, xid " + messageEvent.getXaTransaction());
+                    }
+                    transactionMap.put(messageEvent.getXaTransaction().getXid(),
+                        new Transaction(RplStorage.getRepoUnit(), pipeLineConfig.getPersistConfig()));
+                    // 这里需存xa start event的开始位点
+                    transactionPositionMap.put(messageEvent.getXaTransaction().getXid(), lastPosition);
                     break;
                 case XA_END:
-                    Transaction transaction = transactionMap.get(event.getXaTransaction().getXid());
+                    if (log.isDebugEnabled()) {
+                        log.debug("prepare to get transaction from map for XA_END , xid "
+                            + messageEvent.getXaTransaction().getXid());
+                    }
+                    Transaction transaction = transactionMap.get(messageEvent.getXaTransaction().getXid());
                     transaction.setPrepared(true);
                     break;
                 case XA_COMMIT:
-                    Transaction thisTransaction = removeFromCache(event);
+                    Transaction thisTransaction = removeFromCache(messageEvent);
                     if (thisTransaction != null) {
+                        // non-xa transaction's end may be filtered by "filterTransactionEnd"
+                        // when receive xa commit, means former non-xa transaction is finished
+                        // this may produce at most 1s latency when no xa transaction exists
+                        if (transactionBatch.size() > 0) {
+                            transactionBatch.get(transactionBatch.size() - 1).setFinished(true);
+                        }
                         transactionBatch.add(thisTransaction);
+                    } else {
+                        // 收到了commit，但却没有拿到xa事务start和end之间的event，存在丢数据风险
+                        // 触发同步报警 并 exit
+                        String errorInfo = "receive commit but not start and end in xa transaction, xid: " +
+                            messageEvent.getXaTransaction().getXid();
+                        log.error(errorInfo);
+                        MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                            TaskContext.getInstance().getTaskId(), errorInfo);
+                        Runtime.getRuntime().halt(1);
                     }
                     break;
                 case XA_ROLLBACK:
-                    removeFromCache(event);
+                    // 由于是rollback掉的数据，这里没找到对应的start/end可以忽略
+                    removeFromCache(messageEvent);
                     break;
                 default:
                     break;
                 }
             } else {
-                // nextPosition = event.getPosition();
+                // 可能会有其他queryLogEvent，甚至是事务中的event
+                // 与非xa处理器不同，因为xa rollback的存在，保守起见，这里不推进位点
+                // 无业务数据时，位点的推进依赖rds心跳
             }
+            messageEvent.tryRelease();
 
             if (endOfBatch) {
                 try {
@@ -437,36 +505,52 @@ public class SerialPipeline extends BasePipeline {
                     }
                     int eventCount = 0;
                     for (Transaction transaction : transactionBatch) {
-                        eventCount += transaction.getEvents().size();
+                        eventCount += transaction.getEventSize();
                     }
                     long start = System.currentTimeMillis();
+
                     // apply
                     if (applier instanceof TransactionApplier) {
                         if (!StatisticalProxy.getInstance().tranApply(transactionBatch)) {
                             log.error("failed to call applier, exit");
+                            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                                TaskContext.getInstance().getTaskId(), "apply error");
                             Runtime.getRuntime().halt(1);
                         }
                     } else {
                         // 展开transactionBatch
                         List<DBMSEvent> events = new ArrayList<>();
                         for (Transaction transaction : transactionBatch) {
-                            events.addAll(transaction.getEvents());
+                            Transaction.RangeIterator iterator = transaction.rangeIterator();
+                            if (transaction.isPersisted()) {
+                                log.info("current transaction is persisted, will apply with stream mode!");
+                                applyEvents(events);
+                                events.clear();
+                                while (iterator.hasNext()) {
+                                    Transaction.Range range = iterator.next();
+                                    applyEvents(range.getEvents());
+                                }
+                            } else {
+                                while (iterator.hasNext()) {
+                                    events.addAll(iterator.next().getEvents());
+                                }
+                            }
                         }
-                        if (!StatisticalProxy.getInstance().apply(events)) {
-                            log.error("failed to call applier, exit");
-                            Runtime.getRuntime().halt(1);
+                        if (!events.isEmpty()) {
+                            applyEvents(events);
                         }
                     }
-                    takeStatisticsWithFlowControl(eventCount, sequence, start);
 
-                    if (nextPosition != null) {
-                        position = nextPosition;
+                    // set position and flow control
+                    if (nextRecordPosition != null) {
+                        position = nextRecordPosition;
                     }
+                    takeStatisticsWithFlowControl(eventCount, sequence, start, transactionMap.size());
+
                     // remove finished, keep the NOT finished transaction
                     transactionBatch.clear();
                     if (lastTransaction != null && !lastTransaction.isFinished()) {
                         transactionBatch.add(lastTransaction);
-                        log.info("lastTransaction NOT finished, waiting for DBMSTransactionEnd");
                     }
                 } catch (Throwable e) {
                     log.error("failed to call applier, exit", e);
@@ -484,12 +568,26 @@ public class SerialPipeline extends BasePipeline {
         }
 
         private Transaction getTransactionToApply() {
+            // 如果最后一个transaction未结束，则将新来的非xa event放入未结束的transaction
             if (transactionBatch.size() == 0 || transactionBatch.get(transactionBatch.size() - 1).isFinished()) {
-                Transaction newTransaction = new Transaction();
+                Transaction newTransaction =
+                    new Transaction(RplStorage.getRepoUnit(), pipeLineConfig.getPersistConfig());
                 transactionBatch.add(newTransaction);
                 return newTransaction;
             }
             return transactionBatch.get(transactionBatch.size() - 1);
+        }
+
+        private void applyEvents(List<DBMSEvent> events) {
+            if (events.isEmpty()) {
+                return;
+            }
+            if (!StatisticalProxy.getInstance().apply(events)) {
+                log.error("failed to call applier, exit");
+                MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                    TaskContext.getInstance().getTaskId(), "apply error");
+                Runtime.getRuntime().halt(1);
+            }
         }
 
         public <K, V> Map.Entry<K, V> getHead(LinkedHashMap<K, V> map) {
@@ -499,9 +597,13 @@ public class SerialPipeline extends BasePipeline {
         private Transaction removeFromCache(MessageEvent event) {
             transactionPositionMap.remove(event.getXaTransaction().getXid());
             if (transactionPositionMap.size() != 0) {
-                nextPosition = getHead(transactionPositionMap).getValue();
+                // 如果仍有未commit/rollback的xa事务，从linkedhashmap取最早插入的xa start开始位点，作为本次推进到的位点
+                if (getHead(transactionPositionMap).getValue() != null) {
+                    nextRecordPosition = getHead(transactionPositionMap).getValue();
+                }
             } else {
-                nextPosition = event.getPosition();
+                // 如果没有未commit/rollback的xa事务，直接推进位点到本event的结束位点
+                nextRecordPosition = event.getPosition();
             }
             Transaction returnTran = transactionMap.remove(event.getXaTransaction().getXid());
             if (returnTran != null) {
@@ -509,7 +611,49 @@ public class SerialPipeline extends BasePipeline {
             }
             return returnTran;
         }
+    }
 
+    /**
+     * For SQL flash back.
+     */
+    private class RecoveryEventHandler implements EventHandler<MessageEvent>, LifecycleAware {
+
+        private final List<DBMSEvent> eventBatch;
+
+        public RecoveryEventHandler(int batchSize) {
+            eventBatch = new ArrayList<>(batchSize / 2);
+        }
+
+        @Override
+        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) throws Exception {
+            DBMSEvent event = messageEvent.getDbmsEventWithEffect();
+            // 只传给applier dbmsRowChange 和 queryLog 两种类型的event
+            if (event instanceof DBMSRowChange || event instanceof DBMSQueryLog) {
+                eventBatch.add(event);
+                position = messageEvent.getPosition();
+            }
+            messageEvent.tryRelease();
+
+            if (endOfBatch) {
+                if (log.isDebugEnabled()) {
+                    log.debug("pipeline received events, count: {}", eventBatch.size());
+                }
+                if (!StatisticalProxy.getInstance().apply(eventBatch)) {
+                    log.error("applier return false, stop pipeline");
+                    stop();
+                }
+                StatisticalProxy.getInstance().recordPosition(position, true);
+                eventBatch.clear();
+            }
+        }
+
+        @Override
+        public void onStart() {
+        }
+
+        @Override
+        public void onShutdown() {
+        }
     }
 
 }

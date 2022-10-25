@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,14 +11,19 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor.sort;
 
+import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
+import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,16 +34,21 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSACTION_SKIP_WHITELIST;
+
 /**
  * Created by ziyang.lb
  **/
 @Slf4j
 public class Sorter {
+    private static final Logger skipTranslogger = LoggerFactory.getLogger("SKIP_TRANS_LOG");
     private final Set<String> waitTrans;
     private final List<SortItem> items;
     private final Map<String, Transaction> transMap;
     private final PriorityQueue<TransNode> transQueue;
     private final AtomicReference<SortItem> firstSortItem;
+    private final boolean RANDOM_DISCARD_COMMIT_SWITCH =
+        DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_TRANSACTION_RANDOM_DISCARD_COMMIT);
     private SortItem maxSortItem;
 
     public Sorter() {
@@ -61,7 +70,17 @@ public class Sorter {
                 throw new PolardbxException("duplicate xid for ： " + item.getXid());
             }
         } else {
+            if (RANDOM_DISCARD_COMMIT_SWITCH) {
+                // xa事务随机丢弃，制造block场景
+                if (CommonUtils.randomBoolean(5)) {
+                    log.warn("[inject trouble] discard commit event for : " + item.getXid());
+                    return;
+                }
+            }
             if (transMap.get(item.getXid()) == null) {
+                if (wantSkip(item.getXid())) {
+                    return;
+                }
                 throw new PolardbxException("xid is not existed in trans map for : " + item.getXid());
             }
             waitTrans.remove(item.getXid());
@@ -80,6 +99,25 @@ public class Sorter {
         List<Transaction> result = new LinkedList<>();
         if (items.isEmpty()) {
             return result;
+        }
+
+        int skipThreshold = DynamicApplicationConfig.getInt(ConfigKeys.TASK_TRANSACTION_SKIP_THRESHOLD);
+        if (items.size() > skipThreshold) {
+            // 加一个优化， items 比较大的情况，可能有丢失commit或者rollback现象
+            // 只清理头部即可
+            SortItem item = items.get(0);
+            if (item.getType() == SortItemType.PreWrite) {
+                String xid = item.getXid();
+                if (wantSkip(xid)) {
+                    log.info("hit the whitelist, skip transaction with xid {}.", xid);
+                    skipTranslogger.info("skip : " + xid);
+                    if (waitTrans.remove(xid)) {
+                        //释放一下 transaction
+                        item.getTransaction().release();
+                    }
+                    transMap.remove(xid);
+                }
+            }
         }
 
         long startTime = System.currentTimeMillis();
@@ -136,8 +174,34 @@ public class Sorter {
         return result;
     }
 
+    private boolean wantSkip(String xid) {
+        String skipWhiteList = DynamicApplicationConfig.getString(TASK_TRANSACTION_SKIP_WHITELIST);
+        if (StringUtils.isBlank(skipWhiteList)) {
+            return false;
+        }
+        String[] array = StringUtils.split(skipWhiteList, "#");
+        for (String skipXid : array) {
+            if (xid.equals(skipXid)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public Transaction getTransByXid(String xid) {
         return transMap.get(xid);
+    }
+
+    public TransNode peekFirstNode() {
+        return transQueue.peek();
+    }
+
+    public SortItem peekFirstSortItem() {
+        return items.isEmpty() ? null : items.get(0);
+    }
+
+    public List<Transaction> getAllQueuedTransactions() {
+        return Lists.newArrayList(transMap.values());
     }
 
     public void clear() {

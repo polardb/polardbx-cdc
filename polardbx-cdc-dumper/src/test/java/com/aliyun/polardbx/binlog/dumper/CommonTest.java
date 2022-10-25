@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,12 +11,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper;
-
-import java.util.concurrent.TimeUnit;
 
 import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
 import com.google.common.cache.CacheBuilder;
@@ -27,10 +22,10 @@ import io.grpc.netty.shaded.io.netty.buffer.ByteBufUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Test;
 
+import java.util.concurrent.TimeUnit;
+
 /**
- * @Author Timmy
- * @Description
- * @Date 2021/7/28
+ * @author Timmy
  */
 @Slf4j
 public class CommonTest {

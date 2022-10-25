@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
 import com.alibaba.fastjson.JSONObject;
@@ -40,20 +37,17 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY
  */
 @Slf4j
 public class TopologyWatcher extends AbstractBinlogTimerTask {
-    private final int storageTriggerRelayThreshold;
     private final SystemConfigInfoMapper systemConfigInfoMapper =
         SpringContextHolder.getObject(SystemConfigInfoMapper.class);
     private volatile boolean initFlag;
 
-    public TopologyWatcher(String cluster, String clusterType, String name, int interval,
-                           int storageTriggerRelayThreshold) {
+    public TopologyWatcher(String cluster, String clusterType, String name, int interval) {
         super(cluster, clusterType, name, interval);
-        this.storageTriggerRelayThreshold = storageTriggerRelayThreshold;
     }
 
     @Override
     public void exec() {
-        StorageCountStrategy storageCountStrategy = new StorageCountStrategy(clusterId, storageTriggerRelayThreshold);
+        StorageCountStrategy storageCountStrategy = new StorageCountStrategy(clusterId);
         TopologyService topologyService = new TopologyService(storageCountStrategy, clusterId);
         try {
             if (!RuntimeLeaderElector.isDaemonLeader()) {

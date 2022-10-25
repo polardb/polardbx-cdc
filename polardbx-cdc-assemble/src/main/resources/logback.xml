@@ -54,6 +54,50 @@
         </encoder>
     </appender>
 
+    <appender name="searchAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${HOME}/logs/polardbx-binlog/${taskName}/search.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/search.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>5</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="tsoFilterAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${HOME}/logs/polardbx-binlog/${taskName}/filter.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/filter.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>5</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
     <appender name="transactionAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${HOME}/logs/polardbx-binlog/${taskName}/transaction.log</file>
         <append>true</append>
@@ -98,6 +142,29 @@
         </encoder>
     </appender>
 
+    <appender name="rdsDownloadAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${HOME}/logs/polardbx-binlog/${taskName}/rds_download.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/rds_download.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>5</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+
     <appender name="traceIdDisorderAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${HOME}/logs/polardbx-binlog/${taskName}/traceid-disorder.log</file>
         <append>true</append>
@@ -138,6 +205,29 @@
         <appender-ref ref="transactionAppender"/>
     </appender>
 
+    <appender name="skipTransAppender"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/skipTrans.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/skipTrans.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>10</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
 
     <appender name="metricsAppender"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
@@ -161,6 +251,99 @@
             <charset class="java.nio.charset.Charset">UTF-8</charset>
         </encoder>
     </appender>
+
+    <appender name="metaMetricsAppender"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/meta-metrics.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/meta-metrics.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>10</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="rocksDbAppender"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/rocksdb.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/rocksdb.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>10</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="rebuildEventAppender"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/rebuildEvent.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/rebuildEvent.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>10</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="eventCommitAppender"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/eventCommit.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/eventCommit.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>10</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
 
     <logger name="com.aliyun.polardbx.binlog.extractor.commit" level="INFO" additivity="false">
         <appender-ref ref="file.async.commit"/>
@@ -191,6 +374,15 @@
         <appender-ref ref="fileAppender"/>
     </logger>
 
+    <logger name="com.aliyun.polardbx.binlog.extractor.filter.RebuildEventLogFilter" level="INFO" additivity="false">
+        <appender-ref ref="rebuildEventAppender"/>
+    </logger>
+
+    <logger name="com.aliyun.polardbx.binlog.extractor.filter.RtRecordFilter" level="INFO" additivity="false">
+        <appender-ref ref="eventCommitAppender"/>
+    </logger>
+
+
     <logger name="duplicateTransactionLogger" level="INFO" additivity="false">
         <appender-ref ref="duplicateTransactionAppender"/>
     </logger>
@@ -207,12 +399,40 @@
         <appender-ref ref="metaAppender"/>
     </logger>
 
+    <logger name="rplLogger" level="INFO">
+        <appender-ref ref="rplAppender"/>
+    </logger>
+
     <logger name="METRICS" level="INFO" additivity="false">
         <appender-ref ref="metricsAppender"/>
     </logger>
 
+    <logger name="META-METRICS" level="INFO" additivity="false">
+        <appender-ref ref="metaMetricsAppender"/>
+    </logger>
+
+    <logger name="rocksDbLogger" level="INFO" additivity="false">
+        <appender-ref ref="rocksDbAppender"/>
+    </logger>
+
     <logger name="traceIdDisorderLogger" level="WARN" additivity="false">
         <appender-ref ref="traceIdDisorderAppender"/>
+    </logger>
+
+    <logger name="rdsDownloadLogger" level="INFO" additivity="false">
+        <appender-ref ref="rdsDownloadAppender"/>
+    </logger>
+
+    <logger name="com.aliyun.polardbx.binlog.extractor.filter.MinTSOFilter" level="INFO" additivity="false">
+        <appender-ref ref="tsoFilterAppender"/>
+    </logger>
+
+    <logger name="searchLogger" level="INFO" additivity="false">
+        <appender-ref ref="searchAppender"/>
+    </logger>
+
+    <logger name="SKIP_TRANS_LOG" level="INFO" additivity="false">
+        <appender-ref ref="skipTransAppender"/>
     </logger>
 
     <root level="INFO">

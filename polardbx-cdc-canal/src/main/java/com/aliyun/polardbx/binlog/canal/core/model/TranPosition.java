@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.core.model;
 
 import com.aliyun.polardbx.binlog.CommonUtils;
@@ -28,6 +25,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class TranPosition implements IXaTransaction<TranPosition> {
 
     private static final Logger logger = LoggerFactory.getLogger(TranPosition.class);
@@ -40,6 +40,8 @@ public class TranPosition implements IXaTransaction<TranPosition> {
     private long transId;
 
     private InstructionCommand command;
+
+    private List<ITranStatChangeListener> listenerList = new ArrayList<>();
 
     public TranPosition() {
     }
@@ -87,6 +89,19 @@ public class TranPosition implements IXaTransaction<TranPosition> {
 
     public void setBegin(BinlogPosition begin) {
         this.begin = begin;
+        detectedStateChange();
+    }
+
+    public void registerStateChangeListener(ITranStatChangeListener listener) {
+        this.listenerList.add(listener);
+    }
+
+    private void detectedStateChange() {
+        if (begin != null && end != null) {
+            for (ITranStatChangeListener l : listenerList) {
+                l.onComplete(this);
+            }
+        }
     }
 
     public BinlogPosition getPosition() {
@@ -107,6 +122,7 @@ public class TranPosition implements IXaTransaction<TranPosition> {
             throw new RuntimeException("duplicate commit event pos  " + end);
         }
         this.end = end;
+        detectedStateChange();
     }
 
     public boolean isCdcStartCmd() {
@@ -134,8 +150,25 @@ public class TranPosition implements IXaTransaction<TranPosition> {
         return command != null ? command.getContent() : null;
     }
 
+    public void setCommand(InstructionCommand command) {
+        this.command = command;
+    }
+
     @Override
     public int compareTo(TranPosition o) {
         return (int) (tso - o.getTso());
+    }
+
+    @Override
+    public String toString() {
+        return "TranPosition{" +
+            "begin=" + begin +
+            ", end=" + end +
+            ", tso=" + tso +
+            ", xid='" + xid + '\'' +
+            ", transId=" + transId +
+            ", command=" + command +
+            ", listenerList=" + listenerList +
+            '}';
     }
 }

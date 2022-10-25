@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 
 import com.alibaba.fastjson.JSON;
@@ -68,7 +65,7 @@ public class ConsoleTableMetaTSDB implements TableMetaTSDB {
         this.taskName = taskName;
         this.env = env;
         this.consoleDomain = consoleDomain;
-        this.memoryTableMeta = new MemoryTableMeta(logger);
+        this.memoryTableMeta = new MemoryTableMeta(logger, true);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
 
             @Override
@@ -126,7 +123,7 @@ public class ConsoleTableMetaTSDB implements TableMetaTSDB {
     @Override
     public boolean rollback(BinlogPosition position) {
         // 每次rollback需要重新构建一次memory data
-        this.memoryTableMeta = new MemoryTableMeta(logger);
+        this.memoryTableMeta = new MemoryTableMeta(logger, true);
         boolean flag = false;
         BinlogPosition snapshotPosition = buildMemFromSnapshot(position);
         if (snapshotPosition != null) {
@@ -232,7 +229,7 @@ public class ConsoleTableMetaTSDB implements TableMetaTSDB {
      */
     private boolean applySnapshotToConsole(BinlogPosition position, boolean init) {
         // 获取一份快照
-        MemoryTableMeta tmpMemoryTableMeta = new MemoryTableMeta(logger);
+        MemoryTableMeta tmpMemoryTableMeta = new MemoryTableMeta(logger, true);
         Map<String, String> schemaDdls = null;
         synchronized (memoryTableMeta) {
             if (!init && position == null) {
@@ -310,7 +307,7 @@ public class ConsoleTableMetaTSDB implements TableMetaTSDB {
                         createDDL = rs.getString(2);
                     }
 
-                    MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null);
+                    MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, true);
                     memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, schema, createDDL, null);
                     TableMeta tableMeta = memoryTableMeta.find(schema, table);
                     return tableMeta;

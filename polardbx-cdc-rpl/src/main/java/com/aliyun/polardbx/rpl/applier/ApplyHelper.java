@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
@@ -25,15 +22,12 @@ import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DdlResult;
 import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DruidDdlParser;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
-import com.aliyun.polardbx.rpl.common.TaskContext;
-import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
-import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.DdlState;
 import com.google.common.collect.Lists;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.collections.CollectionUtils;
+import org.springframework.util.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import javax.sql.DataSource;
@@ -135,6 +129,82 @@ public class ApplyHelper {
         }
     }
 
+    public static List<SqlContext> mergeSendBatchSqlContexts(List<SqlContext> sqlContexts, int sendBatchSize) {
+        List<SqlContext> results = new ArrayList<>();
+        // todo jiyue, using addbatch
+        if (sendBatchSize <= 1) {
+            return sqlContexts;
+        }
+        int i = 0;
+        while (i < sqlContexts.size()) {
+            StringBuilder sqlSb = new StringBuilder();
+            List<Serializable> params = new ArrayList<>();
+            for (int j = 0; j < sendBatchSize && i < sqlContexts.size(); j++) {
+                SqlContext sqlContext = sqlContexts.get(i);
+                sqlSb.append(sqlContext.getSql()).append(";");
+                params.addAll(sqlContext.getParams());
+                i++;
+            }
+
+            SqlContext batchSqlContext = new SqlContext(sqlSb.toString(), "", "", params);
+            results.add(batchSqlContext);
+        }
+
+        return results;
+    }
+
+    public static boolean tranExecUpdateV1(DataSource dataSource, List<SqlContext> sqlContexts) {
+        if (sqlContexts.size() == 0) {
+            return true;
+        }
+        Connection conn = null;
+        PreparedStatement stmt = null;
+        StringBuilder sqlSb = new StringBuilder();
+        // 合并多sql语句
+        for (SqlContext sqlContext : sqlContexts) {
+            sqlSb.append(sqlContext.getSql()).append(";");
+        }
+        String sql = sqlSb.toString();
+        try {
+            conn = dataSource.getConnection();
+            stmt = conn.prepareStatement(sql);
+            conn.setAutoCommit(false);
+            int i = 1;
+            for (SqlContext sqlContext : sqlContexts) {
+                for (Serializable param : sqlContext.getParams()) {
+                    stmt.setObject(i, param);
+                    i++;
+                }
+            }
+            // 执行SQL
+            i = 0;
+            stmt.execute();
+            do {
+                int affectRow = stmt.getUpdateCount();
+                if (affectRow == -1) {
+                    // 没有更多的结果了
+                    break;
+                }
+                stmt.getMoreResults();
+                i++;
+            } while (true);
+            conn.commit();
+            return true;
+        } catch (Exception e) {
+            // logExecUpdateError(sqlContext, e);
+            try {
+                if (conn != null) {
+                    conn.rollback();
+                }
+            } catch (Exception e1) {
+                log.error("failed in tranExecUpdate, rollback failed", e1);
+            }
+        } finally {
+            DataSourceUtil.closeQuery(null, stmt, conn);
+        }
+        return false;
+    }
+
     public static boolean execUpdate(DataSource dataSource, SqlContext sqlContext) {
         Connection conn = null;
         PreparedStatement stmt = null;
@@ -158,7 +228,8 @@ public class ApplyHelper {
             return true;
         } catch (Throwable e) {
             logExecUpdateError(sqlContext, e);
-            DbTaskMetaManager.updateTaskLastError(TaskContext.getInstance().getTaskId(), e.getMessage());
+            // todo by jiyue
+            // DbTaskMetaManager.updateTaskLastError(TaskContext.getInstance().getTaskId(), e.getMessage());
             return false;
         } finally {
             DataSourceUtil.closeQuery(null, stmt, conn);
@@ -191,8 +262,8 @@ public class ApplyHelper {
         }
     }
 
-    public static DdlSqlContext getDdlSqlExeContext(DefaultQueryLog queryLog, String tso) {
-        DdlSqlContext sqlContext = new DdlSqlContext(queryLog.getQuery(), "", new ArrayList<>());
+    public static SqlContext getDdlSqlContext(DefaultQueryLog queryLog, String tso) {
+        SqlContext sqlContext = new SqlContext(queryLog.getQuery(), "", "", new ArrayList<>());
 
         String originSql = DdlHelper.getOriginSql(queryLog.getQuery());
         String sql = StringUtils.isBlank(originSql) ? queryLog.getQuery() : originSql;
@@ -203,7 +274,7 @@ public class ApplyHelper {
             return null;
         }
         DdlResult result = resultList.get(0);
-        sqlContext.setSchema(result.getSchemaName());
+        sqlContext.setDstSchema(result.getSchemaName());
 
         switch (queryLog.getAction()) {
         case CREATE:
@@ -218,7 +289,7 @@ public class ApplyHelper {
             break;
         case CREATEDB:
         case DROPDB:
-            sqlContext.setSchema("");
+            sqlContext.setDstSchema("");
             break;
         default:
             break;
@@ -230,7 +301,6 @@ public class ApplyHelper {
     public static boolean isFiltered(String columnName) {
         return StringUtils.equalsIgnoreCase(RplConstants.RDS_IMPLICIT_ID, columnName);
     }
-
 
     public static List<SqlContext> getInsertUpdateSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo) {
         List<? extends DBMSColumn> columns = rowChange.getColumns();
@@ -277,14 +347,15 @@ public class ApplyHelper {
                     nameSqlSb,
                     valueSqlSb,
                     updateSqlSb);
-            SqlContext context = new SqlContext(insertSql, dstTbInfo.getName(), parmas);
+            SqlContext context = new SqlContext(insertSql, dstTbInfo.getSchema(), dstTbInfo.getName(), parmas);
             contexts.add(context);
         }
 
         return contexts;
     }
 
-    public static List<SqlContext> getDeleteThenInsertSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo) {
+    public static List<SqlContext> getInsertSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo,
+                                                           int insertMode) {
         List<? extends DBMSColumn> columns = rowChange.getColumns();
 
         int rowCount = rowChange.getRowSize();
@@ -292,16 +363,7 @@ public class ApplyHelper {
 
         for (int i = 1; i <= rowCount; i++) {
             // WHERE {column1} = {value1} AND {column2} = {value2}
-            if (!getWhereColumns(dstTbInfo).isEmpty()) {
-                StringBuilder whereSqlSb = new StringBuilder();
-                List<Serializable> whereParams = new ArrayList<>();
-                getWhereSql(rowChange, i, dstTbInfo, whereSqlSb, whereParams);
-                String deleteSql = String.format(DELETE_SQL, dstTbInfo.getSchema(), dstTbInfo.getName(), whereSqlSb);
-                SqlContext context1 = new SqlContext(deleteSql, dstTbInfo.getName(), whereParams);
-                contexts.add(context1);
-            }
-
-            // INSERT INTO t1(column1, column2) VALUES(value1, value2)
+            // REPLACE INTO t1(column1, column2) VALUES (value1, value2)
             StringBuilder nameSqlSb = new StringBuilder();
             StringBuilder valueSqlSb = new StringBuilder();
             List<Serializable> parmas = new ArrayList<>();
@@ -315,10 +377,8 @@ public class ApplyHelper {
                     valueSqlSb.setLength(valueSqlSb.length() - 1);
                     continue;
                 }
-                String repairedColumnName = repairDMLName(column.getName());
-                nameSqlSb.append(repairedColumnName);
+                nameSqlSb.append(repairDMLName(column.getName()));
                 valueSqlSb.append("?");
-                // ON DUPLICATE KEY UPDATE
                 if (it.hasNext()) {
                     nameSqlSb.append(",");
                     valueSqlSb.append(",");
@@ -328,19 +388,87 @@ public class ApplyHelper {
                 parmas.add(columnValue);
             }
             valueSqlSb.append(")");
+            String sql = null;
+            switch (insertMode) {
+            case RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE:
+                sql = BATCH_INSERT_SQL;
+                break;
+            case RplConstants.INSERT_MODE_INSERT_IGNORE:
+                sql = INSERT_IGNORE_SQL;
+                break;
+            case RplConstants.INSERT_MODE_REPLACE:
+                sql = REPLACE_SQL;
+                break;
+            default:
+                break;
+            }
             String insertSql = String
-                .format(BATCH_INSERT_SQL,
+                .format(sql,
                     dstTbInfo.getSchema(),
                     dstTbInfo.getName(),
                     nameSqlSb,
                     valueSqlSb);
-            SqlContext context2 = new SqlContext(insertSql, dstTbInfo.getName(), parmas);
-            contexts.add(context2);
+            SqlContext context = new SqlContext(insertSql, dstTbInfo.getSchema(), dstTbInfo.getName(), parmas);
+            contexts.add(context);
         }
 
         return contexts;
     }
 
+    public static List<SqlContext> getDeleteThenReplaceSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo) {
+        List<? extends DBMSColumn> columns = rowChange.getColumns();
+
+        int rowCount = rowChange.getRowSize();
+        List<SqlContext> contexts = Lists.newArrayListWithCapacity(rowCount * 2);
+
+        for (int i = 1; i <= rowCount; i++) {
+            // WHERE {column1} = {value1} AND {column2} = {value2}
+            if (!getWhereColumns(dstTbInfo).isEmpty()) {
+                StringBuilder whereSqlSb = new StringBuilder();
+                List<Serializable> whereParams = new ArrayList<>();
+                getWhereSql(rowChange, i, dstTbInfo, whereSqlSb, whereParams);
+                String deleteSql = String.format(DELETE_SQL, dstTbInfo.getSchema(), dstTbInfo.getName(), whereSqlSb);
+                SqlContext context1 =
+                    new SqlContext(deleteSql, dstTbInfo.getSchema(), dstTbInfo.getName(), whereParams);
+                contexts.add(context1);
+            }
+
+            // REPLACE INTO t1(column1, column2) VALUES(value1, value2)
+            StringBuilder nameSqlSb = new StringBuilder();
+            StringBuilder valueSqlSb = new StringBuilder();
+            List<Serializable> parmas = new ArrayList<>();
+
+            valueSqlSb.append("(");
+            Iterator<? extends DBMSColumn> it = columns.iterator();
+            while (it.hasNext()) {
+                DBMSColumn column = it.next();
+                if (isFiltered(column.getName())) {
+                    nameSqlSb.setLength(nameSqlSb.length() - 1);
+                    valueSqlSb.setLength(valueSqlSb.length() - 1);
+                    continue;
+                }
+                nameSqlSb.append(repairDMLName(column.getName()));
+                valueSqlSb.append("?");
+                if (it.hasNext()) {
+                    nameSqlSb.append(",");
+                    valueSqlSb.append(",");
+                }
+                Serializable columnValue = rowChange.getChangeValue(i, column.getName());
+                parmas.add(columnValue);
+            }
+            valueSqlSb.append(")");
+            String insertSql = String
+                .format(REPLACE_SQL,
+                    dstTbInfo.getSchema(),
+                    dstTbInfo.getName(),
+                    nameSqlSb,
+                    valueSqlSb);
+            SqlContext context2 = new SqlContext(insertSql, dstTbInfo.getSchema(), dstTbInfo.getName(), parmas);
+            contexts.add(context2);
+        }
+
+        return contexts;
+    }
 
     public static MergeDmlSqlContext getMergeInsertUpdateSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo) {
         List<? extends DBMSColumn> columns = rowChange.getColumns();
@@ -359,7 +487,6 @@ public class ApplyHelper {
             Iterator<? extends DBMSColumn> it = columns.iterator();
             while (it.hasNext()) {
                 DBMSColumn column = it.next();
-                String repairedColumnName = repairDMLName(column.getName());
                 if (isFiltered(column.getName())) {
                     if (i == 1) {
                         nameSqlSb.setLength(nameSqlSb.length() - 1);
@@ -368,7 +495,7 @@ public class ApplyHelper {
                     continue;
                 }
                 if (i == 1) {
-                    nameSqlSb.append(repairedColumnName);
+                    nameSqlSb.append(repairDMLName(column.getName()));
                 }
                 valueSqlSb.append("?");
 
@@ -387,7 +514,7 @@ public class ApplyHelper {
 
         String insertSql = String
             .format(REPLACE_SQL, dstTbInfo.getSchema(), dstTbInfo.getName(), nameSqlSb, valueSqlSb);
-        return new MergeDmlSqlContext(insertSql, dstTbInfo.getName(), parmas);
+        return new MergeDmlSqlContext(insertSql, dstTbInfo.getSchema(), dstTbInfo.getName(), parmas);
     }
 
     public static MergeDmlSqlContext getMergeInsertSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo,
@@ -406,7 +533,6 @@ public class ApplyHelper {
             Iterator<? extends DBMSColumn> it = columns.iterator();
             while (it.hasNext()) {
                 DBMSColumn column = it.next();
-                String repairedColumnName = repairDMLName(column.getName());
                 if (isFiltered(column.getName())) {
                     if (i == 1) {
                         nameSqlSb.setLength(nameSqlSb.length() - 1);
@@ -415,7 +541,7 @@ public class ApplyHelper {
                     continue;
                 }
                 if (i == 1) {
-                    nameSqlSb.append(repairedColumnName);
+                    nameSqlSb.append(repairDMLName(column.getName()));
                 }
                 valueSqlSb.append("?");
 
@@ -447,7 +573,7 @@ public class ApplyHelper {
         }
         String insertSql = String
             .format(sql, dstTbInfo.getSchema(), dstTbInfo.getName(), nameSqlSb, valueSqlSb);
-        return new MergeDmlSqlContext(insertSql, dstTbInfo.getName(), parmas);
+        return new MergeDmlSqlContext(insertSql, dstTbInfo.getSchema(), dstTbInfo.getName(), parmas);
     }
 
     public static List<SqlContext> getDeleteSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo) {
@@ -462,7 +588,7 @@ public class ApplyHelper {
             getWhereSql(rowChange, i, dstTbInfo, whereSqlSb, params);
 
             String deleteSql = String.format(DELETE_SQL, dstTbInfo.getSchema(), dstTbInfo.getName(), whereSqlSb);
-            SqlContext context = new SqlContext(deleteSql, dstTbInfo.getName(), params);
+            SqlContext context = new SqlContext(deleteSql, dstTbInfo.getSchema(), dstTbInfo.getName(), params);
             contexts.add(context);
         }
 
@@ -472,13 +598,14 @@ public class ApplyHelper {
     public static MergeDmlSqlContext getMergeDeleteSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo) {
         StringBuilder whereSqlSb = new StringBuilder();
         List<Serializable> params = new ArrayList<>();
-        getWhereInSql(rowChange, dstTbInfo, whereSqlSb, params);
+        getWhereInSqlV2(rowChange, dstTbInfo, whereSqlSb, params);
         String deleteSql = String.format(DELETE_SQL, dstTbInfo.getSchema(), dstTbInfo.getName(), whereSqlSb);
-        return new MergeDmlSqlContext(deleteSql, dstTbInfo.getName(), params);
+        return new MergeDmlSqlContext(deleteSql, dstTbInfo.getSchema(), dstTbInfo.getName(), params);
     }
 
     public static List<SqlContext> getUpdateSqlExecContext(DBMSRowChange rowChange, TableInfo dstTbInfo) {
-        List<? extends DBMSColumn> changeColumns = rowChange.getChangeColumns();
+        // List<? extends DBMSColumn> changeColumns = rowChange.getChangeColumns();
+        List<? extends DBMSColumn> changeColumns = rowChange.getColumns();
 
         int rowCount = rowChange.getRowSize();
         List<SqlContext> contexts = Lists.newArrayListWithCapacity(rowCount);
@@ -491,8 +618,7 @@ public class ApplyHelper {
             Iterator<? extends DBMSColumn> it = changeColumns.iterator();
             while (it.hasNext()) {
                 DBMSColumn changeColumn = it.next();
-                String repairedColumnName = repairDMLName(changeColumn.getName());
-                setSqlSb.append(repairedColumnName).append("=?");
+                setSqlSb.append(repairDMLName(changeColumn.getName())).append("=?");
                 if (it.hasNext()) {
                     setSqlSb.append(",");
                 }
@@ -509,7 +635,7 @@ public class ApplyHelper {
             parmas.addAll(whereColumnValues);
             String updateSql = String
                 .format(UPDATE_SQL, dstTbInfo.getSchema(), dstTbInfo.getName(), setSqlSb, whereSqlSb);
-            SqlContext context = new SqlContext(updateSql, dstTbInfo.getName(), parmas);
+            SqlContext context = new SqlContext(updateSql, dstTbInfo.getSchema(), dstTbInfo.getName(), parmas);
             contexts.add(context);
         }
 
@@ -558,8 +684,7 @@ public class ApplyHelper {
         whereSqlSb.append("(");
         for (int i = 0; i < whereColumns.size(); i++) {
             String columnName = whereColumns.get(i);
-            String repairedName = repairDMLName(columnName);
-            whereSqlSb.append(repairedName);
+            whereSqlSb.append(repairDMLName(columnName));
             if (i < whereColumns.size() - 1) {
                 whereSqlSb.append(",");
             }
@@ -587,16 +712,31 @@ public class ApplyHelper {
         whereSqlSb.append(")");
     }
 
+    private static void getWhereInSqlV2(DBMSRowChange rowChange, TableInfo tableInfo, StringBuilder whereSqlSb,
+                                        List<Serializable> whereColumnValues) {
+        // WHERE ({column1} = {value1} AND {column2} = {value2}) or (...) or
+        for (int i = 1; i <= rowChange.getRowSize(); i++) {
+            whereSqlSb.append("(");
+            getWhereSql(rowChange, i, tableInfo, whereSqlSb, whereColumnValues);
+            if (i == rowChange.getRowSize()) {
+                whereSqlSb.append(")");
+            } else {
+                whereSqlSb.append(") or ");
+            }
+        }
+    }
+
     private static void logExecUpdateError(SqlContext sqlContext, Throwable e) {
-        StringBuilder sb = new StringBuilder();
-        log.error("failed in execUpdate, sql: {}, params: {}", sqlContext.getSql(), sb, e);
+        log.error("failed in execUpdate, sql: {}, exception: {}",
+            (StringUtils.isBlank(sqlContext.getSql()) || sqlContext.getSql().length() <= 200) ?
+                sqlContext.getSql() : sqlContext.getSql().substring(0, 200),
+            e.toString());
     }
 
     private static void logExecUpdateDebug(SqlContext sqlContext) {
         if (!log.isDebugEnabled()) {
             return;
         }
-
         StringBuilder sb = new StringBuilder();
         for (Serializable p : sqlContext.getParams()) {
             if (p == null) {
@@ -607,6 +747,7 @@ public class ApplyHelper {
         }
         log.info("execUpdate, sql: {}, params: {}", sqlContext.getSql(), sb);
     }
+
 
     private static String repairDMLName(String name) {
         return "`" + escape(name) + "`";

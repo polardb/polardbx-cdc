@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,13 +11,13 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.domain.Cursor;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.io.BufferedWriter;
@@ -29,6 +28,12 @@ import java.io.OutputStreamWriter;
 
 public class BinlogEventReaderTest {
     File dir = new File(System.getProperty("user.dir") + "/binlog/mysql/");
+
+    @Before
+    public void before() {
+        SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
+        appContextBootStrap.boot();
+    }
 
     @Test
     public void nextBinlogEvent() throws IOException {
@@ -52,10 +57,10 @@ public class BinlogEventReaderTest {
     @Test
     public void binlogDumper() throws IOException {
         BinlogEventReader binlogFileReader =
-            new BinlogEventReader(new File("/Users/yanfenglin/Downloads/binlog.000001"),
+            new BinlogEventReader(new File("/Users/yanfenglin/Downloads/tmp/binlog.000004"),
                 0, 0, -1);
         BufferedWriter bw = new BufferedWriter(
-            new OutputStreamWriter(new FileOutputStream("/Users/yanfenglin/Downloads/binlog.000001.dump")));
+            new OutputStreamWriter(new FileOutputStream("/Users/yanfenglin/Downloads/tmp/binlog.000004-dmp")));
         binlogFileReader.valid();
         binlogFileReader.skipPos();
         binlogFileReader.skipOffset();

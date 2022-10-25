@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,58 +11,71 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dao;
 
-import java.sql.JDBCType;
-import java.util.Date;
-import javax.annotation.Generated;
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
+import javax.annotation.Generated;
+import java.sql.JDBCType;
+import java.util.Date;
+
 public final class DumperInfoDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.554+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.554+08:00",
+        comments = "Source Table: binlog_dumper_info")
     public static final DumperInfo dumperInfo = new DumperInfo();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.554+08:00", comments="Source field: binlog_dumper_info.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.554+08:00",
+        comments = "Source field: binlog_dumper_info.id")
     public static final SqlColumn<Long> id = dumperInfo.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.gmt_created")
     public static final SqlColumn<Date> gmtCreated = dumperInfo.gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.gmt_modified")
     public static final SqlColumn<Date> gmtModified = dumperInfo.gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.cluster_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.cluster_id")
     public static final SqlColumn<String> clusterId = dumperInfo.clusterId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.task_name")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.task_name")
     public static final SqlColumn<String> taskName = dumperInfo.taskName;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.ip")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.ip")
     public static final SqlColumn<String> ip = dumperInfo.ip;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.port")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.port")
     public static final SqlColumn<Integer> port = dumperInfo.port;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.role")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.role")
     public static final SqlColumn<String> role = dumperInfo.role;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.status")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.status")
     public static final SqlColumn<Integer> status = dumperInfo.status;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.gmt_heartbeat")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.gmt_heartbeat")
     public static final SqlColumn<Date> gmtHeartbeat = dumperInfo.gmtHeartbeat;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.container_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.container_id")
     public static final SqlColumn<String> containerId = dumperInfo.containerId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.555+08:00", comments="Source field: binlog_dumper_info.version")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.555+08:00",
+        comments = "Source field: binlog_dumper_info.version")
     public static final SqlColumn<Long> version = dumperInfo.version;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.554+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.554+08:00",
+        comments = "Source Table: binlog_dumper_info")
     public static final class DumperInfo extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

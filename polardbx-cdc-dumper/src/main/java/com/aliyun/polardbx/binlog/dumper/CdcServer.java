@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper;
 
 import com.aliyun.polardbx.binlog.domain.Cursor;
@@ -41,7 +38,7 @@ import com.aliyun.polardbx.rpc.cdc.StopSlaveRequest;
 import com.aliyun.polardbx.rpl.common.LogUtil;
 import com.aliyun.polardbx.rpl.taskmeta.RplServiceManager;
 import io.grpc.Server;
-import io.grpc.ServerBuilder;
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
@@ -153,7 +150,8 @@ public class CdcServer {
                 executor.submit(() -> {
                     LogFileReader logFileReader = new LogFileReader(logFileManager);
                     txnOutputStream.setExecutingThead(Thread.currentThread());
-                    logFileReader.binlogSync(request.getFileName(), request.getPosition(), txnOutputStream);
+                    logFileReader.binlogSync(request.getFileName(), request.getPosition(), request.getSplitMode(),
+                        txnOutputStream);
                 });
             }
 
@@ -198,7 +196,7 @@ public class CdcServer {
         };
 
         try {
-            server = ServerBuilder
+            server = NettyServerBuilder
                 .forPort(port)
                 .addService(svc)
                 .build()

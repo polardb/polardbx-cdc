@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,12 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.binlog;
 
-import com.aliyun.polardbx.binlog.canal.IBinlogFileSizeFetcher;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.IBinlogFileInfoFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.event.AppendBlockLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.BeginLoadQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.CreateFileLogEvent;
@@ -64,6 +62,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.BitSet;
 
+import static com.aliyun.polardbx.binlog.CommonUtils.nextBinlogFileName;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL;
+
 /**
  * Implements a binary-log decoder.
  *
@@ -91,7 +92,9 @@ public final class LogDecoder {
 
     protected final BitSet handleSet = new BitSet(LogEvent.ENUM_END_EVENT);
 
-    protected IBinlogFileSizeFetcher binlogFileSizeFetcher;
+    protected IBinlogFileInfoFetcher binlogFileSizeFetcher;
+
+    protected boolean needRecordData = true;
 
     public LogDecoder() {
     }
@@ -452,7 +455,9 @@ public final class LogDecoder {
             if (limit >= len) {
                 LogEvent event;
                 header.processCheckSum(buffer);
-                header.initDataBuffer(buffer);
+                if (needRecordData) {
+                    header.initDataBuffer(buffer);
+                }
                 /* Checking binary-log's header */
                 if (handleSet.get(header.getType())) {
                     buffer.limit(len);
@@ -472,7 +477,8 @@ public final class LogDecoder {
                     }
                 } else {
                     /* Ignore unsupported binary-log. */
-                    event = new UnknownLogEvent(header);
+//                    event = new UnknownLogEvent(header);
+                    event = null;
                 }
 
                 /* consume this binary-log. */
@@ -495,23 +501,58 @@ public final class LogDecoder {
              小于binlog文件的size，则说明rotate event是出现在binlog文件中。但有一个例外情况，logPosition中的position字段虽然是long型，
              但在binlog文件中LogHeader实际能记录的最大值是uint32(最大值对应4G)，即logPosition的position字段的值的最大上限是uint32，
              当出现超大事务时(如20G的大事务)，logPosition.getPosition() + length(rotateEvent)之和肯定是小于binlog文件的size的，所以，
-             此中情况下，就不简单的判定rotate event是出现在binlog文件中间位置了。xdb中，可以对max_binlog_size参数设置的最大值为1073741824(1G)，
+             此种情况下，就不能简单的判定rotate event是出现在binlog文件中间位置了。xdb中，可以对max_binlog_size参数设置的最大值为1073741824(1G)，
              只有出现大事务的情况下，才会导致binlog文件的大小超过max_binlog_size，所以rotate event出现在binlog文件的中间位置只会发生在小于
-             max_binlog_size的位置，因此可以得出结论，当logPosition的position字段的值触达uint32阈值后，出现的rotate event一定是正常的rotate event
+             max_binlog_size的位置，因此可以得出结论，当logPosition的position字段的值触达uint32阈值后，出现的rotate event一定是正常的
+             rotate event，不需进行fix处理
               */
-            long fileSize = binlogFileSizeFetcher.fetch(logPosition.getFileName());
-            long length = logPosition.getPosition() + event.getEventLen();
-            if (length < fileSize && length < Integer.MAX_VALUE) {
-                RotateLogEvent newEvent = new RotateLogEvent(event.getHeader(), logPosition.getFileName(), length);
-                logger.warn("receive a invalid rotate event, will fix it, the event info before fix is :" + event.info()
-                    + " ,the event info after fix is :" + newEvent.info());
-                return newEvent;
+            long expectFileSize = logPosition.getPosition() + event.getEventLen();
+            if (expectFileSize < Integer.MAX_VALUE) {
+                long actualFileSize = getFileSize(logPosition.getFileName(), expectFileSize);
+                if (expectFileSize < actualFileSize) {
+                    return rebuildRotateLogEvent(event, logPosition, expectFileSize);
+                }
             }
         }
         return event;
     }
 
-    public void setBinlogFileSizeFetcher(IBinlogFileSizeFetcher binlogFileSizeFetcher) {
+    private long getFileSize(String fileName, long expectFileSize) throws IOException {
+        long actualFileSize = binlogFileSizeFetcher.fetch(fileName);
+
+        if (expectFileSize < actualFileSize) {
+            //如果expectFileSize 小于文件的实际大小，则可以肯定是在文件中间位置发生了rotate，直接返回
+            return actualFileSize;
+        } else {
+            //如果下一个binlog文件已经存在，则当前文件肯定不会再有增量写入，可以直接返回获取到的fileSize
+            //如果下一个binlog文件还不存在，则等待若干个心跳时间看是否有数据写入，尽最大可能进行判断
+            String nextFileName = nextBinlogFileName(fileName);
+            boolean isNextFileExisting = binlogFileSizeFetcher.isFileExisting(nextFileName);
+            if (!isNextFileExisting) {
+                logger.info("prepare to wait for newly binlog data , {}:{}", fileName, expectFileSize);
+                sleep();
+            }
+            return binlogFileSizeFetcher.fetch(fileName);
+        }
+    }
+
+    private RotateLogEvent rebuildRotateLogEvent(RotateLogEvent event, LogPosition logPosition, long expectFileSize) {
+        RotateLogEvent newEvent =
+            new RotateLogEvent(event.getHeader(), logPosition.getFileName(), expectFileSize);
+        logger.warn("receive a invalid rotate event, will fix it, the event info before fix is :"
+            + event.info() + " ,the event info after fix is :" + newEvent.info());
+        return newEvent;
+    }
+
+    private void sleep() {
+        try {
+            int tsoHeartBeatInterval = DynamicApplicationConfig.getInt(DAEMON_TSO_HEARTBEAT_INTERVAL);
+            Thread.sleep(Math.min(tsoHeartBeatInterval * 5, 2000));
+        } catch (InterruptedException e) {
+        }
+    }
+
+    public void setBinlogFileSizeFetcher(IBinlogFileInfoFetcher binlogFileSizeFetcher) {
         this.binlogFileSizeFetcher = binlogFileSizeFetcher;
     }
 }

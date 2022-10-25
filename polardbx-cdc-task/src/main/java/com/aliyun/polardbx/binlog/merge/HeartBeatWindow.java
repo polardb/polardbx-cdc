@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.merge;
 
 import com.aliyun.polardbx.binlog.CommonUtils;
@@ -25,6 +22,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 /**
  * Created by ziyang.lb
@@ -38,27 +36,24 @@ public class HeartBeatWindow {
     private final long snapshotSeq;
     private final long seq;
     private final int expectTokenSize;
-    private final HashMap<String, TxnToken> heartbeatTokens;
+    private final HashMap<String, MergeItem> heartbeatMergeItems;
     private boolean forceComplete;
 
     public HeartBeatWindow(String txnId, String actualTso, long snapshotSeq, int expectTokenSize) {
-        if (snapshotSeq <= 0) {
-            throw new PolardbxException("invalid snapshot seq :" + snapshotSeq);
-        }
         this.txnId = txnId;
         this.actualTso = actualTso;
         this.snapshotSeq = snapshotSeq;
         this.expectTokenSize = expectTokenSize;
         this.seq = SEQ.incrementAndGet();
-        this.heartbeatTokens = new HashMap<>();
+        this.heartbeatMergeItems = new HashMap<>();
     }
 
-    public void addHeartbeatToken(String sourceId, TxnToken token) {
-        if (heartbeatTokens.containsKey(sourceId)) {
+    public void addHeartbeatToken(String sourceId, MergeItem item) {
+        if (heartbeatMergeItems.containsKey(sourceId)) {
             throw new PolardbxException("Duplicate heartbeat token for merge source " + sourceId);
         }
 
-        heartbeatTokens.put(sourceId, token);
+        heartbeatMergeItems.put(sourceId, item);
     }
 
     public boolean isSameWindow(TxnToken token) {
@@ -72,15 +67,19 @@ public class HeartBeatWindow {
     }
 
     public boolean isComplete() {
-        return forceComplete || heartbeatTokens.size() == expectTokenSize;
+        return forceComplete || heartbeatMergeItems.size() == expectTokenSize;
     }
 
     public String getActualTso() {
         return actualTso;
     }
 
-    public Collection<TxnToken> getAllTokens() {
-        return heartbeatTokens.values();
+    public Collection<TxnToken> getAllHeartBeatTokens() {
+        return heartbeatMergeItems.values().stream().map(MergeItem::getTxnToken).collect(Collectors.toList());
+    }
+
+    public Collection<MergeItem> getAllMergeItems() {
+        return heartbeatMergeItems.values();
     }
 
     public long getSeq() {
@@ -98,6 +97,6 @@ public class HeartBeatWindow {
     @Override
     public String toString() {
         return "HeartBeatWindow{" + "txnId='" + txnId + '\'' + ", actualTso=" + actualTso + ", seq=" + seq
-            + ", expectTokenSize=" + expectTokenSize + ", heartbeatTokens=" + heartbeatTokens + '}';
+            + ", expectTokenSize=" + expectTokenSize + ", heartbeatTokens=" + heartbeatMergeItems + '}';
     }
 }

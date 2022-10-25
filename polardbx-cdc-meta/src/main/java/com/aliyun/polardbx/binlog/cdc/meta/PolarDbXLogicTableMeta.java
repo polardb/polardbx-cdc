@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.alibaba.polardbx.druid.DbType;
@@ -29,18 +26,21 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTab
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.alibaba.polardbx.druid.sql.repository.Schema;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
+import com.aliyun.polardbx.binlog.cdc.repository.CdcSchemaStoreProvider;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogLogicMetaHistory;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.google.common.base.Preconditions;
@@ -51,14 +51,21 @@ import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static com.aliyun.polardbx.binlog.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_IGNORE_APPLY_ERROR;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_RECORD_PERSIST_SQL_WITH_EXISTS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_TABLE_CACHE_EXPIRE_TIME_MINUTES;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_TABLE_MAX_CACHE_SIZE;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
 import static com.aliyun.polardbx.binlog.util.FastSQLConstant.FEATURES;
 
 /**
@@ -68,19 +75,35 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
     private static final Logger logger = LoggerFactory.getLogger(PolarDbXLogicTableMeta.class);
     private static final int PAGE_SIZE = 100;
     private static final Gson GSON = new GsonBuilder().create();
+    private static final AtomicBoolean applyBaseFlag = new AtomicBoolean(false);
 
     private final TopologyManager topologyManager;
-    private final MemoryTableMeta distinctPhyMeta = new MemoryTableMeta(logger);//保存逻辑表和物理表列序不一致的meta
+    //保存逻辑表和物理表列序不一致的meta
+    private final MemoryTableMeta distinctPhyMeta = new MemoryTableMeta(logger, CdcSchemaStoreProvider.getInstance(),
+        DynamicApplicationConfig.getInt(META_TABLE_MAX_CACHE_SIZE),
+        DynamicApplicationConfig.getInt(META_TABLE_CACHE_EXPIRE_TIME_MINUTES),
+        DynamicApplicationConfig.getBoolean(META_DDL_IGNORE_APPLY_ERROR));
     private final BinlogLogicMetaHistoryMapper binlogLogicMetaHistoryMapper = SpringContextHolder.getObject(
         BinlogLogicMetaHistoryMapper.class);
+    private String maxTsoWithInit;
+    private String latestAppliedTopologyTso = "";
+    private long applySnapshotCostTime = -1;
+    private long applyHistoryCostTime = -1;
+    private long queryDdlHistoryCostTime = -1;
+    private long querySnapshotCostTime = -1;
+    private long queryDdlHistoryCount = -1;
 
     public PolarDbXLogicTableMeta(TopologyManager topologyManager) {
-        super(logger);
+        super(logger, CdcSchemaStoreProvider.getInstance(),
+            DynamicApplicationConfig.getInt(META_TABLE_MAX_CACHE_SIZE),
+            DynamicApplicationConfig.getInt(META_TABLE_CACHE_EXPIRE_TIME_MINUTES),
+            DynamicApplicationConfig.getBoolean(META_DDL_IGNORE_APPLY_ERROR));
         this.topologyManager = topologyManager;
     }
 
     @Override
     public boolean init(final String destination) {
+        this.initMaxTso();
         return true;
     }
 
@@ -88,13 +111,21 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         applySnapshotInternal(topology);
         DDLRecord record = DDLRecord.builder().schemaName("*").ddlSql(GSON.toJson(snapshot()))
             .metaInfo(GSON.toJson(topology)).build();
-        applyToDb(position, record, MetaType.SNAPSHOT.getValue(), null);
+        try {
+            if (applyBaseFlag.compareAndSet(false, true)) {
+                applyToDb(position, record, MetaType.SNAPSHOT.getValue(), null);
+            }
+        } catch (Throwable t) {
+            applyBaseFlag.compareAndSet(true, false);
+            throw t;
+        }
     }
 
     public boolean apply(BinlogPosition position, DDLRecord record, String extra) {
-        boolean result = false;
-        if (checkBeforeApply(position.getRtso(), record.getSchemaName(), record.getTableName(), record.getDdlSql(),
-            record.getId(), record.getJobId())) {
+        boolean checkResult = checkBeforeApply(position.getRtso(), record.getSchemaName(), record.getTableName(),
+            record.getDdlSql(), record.getId(), record.getJobId());
+
+        if (checkResult) {
             apply(position, record.getSchemaName(), record.getDdlSql(), extra);
 
             //apply distinct phy meta
@@ -113,13 +144,20 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
                 record.getSqlKind(), record.getDdlSql(), record.getExtInfo());
             dropTopology(position.getRtso(), record.getSchemaName(), record.getTableName(), record.getDdlSql());
             topologyManager.apply(position.getRtso(), record.getSchemaName(), record.getTableName(), r);
+            latestAppliedTopologyTso = position.getRtso();
 
-            result = true;
+            // 对于create if not exists和drop if exists，如果checkResult为false，不记录到binlog_logic_meta_history，以避免数据膨胀
+            // 有时候有些系统(比如DTS)会通过create if not exists的方式维持心跳，如果记录这些信息到history表，会导致数据暴增
+            applyToDb(position, record, MetaType.DDL.getValue(), extra);
+            Printer.tryPrint(position, record.getSchemaName(), record.getTableName(), this);
+        } else {
+            if (DynamicApplicationConfig.getBoolean(META_DDL_RECORD_PERSIST_SQL_WITH_EXISTS)) {
+                applyToDb(position, record, MetaType.DDL.getValue(), extra);
+                Printer.tryPrint(position, record.getSchemaName(), record.getTableName(), this);
+            }
         }
 
-        applyToDb(position, record, MetaType.DDL.getValue(), extra);
-        Printer.tryPrint(position, record.getSchemaName(), record.getTableName(), this);
-        return result;
+        return checkResult;
     }
 
     @Override
@@ -133,16 +171,12 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
 
         // do apply
         destory();
-        Optional<BinlogLogicMetaHistory> snapshot = binlogLogicMetaHistoryMapper.selectOne(s -> s
-            .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isEqualTo(snapshotTso)));
-        snapshot.ifPresent(s -> {
-            logger.warn("apply logic snapshot: [id={}, dbName={}, tso={}]", s.getId(), s.getDbName(), s.getTso());
-            LogicMetaTopology topology = GSON.fromJson(s.getTopology(), LogicMetaTopology.class);
-            applyCount.set(applySnapshotInternal(topology));
-        });
+        LogicMetaTopology topology = fetchLogicMetaTopology(snapshotTso);
+        applyCount.set(applySnapshotInternal(topology));
 
         //log after apply snapshot
         long costTime = System.currentTimeMillis() - startTime;
+        applySnapshotCostTime += costTime;
         jvmSnapshot = JvmUtils.buildJvmSnapshot();
         logger.info("build logic meta snapshot finished, applyCount {}, cost time {}(ms), current used memory -> "
             + "young:{}, old:{}", costTime, applyCount.get(), jvmSnapshot.getYoungUsed(), jvmSnapshot.getOldUsed());
@@ -168,6 +202,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
     @Override
     public void applyHistory(String snapshotTso, String rollbackTso) {
         // log before apply
+        final String snapshotTsoInput = snapshotTso;
         long startTime = System.currentTimeMillis();
         long applyCount = 0;
         JvmSnapshot jvmSnapshot = JvmUtils.buildJvmSnapshot();
@@ -177,14 +212,19 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         //apply history
         while (true) {
             final String snapshotTsoCondition = snapshotTso;
+
+            long queryStarTime = System.currentTimeMillis();
             List<BinlogLogicMetaHistory> histories = binlogLogicMetaHistoryMapper.select(s -> s
                 .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isGreaterThan(snapshotTsoCondition))
                 .and(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isLessThanOrEqualTo(rollbackTso))
                 .and(BinlogLogicMetaHistoryDynamicSqlSupport.type, SqlBuilder.isEqualTo(MetaType.DDL.getValue()))
                 .orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso).limit(PAGE_SIZE)
             );
+            queryDdlHistoryCostTime += (System.currentTimeMillis() - queryStarTime);
+            queryDdlHistoryCount += histories.size();
+
             histories.forEach(h -> {
-                toLowerCase(h);
+                toLowerCaseHist(h);
                 BinlogPosition position = new BinlogPosition(null, h.getTso());
                 if (checkBeforeApply(h.getTso(), h.getDbName(), h.getTableName(), h.getDdl(), h.getDdlRecordId(),
                     h.getDdlJobId())) {
@@ -200,6 +240,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
                     if (StringUtils.isNotEmpty(h.getTopology())) {
                         TopologyRecord topologyRecord = GSON.fromJson(h.getTopology(), TopologyRecord.class);
                         topologyManager.apply(h.getTso(), h.getDbName(), h.getTableName(), topologyRecord);
+                        latestAppliedTopologyTso = h.getTso();
                     }
 
                     // try update distinct phy meta
@@ -228,9 +269,10 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
 
         //log after apply
         long costTime = System.currentTimeMillis() - startTime;
+        applyHistoryCostTime += costTime;
         jvmSnapshot = JvmUtils.buildJvmSnapshot();
         logger.info("apply logic ddl history finished, snapshot tso {}, rollback tso {}, cost time {}(ms),"
-                + " applyCount {}" + ", current used memory -> young:{}, old:{}", snapshotTso, rollbackTso, costTime,
+                + " applyCount {}" + ", current used memory -> young:{}, old:{}", snapshotTsoInput, rollbackTso, costTime,
             applyCount, jvmSnapshot.getYoungUsed(), jvmSnapshot.getOldUsed());
     }
 
@@ -238,7 +280,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
      * 快照备份到存储, 这里只需要备份变动的table
      */
     private void applyToDb(BinlogPosition position, DDLRecord record, byte type, String extra) {
-        if (position == null) {
+        if (position == null || position.getRtso().compareTo(maxTsoWithInit) <= 0) {
             return;
         }
         try {
@@ -248,7 +290,8 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
                 .tableName(record.getTableName())
                 .sqlKind(record.getSqlKind())
                 .ddl(record.getDdlSql())
-                .topology(record.getMetaInfo()).type(type)
+                .topology(record.getMetaInfo())
+                .type(type)
                 .extInfo(record.getExtInfo() != null ? GSON.toJson(record.getExtInfo()) : null)
                 .ddlRecordId(record.getId())
                 .ddlJobId(record.getJobId())
@@ -365,9 +408,12 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
 
     private void updateOrDropDistinctPhyMeta(String tso, String schema, String tableName, String sqlKind, String ddlSql,
                                              DDLExtInfo extInfo) {
-        if (distinctPhyMeta.find(schema, tableName) != null) {
-            if (StringUtils.equals(sqlKind, "DROP_DATABASE") || StringUtils.equals(sqlKind, "DROP_TABLE")
-                || StringUtils.equals(sqlKind, "RENAME_TABLE")) {
+        if (distinctPhyMeta.isSchemaExists(schema) && StringUtils.equals(sqlKind, "DROP_DATABASE")) {
+            distinctPhyMeta.apply(new BinlogPosition(null, tso), schema, ddlSql, null);
+        }
+
+        if (StringUtils.isNotBlank(tableName) && distinctPhyMeta.find(schema, tableName) != null) {
+            if (StringUtils.equals(sqlKind, "DROP_TABLE") || StringUtils.equals(sqlKind, "RENAME_TABLE")) {
                 distinctPhyMeta.apply(new BinlogPosition(null, tso), schema, ddlSql, null);
             } else if (StringUtils.equals(sqlKind, "ALTER_TABLE") && (extInfo == null || StringUtils
                 .isEmpty(extInfo.getCreateSql4PhyTable()))) {
@@ -394,7 +440,25 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         }
     }
 
-    private void toLowerCase(BinlogLogicMetaHistory logicMetaHistory) {
+    private LogicMetaTopology fetchLogicMetaTopology(String snapshotTso) {
+        return buildTopology(snapshotTso, () -> buildLogicMetaTopology(snapshotTso));
+    }
+
+    private LogicMetaTopology buildLogicMetaTopology(String snapshotTso) {
+        long queryStartTime = System.currentTimeMillis();
+        Optional<BinlogLogicMetaHistory> snapshot = binlogLogicMetaHistoryMapper.selectOne(s -> s
+            .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isEqualTo(snapshotTso)));
+        querySnapshotCostTime = System.currentTimeMillis() - queryStartTime;
+        if (snapshot.isPresent()) {
+            BinlogLogicMetaHistory s = snapshot.get();
+            logger.warn("apply logic snapshot: [id={}, dbName={}, tso={}]", s.getId(), s.getDbName(), s.getTso());
+            return GSON.fromJson(s.getTopology(), LogicMetaTopology.class);
+        }
+
+        throw new PolardbxException("can`t find snapshot for tso " + snapshotTso);
+    }
+
+    private void toLowerCaseHist(BinlogLogicMetaHistory logicMetaHistory) {
         logicMetaHistory.setDbName(StringUtils.lowerCase(logicMetaHistory.getDbName()));
         logicMetaHistory.setTableName(StringUtils.lowerCase(logicMetaHistory.getTableName()));
         logicMetaHistory.setDdl(StringUtils.lowerCase(logicMetaHistory.getDdl()));
@@ -409,5 +473,36 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
             }
         }
         return extInfo;
+    }
+
+    private void initMaxTso() {
+        JdbcTemplate metaJdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
+        String sql = "select max(tso) tso from binlog_logic_meta_history";
+        String result = metaJdbcTemplate.queryForObject(sql, String.class);
+        this.maxTsoWithInit = result == null ? "" : result;
+    }
+
+    String getLatestAppliedTopologyTso() {
+        return latestAppliedTopologyTso;
+    }
+
+    public long getApplySnapshotCostTime() {
+        return applySnapshotCostTime;
+    }
+
+    public long getApplyHistoryCostTime() {
+        return applyHistoryCostTime;
+    }
+
+    public long getQueryDdlHistoryCostTime() {
+        return queryDdlHistoryCostTime;
+    }
+
+    public long getQueryDdlHistoryCount() {
+        return queryDdlHistoryCount;
+    }
+
+    public long getQuerySnapshotCostTime() {
+        return querySnapshotCostTime;
     }
 }

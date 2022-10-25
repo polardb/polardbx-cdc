@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.daemon.pipeline;
 
 import com.aliyun.polardbx.binlog.daemon.vo.CommandResult;
@@ -37,14 +34,14 @@ public class CommandPipeline {
     private File homeDir;
 
     public CommandPipeline() {
-        this(System.getProperty(Shell.SYSPROP_DAEMON_HOME_DIR));
+        this(System.getProperty(Shell.SYSPROP_CDC_HOME_DIR));
     }
 
     public CommandPipeline(String home) {
         if (StringUtils.isEmpty(home)) {
             home = "/tmp";
         }
-        System.setProperty(Shell.SYSPROP_DAEMON_HOME_DIR, home);
+        System.setProperty(Shell.SYSPROP_CDC_HOME_DIR, home);
         this.home = home;
         this.homeDir = new File(home);
     }
@@ -72,11 +69,14 @@ public class CommandPipeline {
         startTask(taskName);
     }
 
-    public void startRplTask(long taskId, String taskName) throws Exception {
-        execCommand(new String[] {"bash", "-c", "sh bin/start_rpl.sh " + taskId + " " + taskName}, 1000);
+    public void startRplTask(long taskId, String taskName, int memory) throws Exception {
+        log.info("Starting rpl task. Task id: {}, name: {}", taskId, taskName);
+        execCommand(new String[] {"bash", "-c", "sh bin/start_rpl.sh " + taskId + " " + taskName + " "
+            + memory}, 1000);
     }
 
     public void stopRplTask(long taskId) throws Exception {
+        log.info("Stopping rpl task. Task id: {}", taskId);
         execCommand(new String[] {"bash", "-c", "sh bin/stop_rpl.sh " + taskId}, 1000);
     }
 

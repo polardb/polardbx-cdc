@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.monitor;
 
 /**
@@ -164,6 +161,15 @@ public enum MonitorType {
         "polarx_cdc_binlog_backup_upload_error",
         true,
         "Binlog文件备份上传出现异常，请尽快排查原因，文件名称： %s",
+        1,
+        10,
+        true
+    ),
+
+    BINLOG_BACKUP_DELETE_ERROR(
+        "polarx_cdc_binlog_backup_delete_error",
+        true,
+        "从备份存储删除Binlog文件出现异常，请尽快排查原因，文件名称： %s",
         5,
         10,
         true
@@ -177,10 +183,90 @@ public enum MonitorType {
         10,
         true
     ),
+    BINLOG_DOWNLOAD_FAILED_WARNING(
+        "polarx_cdc_binlog_download_faile_warning",
+        true,
+        "从备份中恢复binlog文件%s失败，请及时关注.",
+        5,
+        10,
+        true
+    ),
+    BINLOG_OSS_BACKUP_BUCKET_NOT_FOUND_WARNING(
+        "polarx_cdc_binlog_backup_bucket_warning",
+        true,
+        "查询oss上对应的bucket %s失败，请及时关注.",
+        5,
+        10,
+        true
+    ),
+    IMPORT_VALIDATION_ERROR(
+        "polarx_cdc_import_validation_error",
+        true,
+        "评估升级全量校验和订正任务 %s 错误退出, 请及时关注, 异常： %s",
+        1,
+        30,
+        true
+    ),
+    IMPORT_FULL_ERROR(
+        "polarx_cdc_import_full_error",
+        true,
+        "评估升级全量迁移任务 %s 错误退出, 请及时关注， 异常： %s",
+        1,
+        30,
+        true
+    ),
+    IMPORT_INC_ERROR(
+        "polarx_cdc_import_inc_error",
+        true,
+        "评估升级增量迁移任务 %s 错误退出, 请及时关注， 异常： %s",
+        1,
+        30,
+        true
+    ),
+    RPL_PROCESS_ERROR(
+        "polarx_cdc_rpl_process_error",
+        true,
+        "RPL任务 %s 错误退出, 请及时关注， 异常： %s",
+        1,
+        30,
+        true
+    ),
+    RPL_FLASHBACK_ERROR(
+        "polarx_cdc_rpl_flashback_error",
+        true,
+        "RPL sql闪回任务 %s 失败，请及时关注, 异常： %s",
+        1,
+        30,
+        true
+    ),
+    RPL_HEARTBEAT_TIMEOUT_ERROR(
+        "polarx_cdc_rpl_heartbeat_timeout_error",
+        true,
+        "RPL任务 %s 心跳超时，请及时关注, 异常： %s",
+        1,
+        30,
+        true
+    ),
     META_DATA_INCONSISTENT_WARNNIN(
         "polarx_cdc_meta_data_inconsistent_warnning",
         true,
         "当前已经没有执行中的DDL任务，CDC元数据仍然存在不一致，请及时关注，DeltaChangeData: %s",
+        1,
+        10,
+        true
+    ),
+    META_LOGIC_DDLRECORD_COUNT_WARNNIN(
+        "polarx_cdc_meta_logic_ddlrecord_count_warnning",
+        true,
+        "逻辑元数据历史表，记录数超过报警阈值，请及时关注，当前数量: %s",
+        1,
+        10,
+        true
+    ),
+    META_PHY_DDLRECORD_COUNT_WARNNIN(
+        "polarx_cdc_meta_phy_ddlrecord_count_warnning",
+        true,
+        "物理元数据历史表，记录数超过报警阈值，请及时关注，当前数量: %s",
         1,
         10,
         true

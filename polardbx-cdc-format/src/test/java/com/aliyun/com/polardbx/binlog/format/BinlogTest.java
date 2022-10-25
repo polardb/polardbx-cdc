@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,11 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.com.polardbx.binlog.format;
 
+import com.aliyun.polardbx.binlog.canal.binlog.FileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
@@ -56,15 +54,14 @@ public class BinlogTest {
     private static String filePath = "/Users/yanfenglin/Documents/polardbx-binlog/dumper/binlog/binlog.000001";
     //    private static String filePath = "/Users/yanfenglin/Documents/binlog/binlog.000001";
     private static AutoExpandBuffer output = new AutoExpandBuffer(1024, 1024);
-    //    static {
-    //        File f = new File(filePath);
-    //        if (f.exists()) {
-    //            f.delete();
-    //        }
-    //        for (int i = 0; i < 4; i++) {
-    //            output[i] = FileLogFetcher.BINLOG_MAGIC[i];
-    //        }
-    //    }
+
+    static {
+        File f = new File(filePath);
+        if (f.exists()) {
+            f.delete();
+        }
+        output.put(FileLogFetcher.BINLOG_MAGIC);
+    }
 
     private LocalBinlogParser localBinlogParser = new LocalBinlogParser(filePath);
 
@@ -72,8 +69,8 @@ public class BinlogTest {
     public void generateFDE() throws Exception {
         FormatDescriptionEvent event = BinlogGenerateUtil.buildFormatDescriptionEvent(1, "5.6.29-TDDL-5.x");
         int len = event.write(output);
-        System.out.println(len);
-        FileUtils.writeByteArrayToFile(new File(filePath), output.toBytes(), 0, len, false);
+//        System.out.println(len);
+//        FileUtils.writeByteArrayToFile(new File(filePath), output.toBytes(), 0, len, false);
     }
 
     @Test
@@ -89,24 +86,25 @@ public class BinlogTest {
             "utf8");
         List<Field> fieldList = new ArrayList<>();
 
-        fieldList.add(MakeFieldFactory.makeField("BIGINT(20)", "1", "utf8mb4", false));
-        fieldList.add(MakeFieldFactory.makeField("VARCHAR(20)", "abcdefg", "utf8mb4", false));
+        fieldList.add(MakeFieldFactory.makeField("BIGINT(20)", "1", "utf8", false));
+        fieldList.add(MakeFieldFactory.makeField("VARCHAR(256)", "aa", "utf8", false));
+        fieldList.add(MakeFieldFactory.makeField("VARCHAR(10)", "bb", "utf8", false));
         tme.setFieldList(fieldList);
         int len = tme.write(output);
-        RowEventBuilder reb = new RowEventBuilder((int) tme.getTableId(),
-            2,
+        RowEventBuilder reb = new RowEventBuilder(tme.getTableId(),
+            fieldList.size(),
             BinlogEventType.WRITE_ROWS_EVENT,
             (int) (System.currentTimeMillis() / 1000),
             1);
-        reb.setColumnCount(2);
-        reb.setColumnsBitMap(new BitMap(2, true));
+        reb.setColumnCount(fieldList.size());
+        reb.setColumnsBitMap(new BitMap(fieldList.size(), true));
         RowData rowData = new RowData();
         rowData.setBiFieldList(fieldList);
-        rowData.setBiNullBitMap(new BitMap(2));
+        rowData.setBiNullBitMap(new BitMap(fieldList.size()));
         reb.addRowData(rowData);
         int newLen = reb.write(output);
 
-        FileUtils.writeByteArrayToFile(new File(filePath), output.toBytes(), 0, newLen + len, true);
+        FileUtils.writeByteArrayToFile(new File(filePath), output.toBytes(), 0, output.position(), true);
         test();
     }
 

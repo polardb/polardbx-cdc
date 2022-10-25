@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.common;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
@@ -99,6 +96,8 @@ public class LogUtil {
             .append(" applyRt: ").append(unit.getApplyRt().get(intervalItem))
             .append(" avgMergeBatchSize: ").append(unit.getAvgMergeBatchSize().get(intervalItem))
             .append(" skipCount: ").append(unit.getSkipCounter())
+            .append(" totalDealWithCount: ").append(unit.getPersistentMessageCounter())
+            .append(" skipExceptionCount: ").append(unit.getSkipExceptionCounter())
             .append(" totalInCache: ").append(totalInCache);
         return logSb.toString();
     }
@@ -116,7 +115,7 @@ public class LogUtil {
         String timestamp = CommonUtil.getCurrentTime();
 
         if (ApplyHelper.isDdl(event)) {
-            String position = (String) (event.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION_STR).getValue());
+            String position = (String) (event.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue());
             String log = String.format("%s, DDL: schema: %s, action: %s, sql: %s, position: %s",
                 timestamp,
                 event.getSchema(),
@@ -128,14 +127,33 @@ public class LogUtil {
             DBMSRowChange rowChange = (DBMSRowChange) event;
             String position = null;
             String binlogTimestamp = null;
-            position = (String) (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue());
-            binlogTimestamp = rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP).getValue().toString();
+            String sourceSchema = null;
+            String sourceTable = null;
+            if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION) != null &&
+                rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue() != null) {
+                position = (String) (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue());
+            }
+            if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP) != null &&
+                rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP).getValue() != null) {
+                binlogTimestamp = rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP).getValue().toString();
+            }
+            if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA) != null &&
+                rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA).getValue() != null) {
+                sourceSchema = rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA).getValue().toString();
+            }
+            if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_TABLE) != null &&
+                rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_TABLE).getValue() != null) {
+                sourceTable = rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_TABLE).getValue().toString();
+            }
             String[] pks = getPks(event);
             StringBuilder logSb = new StringBuilder();
             logSb.append(timestamp).append(RplConstants.COMMA);
-            logSb.append(physicalInfo).append(RplConstants.COMMA);
+            logSb.append(event.getAction().name()).append(RplConstants.COMMA);
             logSb.append(rowChange.getSchema()).append(".");
             logSb.append(rowChange.getTable()).append(RplConstants.COMMA);
+            logSb.append(sourceSchema).append(".");
+            logSb.append(sourceTable).append(RplConstants.COMMA);
+
             for (String str : pks) {
                 logSb.append(str);
             }

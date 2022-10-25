@@ -1,0 +1,5 @@
+跑测试前，需修改 HostManager 中的 getDstPolarxHost 为实际的 host
+
+public static HostInfo getDstPolarxHost() {
+    return new HostInfo("127.0.0.1", 3307, "polardbx_root", "123456", "", HostType.POLARX);
+}

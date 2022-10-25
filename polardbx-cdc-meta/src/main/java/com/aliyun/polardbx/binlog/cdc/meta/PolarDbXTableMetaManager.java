@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.alibaba.fastjson.JSONObject;
@@ -29,14 +26,16 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableChangeColumn;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
+import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
+import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
 import com.aliyun.polardbx.binlog.cdc.meta.LogicTableMeta.FieldMetaExt;
@@ -48,48 +47,55 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicTableMetaT
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyTableTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
-import com.aliyun.polardbx.binlog.dao.SemiSnapshotInfoDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistCleanPointDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistCleanPointMapper;
 import com.aliyun.polardbx.binlog.dao.SemiSnapshotInfoMapper;
+import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistCleanPoint;
 import com.aliyun.polardbx.binlog.domain.po.SemiSnapshotInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.util.FastSQLConstant;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.Lists;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
-import org.joda.time.DateTime;
-import org.mybatis.dynamic.sql.SqlBuilder;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.io.IOException;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static com.alibaba.polardbx.druid.sql.parser.SQLParserUtils.createSQLStatementParser;
+import static com.aliyun.polardbx.binlog.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_COMPARE_CACHE_ENABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_ROLLBACK_MODE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_ROLLBACK_MODE_SUPPORT_INSTANT_CREATE_TABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_SEMI_SNAPSHOT_DELTA_CHANGE_CHECK_INTERVAL;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_SEMI_SNAPSHOT_HOLDING_TIME;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_SEMI_SNAPSHOT_HOLDING_TIME_CHECK_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_SEMI_SNAPSHOT_ENABLE;
+import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_EXACTLY;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_SEMI;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_UNSAFE;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.META_DATA_INCONSISTENT_WARNNIN;
+import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
+import static org.mybatis.dynamic.sql.SqlBuilder.isGreaterThanOrEqualTo;
 
 /**
  * Created by ShuGuang & ziyang.lb
@@ -97,22 +103,43 @@ import static com.aliyun.polardbx.binlog.monitor.MonitorType.META_DATA_INCONSIST
 @Slf4j
 public class PolarDbXTableMetaManager {
     private static final Gson GSON = new GsonBuilder().create();
+
     private final AtomicBoolean initialized = new AtomicBoolean(false);
     private final String storageInstId;
     private final Map<String, Set<String>> deltaChangeMap;
+    private final boolean enableCompareCache;
+    private final Map<String, LogicTableMeta> compareCache;
     private final RollbackMode rollbackMode;
-
+    private final AuthenticationInfo authenticationInfo;
+    private final LoadingCache<String, Boolean> hasRdsHiddenPkCache =
+        CacheBuilder.newBuilder().expireAfterWrite(5, TimeUnit.MINUTES).build(new CacheLoader<String, Boolean>() {
+            @Override
+            public Boolean load(String key) throws Exception {
+                try {
+                    String sql = "select `" + CommonUtils.RDS_HIDDEN_PK_NAME + "` from " + key + " limit 1";
+                    log.warn("query rds hidden pk : " + sql);
+                    executeSQLOnStorage(sql, rs -> null);
+                } catch (Exception e) {
+                    log.error("try query rds hidden pk error!", e);
+                    return false;
+                }
+                return true;
+            }
+        });
     private TopologyManager topologyManager;
     private PolarDbXLogicTableMeta polarDbXLogicTableMeta;
     private PolarDbXStorageTableMeta polarDbXStorageTableMeta;
     private ConsistencyChecker consistencyChecker;
-    private ScheduledExecutorService cleaner;
     private long lastCheckAllDeltaTime;
+    private long rollbackCostTime = -1L;
 
-    public PolarDbXTableMetaManager(String storageInstId) {
+    public PolarDbXTableMetaManager(String storageInstId, AuthenticationInfo authenticationInfo) {
         this.storageInstId = storageInstId;
         this.deltaChangeMap = new HashMap<>();
+        this.enableCompareCache = DynamicApplicationConfig.getBoolean(META_COMPARE_CACHE_ENABLE);
+        this.compareCache = new HashMap<>();
         this.rollbackMode = getRollbackMode();
+        this.authenticationInfo = authenticationInfo;
     }
 
     public void init() {
@@ -125,16 +152,14 @@ public class PolarDbXTableMetaManager {
             this.polarDbXStorageTableMeta.init(null);
             this.consistencyChecker = new ConsistencyChecker(topologyManager, polarDbXLogicTableMeta,
                 polarDbXStorageTableMeta, this, storageInstId);
-            this.startCleaner();
+            this.registerToMetaMonitor();
         }
     }
 
     public void destroy() {
         this.polarDbXStorageTableMeta.destory();
         this.polarDbXLogicTableMeta.destory();
-        if (this.cleaner != null) {
-            this.cleaner.shutdownNow();
-        }
+        this.unregisterToCleaner();
     }
 
     public TableMeta findPhyTable(String schema, String table) {
@@ -164,47 +189,25 @@ public class PolarDbXTableMetaManager {
         return phy;
     }
 
-    private void startCleaner() {
-        if (rollbackMode == SNAPSHOT_SEMI) {
-            long checkInterval = DynamicApplicationConfig.getLong(META_SEMI_SNAPSHOT_HOLDING_TIME_CHECK_INTERVAL);
-            this.cleaner = Executors.newSingleThreadScheduledExecutor((r) -> {
-                Thread t = new Thread(r, "semi-snapshot-cleaner");
-                t.setDaemon(true);
-                return t;
-            });
-            cleaner.scheduleAtFixedRate(() -> {
-                try {
-                    cleanExpiredSemiSnapshot();
-                } catch (Exception e) {
-                    log.error("clean semi snapshot error!", e);
-                }
-            }, 0, checkInterval, TimeUnit.MINUTES);
-        }
+    private void registerToMetaMonitor() {
+        MetaMonitor.getInstance().register(storageInstId, this);
     }
 
-    private void cleanExpiredSemiSnapshot() {
-        int holdingTime = DynamicApplicationConfig.getInt(META_SEMI_SNAPSHOT_HOLDING_TIME);
-        Date expireTime = DateTime.now().minusHours(holdingTime).toDate();
-        SemiSnapshotInfoMapper mapper = SpringContextHolder.getObject(SemiSnapshotInfoMapper.class);
+    private void unregisterToCleaner() {
+        MetaMonitor.getInstance().unregister(storageInstId);
+    }
 
-        List<SemiSnapshotInfo> list = mapper
-            .select(s -> s.where(SemiSnapshotInfoDynamicSqlSupport.storageInstId, SqlBuilder.isEqualTo(storageInstId))
-                .and(SemiSnapshotInfoDynamicSqlSupport.gmtCreated, SqlBuilder.isLessThanOrEqualTo(expireTime))
-                .orderBy(SemiSnapshotInfoDynamicSqlSupport.tso.descending())
-                .limit(1));
-        if (!list.isEmpty()) {
-            int count = mapper.delete(
-                s -> s.where(SemiSnapshotInfoDynamicSqlSupport.storageInstId, SqlBuilder.isEqualTo(storageInstId))
-                    .and(SemiSnapshotInfoDynamicSqlSupport.tso, SqlBuilder.isLessThan(list.get(0).getTso())));
-            log.info("successfully deleted expired semi snapshot records which tso is less than {}, delete count: {}. ",
-                list.get(0).getTso(), count);
-        }
+    public void executeSQLOnStorage(String query, MysqlConnection.ProcessJdbcResult callback) throws IOException {
+        MysqlConnection connection = new MysqlConnection(authenticationInfo);
+        connection.connect();
+        connection.query(query, callback);
+        connection.disconnect();
     }
 
     private void createNotExistPhyTable(String logicSchema, String phySchema, String logicTable, String phyTable,
                                         String ddl) {
-        String createSql = "create table `" + CommonUtils.escape(phyTable) + "` like `" +
-            CommonUtils.escape(logicSchema) + "`.`" + CommonUtils.escape(logicTable) + "`";
+        String createSql = "create table `" + escape(phyTable) + "` like `" +
+            escape(logicSchema) + "`.`" + escape(logicTable) + "`";
         polarDbXStorageTableMeta.apply(logicSchema, ddl);
         polarDbXStorageTableMeta.apply(phySchema, createSql);
         polarDbXStorageTableMeta.apply(logicSchema, "drop database `" + logicSchema + "`");
@@ -214,7 +217,15 @@ public class PolarDbXTableMetaManager {
         return polarDbXLogicTableMeta.find(schema, table);
     }
 
-    public LogicTableMeta compare(String schema, String table) {
+    public LogicTableMeta compare(String schema, String table, int columnCount) {
+        String cacheKey = schema + ":" + table + ":" + columnCount;
+        if (enableCompareCache) {
+            LogicTableMeta cacheValue = compareCache.get(cacheKey);
+            if (cacheValue != null) {
+                return cacheValue;
+            }
+        }
+
         TableMeta phy = findPhyTable(schema, table);
         Preconditions.checkNotNull(phy, "phyTable " + schema + "." + table + "'s tableMeta should not be null!");
 
@@ -227,6 +238,23 @@ public class PolarDbXTableMetaManager {
         Preconditions.checkNotNull(logic, "phyTable [" + schema + "." + table + "], logic tableMeta["
             + logicTopology.getSchema() + "." + logicTopology.getLogicTableMetas().get(0).getTableName()
             + "] should not be null!");
+        boolean hasRdsHiddenPK = false;
+        if (phy.getFields().size() != columnCount) {
+            // ddl 中的列和binlog中数量对不上，可能有隐藏主键
+            String key = "`" + escape(schema) + "`.`" + escape(table) + "`";
+            String errorMsg = String.format("find row data column len [%s] not equal to table meta column len [%s], "
+                    + " and test rds hidden pk failed! table name : %s, phy table meta : %s", columnCount,
+                phy.getFields().size(), key, phy);
+            try {
+                hasRdsHiddenPK = hasRdsHiddenPkCache.get(key);
+            } catch (ExecutionException e) {
+                throw new PolardbxException(errorMsg, e);
+            }
+            if (!hasRdsHiddenPK) {
+                log.error(errorMsg);
+                throw new PolardbxException(errorMsg);
+            }
+        }
 
         final List<String> columnNames = phy.getFields().stream().map(FieldMeta::getColumnName).collect(
             Collectors.toList());
@@ -237,26 +265,28 @@ public class PolarDbXTableMetaManager {
         meta.setPhyTable(table);
         meta.setCompatible(phy.getFields().size() == logic.getFields().size());
         FieldMeta hiddenPK = null;
-        if (!meta.isCompatible()) {
-            log.warn("meta is not compatible {} {}", phy, logic);
-        }
         int logicIndex = 0;
         for (int i = 0; i < logic.getFields().size(); i++) {
             FieldMeta fieldMeta = logic.getFields().get(i);
-            final int x = columnNames.indexOf(fieldMeta.getColumnName());
-            if (x != i) {
-                meta.setCompatible(false);
-            }
+
             // 隐藏主键忽略掉
             if (SystemDB.isDrdsImplicitId(fieldMeta.getColumnName())) {
                 meta.setCompatible(false);
                 hiddenPK = fieldMeta;
                 continue;
             }
-            meta.add(new FieldMetaExt(fieldMeta, logicIndex++, x));
-        }
-        if (!meta.isCompatible()) {
-            log.warn("meta is not compatible {}", meta);
+            final int x = columnNames.indexOf(fieldMeta.getColumnName());
+            if (x != logicIndex) {
+                meta.setCompatible(false);
+            }
+            FieldMeta phyField = phy.getFields().get(x);
+            FieldMetaExt destFieldMeta = new FieldMetaExt(fieldMeta, logicIndex++, x);
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACTOR_ROWIMAGE_TYPE_REBUILD_SUPPORT)
+                && !ObjectUtils.equals(fieldMeta.getColumnType(), phyField.getColumnType())) {
+                destFieldMeta.setTypeNotMatch();
+                meta.setCompatible(false);
+            }
+            meta.add(destFieldMeta);
         }
         // 如果有隐藏主键，直接放到最后
         if (hiddenPK != null && DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DRDS_HIDDEN_PK_SUPPORT)) {
@@ -264,15 +294,29 @@ public class PolarDbXTableMetaManager {
             meta.add(new FieldMetaExt(hiddenPK, logicIndex, x));
         }
 
+        if (hasRdsHiddenPK) {
+            meta.setCompatible(false);
+        }
+
+        //对于含有隐藏主键的表，不输出日志，避免日志膨胀
+        if (!meta.isCompatible() && !hasRdsHiddenPK && hiddenPK == null) {
+            log.warn("meta is not compatible, return meta {}, logic TableMeta {}, phy TableMeta {}", meta, logic, phy);
+        }
+
+        if (enableCompareCache) {
+            compareCache.computeIfAbsent(cacheKey, k -> meta);
+        }
         return meta;
     }
 
     public void applyBase(BinlogPosition position, LogicMetaTopology topology) {
+        this.compareCache.clear();
         this.polarDbXLogicTableMeta.applyBase(position, topology);
         this.polarDbXStorageTableMeta.applyBase(position);
     }
 
     public void applyLogic(BinlogPosition position, DDLRecord record, String extra) {
+        this.compareCache.clear();
         if (StringUtils.isNotEmpty(extra)) {
             record.setExtInfo(GSON.fromJson(extra, DDLExtInfo.class));
         }
@@ -287,11 +331,14 @@ public class PolarDbXTableMetaManager {
     }
 
     public void applyPhysical(BinlogPosition position, String schema, String ddl, String extra) {
+        this.compareCache.clear();
+        this.hasRdsHiddenPkCache.invalidateAll();
         this.polarDbXStorageTableMeta.apply(position, schema, ddl, extra);
         this.updateDeltaChangeByPhysicalDdl(position.getRtso(), schema, ddl);
     }
 
     public void rollback(BinlogPosition position) {
+        this.compareCache.clear();
         Stopwatch sw = Stopwatch.createStarted();
 
         if (rollbackMode == SNAPSHOT_EXACTLY) {
@@ -304,6 +351,7 @@ public class PolarDbXTableMetaManager {
             throw new PolardbxException("invalid rollback mode " + rollbackMode);
         }
         sw.stop();
+        rollbackCostTime = sw.elapsed(TimeUnit.MILLISECONDS);
         log.warn("successfully rollback to tso:{}, cost {}", position.getRtso(), sw);
     }
 
@@ -321,7 +369,7 @@ public class PolarDbXTableMetaManager {
      * 从存储中获取小于等于rollback tso的最新一次Snapshot的位点
      */
     protected String getLatestSnapshotTso(String rollbackTso) {
-        JdbcTemplate metaJdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
+        JdbcTemplate metaJdbcTemplate = getObject("metaJdbcTemplate");
         return metaJdbcTemplate.queryForObject(
             "select max(tso) tso from binlog_logic_meta_history where tso <= '" + rollbackTso +
                 "' and type = " + MetaType.SNAPSHOT.getValue(), String.class);
@@ -331,16 +379,29 @@ public class PolarDbXTableMetaManager {
      * 从存储中获取小于等于rollback tso的最新一次的位点
      */
     protected String getLatestLogicDDLTso(String rollbackTso) {
-        JdbcTemplate metaJdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
+        JdbcTemplate metaJdbcTemplate = getObject("metaJdbcTemplate");
         return metaJdbcTemplate.queryForObject(
             "select max(tso) tso from binlog_logic_meta_history where tso <= '" + rollbackTso + "' +"
                 + "and type = " + MetaType.DDL.getValue(), String.class);
     }
 
     private void processSnapshotSemi(BinlogPosition position, DDLRecord record) {
-        if (rollbackMode == SNAPSHOT_SEMI) {
+        boolean enableSemi = DynamicApplicationConfig.getBoolean(META_SEMI_SNAPSHOT_ENABLE);
+        if (rollbackMode == SNAPSHOT_SEMI || enableSemi) {
             this.updateDeltaChangeByLogicDdl(position.getRtso(), record);
             this.tryUpdateSemiSnapshotPosition(position.getRtso());
+        }
+    }
+
+    private void checkSafetyOfSnapshotTso(String snapshotTso) {
+        BinlogPhyDdlHistCleanPointMapper cleanPointMapper = getObject(BinlogPhyDdlHistCleanPointMapper.class);
+        List<BinlogPhyDdlHistCleanPoint> list = cleanPointMapper.select(
+            s -> s.where(BinlogPhyDdlHistCleanPointDynamicSqlSupport.storageInstId, isEqualTo(storageInstId))
+                .and(BinlogPhyDdlHistCleanPointDynamicSqlSupport.tso, isGreaterThanOrEqualTo(snapshotTso)));
+        if (!list.isEmpty()) {
+            throw new PolardbxException(String.format("can`t rollback in SNAPSHOT_EXACTLY mode with snapshot tso %s ,"
+                    + " because there exists clean point tso %s which is greater than snapshot tso!", snapshotTso,
+                list.get(0).getTso()));
         }
     }
 
@@ -377,6 +438,8 @@ public class PolarDbXTableMetaManager {
 
     private void rollbackInSnapshotExactlyMode(BinlogPosition position) {
         String snapshotTso = getLatestSnapshotTso(position.getRtso());
+        checkSafetyOfSnapshotTso(snapshotTso);
+
         polarDbXLogicTableMeta.applySnapshot(snapshotTso);
         polarDbXStorageTableMeta.applySnapshot(snapshotTso);
         polarDbXLogicTableMeta.applyHistory(snapshotTso, position.getRtso());
@@ -556,7 +619,7 @@ public class PolarDbXTableMetaManager {
             String phyTableName = SQLUtils.normalize(sqlAlterTableStatement.getTableName());
             for (SQLAlterTableItem item : sqlAlterTableStatement.getItems()) {
                 if (item instanceof SQLAlterTableAddColumn || item instanceof SQLAlterTableDropColumnItem
-                    || item instanceof MySqlAlterTableChangeColumn) {
+                    || item instanceof MySqlAlterTableChangeColumn || item instanceof MySqlAlterTableModifyColumn) {
                     recordDeltaChangeByPhysicalChange(tso, phySchema, phyTableName);
                     break;
                 }
@@ -637,6 +700,18 @@ public class PolarDbXTableMetaManager {
 
     private boolean compareLogicWithPhysical(String tso, String logicSchemaName, String logicTableName,
                                              String phySchemaName, String phyTableName, boolean createPhyIfNotExist) {
+        if (log.isDebugEnabled()) {
+            log.debug("prepare to compare logic with physical, {}:{}:{}:{}:{}:{}", tso, logicSchemaName, logicTableName,
+                phySchemaName, phyTableName, createPhyIfNotExist);
+        }
+
+        if (MetaFilter.isDbInApplyBlackList(logicSchemaName)) {
+            return true;
+        }
+        if (MetaFilter.isTableInApplyBlackList(logicSchemaName + "." + logicTableName)) {
+            return true;
+        }
+
         // get table meta
         // 先从distinctPhyMeta查，如果没查到，说明物理表和逻辑表的列序是一致的，如果查到了，在进行对比的时候必须以此为准
         TableMeta logicDimTableMeta = polarDbXLogicTableMeta.findDistinctPhy(logicSchemaName, logicTableName);
@@ -679,7 +754,7 @@ public class PolarDbXTableMetaManager {
     private void tryUpdateSemiSnapshotPosition(String tso) {
         if (deltaChangeMap.isEmpty()) {
             try {
-                SemiSnapshotInfoMapper mapper = SpringContextHolder.getObject(SemiSnapshotInfoMapper.class);
+                SemiSnapshotInfoMapper mapper = getObject(SemiSnapshotInfoMapper.class);
                 SemiSnapshotInfo info = new SemiSnapshotInfo();
                 info.setTso(tso);
                 info.setStorageInstId(storageInstId);
@@ -690,13 +765,13 @@ public class PolarDbXTableMetaManager {
                 }
             }
         } else {
-            log.info("it is not a consistent semi snapshot point for tso {}, deltChangData is {}.",
+            log.info("it is not a consistent semi snapshot point for tso {}, deltaChangData is {}.",
                 tso, JSONObject.toJSONString(deltaChangeMap));
         }
     }
 
     private String getSuitableSemiSnapshotTso(String snapshotTso, String rollbackTso) {
-        JdbcTemplate metaJdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
+        JdbcTemplate metaJdbcTemplate = getObject("metaJdbcTemplate");
         return metaJdbcTemplate.queryForObject(
             "select max(tso) tso from binlog_semi_snapshot where tso > '" + snapshotTso +
                 "' and tso <= '" + rollbackTso + "' and storage_inst_id = '" + storageInstId + "'", String.class);
@@ -710,7 +785,14 @@ public class PolarDbXTableMetaManager {
             if (logicSchema.getLogicTableMetas() == null || logicSchema.getLogicTableMetas().isEmpty()) {
                 continue;
             }
+            if (MetaFilter.isDbInApplyBlackList(logicSchema.getSchema())) {
+                continue;
+            }
             for (LogicTableMetaTopology tableMetaTopology : logicSchema.getLogicTableMetas()) {
+                String fullTableName = schema + "." + tableMetaTopology.getTableName();
+                if (MetaFilter.isTableInApplyBlackList(fullTableName)) {
+                    continue;
+                }
                 TableMeta tableMeta = polarDbXLogicTableMeta.find(schema, tableMetaTopology.getTableName());
                 if (tableMeta == null) {
                     throw new PolardbxException(String.format("checking consistency failed, logic table is not found,"
@@ -723,7 +805,7 @@ public class PolarDbXTableMetaManager {
     private void tryTriggerAlarm() {
         try {
             if (!deltaChangeMap.isEmpty()) {
-                JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+                JdbcTemplate polarxTemplate = getObject("polarxJdbcTemplate");
                 List<Map<String, Object>> list = polarxTemplate.queryForList("show ddl");
                 //如果ddl引擎中已经没有任务了，但是还有delta change data，可能出现了bug，触发报警
                 if (list.isEmpty()) {
@@ -735,7 +817,6 @@ public class PolarDbXTableMetaManager {
             log.error("send alarm error!", t);
         }
     }
-    //------------------------------------------拓扑相关---------------------------------------
 
     /**
      * 通过物理库获取逻辑库信息
@@ -743,6 +824,7 @@ public class PolarDbXTableMetaManager {
     public LogicDbTopology getLogicSchema(String phySchema) {
         return topologyManager.getLogicSchema(phySchema);
     }
+    //------------------------------------------拓扑相关---------------------------------------
 
     /**
      * 通过物理库表获取逻辑库表信息
@@ -754,8 +836,9 @@ public class PolarDbXTableMetaManager {
     /**
      * 获取存储实例id下面的所有物理库表信息
      */
-    public List<PhyTableTopology> getPhyTables(String storageInstId) {
-        return topologyManager.getPhyTables(storageInstId);
+    public List<PhyTableTopology> getPhyTables(String storageInstId, Set<String> excludeLogicDbs,
+                                               Set<String> excludeLogicTables) {
+        return topologyManager.getPhyTables(storageInstId, excludeLogicDbs, excludeLogicTables);
     }
 
     public Pair<LogicDbTopology, LogicTableMetaTopology> getTopology(String logicSchema, String logicTable) {
@@ -766,4 +849,15 @@ public class PolarDbXTableMetaManager {
         return topologyManager.getTopology();
     }
 
+    public PolarDbXLogicTableMeta getPolarDbXLogicTableMeta() {
+        return polarDbXLogicTableMeta;
+    }
+
+    public PolarDbXStorageTableMeta getPolarDbXStorageTableMeta() {
+        return polarDbXStorageTableMeta;
+    }
+
+    public long getRollbackCostTime() {
+        return rollbackCostTime;
+    }
 }

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.cdc;
 
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
@@ -35,7 +32,7 @@ public class TestConsole {
 
     @Test
     public void t1() {
-        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(log);
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(log, false);
         System.out.println(memoryTableMeta.snapshot());
         memoryTableMeta.apply(null, "d1", "create table t1 (id int)", null);
         memoryTableMeta.apply(null, "d1", "create table t1 (id int,name varchar(16))", null);
@@ -90,7 +87,7 @@ public class TestConsole {
                 + "DEFAULT '你好', type_blob blob(10) DEFAULT NULL, type_text text DEFAULT NULL, type_enum enum('a', "
                 + "'b', 'c') DEFAULT 'a', type_set set('a', 'b', 'c', 'd') DEFAULT 'b', type_pt POINT DEFAULT NULL )";
 
-        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(log);
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(log, false);
         memoryTableMeta.apply(new BinlogPosition("", ""), "d1", create, null);
         System.out.println(memoryTableMeta.find("d1", "all_type").getFieldMetaByName("type_char"));
         memoryTableMeta.apply(new BinlogPosition("", ""), "d1", create, null);
@@ -132,4 +129,236 @@ public class TestConsole {
 
     }
 
+    @Test
+    public void t5() {
+        System.out.println("==============");
+        SchemaRepository repository = new SchemaRepository(JdbcConstants.MYSQL);
+        repository.setDefaultSchema("d1");
+        repository.console("create table `omc_modify_column_ordinal_test_tbllzj` (\n"
+            + "\ta int primary key,\n"
+            + "\tb int,\n"
+            + "\tc int,\n"
+            + "\td int,\n"
+            + "\te int\n"
+            + ") default character set = utf8mb4 default collate = utf8mb4_general_ci");
+
+        Schema schema = repository.findSchema("d1");
+        System.out.println("schema=" + schema);
+        SchemaObject table = schema.findTable("omc_modify_column_ordinal_test_tbllzj");
+        System.out.println("table=" + table);
+
+        StringBuffer buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        repository.console(
+            "/*+tddl:cmd_extra(omc_alter_table_with_gsi=true)*/alter table omc_modify_column_ordinal_test_tbllzj modify column b bigint algorithm=omc");
+
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+        repository.console(
+            "/*+tddl:cmd_extra(omc_alter_table_with_gsi=true)*/alter table omc_modify_column_ordinal_test_tbllzj modify column c bigint first algorithm=omc");
+
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        repository.console(
+            "/*+tddl:cmd_extra(omc_alter_table_with_gsi=true)*/alter table omc_modify_column_ordinal_test_tbllzj modify column d bigint after e algorithm=omc");
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        buffer = new StringBuffer();
+        if (table.getStatement() instanceof MySqlCreateTableStatement) {
+            ((MySqlCreateTableStatement) table.getStatement()).normalizeTableOptions();
+        }
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+    }
+
+    @Test
+    public void t6() {
+        System.out.println("==============");
+        SchemaRepository repository = new SchemaRepository(JdbcConstants.MYSQL);
+        repository.setDefaultSchema("d1");
+        repository.console("\n"
+            + "create table `omc_modify_column_ordinal_test_tbllzj_kvci_00000` (\n"
+            + "\ta int primary key,\n"
+            + "\tb int,\n"
+            + "\tc int,\n"
+            + "\td int,\n"
+            + "\te int\n"
+            + ") default character set = utf8mb4 default collate = utf8mb4_general_ci");
+
+        Schema schema = repository.findSchema("d1");
+        System.out.println("schema=" + schema);
+        SchemaObject table = schema.findTable("omc_modify_column_ordinal_test_tbllzj_kvci_00000");
+        System.out.println("table=" + table);
+
+        StringBuffer buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+        String ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tadd column `b_rgek` bigint after `b`,\n"
+            + "\talgorithm = default";
+        repository.console(ddl
+        );
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tadd column `b_checker_abgm` bigint generated always as (alter_type(`b`)) virtual,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tdrop column `b_checker_abgm`,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tchange column `b` `b_rgek` int(11) default null,\n"
+            + "\tchange column `b_rgek` `b` bigint,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tdrop column `b_rgek`,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tadd column `c_dmrs` bigint first,\n"
+            + "\talgorithm = default";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tadd column `c_checker_ofcg` bigint generated always as (alter_type(`c`)) virtual,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tdrop column `c_checker_ofcg`,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tchange column `c` `c_dmrs` int(11) default null,\n"
+            + "\tchange column `c_dmrs` `c` bigint,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tdrop column `c_dmrs`,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+        buffer = new StringBuffer();
+        if (table.getStatement() instanceof MySqlCreateTableStatement) {
+            ((MySqlCreateTableStatement) table.getStatement()).normalizeTableOptions();
+        }
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+
+    }
+
+    @Test
+    public void t7() {
+        System.out.println("==============");
+        SchemaRepository repository = new SchemaRepository(JdbcConstants.MYSQL);
+        repository.setDefaultSchema("d1");
+        repository.console("CREATE TABLE `omc_modify_column_ordinal_test_tbllzj_kvci_00000` (\n"
+            + "\t`c_dmrs` bigint,\n"
+            + "\ta int PRIMARY KEY,\n"
+            + "\t`b` bigint,\n"
+            + "\tc int,\n"
+            + "\td int,\n"
+            + "\te int\n"
+            + ") DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci");
+
+        Schema schema = repository.findSchema("d1");
+        System.out.println("schema=" + schema);
+        SchemaObject table = schema.findTable("omc_modify_column_ordinal_test_tbllzj_kvci_00000");
+        System.out.println("table=" + table);
+
+        StringBuffer buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+        String ddl = "alter table `omc_modify_column_ordinal_test_tbllzj_kvci_00000`\n"
+            + "\tchange column `c` `c_dmrs` int(11) default null,\n"
+            + "\tchange column `c_dmrs` `c` bigint,\n"
+            + "\talgorithm = inplace";
+        repository.console(ddl
+        );
+        System.out.println("-------------------------------");
+        System.out.println("exec ddl " + ddl);
+        buffer = new StringBuffer();
+        table.getStatement().output(buffer);
+        System.out.println(buffer);
+    }
 }

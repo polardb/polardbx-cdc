@@ -3,13 +3,8 @@
 TASK_NAME=$1
 MEMORY=$2
 if [ -z "$MEMORY" ]; then
-  if [[ "$TASK_NAME" == "DAEMON" ]]; then
-    MEMORY=256
-    PERM_MEMORY=64
-  else
     MEMORY=1024
     PERM_MEMORY=128
-  fi
 fi
 
 #get param from 16th to end
@@ -55,7 +50,7 @@ if [[ ! "$JVM_PARAMS" =~ "PermSize" ]]; then
   JAVA_OPTS="${JAVA_OPTS} -XX:PermSize=${PERM_MEMORY}m -XX:MaxPermSize=${PERM_MEMORY}m"
 fi
 JAVA_OPTS="${JAVA_OPTS} -XX:+UseConcMarkSweepGC"
-JAVA_OPTS="${JAVA_OPTS} -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRatio=3"
+JAVA_OPTS="${JAVA_OPTS} -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRatio=2"
 JAVA_OPTS="${JAVA_OPTS} -XX:-OmitStackTraceInFastThrow"
 JAVA_OPTS="${JAVA_OPTS} -XX:CMSInitiatingOccupancyFraction=80"
 JAVA_OPTS="${JAVA_OPTS} -XX:+UseCMSInitiatingOccupancyOnly"
@@ -65,7 +60,7 @@ JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDateStamps"
 JAVA_OPTS="${JAVA_OPTS} -Xloggc:${HOME}/logs/polardbx-binlog/$TASK_NAME/gc.log"
 JAVA_OPTS="${JAVA_OPTS} -Dmemory=${MEMORY}"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs -Dfile.encoding=UTF-8"
-JAVA_OPTS="${JAVA_OPTS} -Ddaemon.home.dir=${BASE_DIR}"
+JAVA_OPTS="${JAVA_OPTS} -Dcdc.home.dir=${BASE_DIR}"
 
 if [ ! -d ${HOME}/.java ]; then
   mkdir "${HOME}/.java"
@@ -80,7 +75,7 @@ if [ ! -d ${HOME}/.java/.systemPrefs ]; then
 fi
 
 JAVA_OPTS="${JAVA_OPTS} -XX:+HeapDumpOnOutOfMemoryError"
-JAVA_OPTS="${JAVA_OPTS} -XX:HeapDumpPath=${BASE_DIR}/logs"
+JAVA_OPTS="${JAVA_OPTS} -XX:HeapDumpPath=${HOME}/logs"
 
 
 JAVA_OPTS="${JAVA_OPTS} ${JVM_PARAMS}"
@@ -126,6 +121,7 @@ defaultLog=$HOME/logs/polardbx-binlog/$TASK_NAME/default.log
 cd $HOME
 
 #Start Java Process
+
 if [[ "$TASK_NAME" == Dumper* ]]; then
   ${JAVA} ${JAVA_OPTS} -classpath ${CLASSPATH}:. com.aliyun.polardbx.binlog.dumper.DumperBootStrap "taskName=${TASK_NAME}" 1>>$defaultLog 2>&1 &
 elif [[ "$TASK_NAME" == "TRANSFER" ]]; then

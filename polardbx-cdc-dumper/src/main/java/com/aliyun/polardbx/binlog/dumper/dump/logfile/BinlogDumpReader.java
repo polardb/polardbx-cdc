@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,15 +11,15 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.aliyun.polardbx.binlog.domain.Cursor;
 import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
 import com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.UnsafeByteOperations;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.tuple.Pair;
@@ -35,7 +34,7 @@ import java.nio.channels.FileChannel;
  */
 @Slf4j
 public class BinlogDumpReader {
-    private static final int SIZE = 2 * 1024 * 1024;//聚合小的event，一次发送
+    final int maxPacketSize;
     /**
      * Command-Line Format	--max-binlog-size=#
      * System Variable	max_binlog_size
@@ -46,7 +45,7 @@ public class BinlogDumpReader {
      * Minimum Value	4096
      * Maximum Value	1073741824
      */
-    private static final int EVENT_MAX_SIZE = 32 * 1024 * 1024;//最大4G，这里为节省内存，先设置为32M
+    final int readBufferSize;
 
     // https://dev.mysql.com/doc/refman/5.7/en/replication-options-binary-log.html
     String fileName;
@@ -54,17 +53,25 @@ public class BinlogDumpReader {
     long fp;
     FileInputStream inputStream;
     FileChannel channel;
-    ByteBuffer buffer = ByteBuffer.allocate(EVENT_MAX_SIZE);
+    ByteBuffer buffer;
     LogFileManager logFileManager;
     int left = 0;
     private byte seq = 1;
 
-    public BinlogDumpReader(LogFileManager logFileManager, String fileName, long pos) throws IOException {
+    public BinlogDumpReader(LogFileManager logFileManager, String fileName, long pos, int maxPacketSize,
+                            int readBufferSize)
+        throws IOException {
+        if (pos == 0) {
+            pos = 4;
+        }
         this.logFileManager = logFileManager;
         this.fileName = fileName;
         this.pos = pos;
         this.inputStream = new FileInputStream(logFileManager.getFullName(fileName));
         this.channel = inputStream.getChannel();
+        this.maxPacketSize = maxPacketSize;
+        this.readBufferSize = readBufferSize;
+        this.buffer = ByteBuffer.allocate(readBufferSize);
     }
 
     public void valid() throws IOException {
@@ -208,6 +215,7 @@ public class BinlogDumpReader {
             if (buffer.remaining() == 0 && hasNext() && fp == channel.size()) {
                 log.info("transfer, buffer={}, {}, {}<->{}", buffer, hasNext(), channel.position(), channel.size());
                 transfer();
+                return fakeRotateEvent();
             }
             int cur = buffer.position();
             boolean withStatus = true;
@@ -216,7 +224,9 @@ public class BinlogDumpReader {
                 length = left;
             } else {
                 if (buffer.remaining() < 13) {
-                    log.debug("buffer.remaining() < 13 cause read, buffer={}", buffer);
+                    if (log.isDebugEnabled()) {
+                        log.debug("buffer.remaining() < 13 cause read, buffer={}", buffer);
+                    }
                     buffer.compact();
                     cur = 0;
                     this.read();
@@ -232,7 +242,9 @@ public class BinlogDumpReader {
                 left = 0;
             }
             if (buffer.remaining() < length - 13) {
-                log.debug("buffer.remaining() < length - 13  cause read, length={},buffer={}", length, buffer);
+                if (log.isDebugEnabled()) {
+                    log.debug("buffer.remaining() < length - 13  cause read, length={},buffer={}", length, buffer);
+                }
                 buffer.position(cur);//go to length
                 buffer.compact();
                 cur = 0;
@@ -258,8 +270,11 @@ public class BinlogDumpReader {
             buffer.position(cur);
             buffer.get(data, nrp_len, length);
             fp += length;
-            ByteString bytes = ByteString.copyFrom(data);
-            log.debug("dumpPack {}@{}#{}", fileName, fp - length, fp);
+            //ByteString bytes = ByteString.copyFrom(data);
+            ByteString bytes = UnsafeByteOperations.unsafeWrap(data);
+            if (log.isDebugEnabled()) {
+                log.debug("dumpPack {}@{}#{}", fileName, fp - length, fp);
+            }
             return bytes;
         } catch (Exception e) {
             log.warn("buffer parse fail {}@{} {} {}", fileName, fp, length, buffer, e);
@@ -275,14 +290,14 @@ public class BinlogDumpReader {
         ByteString result = ByteString.EMPTY;
         while (hasNext()) {
             result = result.concat(nextDumpPack());
-            if (result.size() > SIZE) {
+            if (result.size() > maxPacketSize) {
                 break;
             }
             int nextDumpPackLength = nextDumpPackLength();
             if (nextDumpPackLength == 0) {
                 break;
             }
-            if (nextDumpPackLength + result.size() > SIZE) {
+            if (nextDumpPackLength + result.size() > maxPacketSize) {
                 break;
             }
         }
@@ -309,13 +324,19 @@ public class BinlogDumpReader {
     }
 
     public boolean hasNext() {
-        int ret = logFileManager.getLatestFileCursor().getFileName().compareTo(fileName);
+        Cursor cursor = logFileManager.getLatestFileCursor();
+        int ret = cursor.getFileName().compareTo(fileName);
         if (ret == 0) {
-            long latestCursor = logFileManager.getLatestFileCursor().getFilePosition();
-            boolean hasNext = fp < latestCursor;
-            return hasNext;
+            long latestCursor = cursor.getFilePosition();
+            return fp < latestCursor;
         } else if (ret > 0) {
-            return logFileManager.getLatestFileCursor().getFilePosition() > 4;
+            int seq1 = logFileManager.parseFileNumber(fileName);
+            int seq2 = logFileManager.parseFileNumber(cursor.getFileName());
+            if (seq2 - seq1 == 1) {
+                return cursor.getFilePosition() > 4;
+            } else {
+                return true;
+            }
         } else {
             return false;
         }

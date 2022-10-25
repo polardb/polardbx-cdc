@@ -6,13 +6,14 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.13-SNAPSHOT</version>
+        <version>5.4.15-SNAPSHOT</version>
     </parent>
     <groupId>com.aliyun.polardbx</groupId>
     <artifactId>polardbx-cdc-storage</artifactId>
     <url>http://maven.apache.org</url>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <license.dir>${project.parent.basedir}</license.dir>
     </properties>
     <dependencies>
         <dependency>
@@ -29,6 +30,11 @@
             <groupId>org.rocksdb</groupId>
             <artifactId>rocksdbjni</artifactId>
             <version>6.16.4</version>
+        </dependency>
+        <dependency>
+            <groupId>org.ini4j</groupId>
+            <artifactId>ini4j</artifactId>
+            <version>0.5.4</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>

@@ -36,3 +36,4 @@ echo
 }
 
 checkpage $JAVA
+Footer

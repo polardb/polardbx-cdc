@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.domain.Cursor;
@@ -53,7 +50,7 @@ public class BinlogFileReaderTest {
         logFileManager.setLatestFileCursor(new Cursor("binlog.000006", 860L));
 
         BinlogDumpReader binlogFileReader = new BinlogDumpReader(logFileManager, "binlog.000005",
-            4);
+            4, 2 * 1024 * 1024, 32 * 1024 * 1024);
 
         binlogFileReader.valid();
 

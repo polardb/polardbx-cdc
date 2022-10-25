@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.util;
 
 import org.slf4j.Logger;
@@ -44,7 +41,7 @@ public class WgetCmd {
         ProcessBuilder pb = new ProcessBuilder("wget", "--no-check-certificate", link, "-O", fileName + "_tmp_wget");
         pb.redirectErrorStream(true);
         Process process = pb.start();
-        final Scanner scanner = new Scanner(process.getInputStream());
+        final Scanner scanner = new Scanner(process.getInputStream(), "utf8");
         scanner.useDelimiter("\n");
         Thread t = new Thread("wget-progress") {
             @Override
@@ -63,7 +60,6 @@ public class WgetCmd {
                 }
             }
         };
-        t.setDaemon(true);
         t.start();
 
         process.waitFor();

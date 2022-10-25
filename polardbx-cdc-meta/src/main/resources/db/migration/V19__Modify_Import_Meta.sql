@@ -6,7 +6,7 @@ BEGIN
     THEN
         alter table rpl_task modify column `extractor_config` longtext;
     END IF;
-	IF EXISTS(SELECT * FROM information_schema.columns WHERE table_schema=(select database()) AND table_name='rpl_task' AND column_name='pipeline__config')
+	IF EXISTS(SELECT * FROM information_schema.columns WHERE table_schema=(select database()) AND table_name='rpl_task' AND column_name='pipeline_config')
     THEN
         alter table rpl_task modify column `pipeline_config` longtext;
     END IF;

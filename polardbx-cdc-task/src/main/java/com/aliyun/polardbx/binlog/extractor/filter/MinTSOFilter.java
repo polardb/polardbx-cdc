@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor.filter;
 
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
@@ -72,12 +69,7 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
      * 2. 非DDL 允许重复
      */
     private boolean isPass(Transaction transaction, HandlerContext context) {
-        int cmp = transaction.getVirtualTSOModel().compareTo(lastPushTso);
-        boolean isSystem = transaction.isDDL() || transaction.isHeartbeat() || transaction.isInstructionCommand();
-        if (isSystem && cmp == 0) {
-            // 如果已经正常处理数据了，就不允许出现小于等于的系统事件
-            return !processingEvent;
-        }
+        long cmp = transaction.getVirtualTSOModel().tso - lastPushTso.tso;
         if (cmp < 0) {
             // 已经正常执行了，就必须确保tso 递增
             if (processingEvent) {
@@ -86,6 +78,9 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
                 throw new PolardbxException("detected disorderly transaction，current tso is: "
                     + transaction.getVirtualTSO() + ", last tso is :" + lastPushTso);
             }
+            logger.info(
+                "filter:TSO:" + transaction.getVirtualTSO() + ":pos:[" + transaction
+                    .getBinlogFileName() + ":" + transaction.getStartLogPos() + "]xid:" + transaction.getXid());
             return false;
         }
 
@@ -113,7 +108,8 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
         currentFile = context.getRuntimeContext().getBinlogFile();
 
         if (!processingEvent) {
-            logger.info("****--- ready to push event start with : " + transaction.getVirtualTSO());
+            logger.info("****--- ready to push event start with tso " + transaction.getVirtualTSO() + ", at position "
+                + transaction.getBinlogFileName() + ":" + transaction.getStartLogPos());
         }
         processingEvent = true;
     }

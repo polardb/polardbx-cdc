@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.core.handle;
 
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
@@ -31,6 +28,9 @@ import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.HashSet;
+import java.util.Set;
+
 public class DefaultBinlogEventHandle implements EventHandle {
 
     protected HandlerContext head = null;
@@ -43,19 +43,16 @@ public class DefaultBinlogEventHandle implements EventHandle {
     private String requestTSO;
     private ServerCharactorSet serverCharactorSet;
     private int lowerCaseTableNames;
-    private String topologyContext;
 
     public DefaultBinlogEventHandle(AuthenticationInfo runningInfo, String polarxVersion,
                                     BinlogPosition startPosition, String requestTSO,
-                                    ServerCharactorSet serverCharactorSet, int lowerCaseTableNames,
-                                    String topologyContext) {
+                                    ServerCharactorSet serverCharactorSet, int lowerCaseTableNames) {
         this.runningInfo = runningInfo;
         this.polarxVersion = polarxVersion;
         this.startPosition = startPosition;
         this.requestTSO = requestTSO;
         this.serverCharactorSet = serverCharactorSet;
         this.lowerCaseTableNames = lowerCaseTableNames;
-        this.topologyContext = topologyContext;
     }
 
     public void addFilter(LogEventFilter logEventFilter) {
@@ -81,26 +78,42 @@ public class DefaultBinlogEventHandle implements EventHandle {
     }
 
     @Override
+    public Set<Integer> interestEvents() {
+        Set<Integer> flagSet = new HashSet<>();
+        flagSet.add(LogEvent.START_EVENT_V3);
+        flagSet.add(LogEvent.QUERY_EVENT);
+        flagSet.add(LogEvent.ROWS_QUERY_LOG_EVENT);
+        flagSet.add(LogEvent.WRITE_ROWS_EVENT_V1);
+        flagSet.add(LogEvent.WRITE_ROWS_EVENT);
+        flagSet.add(LogEvent.UPDATE_ROWS_EVENT_V1);
+        flagSet.add(LogEvent.UPDATE_ROWS_EVENT);
+        flagSet.add(LogEvent.DELETE_ROWS_EVENT_V1);
+        flagSet.add(LogEvent.DELETE_ROWS_EVENT);
+        flagSet.add(LogEvent.ROTATE_EVENT);
+        flagSet.add(LogEvent.SEQUENCE_EVENT);
+        flagSet.add(LogEvent.GCN_EVENT);
+        flagSet.add(LogEvent.TABLE_MAP_EVENT);
+        flagSet.add(LogEvent.XA_PREPARE_LOG_EVENT);
+        flagSet.add(LogEvent.XID_EVENT);
+        flagSet.add(LogEvent.FORMAT_DESCRIPTION_EVENT);
+        return flagSet;
+    }
+
+    @Override
     public void onStart() {
         ThreadRecorder recorder = new ThreadRecorder(runningInfo.getStorageInstId());
         recorder.init();
         recorder.dump();
         runtimeContext = new RuntimeContext(recorder);
         runtimeContext.setVersion(polarxVersion);
-        if (StringUtils.isNotBlank(requestTSO)) {
-            runtimeContext.setRecovery(true);
-        } else {
-            runtimeContext.setRecovery(false);
-        }
+        runtimeContext.setRecovery(StringUtils.isNotBlank(requestTSO));
         runtimeContext.setStartPosition(startPosition);
         runtimeContext.setServerCharactorSet(serverCharactorSet);
         runtimeContext.setHostAddress(runningInfo.getAddress().getAddress().getHostAddress());
         runtimeContext.setLowerCaseTableNames(lowerCaseTableNames);
-        runtimeContext.setTopology(topologyContext);
         runtimeContext.setAuthenticationInfo(runningInfo);
         head.setRuntimeContext(runtimeContext);
         head.fireStart();
-
         head.fireStartConsume();
     }
 

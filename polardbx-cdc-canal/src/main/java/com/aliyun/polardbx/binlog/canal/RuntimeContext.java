@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal;
 
 import com.aliyun.polardbx.binlog.canal.core.ddl.ThreadRecorder;
@@ -24,6 +21,8 @@ import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * @author chengjin.lyf on 2020/7/23 2:02 下午
@@ -33,43 +32,45 @@ public class RuntimeContext {
 
     public static final int DEBUG_MODE = 0;
     public static final int ATTRIBUTE_TABLE_META_MANAGER = 1;
+    public static final AtomicReference<String> initTopology = new AtomicReference<>("");
 
+    private final ThreadRecorder threadRecorder;
+    /**
+     * 最大事务ID 序号生成
+     * 用来为 no XA事务生成事务ID，要求seq必须大于前一个事务ID
+     */
+    private final AutoSequence maxTxnIdSequence = new AutoSequence();
+    private final Map<Integer, Object> attributeMap = new HashMap<>();
     private AuthenticationInfo authenticationInfo;
     /**
      * 当前收到的最大TSO
      * no TSO事务，全部使用maxTSO
      */
     private Long maxTSO = 0L;
-
     private String binlogFile;
-    private ThreadRecorder threadRecorder;
     private long logPos;
     private String hostAddress;
     private String version;
-
     private BinlogPosition startPosition;
-    private String topology;
     /**
      * 是否位点回溯启动
      */
     private boolean recovery;
-
     private long serverId;
-
     private int lowerCaseTableNames;
-
     private ServerCharactorSet serverCharactorSet;
-
-    /**
-     * 最大事务ID 序号生成
-     * 用来为 no XA事务生成事务ID，要求seq必须大于前一个事务ID
-     */
-    private AutoSequence maxTxnIdSequence = new AutoSequence();
-
-    private Map<Integer, Object> attributeMap = new HashMap<>();
+    private String storageHashCode;
 
     public RuntimeContext(ThreadRecorder threadRecorder) {
         this.threadRecorder = threadRecorder;
+    }
+
+    public static String getInitTopology() {
+        return initTopology.get();
+    }
+
+    public static void setInitTopology(String topology) {
+        initTopology.compareAndSet("", topology);
     }
 
     public AuthenticationInfo getAuthenticationInfo() {
@@ -78,6 +79,7 @@ public class RuntimeContext {
 
     public void setAuthenticationInfo(AuthenticationInfo authenticationInfo) {
         this.authenticationInfo = authenticationInfo;
+        this.storageHashCode = Objects.hashCode(this.authenticationInfo.getStorageInstId()) + "";
     }
 
     public void putAttribute(Integer id, Object attribute) {
@@ -184,14 +186,6 @@ public class RuntimeContext {
         this.version = version;
     }
 
-    public String getTopology() {
-        return topology;
-    }
-
-    public void setTopology(String topology) {
-        this.topology = topology;
-    }
-
     public long getServerId() {
         return serverId;
     }
@@ -206,5 +200,9 @@ public class RuntimeContext {
 
     public void setLowerCaseTableNames(int lowerCaseTableNames) {
         this.lowerCaseTableNames = lowerCaseTableNames;
+    }
+
+    public String getStorageHashCode() {
+        return storageHashCode;
     }
 }

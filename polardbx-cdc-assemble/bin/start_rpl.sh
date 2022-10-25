@@ -10,7 +10,7 @@
 
 TASK_ID=$1
 TASK_NAME=$2
-MEMORY=3072
+MEMORY=$3
 PERM_MEMORY=256
 LOG_DIR=$HOME/logs/polardbx-rpl/$TASK_NAME
 
@@ -26,10 +26,6 @@ if [ $# -lt 1 ]; then
   usage
 fi
 
-if [ $(whoami) == "root" ]; then
-  echo DO NOT use root user to launch me.
-  exit 1
-fi
 
 case "$(uname)" in
 Linux)
@@ -61,7 +57,7 @@ if [[ ! "$JVM_PARAMS" =~ "PermSize" ]]; then
 fi
 #JAVA_OPTS="${JAVA_OPTS} -XX:NewSize=128m -XX:MaxNewSize=256m"
 JAVA_OPTS="${JAVA_OPTS} -XX:+UseParallelGC"
-JAVA_OPTS="${JAVA_OPTS} -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRatio=1 -XX:ParallelGCThreads=6"
+JAVA_OPTS="${JAVA_OPTS} -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRatio=2 -XX:ParallelGCThreads=6"
 JAVA_OPTS="${JAVA_OPTS} -XX:-OmitStackTraceInFastThrow"
 
 JAVA_OPTS="${JAVA_OPTS} -Djava.net.preferIPv4Stack=true"
@@ -71,7 +67,8 @@ JAVA_OPTS="${JAVA_OPTS} -XX:+DisableExplicitGC"
 JAVA_OPTS="${JAVA_OPTS} -Xloggc:${LOG_DIR}/gc.log"
 JAVA_OPTS="${JAVA_OPTS} -Dmemory=${MEMORY}"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs -Dfile.encoding=UTF-8"
-JAVA_OPTS="${JAVA_OPTS} -Ddaemon.home.dir=${BASE_HOME}"
+JAVA_OPTS="${JAVA_OPTS} -Dcdc.home.dir=${BASE_HOME}"
+JAVA_OPTS="${JAVA_OPTS} -Djava.io.tmpdir=/tmp/${TASK_ID}"
 
 if [ -f /home/admin/env.properties ]; then
     for line in `cat /home/admin/env.properties`
@@ -93,6 +90,8 @@ if [ ! -d ${HOME}/.java/.systemPrefs ]; then
 fi
 
 JAVA_OPTS="${JAVA_OPTS} -XX:+HeapDumpOnOutOfMemoryError"
+JAVA_OPTS="${JAVA_OPTS} -XX:HeapDumpPath=${HOME}/logs"
+
 JAVA_OPTS="${JAVA_OPTS} ${JVM_PARAMS}"
 
 ## set java path

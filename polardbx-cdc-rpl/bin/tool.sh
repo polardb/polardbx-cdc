@@ -61,7 +61,7 @@ JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDateStamps"
 JAVA_OPTS="${JAVA_OPTS} -XX:+DisableExplicitGC"
 JAVA_OPTS="${JAVA_OPTS} -Dmemory=${MEMORY}"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs"
-JAVA_OPTS="${JAVA_OPTS} -Ddaemon.home.dir=${BASE_HOME}"
+JAVA_OPTS="${JAVA_OPTS} -Dcdc.home.dir=${BASE_HOME}"
 
 if [ -f /home/admin/env.properties ]; then
     for line in `cat /home/admin/env.properties`

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,17 +11,17 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl;
 
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
+import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator;
+import com.aliyun.polardbx.rpl.storage.RplStorage;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
 import lombok.extern.slf4j.Slf4j;
@@ -48,18 +47,39 @@ public class RplTaskEngine {
             System.setProperty(TASK_NAME, taskName);
 
             // spring context
-            log.info("Spring context booting");
+            log.info("Spring context loading");
             SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
             appContextBootStrap.boot();
-            log.info("Spring context botted");
+            log.info("Spring context loaded");
 
             if (!RuntimeLeaderElector.isLeader("RplTaskEngine_" + taskId)) {
                 log.error("another process is already running, exit");
                 return;
             }
 
-            RplTaskRunner taskRunner = new RplTaskRunner(Long.parseLong(taskId));
-            taskRunner.start();
+            MonitorManager.getInstance().startup();
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    log.info("## stop rpl task.");
+                    MonitorManager.getInstance().shutdown();
+                } catch (Throwable e) {
+                    log.warn("##something goes wrong when stopping rpl task.", e);
+                } finally {
+                    log.info("## rpl task is down.");
+                }
+            }));
+
+            // init storage
+            RplStorage.init();
+
+            RplTask task = DbTaskMetaManager.getTask(Long.parseLong(taskId));
+            if (task.getType().equals(ServiceType.REC_COMBINE.getValue())) {
+                FlashbackResultCombiner taskRunner = new FlashbackResultCombiner(Long.parseLong(taskId));
+                taskRunner.run();
+            } else {
+                RplTaskRunner taskRunner = new RplTaskRunner(Long.parseLong(taskId));
+                taskRunner.start();
+            }
 
             log.info("RplTaskEngine end");
         } catch (Throwable e) {

@@ -6,13 +6,14 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.13-SNAPSHOT</version>
+        <version>5.4.15-SNAPSHOT</version>
     </parent>
     <groupId>com.aliyun.polardbx</groupId>
     <artifactId>polardbx-cdc-dumper</artifactId>
     <url>http://maven.apache.org</url>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <license.dir>${project.parent.basedir}</license.dir>
     </properties>
     <dependencies>
         <dependency>
@@ -23,6 +24,11 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-canal</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-backup</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -46,7 +52,7 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-rpl</artifactId>
-            <version>5.4.13-SNAPSHOT</version>
+            <version>${project.version}</version>
             <scope>compile</scope>
         </dependency>
     </dependencies>

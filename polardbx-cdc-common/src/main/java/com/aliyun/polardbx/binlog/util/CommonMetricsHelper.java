@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,17 +11,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.util;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.aliyun.polardbx.binlog.CommonMetrics;
 import com.google.common.collect.Maps;
@@ -31,10 +21,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
- * @Author ShuGuang
- * @Description
- * @Date 2021/6/2 3:03 下午
+ * @author ShuGuang
  */
 @Slf4j
 public class CommonMetricsHelper {
@@ -68,7 +63,7 @@ public class CommonMetricsHelper {
                     DUMPER_S.put(ss[3], CommonMetrics.builder().key(ss[0]).desc(ss[4])
                         .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
                 }
-                if (ss[0].contains("_cdc_task_")) {
+                if (ss[0].contains("_task_")) {
                     TASK.put(ss[3], CommonMetrics.builder().key(ss[0]).desc(ss[4])
                         .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
                 }

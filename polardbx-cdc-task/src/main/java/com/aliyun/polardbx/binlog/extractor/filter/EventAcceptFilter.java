@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor.filter;
 
 import com.alibaba.fastjson.JSON;
@@ -34,6 +31,7 @@ import com.aliyun.polardbx.binlog.extractor.filter.rebuild.TableMetaChangeEvent;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.TableMetaChangeListener;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.TableMetaDelegate;
 import com.google.gson.Gson;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +40,9 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
+import static com.aliyun.polardbx.binlog.scheduler.model.TaskConfig.ORIGIN_TSO;
 
 /**
  * @author chengjin.lyf on 2020/7/15 4:40 下午
@@ -81,7 +82,8 @@ public class EventAcceptFilter implements LogEventFilter<LogEvent>, TableMetaCha
             return;
         }
         try {
-            PolarDbXTableMetaManager polarDbXTableMetaManager = new PolarDbXTableMetaManager(rc.getStorageInstId());
+            PolarDbXTableMetaManager polarDbXTableMetaManager =
+                new PolarDbXTableMetaManager(rc.getStorageInstId(), rc.getAuthenticationInfo());
             polarDbXTableMetaManager.init();
             if (rc.isRecovery()) {
                 logger.info("start rollback to " + rc.getStartPosition().getRtso());
@@ -89,7 +91,12 @@ public class EventAcceptFilter implements LogEventFilter<LogEvent>, TableMetaCha
             } else {
                 logger.info("start apply base to " + rc.getStartPosition().getRtso());
                 polarDbXTableMetaManager.applyBase(rc.getStartPosition(),
-                    JSON.parseObject(rc.getTopology(), LogicMetaTopology.class));
+                    buildTopology(ORIGIN_TSO, () -> {
+                        if (StringUtils.isBlank(RuntimeContext.getInitTopology())) {
+                            throw new PolardbxException("init topology can`t be empty");
+                        }
+                        return JSON.parseObject(RuntimeContext.getInitTopology(), LogicMetaTopology.class);
+                    }));
             }
             delegate = new TableMetaDelegate(polarDbXTableMetaManager);
             delegate.addTableChangeListener(this);

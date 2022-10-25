@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.applier;
 
 import com.alibaba.fastjson.JSON;
@@ -22,6 +19,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.domain.po.RplTablePosition;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
+import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
 import com.aliyun.polardbx.rpl.common.LogUtil;
 import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
 import com.aliyun.polardbx.rpl.common.RplConstants;
@@ -54,7 +52,7 @@ public class StatisticalProxy implements FlowLimiter {
 
     private final static int MAX_RETRY = 4;
     private final static int COUNTER_OUTDATE_SECONDS = 60;
-    private final static int HEARTBEAT_OUTDATE_SECONDS = 120;
+    private final static int HEARTBEAT_OUTDATE_SECONDS = 300;
 
     public final static String INTERVAL_1M = "oneMinute";
 
@@ -82,6 +80,7 @@ public class StatisticalProxy implements FlowLimiter {
     private volatile FlowLimiter limiter;
 
     private Map<String, String> lastRunTablePositions = new HashMap<>();
+
     private static StatisticalProxy instance = new StatisticalProxy();
 
     private StatisticalProxy() {
@@ -109,6 +108,7 @@ public class StatisticalProxy implements FlowLimiter {
             applier = pipeline.getApplier();
             skipAllException = pipeline.getPipeLineConfig().isSkipException();
             applier.setSkipAllException(skipAllException);
+            applier.setSafeMode(pipeline.getPipeLineConfig().isSafeMode());
             tpsLimit = pipeline.getPipeLineConfig().getFixedTpsLimit();
             initFlowLimiter();
 
@@ -156,10 +156,11 @@ public class StatisticalProxy implements FlowLimiter {
     }
 
     private void checkPipelineConfig() {
-        RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
-        PipelineConfig config = JSON.parseObject(task.getPipelineConfig(), PipelineConfig.class);
+        RplTaskConfig taskConfig = DbTaskMetaManager.getTaskConfig(TaskContext.getInstance().getTaskId());
+        PipelineConfig config = JSON.parseObject(taskConfig.getPipelineConfig(), PipelineConfig.class);
         skipAllException = config.isSkipException();
         applier.setSkipAllException(skipAllException);
+        applier.setSafeMode(config.isSafeMode());
         if (this.tpsLimit != config.getFixedTpsLimit()) {
             this.tpsLimit = config.getFixedTpsLimit();
             initFlowLimiter();
@@ -176,7 +177,7 @@ public class StatisticalProxy implements FlowLimiter {
                 boolean result = applier.apply(Arrays.asList(event));
                 if (!result) {
                     log.error("stop because of the msg, " + event.toString());
-                    Runtime.getRuntime().halt(1);
+                    return false;
                 }
             }
         }
@@ -297,7 +298,7 @@ public class StatisticalProxy implements FlowLimiter {
             && System.currentTimeMillis() - lastEventTimestamp > HEARTBEAT_OUTDATE_SECONDS * 1000) {
             log.error("lastEventTimestamp: {} exceeds {} seconds, process exit", new Date(lastEventTimestamp),
                 HEARTBEAT_OUTDATE_SECONDS);
-            Runtime.getRuntime().halt(1);;
+            Runtime.getRuntime().halt(1);
         }
     }
 
@@ -325,7 +326,7 @@ public class StatisticalProxy implements FlowLimiter {
 
     private void flushInternal() {
         StatisticUnit unit = new StatisticUnit();
-        flushFields(unit, INTERVAL_1M, 1 * 60);
+        flushFields(unit, INTERVAL_1M, 60);
         unit.setSkipCounter(skipCounter.get());
         unit.setSkipExceptionCounter(skipExceptionCounter.get());
         unit.setPersistentMessageCounter(persistentMessageCounter.get());
@@ -342,7 +343,7 @@ public class StatisticalProxy implements FlowLimiter {
         RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
         if (task == null) {
             log.error("task has been deleted from db");
-            Runtime.getRuntime().halt(1);;
+            Runtime.getRuntime().halt(1);
         }
         if (task.getStatus() == TaskStatus.RUNNING.getValue()) {
             DbTaskMetaManager.updateTask(TaskContext.getInstance().getTaskId(),

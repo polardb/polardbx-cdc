@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.format.field;
 
 import com.alibaba.polardbx.druid.sql.SQLUtils;
@@ -50,10 +47,13 @@ public class MakeFieldFactory {
         case MYSQL_TYPE_MEDIUM_BLOB:
         case MYSQL_TYPE_TINY_BLOB:
         case MYSQL_TYPE_LONG_BLOB:
+            createField.setDefaultValue(null);
             return new BlobField(createField);
         case MYSQL_TYPE_GEOMETRY:
+            createField.setDefaultValue(null);
             return new GeometryField(createField);
         case MYSQL_TYPE_JSON: {
+            createField.setDefaultValue(null);
             return new JsonField(createField);
         }
         case MYSQL_TYPE_ENUM:
@@ -90,7 +90,7 @@ public class MakeFieldFactory {
         case MYSQL_TYPE_DATETIME2:
             return new Datetime2Field(createField);
         case MYSQL_TYPE_NULL:
-            return new NullField();
+            return NullField.INSTANCE;
         case MYSQL_TYPE_BIT:
             return new BitField(createField);
 

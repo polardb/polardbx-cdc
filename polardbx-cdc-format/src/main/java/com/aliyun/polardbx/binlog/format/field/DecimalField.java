@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,14 +11,16 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.format.field;
 
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 import org.apache.commons.lang3.StringUtils;
+
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * MYSQL_TYPE_NEWDECIMAL
@@ -55,47 +56,110 @@ public class DecimalField extends Field {
         }
     }
 
+    static int mod_by_pow10(int x, int p) {
+        // See div_by_pow10 for rationale.
+        switch (p) {
+        case 1:
+            return (x) % 10;
+        case 2:
+            return (x) % 100;
+        case 3:
+            return (x) % 1000;
+        case 4:
+            return (x) % 10000;
+        case 5:
+            return (x) % 100000;
+        case 6:
+            return (x) % 1000000;
+        case 7:
+            return (x) % 10000000;
+        case 8:
+            return (x) % 100000000;
+        default:
+            return x % powers10[p];
+        }
+    }
+
+    static int div_by_pow10(int x, int p) {
+  /*
+    GCC can optimize division by a constant to a multiplication and some
+    shifts, which is faster than dividing by a variable, even taking into
+    account the extra cost of the switch. It is also (empirically on a Skylake)
+    faster than storing the magic multiplier constants in a table and doing it
+    ourselves. However, since the code is much bigger, we only use this in
+    a few select places.
+
+    Note the use of unsigned, which is faster for this specific operation.
+  */
+        switch (p) {
+        case 0:
+            return (x) / 1;
+        case 1:
+            return (x) / 10;
+        case 2:
+            return (x) / 100;
+        case 3:
+            return (x) / 1000;
+        case 4:
+            return (x) / 10000;
+        case 5:
+            return (x) / 100000;
+        case 6:
+            return (x) / 1000000;
+        case 7:
+            return (x) / 10000000;
+        case 8:
+            return (x) / 100000000;
+        default:
+            return x / powers10[p];
+        }
+    }
+
     @Override
     public byte[] encode() {
         if (data == null) {
             return EMPTY;
         }
-
-        int mask = data.charAt(0) == '-' ? -1 : 0;
+        byte mask = 0;
+        if (data.charAt(0) == '-') {
+            mask = -1;
+            data = data.substring(1);
+        }
         int intg = precision - frac, intg0 = intg / DIG_PER_DEC1, frac0 = frac / DIG_PER_DEC1, intg0x =
             intg - intg0 * DIG_PER_DEC1, frac0x = frac - frac0 * DIG_PER_DEC1, isize0 =
             intg0 * SIZE_OF_INT32 + dig2bytes[intg0x], fsize0 = frac0 * SIZE_OF_INT32 + dig2bytes[frac0x];
 
         int intg1, intg1x, intg1x0, frac1, frac1x;
         int dot = data.indexOf(".");
+        int fromIntg, fromFrac;
         if (dot > 0) {
-            intg1 = dot;
+            fromIntg = dot;
+            fromFrac = data.length() - dot - 1;
         } else {
-            intg1 = data.length() / DIG_PER_DEC1;
+            fromIntg = data.length();
+            fromFrac = 0;
         }
-
-        int fromFrac = data.length() - intg1 - (dot > 0 ? 1 : 0);
+        intg1 = fromIntg / DIG_PER_DEC1;
+        intg1x = fromIntg - intg1 * DIG_PER_DEC1;
         frac1 = fromFrac / DIG_PER_DEC1;
         frac1x = fromFrac - frac1 * DIG_PER_DEC1;
-        intg1x = intg1 / DIG_PER_DEC1;
-        intg1x0 = intg1 - intg1x * DIG_PER_DEC1;
-        int csize = isize0;
-        int rsize = intg1x + dig2bytes[intg1x0];
-        byte[] buffer = new byte[isize0 + fsize0];
-
-        int offset = 0;
-
-        while (csize-- > rsize) {
-            buffer[offset++] = (byte) mask;
-        }
-
+        int isize1 = intg1 * SIZE_OF_INT32 + dig2bytes[intg1x];
         int fsize1 = frac1 * SIZE_OF_INT32 + dig2bytes[frac1x];
 
-        if (fsize0 < fsize1) {
-            frac1 = frac0;
-            frac1x = frac0x;
-            //truncate
-        } else if (fsize0 > fsize1 && frac1x > 0) {
+        List<String> decList = new ArrayList<>();
+        decList.add(data.substring(0, intg1x));
+        for (int i = intg1x; i < dot; i += DIG_PER_DEC1) {
+            decList.add(data.substring(i, i + DIG_PER_DEC1));
+        }
+        for (int i = 0; i < frac1; i++) {
+            int idx = i * DIG_PER_DEC1 + dot + 1;
+            decList.add(data.substring(idx, idx + DIG_PER_DEC1));
+        }
+        decList.add(data.substring(frac1 * DIG_PER_DEC1 + dot + 1));
+
+        ByteBuffer buffer = ByteBuffer.allocate(isize0 + fsize0);
+
+        if (fsize0 > fsize1 && frac1x > 0) {
             if (frac0 == frac1) {
                 frac1x = frac0x;
                 fsize0 = fsize1;
@@ -105,49 +169,45 @@ public class DecimalField extends Field {
             }
         }
 
-        if (intg0x > 0) {
-            String ns = data.substring(0, intg0x);
-            toBEByte(buffer, Long.valueOf(ns) ^ mask, dig2bytes[intg0x], offset);
-            offset += dig2bytes[intg0x];
-        }
-
-        if (intg1x < intg0) {
-            intg0 = intg1x;
-        }
-        int from = intg0x;
-        for (int i = 0; i < intg0; i++) {
-            String ns = data.substring(from, from + DIG_PER_DEC1);
-            from += DIG_PER_DEC1;
-            toBEByte(buffer, Long.valueOf(ns) ^ mask, 4, offset);
-            offset += 4;
-        }
-
-        // skip dot
-        from++;
-
-        for (int i = 0; i < frac0; i++) {
-            String ns = data.substring(from, Math.min(from + DIG_PER_DEC1, data.length()));
-            from += DIG_PER_DEC1;
-            toBEByte(buffer, Long.valueOf(ns) ^ mask, 4, offset);
-            offset += 4;
-        }
-
-        if (frac1x > 0) {
-            int x;
-            int i = dig2bytes[frac1x];
-            String ns = StringUtils.rightPad(data.substring(from), frac, "0");
-            x = Integer.valueOf(ns) ^ mask;
-            toBEByte(buffer, x, i, offset);
-            offset += i;
-        }
-        if (fsize0 > fsize1) {
-            while (fsize0-- > fsize1) {
-                buffer[offset++] = (byte) mask;
+        if (intg < fromIntg) {
+            throw new UnsupportedOperationException();
+        } else if (isize0 > isize1) {
+            while (isize0-- > isize1) {
+                buffer.put(mask);
             }
         }
-        buffer[0] ^= 0x80;
+
+        for (int i = 0; i < decList.size(); i++) {
+            String str = decList.get(i);
+            if (str.length() < DIG_PER_DEC1) {
+                if (i == 0) {
+                    toBEByte(buffer, Integer.parseInt(str) ^ mask, dig2bytes[intg1x]);
+                } else {
+                    int j = dig2bytes[frac1x];
+                    while (frac1x < frac0x && dig2bytes[frac1x] == j) {
+                        frac1x++;
+                    }
+                    int x = div_by_pow10(Integer.parseInt(StringUtils.rightPad(str, DIG_PER_DEC1, "0")),
+                        DIG_PER_DEC1 - frac1x) ^ mask;
+                    toBEByte(buffer, x,
+                        dig2bytes[frac1x]);
+                }
+            } else {
+                toBEByte(buffer, Integer.parseInt(str) ^ mask, SIZE_OF_INT32);
+            }
+        }
+
+        if (fsize0 >= fsize1) {
+            while (fsize0-- > fsize1 && buffer.hasRemaining()) {
+                buffer.put(mask);
+            }
+        } else {
+            throw new UnsupportedOperationException();
+        }
+        byte flag = buffer.get(0);
+        buffer.put(0, flag ^= 0x80);
         /* Check that we have written the whole decimal and nothing more */
-        return buffer;
+        return buffer.array();
     }
 
     @Override

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,12 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.system;
 
 import com.alibaba.polardbx.druid.sql.SQLUtils;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.BinlogParser;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.WriteRowsLogEvent;
@@ -28,6 +26,8 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_IGNORE_APPLY_ERROR;
 
 public class SystemDB {
 
@@ -108,7 +108,8 @@ public class SystemDB {
         + ") ENGINE=InnoDB DEFAULT CHARSET=utf8", DRDS_GLOBAL_TX_LOG);
 
     private SystemDB() {
-        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null);
+        MemoryTableMeta memoryTableMeta =
+            new MemoryTableMeta(null, DynamicApplicationConfig.getBoolean(META_DDL_IGNORE_APPLY_ERROR));
         memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_CDC_DDL_RECORD_TABLE, null);
         memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_CDC_INSTRUCTION_TABLE, null);
         memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_DRDS_GLOBAL_TX_LOG, null);

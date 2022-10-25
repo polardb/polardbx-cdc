@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,65 +11,81 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.storage;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.rocksdb.RocksDBException;
+import org.rocksdb.RocksIterator;
 import org.rocksdb.util.ByteUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PARALLEL_RESTORE_BATCH_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PARALLEL_RESTORE_ENABLE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PARALLEL_RESTORE_MAX_EVENT_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PARALLEL_RESTORE_PARALLELISM;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRACEID_DISORDER_IGNORE;
 
 /**
  * Created by ziyang.lb
  **/
 public class TxnBuffer {
+    public static final AtomicLong TOTAL_TXN_COUNT = new AtomicLong(0);
+    public static final AtomicLong TOTAL_TXN_PERSISTED_COUNT = new AtomicLong(0);
 
     private static final Logger logger = LoggerFactory.getLogger(TxnBuffer.class);
     private static final Logger traceIdLogger = LoggerFactory.getLogger("traceIdDisorderLogger");
     private static final AtomicLong sequenceGenerator = new AtomicLong(0L);
+    private static final int beginKeySubSequence = 1;
 
+    private final Repository repository;
     private final TxnKey txnKey;
     private final AtomicBoolean started;
     private final AtomicBoolean completed;
-    private final Repository repository;
-    private final AtomicBoolean shouldPersist;
-    private final AtomicBoolean hasPersistingData;
     private final Long txnBufferId;
-    private final AtomicLong persistedItemCount;
+    private final AtomicInteger subSequenceGenerator;
 
-    private List<TxnItemRef> refList;
-    private String lastTraceId;
-    private long lastPersistCheckTime;
-    private long lastPersistCheckMemSize;
+    private LinkedList<TxnItemRef> refList;
     private long memSize;
-    private byte[] beginKey;
+    private int itemSizeBeforeMerge;
+    private String lastTraceId;
+    private volatile boolean hasPersistingData;
+    private volatile boolean shouldPersist;
+    private volatile boolean restored;
 
     TxnBuffer(TxnKey txnKey, Repository repository) {
         this.txnKey = txnKey;
-        this.refList = new ArrayList<>();
+        this.refList = new LinkedList<>();
         this.started = new AtomicBoolean(false);
         this.completed = new AtomicBoolean(false);
         this.repository = repository;
-        this.shouldPersist = new AtomicBoolean(false);
-        this.hasPersistingData = new AtomicBoolean(false);
+        this.shouldPersist = false;
+        this.hasPersistingData = false;
         this.txnBufferId = nextSequence();
-        this.persistedItemCount = new AtomicLong(0L);
+        this.subSequenceGenerator = new AtomicInteger(beginKeySubSequence - 1);
         StorageMemoryLeakDectectorManager.getInstance().watch(this);
+        TOTAL_TXN_COUNT.incrementAndGet();
     }
 
     /**
@@ -87,17 +102,29 @@ public class TxnBuffer {
         if (!completed.compareAndSet(false, true)) {
             throw new PolardbxException("txn buffer has already completed, can't mark complete again.");
         }
+        itemSizeBeforeMerge = refList.size();
+    }
+
+    public synchronized boolean persist() {
+        if (!shouldPersist) {
+            persistPreviousItems();
+            shouldPersist = true;
+            TOTAL_TXN_PERSISTED_COUNT.incrementAndGet();
+            return true;
+        }
+        return false;
     }
 
     /**
-     * 关闭TxnBuffer，如果有持续化数据，删除数据
+     * 关闭TxnBuffer，如果有持久化数据，删除数据
      */
     void close() {
         StorageMemoryLeakDectectorManager.getInstance().unwatch(this);
-        if (hasPersistingData.get()) {
+        if (hasPersistingData) {
             if (repository.getDeleteMode() == DeleteMode.RANGE) {
                 try {
-                    repository.delRange(beginKey, buildTxnItemRefKey());
+                    byte[] beginKey = buildTxnItemRefKeyWithSubSequence(beginKeySubSequence);
+                    getRepoUnit().deleteRange(beginKey, peekNextTxnItemRefKey().getRight());
                 } catch (RocksDBException e) {
                     throw new PolardbxException("delete rang failed", e);
                 }
@@ -117,6 +144,21 @@ public class TxnBuffer {
             } else {
                 throw new PolardbxException("Invalid Delete Mode : " + repository.getDeleteMode());
             }
+        } else {
+            refList.forEach(r -> {
+                if (r.getTxnBuffer() == this) {
+                    try {
+                        r.delete();
+                    } catch (RocksDBException e) {
+                        throw new PolardbxException("delete txn item failed.", e);
+                    }
+                }
+            });
+        }
+
+        TOTAL_TXN_COUNT.decrementAndGet();
+        if (shouldPersist) {
+            TOTAL_TXN_PERSISTED_COUNT.decrementAndGet();
         }
     }
 
@@ -156,16 +198,19 @@ public class TxnBuffer {
         doAdd(txnItem);
     }
 
+    public boolean isPersisted() {
+        return shouldPersist;
+    }
+
     private void doAdd(TxnBufferItem txnItem) {
         //add to list && try persist
         TxnItemRef ref = new TxnItemRef(this, txnItem.getTraceId(), txnItem.getRowsQuery(),
-            txnItem.getEventType(), txnItem.getPayload(), txnItem.getByteStringPayload(), txnItem.getSchema(),
-            txnItem.getTable(), repository);
+            txnItem.getEventType(), txnItem.getPayload(), txnItem.getSchema(), txnItem.getTable());
 
-        refList.add(ref);
         memSize += txnItem.size();
-        tryPersist(ref);
         lastTraceId = txnItem.getTraceId();
+        tryPersist(ref, txnItem.size());
+        refList.add(ref);
 
         if (logger.isDebugEnabled()) {
             logger.debug("accept an item for txn buffer " + txnKey);
@@ -184,19 +229,70 @@ public class TxnBuffer {
             throw new PolardbxException("Buffer size should't be zero.");
         }
 
-        if (refList.get(0).getEventType() != LogEvent.TABLE_MAP_EVENT) {
+        if (refList.getFirst().getEventType() != LogEvent.TABLE_MAP_EVENT) {
             throw new PolardbxException("The first event is not table_map_event, but is "
-                + refList.get(0).getEventType() + ", and corresponding txn key is " + txnKey);
+                + refList.getFirst().getEventType() + ", and corresponding txn key is " + txnKey);
         }
 
-        if (other.refList.get(0).getEventType() != LogEvent.TABLE_MAP_EVENT) {
+        if (other.refList.getFirst().getEventType() != LogEvent.TABLE_MAP_EVENT) {
             throw new PolardbxException(
-                "The first event is not table_map_event, but is " + other.refList.get(0).getEventType()
+                "The first event is not table_map_event, but is " + other.refList.getFirst().getEventType()
                     + ", and corresponding txn key is " + txnKey);
         }
 
         this.refList = mergeTwoSortList(refList, other.refList);
         this.memSize += other.memSize;
+    }
+
+    public void restore() {
+        if (hasPersistingData && !restored) {
+            byte[] beginKey = buildTxnItemRefKeyWithSubSequence(beginKeySubSequence);
+            byte[] endKey = peekNextTxnItemRefKey().getRight();
+            List<Pair<byte[], byte[]>> repoList = getRepoUnit().getRange(beginKey, endKey, itemSizeBeforeMerge);
+            if (repoList.size() != itemSizeBeforeMerge) {
+                throw new PolardbxException(
+                    "list size from repository is not equal to sub sequence, [" + repoList.size() + ","
+                        + itemSizeBeforeMerge + "]");
+            }
+
+            int count = 0;
+            for (TxnItemRef txnItemRef : refList) {
+                if (txnItemRef.getTxnBuffer() == this) {
+                    try {
+                        Pair<byte[], byte[]> pair = repoList.get(count);
+                        txnItemRef.restore(pair.getKey(), pair.getValue());
+                        count++;
+                    } catch (Throwable t) {
+                        printErrorForRestore(repoList, count);
+                        throw t;
+                    }
+                }
+            }
+
+            if (count != repoList.size()) {
+                throw new PolardbxException(
+                    "txn item count in repository is not equal to which in memory, count in repository is " + repoList
+                        .size() + ", count in memory is " + count);
+            }
+
+            restored = true;
+        }
+    }
+
+    private void printErrorForRestore(List<Pair<byte[], byte[]>> repoList, int count) {
+        List<TxnItemRef> txnItemRefs = refList.stream().filter(i -> i.getTxnBuffer() == TxnBuffer.this)
+            .collect(Collectors.toList());
+        List<String> repoKeyList = repoList.stream()
+            .map(p -> new String(p.getKey())).collect(Collectors.toList());
+        List<String> refKeyList = txnItemRefs.stream()
+            .map(p -> new String(buildTxnItemRefKeyWithSubSequence(p.getSubKeySeq())))
+            .collect(Collectors.toList());
+
+        logger.error("meet fatal error when restore txn item, repository list size is {}, "
+                + "ref list size is {}, ref list size for this txn buffer is {}, current count is {},.",
+            repoList.size(), refList.size(), txnItemRefs.size(), count);
+        logger.error("key list for repository list is : " + JSONObject.toJSONString(repoKeyList, true));
+        logger.error("key list for txn item ref list is :" + JSONObject.toJSONString(refKeyList, true));
     }
 
     /**
@@ -208,7 +304,7 @@ public class TxnBuffer {
             return false;
         }
 
-        ArrayList<TxnItemRef> list = new ArrayList<>(index + 1);
+        LinkedList<TxnItemRef> list = new LinkedList<>();
         for (int i = 0; i < index; i++) {
             list.add(refList.get(i));
         }
@@ -218,15 +314,21 @@ public class TxnBuffer {
         return true;
     }
 
-    byte[] buildTxnItemRefKey() {
-        byte[] key = ByteUtil.bytes((txnKey.getTxnId() +
-            StringUtils.leftPad(txnBufferId.toString(), 19, "0") +
-            StringUtils.leftPad(nextSequence() + "", 19, "0")));
+    Pair<Integer, byte[]> buildNewTxnItemRefKey() {
+        int subSequence = nextSubSequence();
+        byte[] key = buildTxnItemRefKeyWithSubSequence(subSequence);
+        return Pair.of(subSequence, key);
+    }
 
-        if (beginKey == null) {
-            beginKey = key;
-        }
-        return key;
+    Pair<Integer, byte[]> peekNextTxnItemRefKey() {
+        int subSequence = subSequenceGenerator.get() + 1;
+        byte[] key = buildTxnItemRefKeyWithSubSequence(subSequence);
+        return Pair.of(subSequence, key);
+    }
+
+    byte[] buildTxnItemRefKeyWithSubSequence(int subSequence) {
+        return ByteUtil.bytes(StringUtils.leftPad(txnBufferId.toString(), 19, "0") +
+            StringUtils.leftPad(subSequence + "", 10, "0"));
     }
 
     /**
@@ -237,55 +339,81 @@ public class TxnBuffer {
      * 5. traceId全局有序场景下，按此排序算法输出的【所有item】仍然是全局有序的 </br>
      * 6. traceId单分片有序场景下，按此算法输出的【所有TABLE_MAP_EVENT】是全局有序的
      */
-    private List<TxnItemRef> mergeTwoSortList(List<TxnItemRef> aList, List<TxnItemRef> bList) {
-        int aLength = aList.size(), bLength = bList.size();
-        List<TxnItemRef> mergeList = new ArrayList<>();
+    private LinkedList<TxnItemRef> mergeTwoSortList(LinkedList<TxnItemRef> aList, LinkedList<TxnItemRef> bList) {
         String lastTraceId = "";
-        int i = 0, j = 0;
-        while (aLength > i && bLength > j) {
-            if (aList.get(i).getEventType() == LogEvent.TABLE_MAP_EVENT
-                && bList.get(j).getEventType() == LogEvent.TABLE_MAP_EVENT) {
-                if (aList.get(i).compareTo(bList.get(j)) > 0) {
-                    if (bList.get(j).getTraceId().equals(lastTraceId)) {
-                        bList.get(j).setRowsQuery("");
+        int aSize = aList.size();
+        int bSize = bList.size();
+        LinkedList<TxnItemRef> mergeList = new LinkedList<>();
+        Iterator<TxnItemRef> ai = aList.iterator();
+        Iterator<TxnItemRef> bi = bList.iterator();
+        TxnItemRef aItem = null;
+        TxnItemRef bItem = null;
+
+        while ((aItem != null || ai.hasNext()) && (bItem != null || bi.hasNext())) {
+            if (aItem == null) {
+                aItem = ai.next();
+            }
+            if (bItem == null) {
+                bItem = bi.next();
+            }
+
+            if (aItem.getEventType() == LogEvent.TABLE_MAP_EVENT
+                && bItem.getEventType() == LogEvent.TABLE_MAP_EVENT) {
+                if (aItem.compareTo(bItem) > 0) {
+                    if (bItem.getTraceId().equals(lastTraceId)) {
+                        bItem.clearRowsQuery();
                     } else {
-                        lastTraceId = bList.get(j).getTraceId();
+                        lastTraceId = bItem.getTraceId();
                     }
-                    mergeList.add(i + j, bList.get(j));
-                    j++;
+                    mergeList.add(bItem);
+                    bItem = null;
                 } else {
-                    if (aList.get(i).getTraceId().equals(lastTraceId)) {
-                        aList.get(i).setRowsQuery("");
+                    if (aItem.getTraceId().equals(lastTraceId)) {
+                        aItem.clearRowsQuery();
                     } else {
-                        lastTraceId = aList.get(i).getTraceId();
+                        lastTraceId = aItem.getTraceId();
                     }
-                    mergeList.add(i + j, aList.get(i));
-                    i++;
+                    mergeList.add(aItem);
+                    aItem = null;
                 }
             } else {
-                if (aList.get(i).getEventType() != LogEvent.TABLE_MAP_EVENT) {
-                    mergeList.add(i + j, aList.get(i));
-                    i++;
-                } else if (bList.get(j).getEventType() != LogEvent.TABLE_MAP_EVENT) {
-                    mergeList.add(i + j, bList.get(j));
-                    j++;
+                if (aItem.getEventType() != LogEvent.TABLE_MAP_EVENT) {
+                    mergeList.add(aItem);
+                    aItem = null;
+                } else if (bItem.getEventType() != LogEvent.TABLE_MAP_EVENT) {
+                    mergeList.add(bItem);
+                    bItem = null;
                 } else {
                     throw new PolardbxException("invalid merge status");
                 }
             }
         }
+
         // blist元素已排好序， alist还有剩余元素
-        while (aLength > i) {
-            mergeList.add(i + j, aList.get(i));
-            i++;
-        }
-        // alist元素已排好序， blist还有剩余元素
-        while (bLength > j) {
-            mergeList.add(i + j, bList.get(j));
-            j++;
+        if (aItem != null || ai.hasNext()) {
+            if (aItem != null) {
+                mergeList.add(aItem);
+            }
+            while (ai.hasNext()) {
+                mergeList.add(ai.next());
+            }
         }
 
-        assert mergeList.size() == aList.size() + bList.size();
+        // alist元素已排好序， blist还有剩余元素
+        if (bItem != null || bi.hasNext()) {
+            if (bItem != null) {
+                mergeList.add(bItem);
+            }
+            while (bi.hasNext()) {
+                mergeList.add(bi.next());
+            }
+        }
+
+        if (mergeList.size() != (aSize + bSize)) {
+            throw new PolardbxException(
+                "merge list size is incorrect : " + mergeList.size() + ", input first list size is "
+                    + aSize + ", input second list size is " + bSize);
+        }
         return mergeList;
     }
 
@@ -297,66 +425,81 @@ public class TxnBuffer {
         return sequence;
     }
 
-    private void tryPersist(TxnItemRef ref) {
+    private int nextSubSequence() {
+        int sequence = subSequenceGenerator.incrementAndGet();
+        if (sequence == Integer.MAX_VALUE) {
+            throw new PolardbxException("sub sequence exceed max value.");
+        }
+        return sequence;
+    }
+
+    private void tryPersist(TxnItemRef ref, int payloadSize) {
+        if (repository == null) {
+            return;
+        }
+
         if (!repository.isPersistOn()) {
             return;
         }
 
         if (repository.isForcePersist()) {
-            shouldPersist.set(true);
-        } else {
-            boolean origin = shouldPersist.get();
-            String switchToDiskReason = "";
-
-            if (ref.getPayloadSize() >= repository.getTxnItemPersistThreshold()) {
+            if (!shouldPersist) {
+                persistPreviousItems();
+                shouldPersist = true;
+                TOTAL_TXN_PERSISTED_COUNT.incrementAndGet();
+            }
+        } else if (!shouldPersist) {
+            if (payloadSize >= repository.getTxnItemPersistThreshold()) {
                 // 单个Event大小如果超过了指定阈值，则强制走KV存储
-                shouldPersist.set(true);
-                switchToDiskReason = "单个Event大小超过了指定阈值";
-                if (!origin && shouldPersist.get()) {
-                    logger.info("Txn Item size is greater than txnItemPersisThreshold,"
-                            + " txnKey is {},txnItemSize is {},txnItemPersisThreshold is {}.",
-                        txnKey, memSize, repository.getTxnItemPersistThreshold());
-                }
+                shouldPersist = true;
+                logger.info("Txn Item size is greater than txnItemPersistThreshold,"
+                        + " txnKey is {},txnItemSize is {},txnItemPersistThreshold is {}.",
+                    txnKey, memSize, repository.getTxnItemPersistThreshold());
+
             } else if (memSize >= repository.getTxnPersistThreshold()) {
                 // 单个事务大小如果超过了指定阈值，则强制走KV存储
-                shouldPersist.set(true);
-                switchToDiskReason = "单个Transaction大小超过了指定阈值";
-                if (!origin && shouldPersist.get()) {
-                    logger.info("Txn Buffer size is greater than txnPersisThreshold,"
-                            + " txnKey is {},txnBuffSize is {},txnPersisThreshold is {}.",
-                        txnKey, memSize, repository.getTxnPersistThreshold());
-                }
-            } else if (System.currentTimeMillis() - lastPersistCheckTime >= 20
-                || (memSize - lastPersistCheckMemSize) > 5 * 1024 * 1024) {
-                // 性能考虑，每20ms检测一次,如果没达到20ms，内存增长量超过了2M，则也强制检测一次
-                shouldPersist.set(repository.isReachPersistThreshold());
-                switchToDiskReason = shouldPersist.get() ? "内存使用率超过了阈值" : "";
-                lastPersistCheckTime = System.currentTimeMillis();
-                lastPersistCheckMemSize = memSize;
-            }
+                shouldPersist = true;
+                logger.info("Txn Buffer size is greater than txnPersistThreshold,"
+                        + " txnKey is {},txnBuffSize is {},txnPersisThreshold is {}.",
+                    txnKey, memSize, repository.getTxnPersistThreshold());
 
-            if (!origin && shouldPersist.get()) {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("Persisting mode is open for txn buffer : " + txnKey);
+            } else {
+                shouldPersist = repository.isReachPersistThreshold();
+                if (shouldPersist) {
+                    logger.info("Persisting mode is open for txn buffer : " + txnKey + ",caused by memory ratio.");
                 }
             }
 
-            if (origin && !shouldPersist.get()) {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("Persisting mode is shutdown for txn buffer : " + txnKey);
-                }
+            if (shouldPersist) {
+                persistPreviousItems();
+                TOTAL_TXN_PERSISTED_COUNT.incrementAndGet();
             }
         }
 
-        if (shouldPersist.get()) {
+        if (shouldPersist) {
             try {
-                hasPersistingData.set(true);
-                ref.persist();
-                persistedItemCount.incrementAndGet();
+                persistOneItem(ref);
             } catch (RocksDBException e) {
-                throw new PolardbxException("txn item persist error.");
+                throw new PolardbxException("txn item persist error.", e);
             }
         }
+    }
+
+    private void persistPreviousItems() {
+        //将历史item也进行持久化
+        refList.forEach(r -> {
+            try {
+                persistOneItem(r);
+            } catch (RocksDBException e) {
+                throw new PolardbxException("txn item persist error.", e);
+            }
+        });
+
+    }
+
+    private void persistOneItem(TxnItemRef ref) throws RocksDBException {
+        hasPersistingData = true;
+        ref.persist();
     }
 
     public TxnKey getTxnKey() {
@@ -365,6 +508,15 @@ public class TxnBuffer {
 
     public Iterator<TxnItemRef> iterator() {
         return refList.iterator();
+    }
+
+    public Iterator<TxnItemRef> parallelRestoreIterator() {
+        boolean enableParallelRestore = DynamicApplicationConfig.getBoolean(STORAGE_PARALLEL_RESTORE_ENABLE);
+        if (enableParallelRestore) {
+            return new ParallelRestoreIterator(refList);
+        } else {
+            return iterator();
+        }
     }
 
     public TxnItemRef getItemRef(int index) {
@@ -381,5 +533,178 @@ public class TxnBuffer {
 
     public long memSize() {
         return memSize;
+    }
+
+    public RepoUnit getRepoUnit() {
+        return repository.selectUnit(txnBufferId);
+    }
+
+    private static class ParallelRestoreIterator implements Iterator<TxnItemRef> {
+        private final static ThreadPoolExecutor EXECUTORS;
+
+        static {
+            int parallelism = DynamicApplicationConfig.getInt(STORAGE_PARALLEL_RESTORE_PARALLELISM);
+            EXECUTORS = new ThreadPoolExecutor(parallelism, parallelism, 30L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                new ThreadFactoryBuilder().setNameFormat("event-data-restore-thread-%d").build(),
+                new ThreadPoolExecutor.CallerRunsPolicy());
+            EXECUTORS.allowCoreThreadTimeOut(true);
+        }
+
+        private final List<TxnItemRef> txnItemRefList;
+        private final Iterator<TxnItemRef> iterator;
+        private final LinkedList<TxnItemRef> batchData;
+        private final int batchSize;
+        private final int maxEventSize;
+        private int index;
+
+        ParallelRestoreIterator(List<TxnItemRef> txnItemRefList) {
+            this.txnItemRefList = txnItemRefList;
+            this.iterator = txnItemRefList.iterator();
+            this.batchData = new LinkedList<>();
+            this.batchSize = DynamicApplicationConfig.getInt(STORAGE_PARALLEL_RESTORE_BATCH_SIZE);
+            this.maxEventSize = DynamicApplicationConfig.getInt(STORAGE_PARALLEL_RESTORE_MAX_EVENT_SIZE);
+            this.index = 0;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return index < txnItemRefList.size();
+        }
+
+        @Override
+        public TxnItemRef next() {
+            if (batchData.isEmpty() && iterator.hasNext()) {
+                while (iterator.hasNext()) {
+                    batchData.add(iterator.next());
+                    if (batchData.size() == batchSize) {
+                        break;
+                    }
+                }
+
+                List<Future<?>> futures = new LinkedList<>();
+                for (TxnItemRef ref : batchData) {
+                    if (!ref.isPersisted()) {
+                        continue;
+                    }
+                    futures.add(EXECUTORS.submit(() -> {
+                        try {
+                            byte[] key = ref.getTxnBuffer().buildTxnItemRefKeyWithSubSequence(ref.getSubKeySeq());
+                            byte[] value = ref.getTxnBuffer().getRepoUnit().get(key);
+                            if (value.length < maxEventSize) {
+                                ref.restore(key, value);
+                            }
+                        } catch (Throwable e) {
+                            throw new PolardbxException("restore error for txn item ref", e);
+                        }
+                    }));
+                }
+                futures.forEach(f -> {
+                    try {
+                        f.get();
+                    } catch (Throwable t) {
+                        throw new PolardbxException("wait restore error", t);
+                    }
+                });
+            }
+
+            index++;
+            return batchData.removeFirst();
+        }
+
+        @Override
+        public void remove() {
+            throw new UnsupportedOperationException("remove is unsupported");
+        }
+
+        @Override
+        public void forEachRemaining(Consumer<? super TxnItemRef> action) {
+            throw new UnsupportedOperationException("forEachRemaining is unsupported");
+        }
+    }
+
+    //只有在key是相邻状态时，才能发挥Iterator的优势，否则性能反而会更慢，暂时放在这里
+    private static class RestoreContext {
+        private final TxnBuffer txnBuffer;
+        private Iterator<TxnItemRef> refIterator;
+        private RocksIterator rocksIterator;
+        private int restoreCursor;
+
+        RestoreContext(TxnBuffer txnBuffer) {
+            this.txnBuffer = txnBuffer;
+            this.restoreCursor = 1;
+        }
+
+        void next(TxnItemRef ref) {
+            try {
+                if (rocksIterator == null) {
+                    byte[] beginKey = txnBuffer.buildTxnItemRefKeyWithSubSequence(beginKeySubSequence);
+                    byte[] endKey = txnBuffer.peekNextTxnItemRefKey().getRight();
+                    rocksIterator = txnBuffer.getRepoUnit().getIterator(beginKey, endKey);
+                    rocksIterator.seek(beginKey);
+                } else {
+                    rocksIterator.next();
+                }
+
+                //get data from rocksdb
+                if (!rocksIterator.isValid()) {
+                    throw new PolardbxException("rocks iterator has no data for subKeySeq " + ref.getSubKeySeq());
+                }
+                Pair<byte[], byte[]> pair = Pair.of(rocksIterator.key(), rocksIterator.value());
+
+                //do restore
+                ref.restore(pair.getLeft(), pair.getRight());
+            } catch (Throwable t) {
+                throw new PolardbxException("next restore failed ", t);
+            }
+        }
+
+        void tryRestoreNextBatch(int subKeySeq) {
+            if (refIterator == null) {
+                this.refIterator = txnBuffer.iterator();
+            }
+
+            if (subKeySeq < restoreCursor) {
+                return;
+            }
+            if (subKeySeq > restoreCursor) {
+                throw new PolardbxException("invalid restore status, input subKeySeq is " + subKeySeq +
+                    " , restoreCursor is" + restoreCursor);
+            }
+
+            Pair<Integer, byte[]> pair = txnBuffer.peekNextTxnItemRefKey();
+            if (pair.getLeft() == restoreCursor) {
+                return;
+            }
+
+            byte[] beginKey = txnBuffer.buildTxnItemRefKeyWithSubSequence(restoreCursor);
+            int end = restoreCursor + 200;
+            end = Math.min(end, pair.getLeft());
+            byte[] endKey = txnBuffer.buildTxnItemRefKeyWithSubSequence(end);
+            int count = end - restoreCursor;
+            List<Pair<byte[], byte[]>> repoList = txnBuffer.getRepoUnit().getRange(beginKey, endKey, count);
+            repoList.forEach(p -> {
+                TxnItemRef ref = null;
+                while (refIterator.hasNext()) {
+                    TxnItemRef temp = refIterator.next();
+                    if (temp.getTxnBuffer() == txnBuffer) {
+                        ref = temp;
+                        break;
+                    }
+                }
+                if (ref == null) {
+                    throw new PolardbxException("can`t find txn item ref for key " + new String(p.getLeft()));
+                }
+                ref.restore(p.getLeft(), p.getRight());
+            });
+
+            restoreCursor = end;
+        }
+
+        void close() {
+            if (rocksIterator != null) {
+                rocksIterator.close();
+            }
+        }
     }
 }

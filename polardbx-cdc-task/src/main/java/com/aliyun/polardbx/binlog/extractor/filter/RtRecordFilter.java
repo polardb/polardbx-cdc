@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,11 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor.filter;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.LogEventFilter;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
@@ -35,6 +34,11 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
     private ThreadRecorder recorder;
     private Thread c;
     private volatile boolean run;
+    private boolean recordCommit = false;
+
+    public RtRecordFilter() {
+        this.recordCommit = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EVENT_COMMITLOG);
+    }
 
     @Override
     public void handle(LogEvent event, HandlerContext context) throws Exception {
@@ -46,6 +50,11 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
         if (c == null) {
             c = Thread.currentThread();
         }
+        if (recordCommit) {
+            logger.info(
+                context.getRuntimeContext().getBinlogFile() + ":" + event.getLogPos() + ":" + event.getWhen() + ":"
+                    + event.getHeader().getType());
+        }
         recorder.doRecord(() -> context.doNext(event));
     }
 
@@ -55,19 +64,17 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
         run = true;
         while (run) {
             BinlogPosition position = context.getRuntimeContext().getStartPosition();
-            boolean isReady =
-                MultiStreamStartTsoWindow.getInstance().readyFoConsume(context.getRuntimeContext().getStorageInstId(),
-                    position.getRtso());
+            boolean isReady = MultiStreamStartTsoWindow.getInstance().readyFoConsume(
+                context.getRuntimeContext().getStorageInstId(), position.getRtso());
             if (isReady) {
-//                position.setRtso(MultiStreamStartTsoWindow.getInstance().getFilterTSO());
-//                logger.info("merge final tso : " + position.getRtso());
                 break;
             }
-            logger.warn("wait for all stream ready!");
             try {
                 Thread.sleep(TimeUnit.SECONDS.toMillis(5));
             } catch (InterruptedException e) {
-
+            }
+            if (logger.isDebugEnabled()) {
+                logger.debug("wait for all stream ready!");
             }
         }
     }

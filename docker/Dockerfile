@@ -2,8 +2,12 @@ FROM centos:7
 
 # Install essential utils
 RUN yum update -y && \
-    yum install sudo hostname telnet net-tools vim tree less file java-1.8.0-openjdk-devel mysql -y && \
-    yum clean all && rm -rf /var/cache/yum && rm -rf /var/tmp/yum-*
+    yum install sudo hostname telnet net-tools vim tree less file wget java-1.8.0-openjdk java-1.8.0-openjdk-devel crontabs -y && \
+    yum clean all && rm -rf /var/cache/yum && rm -rf /var/tmp/yum-* && \
+    wget https://repo.mysql.com//mysql80-community-release-el7-1.noarch.rpm && \
+    rpm -ivh mysql80-community-release-el7-1.noarch.rpm && \
+    rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2022 && \
+    yum install -y mysql
 
 # Create user "admin" and add it into sudo group
 RUN useradd -ms /bin/bash admin && \

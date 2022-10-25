@@ -1,3 +1,17 @@
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.alibaba.fastjson.JSONObject;
@@ -15,8 +29,10 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.FastSQLConstant;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,21 +42,23 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CHECK_CONSISTENCY_AFTER_EACH_APPLY;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_CHECK_FASTSQL_FORMAT_RESULT;
 import static com.aliyun.polardbx.binlog.util.FastSQLConstant.FEATURES;
 
 /**
  * created by ziyang.lb
  **/
+@Slf4j
 public class ConsistencyChecker {
 
     private static final Gson GSON = new GsonBuilder().create();
+    private static final JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+    private static final String cdcPhyTableName = getCdcPhyTableName();
 
-    private final JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
     private final TopologyManager topologyManager;
     private final PolarDbXLogicTableMeta polarDbXLogicTableMeta;
     private final PolarDbXStorageTableMeta polarDbXStorageTableMeta;
     private final PolarDbXTableMetaManager polarDbXTableMetaManager;
-    private final String cdcPhyTableName;
     private final String storageInstId;
 
     public ConsistencyChecker(TopologyManager topologyManager, PolarDbXLogicTableMeta polarDbXLogicTableMeta,
@@ -51,7 +69,28 @@ public class ConsistencyChecker {
         this.polarDbXStorageTableMeta = polarDbXStorageTableMeta;
         this.polarDbXTableMetaManager = polarDbXTableMetaManager;
         this.storageInstId = storageInstId;
-        this.cdcPhyTableName = getCdcPhyTableName();
+    }
+
+    private static String getCdcPhyTableName() {
+        List<Map<String, Object>> list = polarxTemplate.queryForList("show topology from __cdc__.__cdc_ddl_record__");
+        return list.get(0).get("TABLE_NAME").toString();
+    }
+
+    private static String renameTo(String sql) {
+        if (StringUtils.isNotBlank(sql)) {
+            SQLStatementParser parser =
+                SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FEATURES);
+            SQLStatement stmt = parser.parseStatementList().get(0);
+
+            if (stmt instanceof MySqlRenameTableStatement) {
+                MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) stmt;
+                for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
+                    //CN只支持一次Rename一张表，直接返回即可
+                    return SQLUtils.normalize(item.getTo().getSimpleName());
+                }
+            }
+        }
+        return "";
     }
 
     public void checkLogicAndPhysicalConsistency(String tso, DDLRecord record) {
@@ -66,7 +105,29 @@ public class ConsistencyChecker {
                 String tableName = renameTo(record.getDdlSql());
                 compareForOneLogicTable(tso, record.getSchemaName(), tableName, r != null);
             } else if (StringUtils.isNotEmpty(record.getTableName())) {
+                //针对online modify ddl，打标之后，物理表和逻辑表的结构会出现不一致，但最终是一致的(打标之后物理表会有清理动作)，此处跳过判断
+                if (isAlterWithOMC(record.getDdlSql())) {
+                    log.info("skip consistency check for alter ddl sql with omc");
+                    return;
+                }
                 compareForOneLogicTable(tso, record.getSchemaName(), record.getTableName(), r != null);
+            }
+
+            boolean checkFastsql = DynamicApplicationConfig.getBoolean(META_CHECK_FASTSQL_FORMAT_RESULT);
+
+            String reformatDDL = "";
+            try {
+                List<SQLStatement> statements =
+                    SQLUtils.parseStatements(record.getDdlSql(), DbType.mysql, FastSQLConstant.FEATURES);
+                reformatDDL = statements.get(0).toString();
+                SQLUtils.parseStatements(reformatDDL, DbType.mysql, FastSQLConstant.FEATURES);
+            } catch (Exception e) {
+                log.error("org ddl : " + record.getDdlSql());
+                log.error("after reformat ddl : " + reformatDDL);
+                log.error("reformat parse DDL failed  : ", e);
+                if (checkFastsql) {
+                    throw new PolardbxException(e);
+                }
             }
         }
     }
@@ -171,6 +232,10 @@ public class ConsistencyChecker {
         }
     }
 
+    private boolean isAlterWithOMC(String sql) {
+        return StringUtils.contains(sql.toLowerCase(), "ALGORITHM=OMC".toLowerCase());
+    }
+
     private void compareLogicWithPhysicalTable(String tso, String logicSchemaName, String logicTableName,
                                                String phySchemaName, String phyTableName, boolean createPhyIfNotExist) {
         //get table meta
@@ -260,27 +325,5 @@ public class ConsistencyChecker {
             }
         }
         return result;
-    }
-
-    private String getCdcPhyTableName() {
-        List<Map<String, Object>> list = polarxTemplate.queryForList("show topology from __cdc__.__cdc_ddl_record__");
-        return list.get(0).get("TABLE_NAME").toString();
-    }
-
-    private static String renameTo(String sql) {
-        if (StringUtils.isNotBlank(sql)) {
-            SQLStatementParser parser =
-                SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FEATURES);
-            SQLStatement stmt = parser.parseStatementList().get(0);
-
-            if (stmt instanceof MySqlRenameTableStatement) {
-                MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) stmt;
-                for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
-                    //CN只支持一次Rename一张表，直接返回即可
-                    return SQLUtils.normalize(item.getTo().getSimpleName());
-                }
-            }
-        }
-        return "";
     }
 }

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.core.ddl;
 
 /**
@@ -29,14 +26,16 @@ public class ThreadRecorder {
     private volatile long rt;
     private String position;
     private STATE state;
-
     private String binlogFile;
     private long logPos;
     private long when;
-
-    private String commitSizeChange;
-
+    private String queuedTransSizeInSorter;
+    private String firstTransInSorter;
+    private String firstTransXidInSorter;
     private String storageInstanceId;
+    private long mergeSourceQueueSize;
+    private long mergeSourcePassCount;
+    private long mergeSourcePollCount;
     private volatile long netIn = 0;
 
     public ThreadRecorder(String storageInstanceId) {
@@ -139,12 +138,52 @@ public class ThreadRecorder {
         this.netIn = 0;
     }
 
-    public String getCommitSizeChange() {
-        return commitSizeChange;
+    public String getQueuedTransSizeInSorter() {
+        return queuedTransSizeInSorter;
     }
 
-    public void setCommitSizeChange(String commitSizeChange) {
-        this.commitSizeChange = commitSizeChange;
+    public void setQueuedTransSizeInSorter(String queuedTransSizeInSorter) {
+        this.queuedTransSizeInSorter = queuedTransSizeInSorter;
+    }
+
+    public String getFirstTransInSorter() {
+        return firstTransInSorter;
+    }
+
+    public void setFirstTransInSorter(String firstTransInSorter) {
+        this.firstTransInSorter = firstTransInSorter;
+    }
+
+    public String getFirstTransXidInSorter() {
+        return firstTransXidInSorter;
+    }
+
+    public void setFirstTransXidInSorter(String firstTransXidInSorter) {
+        this.firstTransXidInSorter = firstTransXidInSorter;
+    }
+
+    public long getMergeSourceQueueSize() {
+        return mergeSourceQueueSize;
+    }
+
+    public void setMergeSourceQueueSize(long mergeSourceQueueSize) {
+        this.mergeSourceQueueSize = mergeSourceQueueSize;
+    }
+
+    public long getMergeSourcePassCount() {
+        return mergeSourcePassCount;
+    }
+
+    public void setMergeSourcePassCount(long mergeSourcePassCount) {
+        this.mergeSourcePassCount = mergeSourcePassCount;
+    }
+
+    public long getMergeSourcePollCount() {
+        return mergeSourcePollCount;
+    }
+
+    public void setMergeSourcePollCount(long mergeSourcePollCount) {
+        this.mergeSourcePollCount = mergeSourcePollCount;
     }
 
     @Override

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.MarkType;
@@ -33,6 +30,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.util.zip.CRC32;
 
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.ROWS_QUERY_LOG_EVENT;
@@ -51,27 +49,41 @@ public class BinlogFile {
 
     private File file;
     private RandomAccessFile raf;
+    private FileChannel fileChannel;
     private CRC32 crc32;
     private ByteBuffer writeBuffer;
     private long lastFlushTime;
+    private long filePointer;//FileChannel的position()方法频繁调用的话有严重的性能问题，所以在内存中维护一个指针
     private int seekBufferSize;
 
     private Long logBegin;
     private Long logEnd;
 
-    public BinlogFile(File file, String mode, int writeBufferSize, int seekBufferSize) throws FileNotFoundException {
+    public BinlogFile(File file, String mode, int writeBufferSize, int seekBufferSize, boolean useDirectByteBuffer)
+        throws FileNotFoundException {
+        this.checkMode(mode);
         this.file = file;
         this.raf = new RandomAccessFile(file, mode);
+        this.fileChannel = raf.getChannel();
         this.crc32 = new CRC32();
-        this.writeBuffer = ByteBuffer.allocate(writeBufferSize);
+        if ("rw".equals(mode)) {
+            this.writeBuffer = useDirectByteBuffer ? ByteBuffer.allocateDirect(writeBufferSize)
+                : ByteBuffer.allocate(writeBufferSize);
+        }
         this.seekBufferSize = seekBufferSize * 1024 * 1024;//外部传过来的参数为单位为M，需要转化为字节
     }
 
     public void flush() throws IOException {
+        if (writeBuffer == null) {
+            return;
+        }
         if (writeBuffer.position() > 0) {
-            log.debug("binlog write payload {}[{}->{}]", file.getName(), raf.getFilePointer(),
-                raf.getFilePointer() + writeBuffer.position());
-            raf.write(writeBuffer.array(), 0, writeBuffer.position());
+            writeBuffer.flip();
+            long size = writeBuffer.limit() - writeBuffer.position();
+            while (writeBuffer.hasRemaining()) {
+                fileChannel.write(writeBuffer);
+            }
+            filePointer += size;
         }
         writeBuffer.clear();
         lastFlushTime = System.currentTimeMillis();
@@ -90,38 +102,39 @@ public class BinlogFile {
     }
 
     /**
-     * 当前正在读取或者写入的文件位置(不包含write buffer)
+     * 当前正在读取或者写入的文件位置
      */
-    public long position() throws IOException {
-        return raf.getFilePointer();
+    public long filePointer() {
+        return filePointer;
     }
 
     /**
-     * 文件的实际长度(不包含write buffer)
+     * 文件的实际长度，一定大于等于position()
      */
-    public long length() throws IOException {
+    public long fileSize() throws IOException {
         return raf.length();
     }
 
     /**
-     * 已经写入文件的字节数，包含已经写入缓冲区但还未写入文件的字节
+     * 对文件进行截断处理
      */
-    public long writeSize() throws IOException {
-        return raf.getFilePointer() + writeBuffer.position();
+    public void truncate(long size) throws IOException {
+        fileChannel.truncate(size);
     }
 
     /**
-     * 定位到文件的某个位置
+     * 已经写入的字节数，包含已经写入write buffer缓冲区但还未进行flush的数据
      */
-    public void seek(long pos) throws IOException {
-        raf.seek(pos);
+    public long writePointer() {
+        return filePointer + writeBuffer.position();
     }
 
     /**
      * 定位到文件最后的位置
      */
     public void seekLast() throws IOException {
-        raf.seek(length());
+        fileChannel.position(raf.length());
+        filePointer = raf.length();
     }
 
     /**
@@ -131,40 +144,35 @@ public class BinlogFile {
         return file.getName();
     }
 
-    /**
-     * 跳过n个字节
-     */
-    public void skipBytes(int n) throws IOException {
-        raf.skipBytes(n);
-    }
-
-    /**
-     * 跳过文件头
-     */
-    public void skipHeader() throws IOException {
-        assert raf.getFilePointer() == 0;
-        raf.seek(4);
-    }
-
     /*
      * 文件头，四个字节
      */
     public void writeHeader() throws IOException {
-        raf.write(BINLOG_FILE_HEADER);
+        fileChannel.write(ByteBuffer.wrap(BINLOG_FILE_HEADER));
+        filePointer += BINLOG_FILE_HEADER.length;
     }
 
     /**
      * 无需更新事件信息，直接写入binlog文件
      */
-    public void writeEventWithoutUpdate(byte[] data, int offset, int length) throws IOException {
+    public void writeEventForSync(byte[] data, int offset, int length) throws IOException {
         assert data.length >= length;
-        long startTime = System.currentTimeMillis();
 
         ByteArray array = new ByteArray(data, offset, length);
         array.skip(13);
         long thatPosition = array.readLong(4);
-        long thisPosition = raf.getFilePointer() + writeBuffer.position() + length;
+        long thisPosition = filePointer + writeBuffer.position() + length;
+        checkPosition(thatPosition, thisPosition);
 
+        writeInternal(data, offset, length);
+        Metrics.get().incrementTotalWriteEventCount();
+    }
+
+    public void writeData(byte[] data, int offset, int length) throws IOException {
+        writeInternal(data, offset, length);
+    }
+
+    public void checkPosition(long thatPosition, long thisPosition) {
         if (thisPosition != thatPosition) {
             // 4个字节能表示的最大的无符号数为4294967295，当thisPosition超过这个最大值之后，会出现this和that不相等的情况
             // 因此，需要对this进行一次编码和解码，然后再进行对比
@@ -181,52 +189,19 @@ public class BinlogFile {
                         thatPosition));
             }
         }
-
-        writeInternal(data, offset, length);
-
-        if (log.isDebugEnabled()) {
-            log.debug("write {} {} {}", data, offset, length);
-        }
-
-        long endTime = System.currentTimeMillis();
-        Metrics.get().incrementTotalWriteTime(endTime - startTime);
-        Metrics.get().incrementTotalWriteEventCount();
-        Metrics.get().incrementTotalWriteBytes(length);
     }
 
     /*
      * 更新binlog event的position信息，并写入文件
      */
     public void writeEvent(byte[] data, int offset, int length, boolean updateChecksum) throws IOException {
-        assert data.length >= length;
-        long startTime = System.currentTimeMillis();
-
         // 更新checksum
-        long position = raf.getFilePointer() + writeBuffer.position() + length;
-        EventGenerator.updatePos(data, position);
         if (updateChecksum) {
             EventGenerator.updateChecksum(data, offset, length);
         }
 
         writeInternal(data, offset, length);
-
-        if (log.isDebugEnabled()) {
-            log.debug("write {} {} {}", data, offset, length);
-        }
-
-        long endTime = System.currentTimeMillis();
-        Metrics.get().incrementTotalWriteTime(endTime - startTime);
         Metrics.get().incrementTotalWriteEventCount();
-        Metrics.get().incrementTotalWriteBytes(length);
-
-    }
-
-    public void readBytes(byte[] bytes) throws IOException {
-        raf.read(bytes);
-    }
-
-    public void readBytes(byte[] bytes, int off, int length) throws IOException {
-        raf.read(bytes, off, length);
     }
 
     /**
@@ -239,27 +214,31 @@ public class BinlogFile {
 
     public void close() throws IOException {
         flush();
-        raf.close();
+        if (fileChannel != null) {
+            fileChannel.close();
+        }
+        if (raf != null) {
+            raf.close();
+        }
         log.info("binlog file successfully closed.");
     }
 
     private SeekResult seekFirst() {
         long startTime = System.currentTimeMillis();
         try {
-            final long fileLength = length();
+            final long fileLength = fileSize();
             long seekEventCount = 0;
             long seekPosition = 0;
 
             String lastTso = "";
             Byte lastEventType = null;
             Long lastEventTimestamp = null;
-            boolean isFirst = true;
 
             if (fileLength > 4) {
                 long nextEventAbsolutePos = 4;
+                int seekBufferSize = 4 * 1024;//seek first 不需要很大内存
                 int bufSize = seekBufferSize > fileLength ? (int) fileLength : seekBufferSize;
                 do {
-
                     RandomAccessFile tempRaf = null;
                     try {
                         ByteBuffer buffer = ByteBuffer.allocate(bufSize);
@@ -293,9 +272,12 @@ public class BinlogFile {
 
             }
 
-            raf.seek(StringUtils.isBlank(lastTso) ? 0 : seekPosition);
-            log.info("seek start tso cost time:" + (System.currentTimeMillis() - startTime) + "ms, skipped event count:"
-                + seekEventCount);
+            long pos = StringUtils.isBlank(lastTso) ? 0 : seekPosition;
+            fileChannel.position(pos);
+            filePointer = pos;
+            log.info(
+                "seek start tso cost time:" + (System.currentTimeMillis() - startTime) + "ms, skipped event count:"
+                    + seekEventCount);
 
             return new SeekResult(lastTso, lastEventType, lastEventTimestamp);
         } catch (IOException e) {
@@ -308,7 +290,7 @@ public class BinlogFile {
     private SeekResult seekLastTsoV2() {
         long startTime = System.currentTimeMillis();
         try {
-            final long fileLength = length();
+            final long fileLength = fileSize();
             long seekEventCount = 0;
             long seekPosition = 0;
 
@@ -329,6 +311,12 @@ public class BinlogFile {
                         tempRaf.getChannel().read(buffer, nextEventAbsolutePos);
                         buffer.flip();
 
+                        //如果刚刚读取的buffer的remaining小于event header的长度，说明对文件已经读取完，直接break
+                        if (buffer.hasRemaining() && buffer.remaining() < 19 &&
+                            nextEventAbsolutePos + buffer.remaining() >= fileLength) {
+                            break;
+                        }
+
                         int nextEventRelativePos = buffer.position();
                         while (buffer.hasRemaining() && buffer.remaining() >= 19) {
                             lastEventTimestamp = readInt32(buffer);//read timestamp
@@ -342,8 +330,10 @@ public class BinlogFile {
                             nextEventRelativePos += eventSize;
 
                             if (nextEventRelativePos > buffer.limit()) {
-                                // 如果当前这个Event是ROWS_QUERY_LOG_EVENT，则不能直接跳过，需要将nextEventAbsolutePos进行回调后再break
-                                if (lastEventType == ROWS_QUERY_LOG_EVENT || containsTableId(lastEventType)) {
+                                // 如果当前这个Event是ROWS_QUERY_LOG_EVENT，则不能直接跳过，需要将nextEventAbsolutePos进行回调后再break，
+                                // 但保证nextEventAbsolutePos<fileLength，否则会有死循环问题
+                                if ((lastEventType == ROWS_QUERY_LOG_EVENT || containsTableId(lastEventType))
+                                    && nextEventAbsolutePos < fileLength) {
                                     nextEventAbsolutePos -= eventSize;
                                 }
                                 break;
@@ -397,7 +387,9 @@ public class BinlogFile {
                 }
             }
 
-            raf.seek(StringUtils.isBlank(lastTso) ? 0 : seekPosition);
+            long pos = StringUtils.isBlank(lastTso) ? 0 : seekPosition;
+            fileChannel.position(pos);
+            filePointer = pos;
             log.info("seek last tso cost time:" + (System.currentTimeMillis() - startTime) + "ms, skipped event count:"
                 + seekEventCount);
 
@@ -408,39 +400,23 @@ public class BinlogFile {
     }
 
     private void writeInternal(byte[] data, int offset, int length) throws IOException {
-        if (writeBuffer.remaining() < length) {
-            if (log.isDebugEnabled()) {
-                log.warn(
-                    "force flushing write buffer because remaining space is not enough, remaining space is {}, write data length is {}.",
-                    writeBuffer.remaining(),
-                    length);
-            }
+        while (writeBuffer.remaining() < length) {
+            int n = writeBuffer.remaining();
+            writeBuffer.put(data, offset, n);
+            offset += n;
+            length -= n;
             flush();
-            Metrics.get().incrementTotalForceFlushWriteCount();
-
-            assert (writeBuffer.remaining() == writeBuffer.capacity());
-            if (writeBuffer.remaining() < length) {
-                log.info("write data length [{}] is greater than write buffer capacity [{}].",
-                    length,
-                    writeBuffer.remaining());
-                raf.write(data, offset, length);
-            } else {
-                writeBuffer.put(data, offset, length);
-            }
-        } else {
-            writeBuffer.put(data, offset, length);
         }
+        writeBuffer.put(data, offset, length);
+        if (writeBuffer.remaining() == 0) {
+            flush();
+        }
+        Metrics.get().incrementTotalWriteBytes(length);
     }
 
     private long readInt32(ByteBuffer buffer) {
         return ((long) (0xff & buffer.get())) | ((long) (0xff & buffer.get()) << 8) |
             ((long) (0xff & buffer.get()) << 16) | ((long) (0xff & buffer.get()) << 24);
-    }
-
-    private String readString(byte length) throws IOException {
-        byte[] bytes = new byte[length];
-        raf.read(bytes);
-        return new String(bytes);
     }
 
     private String readString(long length, ByteBuffer buffer) throws IOException {
@@ -452,6 +428,12 @@ public class BinlogFile {
     private long readTableId(ByteBuffer buffer) {
         int length = getTableIdLength();
         return readLongByLength(buffer, length);
+    }
+
+    private void checkMode(String mode) {
+        if (!"rw".equals(mode) && !"r".equals(mode)) {
+            throw new PolardbxException("invalid mode " + mode);
+        }
     }
 
     public long readLongByLength(ByteBuffer buffer, int length) {

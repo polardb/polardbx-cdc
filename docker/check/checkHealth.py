@@ -14,7 +14,7 @@ port='3306'
 if port is None or port=='':
     print "port not provided"
     sys.exit(2)
-# just ping 
+# just ping
 status,output = commands.getstatusoutput("MYSQL_BIN=$(which mysql);$MYSQL_BIN -h127.0.0.1 -P%s -e 'set names utf8'" % port)
 if status != 0 or 'ERROR' in output:
     print "Service down."
@@ -22,3 +22,4 @@ if status != 0 or 'ERROR' in output:
 
 print "Service is up !"
 sys.exit(0)
+Footer

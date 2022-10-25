@@ -12,10 +12,16 @@
         </commentGenerator>
 
         <!-- database connection -->
+        <!--        <jdbcConnection driverClass="com.mysql.jdbc.Driver"-->
+        <!--                        connectionURL="jdbc:mysql://11.158.129.153:3306?useUnicode=true&amp;characterEncoding=UTF-8"-->
+        <!--                        userId="diamond"-->
+        <!--                        password="diamond1qaz@2wsx">-->
+        <!--        </jdbcConnection>-->
         <jdbcConnection driverClass="com.mysql.jdbc.Driver"
-                        connectionURL="jdbc:mysql://127.0.0.1:3306?useUnicode=true&amp;characterEncoding=UTF-8"
+                        connectionURL="jdbc:mysql://11.158.129.153:3306"
                         userId="diamond"
                         password="diamond1qaz@2wsx">
+            <property name="useInformationSchema" value="true"/>
         </jdbcConnection>
 
         <javaTypeResolver>
@@ -54,24 +60,39 @@
         <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_storage_history" domainObjectName="StorageHistoryInfo"/>-->
         <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_system_config" domainObjectName="SystemConfigInfo"/>-->
         <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_schedule_history" domainObjectName="BinlogScheduleHistory"/>-->
-        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_service" domainObjectName="RplService">-->
-        <!--                <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
-        <!--                </table>-->
-        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_task" domainObjectName="RplTask">-->
-        <!--                    <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
-        <!--                </table>-->
-        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_state_machine" domainObjectName="RplStateMachine">-->
-        <!--                <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
-        <!--                </table>-->
-        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_ddl" domainObjectName="RplDdl">-->
-        <!--                <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
-        <!--                </table>-->
-        <!--                <table schema="polardbx_meta_db_polardbx" tableName="rpl_table_position" domainObjectName="RplTablePosition">-->
-        <!--                    <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
-        <!--                </table>-->
-        <!--        <table schema="polardbx_meta_db_polardbx" tableName="node_info" domainObjectName="PolarxCNodeInfo"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="rpl_service" domainObjectName="RplService">-->
+        <!--        <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--        </table>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="rpl_task" domainObjectName="RplTask">-->
+        <!--            <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--        </table>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="rpl_state_machine" domainObjectName="RplStateMachine">-->
+        <!--        <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--        </table>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="rpl_db_full_position" domainObjectName="RplDbFullPosition">-->
+        <!--        <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--        </table>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="rpl_ddl" domainObjectName="RplDdl">-->
+        <!--        <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--        </table>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="rpl_table_position" domainObjectName="RplTablePosition">-->
+        <!--            <generatedKey column="id" sqlStatement="MySql" identity="true"/>-->
+        <!--        </table>-->
+                <table schema="polardbx_meta_db_polardbx" tableName="rpl_task_config" domainObjectName="RplTaskConfig">
+                    <generatedKey column="id" sqlStatement="MySql" identity="true"/>
+                </table>
 
-        <table schema="polardbx_meta_db_polardbx" tableName="binlog_logic_meta_history"
-               domainObjectName="BinlogLogicMetaHistory"/>
+<!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_phy_ddl_hist_clean_point"-->
+<!--               domainObjectName="BinlogPhyDdlHistCleanPoint"/>-->
+
+        <!--<table schema="polardbx_meta_db_polardbx" tableName="node_info" domainObjectName="PolarxCNodeInfo">-->
+        <!--</table>-->
+        <!--<table schema="polardbx_meta_db_polardbx" tableName="user_priv" domainObjectName="UserPriv">-->
+        <!--</table>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="validation_task" domainObjectName="ValidationTask"><generatedKey column="id" sqlStatement="MySql" identity="true"/></table>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="binlog_env_config_history" domainObjectName="BinlogEnvConfigHistory"/>-->
+        <!--        <table schema="polardbx_meta_db_polardbx" tableName="validation_diff" domainObjectName="ValidationDiff"/>-->
+
+
     </context>
 </generatorConfiguration>

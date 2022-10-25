@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.binlog;
 
 import com.aliyun.polardbx.binlog.canal.HandlerEvent;
@@ -288,6 +285,9 @@ public abstract class LogEvent implements HandlerEvent {
     public static final int MYSQL_TYPE_TIMESTAMP2 = 17;
     public static final int MYSQL_TYPE_DATETIME2 = 18;
     public static final int MYSQL_TYPE_TIME2 = 19;
+    public static final int MYSQL_TYPE_TYPED_ARRAY = 20;
+    public static final int MYSQL_TYPE_INVALID = 243;
+    public static final int MYSQL_TYPE_BOOL = 244;
     public static final int MYSQL_TYPE_JSON = 245;
     public static final int MYSQL_TYPE_NEWDECIMAL = 246;
     public static final int MYSQL_TYPE_ENUM = 247;

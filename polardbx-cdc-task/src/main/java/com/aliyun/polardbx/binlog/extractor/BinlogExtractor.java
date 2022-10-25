@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,12 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.ServerConfigUtil;
@@ -52,6 +50,9 @@ import java.util.List;
 import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.ASSIGNED_DN_IP;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RDS_BID;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RDS_UID;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_ASSINGED_HOST;
 
 /**
  * @author chengjin.lyf on 2020/7/10 6:59 下午
@@ -63,35 +64,33 @@ public class BinlogExtractor implements Extractor {
     private static final String QUERY_VIP_STORAGE =
         "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";
     private static final String QUERY_STORAGE_LIMIT_1 =
-        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' and xport <> -1 limit 1";
+        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
     private static final String QUERY_CDC_INFO =
         "select d.phy_db_name from db_group_info d inner join group_detail_info g on d.group_name = g.group_name where storage_inst_id = '%s';";
     private static final String QUERY_FOR_VERSION = "select version()";
-
     private static final String QUERY_START_CMD = "select tso from binlog_logic_meta_history order by id asc limit 1";
 
+    private static String cnVersion = getCnVersion();
+
     private AuthenticationInfo authenticationInfo;
-    private LogEventHandler logEventHandler;
-    private String version;
+    private LogEventHandler<?> logEventHandler;
     private Storage storage;
-    private HashSet<String> cdcSchemaSet = new HashSet<>();
+    private final HashSet<String> cdcSchemaSet = new HashSet<>();
     private String localBinlogFilePath;
-
-    private List<LogEventFilter> processLogEventFilter = Lists.newArrayList();
-
+    private List<LogEventFilter<?>> processLogEventFilter = Lists.newArrayList();
     private CanalBootstrap canalBootstrap;
-
     private String startCmdTSO = null;
 
-    public void setLogEventHandler(LogEventHandler logEventHandler) {
+    public void setLogEventHandler(LogEventHandler<?> logEventHandler) {
         this.logEventHandler = logEventHandler;
     }
 
-    public void init(BinlogParameter binlogParameter, Storage storage) {
+    public void init(BinlogParameter binlogParameter, Storage storage, String rdsBinlogPath) {
         assertNotNull(binlogParameter, "binlog parameter should not be null");
         assertNotNull(binlogParameter.getStorageInstId(), "storageInstId should not be null");
 
         this.storage = storage;
+        this.localBinlogFilePath = rdsBinlogPath;
         String storageInstId = binlogParameter.getStorageInstId();
         JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
         List<Map<String, Object>> dataList = metaTemplate.queryForList(String.format(QUERY_VIP_STORAGE, storageInstId));
@@ -132,9 +131,6 @@ public class BinlogExtractor implements Extractor {
             cdcSchemaSet.add(schemaName);
         }
 
-        JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
-        version = polarxTemplate.queryForObject(QUERY_FOR_VERSION, String.class);
-
         List<String> startCmdTSOList = metaTemplate.queryForList(QUERY_START_CMD, String.class);
         if (!CollectionUtils.isEmpty(startCmdTSOList)) {
             startCmdTSO = startCmdTSOList.get(0);
@@ -145,10 +141,12 @@ public class BinlogExtractor implements Extractor {
         authenticationInfo.setUsername(dbHost.getUserName());
         authenticationInfo.setPassword(dbHost.getPassword());
         authenticationInfo.setStorageInstId(storageInstId);
+        authenticationInfo.setUid(DynamicApplicationConfig.getString(RDS_UID));
+        authenticationInfo.setBid(DynamicApplicationConfig.getString(RDS_BID));
 
         MultiStreamStartTsoWindow.getInstance().addNewStream(storageInstId);
 
-        logger.info("init binlog extractor whith host " + JSON.toJSONString(dbHost));
+        logger.info("init binlog extractor with host " + JSON.toJSONString(dbHost));
     }
 
     @Override
@@ -157,8 +155,18 @@ public class BinlogExtractor implements Extractor {
         assertNotNull(authenticationInfo, "authenticationInfo should not be null");
 
         ExtractorMetrics.get();
+        Long preferHostId = null;
+        String hostMap = DynamicApplicationConfig.getString(TASK_RDSBINLOG_DOWNLOAD_ASSINGED_HOST);
+        if (StringUtils.isNotBlank(hostMap)) {
+            JSONObject jsonObject = JSON.parseObject(hostMap);
+            String preferHostIdStr = jsonObject.getString(authenticationInfo.getStorageInstId());
+            if (StringUtils.isNotBlank(preferHostIdStr)) {
+                preferHostId = Long.valueOf(preferHostIdStr);
+                logger.warn(authenticationInfo.getStorageInstId() + " prefer host id : " + preferHostIdStr);
+            }
+        }
         canalBootstrap =
-            new CanalBootstrap(authenticationInfo, version, localBinlogFilePath, startCmdTSO);
+            new CanalBootstrap(authenticationInfo, cnVersion, localBinlogFilePath, preferHostId, startCmdTSO);
         canalBootstrap.setHandler(logEventHandler);
         addDefaultFilter(startTSO);
         try {
@@ -243,11 +251,16 @@ public class BinlogExtractor implements Extractor {
         return binlogPosition;
     }
 
-    public List<LogEventFilter> getProcessLogEventFilter() {
+    private static String getCnVersion() {
+        JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+        return polarxTemplate.queryForObject(QUERY_FOR_VERSION, String.class);
+    }
+
+    public List<LogEventFilter<?>> getProcessLogEventFilter() {
         return processLogEventFilter;
     }
 
-    public void setProcessLogEventFilter(List<LogEventFilter> processLogEventFilter) {
+    public void setProcessLogEventFilter(List<LogEventFilter<?>> processLogEventFilter) {
         this.processLogEventFilter = processLogEventFilter;
     }
 }

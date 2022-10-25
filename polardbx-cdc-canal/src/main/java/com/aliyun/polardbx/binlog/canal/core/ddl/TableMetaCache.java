@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.core.ddl;
 
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
@@ -26,6 +23,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,6 +37,7 @@ import java.util.List;
 public class TableMetaCache {
 
     private static final Logger logger = LoggerFactory.getLogger(TableMetaCache.class);
+    private DataSource dataSource;
     private MysqlConnection connection;
     private MemoryTableMeta memoryTableMeta;
 
@@ -47,10 +47,31 @@ public class TableMetaCache {
         memoryTableMeta.destory();
     }
 
-    public TableMetaCache(MysqlConnection connection) {
-        this.connection = connection;
-        this.memoryTableMeta = new MemoryTableMeta(logger);
+    public TableMetaCache(DataSource dataSource) {
+        this.dataSource = dataSource;
+        this.memoryTableMeta = new MemoryTableMeta(logger, true);
+        resetMysqlConnection();
     }
+
+    public void resetMysqlConnection() {
+        try {
+            // 不想动太底层的MysqlConnection代码
+            // conn存在已被druid remove的可能
+            // 忽略异常： java.sql.SQLException: connection holder is null
+            if (connection != null) {
+                try {
+                    connection.disconnect();
+                } catch (Throwable e) {
+                    logger.error("disconnect mysqlconnection failed", e);
+                }
+            }
+            Connection conn = dataSource.getConnection();
+            connection = new MysqlConnection(conn);
+        } catch (Throwable e) {
+            logger.error("reset mysqlconnection failed", e);
+        }
+    }
+
     public TableMeta getTableMeta(String schema, String table) throws Throwable {
         TableMeta tableMeta = memoryTableMeta.find(schema, table);
         if (tableMeta == null) {
@@ -83,7 +104,6 @@ public class TableMetaCache {
 
     private TableMeta getTableMetaFromDb(final String fullname) throws Throwable {
         int retry = 0;
-
         while (true) {
             try {
                 // 优先使用show create table处理
@@ -127,6 +147,7 @@ public class TableMetaCache {
                 });
             } catch (Throwable e) {
                 logger.error("getTableMetaFromDb failed", e);
+                resetMysqlConnection();
                 if (++retry >= MAX_RETRY) {
                     throw e;
                 }
@@ -135,13 +156,23 @@ public class TableMetaCache {
     }
 
     private String getDbCharset(String schema) {
-        String sql = String.format(
-            "SELECT default_character_set_name FROM information_schema.SCHEMATA WHERE schema_name = '%s'",
-            schema);
-        String charset = connection.query(sql, rs -> {
-            rs.next();
-            return rs.getString("default_character_set_name");
-        });
-        return charset;
+        int retry = 0;
+        while (true) {
+            try {
+                String sql = String.format(
+                    "SELECT default_character_set_name FROM information_schema.SCHEMATA WHERE schema_name = '%s'",
+                    schema);
+                return connection.query(sql, rs -> {
+                    rs.next();
+                    return rs.getString("default_character_set_name");
+                });
+            } catch (Throwable e) {
+                logger.error("getDbCharset failed", e);
+                resetMysqlConnection();
+                if (++retry >= MAX_RETRY) {
+                    throw e;
+                }
+            }
+        }
     }
 }

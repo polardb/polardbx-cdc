@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog;
 
 import com.aliyun.polardbx.binlog.dao.ServerInfoMapper;
@@ -52,6 +49,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.DATASOURCE_WRAPPER_CHECK_VALID_TIMEOUT_SEC;
 import static com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport.instType;
 import static com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport.status;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
@@ -157,15 +155,16 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
             Set<String> toBeRemovedServers =
                 holdingServers.stream().filter(s -> !latestServers.contains(s)).collect(Collectors.toSet());
 
+            int timeout = DynamicApplicationConfig.getInt(DATASOURCE_WRAPPER_CHECK_VALID_TIMEOUT_SEC);
             Set<String> invalidHoldingServers = holdingServers.stream().filter(s -> {
                 try (Connection conn = nestedDataSources.getUnchecked(s).getConnection()) {
-                    if (conn.isValid(1)) {
+                    if (conn.isValid(timeout)) {
                         return false;
                     } else {
-                        logger.warn("detected abnormal server node with address {}.", s);
+                        logger.warn("detected abnormal server node with address {}", s);
                     }
                 } catch (Throwable t) {
-                    logger.warn("detected abnormal server node with address {}.", s, t);
+                    logger.warn("detected abnormal server node with address {}, {}", s, t);
                 }
                 return true;
             }).collect(Collectors.toSet());
@@ -191,9 +190,10 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
     }
 
     private void onServerNodeAdd(Set<String> toBeAddedServers) {
+        int timeout = DynamicApplicationConfig.getInt(DATASOURCE_WRAPPER_CHECK_VALID_TIMEOUT_SEC);
         Set<String> validServers = toBeAddedServers.stream().filter(s -> {
             try (Connection conn = nestedDataSources.getUnchecked(s).getConnection()) {
-                if (conn.isValid(1)) {
+                if (conn.isValid(timeout)) {
                     return true;
                 } else {
                     logger.warn("Server node {} is not ready yet, will retry later.", s);

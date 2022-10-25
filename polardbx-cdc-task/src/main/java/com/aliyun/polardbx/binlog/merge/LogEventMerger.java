@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.merge;
 
 import com.aliyun.polardbx.binlog.CommonUtils;
@@ -27,7 +24,9 @@ import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorValue;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
+import com.aliyun.polardbx.binlog.storage.PersistAllChecker;
 import com.aliyun.polardbx.binlog.storage.Storage;
+import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -35,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,13 +42,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.aliyun.polardbx.binlog.CommonUtils.getTsoPhysicalTime;
 import static com.aliyun.polardbx.binlog.ConfigKeys.ALARM_NODATA_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_HB_WINDOW_FORCE_COMPLETE_THRESHOLD;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGER_MERGE_TYPE;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_EMPTY_LOOP_EXCEED_THRESHOLD;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_LOOP_ERROR;
+import static com.aliyun.polardbx.binlog.util.TxnTokenUtil.cleanTxnBuffer4Token;
 
 /**
  * Created by ziyang.lb
@@ -58,7 +61,7 @@ public class LogEventMerger implements Merger {
 
     private static final Logger logger = LoggerFactory.getLogger(LogEventMerger.class);
     // 单位，ms
-    private static final Long SLEEP_TIME = 10L;
+    private static final Long SLEEP_TIME = 1L;
 
     private final TaskType taskType;
     private final Collector collector;
@@ -74,6 +77,8 @@ public class LogEventMerger implements Merger {
     private final List<HeartBeatWindowAware> heartBeatWindowAwares;
     private final AtomicReference<TxnToken> firstToken;
     private final AtomicReference<TxnToken> firstDmlToken;
+    private final PersistAllChecker persistAllChecker;
+    private final MergeType mergeType;
 
     private MergeItem lastMergeItem;
     private String lastScaleTso;
@@ -84,6 +89,7 @@ public class LogEventMerger implements Merger {
     private Long latestPassTime;
     private Long latestPassCount;
     private boolean forceCompleteHbWindow;
+    private MergeBridge mergeBridge;
     private volatile boolean running;
 
     public LogEventMerger(TaskType taskType, Collector collector, boolean isMergeNoTsoXa, String startTso,
@@ -95,6 +101,8 @@ public class LogEventMerger implements Merger {
         this.dryRunMode = dryRunMode;
         this.storage = storage;
         this.lastScaleTso = lastScaleTso;
+        this.persistAllChecker = new PersistAllChecker();
+        this.mergeType = MergeType.valueOf(DynamicApplicationConfig.getString(TASK_MERGER_MERGE_TYPE));
 
         if (StringUtils.isNotBlank(startTso)) {
             this.aligned = new AtomicBoolean(true);// 如果startTso不为空，则默认为"已对齐"状态
@@ -111,8 +119,12 @@ public class LogEventMerger implements Merger {
         } else {
             this.mergeBarrier = new MergeBarrier(isMergeNoTsoXa, collector::push);
         }
-        this.executorService = Executors.newSingleThreadExecutor(r -> new Thread(r, "Binlog-merger-thread"));
+        this.executorService = Executors.newSingleThreadExecutor(r -> new Thread(r, "binlog-merger-thread"));
         this.heartBeatWindowAwares = new ArrayList<>();
+
+        if (mergeType == MergeType.BATCH) {
+            mergeBridge = new MergeBridge(this::doEmit);
+        }
 
         this.latestPassTime = 0L;
         this.latestPassCount = 0L;
@@ -125,13 +137,17 @@ public class LogEventMerger implements Merger {
         }
         running = true;
 
+        mergeSources.values().forEach(s -> s.setMergeType(mergeType));
         mergeSources.values().forEach(MergeSource::start);
-        MergeMetrics.get().addMergeSources(mergeSources);
+        if (mergeBridge != null) {
+            mergeBridge.start();
+        }
         executorService.execute(() -> {
             logger.info("LogEventMerger start {} ...", mergeSources);
             this.startTime = System.currentTimeMillis();
             while (running) {
                 try {
+                    tryPersistAllQueued();
                     boolean skip = false;
                     if (mergeSources.isEmpty()) {
                         try {
@@ -142,36 +158,45 @@ public class LogEventMerger implements Merger {
                         continue;
                     }
 
-                    if (lastMergeItem != null) {
-                        MergeItem mergeItem = lastMergeItem.getMergeSource().poll();
-                        if (mergeItem == null) {
-                            skip = true;
+                    boolean pollFromLast = true;
+                    boolean hasFind = false;
+                    if (mergeType == MergeType.BATCH && lastMergeItem != null) {
+                        MergeItem mergeItem = mergeController.peek();
+                        if (mergeItem == null
+                            || mergeItem.getTxnToken().getTso().compareTo(lastMergeItem.getTxnToken().getTso()) > 0) {
+                            pollFromLast = false;
                         } else {
-                            mergeController.push(mergeItem);
+                            hasFind = true;
                         }
-                    } else {
-                        for (Map.Entry<String, MergeSource> entry : mergeSources.entrySet()) {
-                            if (mergeController.contains(entry.getKey())) {
-                                continue;
-                            }
+                    }
 
-                            MergeItem mergeItem = entry.getValue().poll();
+                    if (!hasFind) {
+                        if (lastMergeItem != null && pollFromLast) {
+                            MergeItem mergeItem = lastMergeItem.getMergeSource().poll();
                             if (mergeItem == null) {
                                 skip = true;
                             } else {
                                 mergeController.push(mergeItem);
                             }
-                        }
-                    }
+                        } else {
+                            for (Map.Entry<String, MergeSource> entry : mergeSources.entrySet()) {
+                                if (mergeController.contains(entry.getKey())) {
+                                    continue;
+                                }
 
-                    if (skip) {
-                        try {
-                            checkEmptyLoopThreshold();
-                            CommonUtils.sleep(SLEEP_TIME);
-                        } catch (InterruptedException e) {
-                            break;
+                                MergeItem mergeItem = entry.getValue().poll();
+                                if (mergeItem == null) {
+                                    skip = true;
+                                } else {
+                                    mergeController.push(mergeItem);
+                                }
+                            }
                         }
-                        continue;
+
+                        if (skip) {
+                            checkEmptyLoopThreshold();
+                            continue;
+                        }
                     }
 
                     MergeItem minItem = mergeController.pop();
@@ -204,16 +229,19 @@ public class LogEventMerger implements Merger {
                             + minItem.getTxnToken().getType() + " with sourceId : " + minItem.getSourceId());
                     }
 
+                    if (mergeType == MergeType.BATCH && minItem.getTxnToken().getType() != TxnType.FORMAT_DESC
+                        && minItem.getTxnToken().getType() != TxnType.META_HEARTBEAT) {
+                        throw new PolardbxException("invalid txn type in batch merge mode :" +
+                            minItem.getTxnToken().getType());
+                    }
+
                     checkHeartbeatWindow(minItem);
-                    doEmit(minItem);
+                    emit((minItem.getTxnToken()));
                     lastMergeItem = minItem;
                     lastTso = minTso;
-                    doMetricsAfter(minItem.getTxnToken());
-                    if (minItem.getTxnToken().getType() == TxnType.META_SCALE) {
-                        lastScaleTso = minItem.getTxnToken().getTso();
-                        forceCountAfterLastScale = 0;
-                        logger.info("reset last scale token to : " + minItem.getTxnToken());
-                    }
+                } catch (InterruptedException e) {
+                    logger.info("log event merger is interrupted, exit merge loop.");
+                    break;
                 } catch (Throwable t) {
                     MonitorManager.getInstance().triggerAlarm(MERGER_STAGE_LOOP_ERROR, ExceptionUtils.getStackTrace(t));
                     logger.error("fatal error in merger loop, the merger thread will exit", t);
@@ -231,6 +259,9 @@ public class LogEventMerger implements Merger {
         running = false;
 
         mergeSources.forEach((s, mergeSource) -> mergeSource.stop());
+        if (mergeBridge != null) {
+            mergeBridge.stop();
+        }
         if (executorService != null) {
             try {
                 executorService.shutdownNow();
@@ -268,13 +299,13 @@ public class LogEventMerger implements Merger {
                     throw new PolardbxException(
                         "Received heartbeat token for next window，but current window is not complete yet. The received "
                             + "token is " + item.getTxnToken() + ", current window's tokens are "
-                            + currentWindow.getAllTokens());
+                            + currentWindow.getAllHeartBeatTokens());
                 }
             }
             if (currentWindow == null || !currentWindow.isSameWindow(item.getTxnToken())) {
                 windowRotate(item);
             }
-            currentWindow.addHeartbeatToken(item.getSourceId(), item.getTxnToken());
+            currentWindow.addHeartbeatToken(item.getSourceId(), item);
         } else {
             // 当前Window还未达到complete状态，收到了非心跳Token，属于异常现象，抛异常处理
             if (currentWindow != null && aligned.get()) {// 未对齐之前不进行验证
@@ -283,7 +314,7 @@ public class LogEventMerger implements Merger {
                     throw new PolardbxException(
                         "Received none heartbeat token, but current window is not ready yet. The received token is "
                             + item.getTxnToken() + ", current window's tokens are "
-                            + currentWindow.getAllTokens());
+                            + currentWindow.getAllHeartBeatTokens());
                 }
             }
         }
@@ -326,39 +357,57 @@ public class LogEventMerger implements Merger {
         }
     }
 
-    private void doEmit(MergeItem minItem) {
-        if (minItem.getTxnToken().getType() == TxnType.FORMAT_DESC) {
-            collector.push(minItem.getTxnToken());
+    private void emit(TxnToken txnToken) {
+        if (txnToken.getType() == TxnType.FORMAT_DESC) {
+            collector.push(txnToken);
             return;
         }
+
+        if (mergeType != MergeType.BATCH) {
+            doEmit(txnToken);
+        }
+    }
+
+    private void doEmit(TxnToken txnToken) {
 
         // 如果startTso为空，在各个merge source未对齐之前，不对外发送数据
         if (StringUtils.isBlank(startTso) && !aligned.get()) {
-            logger.info("Token is skipped before aligned, token is {}.", minItem.getTxnToken());
+            logger.info("Token is skipped before aligned, token is {}.", txnToken);
             return;
         }
 
-        if (minItem.getTxnToken().getType() == TxnType.META_HEARTBEAT) {
-            if (currentWindow.isComplete()) {
+        if (txnToken.getType() == TxnType.META_HEARTBEAT) {
+            if (currentWindow != null && currentWindow.isComplete()) {
                 if (taskType == TaskType.Final) {
                     mergeBarrier.flush();
                 }
                 heartBeatWindowAwares.forEach(h -> h.setCurrentHeartBeatWindow(currentWindow));
-                collector.push(minItem.getTxnToken());
+                if (dryRun) {
+                    cleanTxnBuffer4Token(txnToken, storage);
+                } else {
+                    collector.push(txnToken);
+                }
             }
         } else {
             if (taskType == TaskType.Relay) {
-                collector.push(minItem.getTxnToken());
+                collector.push(txnToken);
             } else {
                 if (dryRun) {
-                    if (dryRunMode == 1) {
-                        mergeBarrier.addTxnToken(minItem.getTxnToken());
+                    if (dryRunMode == 2) {
+                        mergeBarrier.addTxnToken(txnToken);
                     }
-                    clearCache(minItem.getTxnToken());
+                    cleanTxnBuffer4Token(txnToken, storage);
                 } else {
-                    mergeBarrier.addTxnToken(minItem.getTxnToken());
+                    mergeBarrier.addTxnToken(txnToken);
                 }
             }
+        }
+
+        doMetricsAfter(txnToken);
+        if (txnToken.getType() == TxnType.META_SCALE) {
+            lastScaleTso = txnToken.getTso();
+            forceCountAfterLastScale = 0;
+            logger.info("reset last scale token to : " + txnToken);
         }
     }
 
@@ -371,6 +420,12 @@ public class LogEventMerger implements Merger {
 
         if (currentWindow != null && currentWindow.isForceComplete() && lastScaleTso != null) {
             forceCountAfterLastScale++;
+        }
+
+        if (currentWindow != null && mergeType == MergeType.BATCH) {
+            MergeItemChunk chunk = new MergeItemChunk();
+            currentWindow.getAllMergeItems().forEach(chunk::addMergeItem);
+            mergeBridge.push(chunk);
         }
 
         currentWindow = new HeartBeatWindow(item.getTxnToken().getTxnId(),
@@ -387,27 +442,13 @@ public class LogEventMerger implements Merger {
                     MergeMetrics.get().incrementMergePass1PCCount();
                 }
             }
-            MergeMetrics.get()
-                .setDelayTimeOnMerge(System.currentTimeMillis() - getTsoPhysicalTime(lastTso, TimeUnit.MILLISECONDS));
+
+            long delay = System.currentTimeMillis() - getTsoPhysicalTime(lastTso, TimeUnit.MILLISECONDS);
+            MergeMetrics.get().setDelayTimeOnMerge(delay);
             this.latestPassTime = System.currentTimeMillis();
             this.latestPassCount++;
         } catch (Throwable t) {
             logger.error("do metrics failed.", t);
-        }
-    }
-
-    private void clearCache(TxnToken token) {
-        // 如果allPartiesCount > 0，说明这是一个事务合并后的delegate token，需要把所有分片的缓存都清空
-        if (token.getAllPartiesCount() > 0) {
-            token.getAllPartiesList().forEach(p -> {
-                TxnKey key = new TxnKey(token.getTxnId(), p);
-                storage.deleteAsync(key);
-                MergeMetrics.get().setStorageCleanerQueuedSize(storage.getCleanerQueuedSize());
-            });
-        } else {
-            TxnKey key = new TxnKey(token.getTxnId(), token.getPartitionId());
-            storage.deleteAsync(key);
-            MergeMetrics.get().setStorageCleanerQueuedSize(storage.getCleanerQueuedSize());
         }
     }
 
@@ -427,6 +468,35 @@ public class LogEventMerger implements Merger {
                     .triggerAlarm(MERGER_STAGE_EMPTY_LOOP_EXCEED_THRESHOLD, new MonitorValue(noDataTime / 1000),
                         noDataTime / 1000);
             }
+        }
+    }
+
+    private void tryPersistAllQueued() {
+        try {
+            persistAllChecker.checkWithCallback(() -> {
+                AtomicInteger persistedTokenCount = new AtomicInteger(0);
+
+                mergeSources.values().forEach(v -> {
+                    Iterator<TxnToken> iterator = v.iterator();
+                    while (iterator.hasNext()) {
+                        TxnToken token = iterator.next();
+                        TxnKey key = new TxnKey(token.getTxnId(), token.getPartitionId());
+                        TxnBuffer txnBuffer = storage.fetch(key);
+                        if (txnBuffer != null) {
+                            txnBuffer.persist();
+                            persistedTokenCount.incrementAndGet();
+                        }
+                    }
+                });
+
+                if (persistedTokenCount.get() > 0) {
+                    logger.info("newly persist count for tokens in merge source at this round is " +
+                        persistedTokenCount.get());
+                }
+                return null;
+            });
+        } catch (Throwable t) {
+            logger.error("try persist all queued txn buffer failed.", t);
         }
     }
 

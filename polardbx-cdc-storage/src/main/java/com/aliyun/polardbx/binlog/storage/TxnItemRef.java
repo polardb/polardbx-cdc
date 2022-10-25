@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,82 +11,72 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.storage;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.google.protobuf.ByteString;
+import com.aliyun.polardbx.binlog.protocol.EventData;
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.protobuf.UnsafeByteOperations;
+import org.apache.commons.lang3.tuple.Pair;
 import org.rocksdb.RocksDBException;
 
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Created by ziyang.lb
  **/
 public class TxnItemRef implements Comparable<TxnItemRef> {
+    public static final AtomicLong TOTAL_TXN_ITEM_COUNT = new AtomicLong(0);
 
     private final TxnBuffer txnBuffer;
     private final String traceId;
     private final int eventType;
-    private final Repository repository;
-    private final AtomicBoolean persisted;
-    private final int payloadSize;
-
-    private byte[] referenceKey;
-    private String rowsQuery;
-    private String schema;
-    private String table;
-    private volatile byte[] payload;
-    private volatile ByteString byteStringPayload;
+    private boolean shouldClearRowsQuery;
+    private int subKeySeq;
+    private boolean restored;
+    private EventData eventData;
 
     TxnItemRef(TxnBuffer txnBuffer, String traceId, String rowsQuery, int eventType, byte[] payload,
-               ByteString byteStringPayload, String schema, String table,
-               Repository repository) {
-        if (payload != null && byteStringPayload != null) {
-            throw new IllegalStateException(
-                "Both payload and byteStringPayload has not null value, with eventType is " +
-                    eventType + " and traceId is " + traceId + "and txnKey is " + txnBuffer.getTxnKey());
-        }
-        if (payload == null && byteStringPayload == null) {
-            throw new IllegalStateException("Both payload and byteStringPayload has null value, with eventType is " +
-                eventType + " and traceId is " + traceId + "and txnKey is " + txnBuffer.getTxnKey());
-        }
-
+               String schema, String table) {
+        checkPayload(payload);
         this.txnBuffer = txnBuffer;
-        this.traceId = traceId;
-        this.rowsQuery = rowsQuery == null ? "" : rowsQuery;
+        this.traceId = traceId.intern();
+        this.shouldClearRowsQuery = false;
         this.eventType = eventType;
-        this.payload = payload;
-        this.byteStringPayload = byteStringPayload;
-        this.schema = schema;
-        this.table = table;
-        this.payloadSize = payload != null ? payload.length : byteStringPayload.size();
-        this.repository = repository;
-        this.persisted = new AtomicBoolean(false);
+        this.subKeySeq = -1;
+        this.eventData = EventData.newBuilder()
+            .setRowsQuery(rowsQuery == null ? "" : rowsQuery)
+            .setSchemaName(schema == null ? "" : schema)
+            .setTableName(table == null ? "" : table)
+            .setPayload(UnsafeByteOperations.unsafeWrap(payload)).build();
+
+        TOTAL_TXN_ITEM_COUNT.incrementAndGet();
     }
 
     void persist() throws RocksDBException {
-        if (persisted.compareAndSet(false, true)) {
-            referenceKey = txnBuffer.buildTxnItemRefKey();
-            repository.put(referenceKey, payload != null ? payload : byteStringPayload.toByteArray());
-            clearPayload();//尽快执行垃圾回收
+        if (!isPersisted()) {
+            Pair<Integer, byte[]> pair = txnBuffer.buildNewTxnItemRefKey();
+            subKeySeq = pair.getLeft();
+            txnBuffer.getRepoUnit().put(pair.getRight(), eventData.toByteArray());
+            clearEventData();//尽快执行垃圾回收
         } else {
             throw new PolardbxException("Invalid status :duplicate persist operation, txn item has already persisted."
                 + "TxnKey is : " + txnBuffer.getTxnKey() + " ,traceId is : " + traceId);
         }
     }
 
-    void delete() throws RocksDBException {
-        if (persisted.get()) {
-            repository.del(referenceKey);
+    public void delete() throws RocksDBException {
+        if (isPersisted()) {
+            byte[] key = txnBuffer.buildTxnItemRefKeyWithSubSequence(subKeySeq);
+            txnBuffer.getRepoUnit().delete(key);
         }
+        TOTAL_TXN_ITEM_COUNT.decrementAndGet();
     }
 
-    public void clearPayload() {
-        this.payload = null;
-        this.byteStringPayload = null;
+    public void clearEventData() {
+        this.eventData = null;
     }
 
     public String getTraceId() {
@@ -98,80 +87,87 @@ public class TxnItemRef implements Comparable<TxnItemRef> {
         return eventType;
     }
 
-    public String getRowsQuery() {
-        return rowsQuery;
-    }
-
-    public void setRowsQuery(String rowsQuery) {
-        this.rowsQuery = rowsQuery;
-    }
-
     public boolean isPersisted() {
-        return persisted.get();
+        return subKeySeq != -1;
     }
 
-    public int getPayloadSize() {
-        return payloadSize;
-    }
-
-    public String getSchema() {
-        return schema;
-    }
-
-    public void setSchema(String schema) {
-        this.schema = schema;
-    }
-
-    public String getTable() {
-        return table;
-    }
-
-    public void setTable(String table) {
-        this.table = table;
-    }
-
-    public ByteString getByteStringPayload() {
-        if (byteStringPayload != null) {
-            return byteStringPayload;
-        } else {
-            return ByteString.copyFrom(getPayload());
+    public void clearRowsQuery() {
+        this.shouldClearRowsQuery = true;
+        if (this.eventData != null) {
+            this.eventData = eventData.toBuilder().setRowsQuery("").build();
         }
     }
 
     // 如果是为了rpc通信，直接调用getByteStringPayload，在byteStringPayload不为空的时候，可以避免不必要的copy操作
-    public byte[] getPayload() {
-        if (persisted.get()) {
+    public EventData getEventData() {
+        if (isPersisted() && !restored) {
             try {
-                return repository.get(referenceKey);
+                byte[] key = txnBuffer.buildTxnItemRefKeyWithSubSequence(subKeySeq);
+                byte[] value = txnBuffer.getRepoUnit().get(key);
+                return parseOne(value);
             } catch (RocksDBException e) {
                 throw new PolardbxException("get payload from repository error.");
             }
         } else {
-            if (payload != null) {
-                return payload;
-            } else if (byteStringPayload != null) {
-                return byteStringPayload.toByteArray();
+            if (eventData != null) {
+                return eventData;
             } else {
                 throw new IllegalStateException("Both payload and byteStringPayload is null.");
             }
         }
     }
 
-    public void setPayload(byte[] payload) {
-        clearPayload();
-        if (persisted.get()) {
+    public void setEventData(EventData eventData) {
+        clearEventData();
+        if (isPersisted()) {
             try {
-                repository.put(referenceKey, payload);
+                byte[] key = txnBuffer.buildTxnItemRefKeyWithSubSequence(subKeySeq);
+                txnBuffer.getRepoUnit().put(key, eventData.toByteArray());
             } catch (RocksDBException e) {
                 throw new PolardbxException("set payload error");
             }
         } else {
-            this.payload = payload;
+            this.eventData = eventData;
+        }
+    }
+
+    public void restore(byte[] key, byte[] value) {
+        byte[] actualKey = txnBuffer.buildTxnItemRefKeyWithSubSequence(subKeySeq);
+        if (!Arrays.equals(key, actualKey)) {
+            throw new PolardbxException("input key is different from actual key, input key is : " + new String(key)
+                + ", actual key is :" + new String(actualKey));
+        }
+        this.eventData = parseOne(value);
+        this.restored = true;
+    }
+
+    private EventData parseOne(byte[] data) {
+        EventData eventData;
+        try {
+            eventData = EventData.parseFrom(data);
+            if (shouldClearRowsQuery) {
+                eventData.toBuilder().setRowsQuery("").build();
+            }
+            return eventData;
+        } catch (InvalidProtocolBufferException e) {
+            throw new PolardbxException("parse error when restore txn item.", e);
         }
     }
 
     TxnBuffer getTxnBuffer() {
         return txnBuffer;
+    }
+
+    int getSubKeySeq() {
+        return subKeySeq;
+    }
+
+    private void checkPayload(byte[] payload) {
+        if (payload == null) {
+            throw new IllegalStateException(
+                "Payload can`t be null, with eventType is " + eventType + " and traceId is " + traceId
+                    + "and txnKey is " + txnBuffer.getTxnKey());
+        }
     }
 
     @Override

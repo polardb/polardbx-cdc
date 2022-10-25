@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.alibaba.polardbx.druid.DbType;
@@ -38,22 +35,28 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableElement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlUnique;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableOption;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlTableIndex;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.LowerCaseTableNameVariables;
+import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
-import com.aliyun.polardbx.binlog.format.utils.CharsetConversion;
 import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import static com.aliyun.polardbx.binlog.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_CONVERTER_ALGORITHM_BLACKLIST;
 
 public class DDLConverter {
 
@@ -141,6 +144,7 @@ public class DDLConverter {
             createTableStatement.setPrefixPartition(false);
             createTableStatement.setTableGroup(null);
             createTableStatement.setAutoSplit(null);
+            createTableStatement.setJoinGroup(null);
             if (StringUtils.isNotBlank(tbCollation)) {
                 String charset = CharsetConversion.getCharsetByCollation(tbCollation);
                 if (StringUtils.isNotBlank(charset)) {
@@ -188,7 +192,11 @@ public class DDLConverter {
                 lowerCaseTableNames);
         } else if (sqlStatement instanceof SQLAlterTableStatement) {
             SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
-            for (SQLAlterTableItem item : sqlAlterTableStatement.getItems()) {
+            List<SQLAlterTableItem> items = sqlAlterTableStatement.getItems();
+            Iterator<SQLAlterTableItem> iterator = items.iterator();
+
+            while (iterator.hasNext()) {
+                SQLAlterTableItem item = iterator.next();
                 if (item instanceof SQLAlterTableAddIndex) {
                     SQLAlterTableAddIndex addIndex = (SQLAlterTableAddIndex) item;
                     addIndex.setClustered(false);
@@ -220,6 +228,20 @@ public class DDLConverter {
                 if (item instanceof SQLAlterTableAddColumn) {
                     SQLAlterTableAddColumn alterTableAlterColumn = (SQLAlterTableAddColumn) item;
                     alterTableAlterColumn.getColumns().forEach(c -> c.setSequenceType(null));
+                }
+
+                if (item instanceof MySqlAlterTableOption) {
+                    MySqlAlterTableOption option = (MySqlAlterTableOption) item;
+                    String optionName = option.getName();
+                    if ("ALGORITHM".equalsIgnoreCase(optionName)) {
+                        if (option.getValue() instanceof SQLIdentifierExpr) {
+                            SQLIdentifierExpr identifierExpr = (SQLIdentifierExpr) option.getValue();
+                            if (getAlgorithmBlacklist()
+                                .contains(StringUtils.lowerCase(identifierExpr.getSimpleName()))) {
+                                iterator.remove();
+                            }
+                        }
+                    }
                 }
             }
         } else if (sqlStatement instanceof SQLCreateIndexStatement) {
@@ -265,5 +287,14 @@ public class DDLConverter {
             createTableStatement.setTableName("`" + escape(tableName) + "`");
             logger.warn("repair table name in create sql, before : {}, after :{}", tableNameInSql, tableName);
         }
+    }
+
+    private static Set<String> getAlgorithmBlacklist() {
+        String configValue = DynamicApplicationConfig.getString(META_DDL_CONVERTER_ALGORITHM_BLACKLIST);
+        if (StringUtils.isNotBlank(configValue)) {
+            String[] splitValues = StringUtils.split(configValue.toLowerCase(), ",");
+            return Sets.newHashSet(splitValues);
+        }
+        return new HashSet<>();
     }
 }

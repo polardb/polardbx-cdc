@@ -46,8 +46,8 @@ message ShowBinlogEventsRequest{
 message DumpRequest{
   string      fileName = 1;
   int64       position = 2;
+  EventSplitMode       splitMode = 3;
 }
-
 
 message BinaryLog {
   string logName = 1;
@@ -73,6 +73,7 @@ message BinlogEvent {
 
 message DumpStream {
   bytes       payload = 1;
+  bool        isHeartBeat = 2;
 }
 
 ////////////////////////////// replicate ///////////////////////////
@@ -107,4 +108,19 @@ message ShowSlaveStatusRequest{
 
 message ShowSlaveStatusResponse{
   string    response = 1;
+}
+
+enum EventSplitMode{
+  /**
+     * Server端对event进行拆包
+     */
+  SERVER = 0;
+  /**
+   * Client端对event进行拆包
+   */
+  CLIENT = 1;
+  /**
+   * 随机模式，测试用
+   */
+  RANDOM = 2;
 }

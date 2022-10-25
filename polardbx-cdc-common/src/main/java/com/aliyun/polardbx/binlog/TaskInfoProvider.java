@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog;
 
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
@@ -128,7 +125,7 @@ public class TaskInfoProvider {
         if (storageHistoryInfos.isEmpty()) {
             throw new PolardbxException("can`t find storage info for tso " + currentTso);
         }
-        log.info("storage content is " + storageHistoryInfos.get(0).getStorageContent());
+        log.info("storage list to consume for this task is " + storageHistoryInfos.get(0).getStorageContent());
         return GSON.fromJson(storageHistoryInfos.get(0).getStorageContent(), StorageContent.class);
     }
 }

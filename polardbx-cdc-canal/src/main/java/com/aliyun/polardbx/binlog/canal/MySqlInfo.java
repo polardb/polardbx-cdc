@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,11 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal;
 
+import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
@@ -35,6 +33,7 @@ public class MySqlInfo {
     private MysqlConnection.BinlogImage binlogImage;
     private ServerCharactorSet serverCharactorSet;
     private int lowerCaseTableNames;
+    private int binlogChecksum = LogEvent.BINLOG_CHECKSUM_ALG_OFF;
 
     public void init(MysqlConnection connection) {
         this.serverId = findServerId(connection);
@@ -44,6 +43,7 @@ public class MySqlInfo {
         this.binlogImage = connection.getBinlogImage();
         this.serverCharactorSet = connection.getDefaultDatabaseCharset();
         this.lowerCaseTableNames = connection.getLowerCaseTableNames();
+        this.binlogChecksum = connection.loadBinlogChecksum();
     }
 
     /**

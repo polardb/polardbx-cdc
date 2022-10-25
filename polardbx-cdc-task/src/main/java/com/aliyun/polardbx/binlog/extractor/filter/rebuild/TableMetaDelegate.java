@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.alibaba.polardbx.druid.DbType;
@@ -27,19 +24,23 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.meta.LogicTableMeta;
+import com.aliyun.polardbx.binlog.cdc.meta.MetaFilter;
 import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -47,6 +48,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACTOR_LOGIC_DB_BLACKLIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACTOR_LOGIC_TABLE_BLACKLIST;
 
 public class TableMetaDelegate implements ITableMetaDelegate {
 
@@ -72,8 +76,7 @@ public class TableMetaDelegate implements ITableMetaDelegate {
 
     @Override
     public void applyLogic(BinlogPosition position, DDLRecord record, String ext, RuntimeContext rc) {
-        if (!StringUtils.isBlank(lastApplyLogicTSO) && lastApplyLogicTSO.compareTo(position.getRtso()) >= 0) {
-            logger.warn("ignore duplicate apply logic ddl " + record.getDdlSql() + " tso : " + position.getRtso());
+        if (isIgnore(position, record)) {
             return;
         }
         target.applyLogic(position, record, ext);
@@ -110,7 +113,7 @@ public class TableMetaDelegate implements ITableMetaDelegate {
                     event.setChangeAction(TableMetaChangeAction.DROP_TABLE);
                     event.setPhyChange(isPhy);
                     event.setRc(rc);
-                    event.setTopologyChange(isTopoChange);
+                    event.setTopologyChange(true);
                     onEvent(event);
                 }
 
@@ -141,7 +144,7 @@ public class TableMetaDelegate implements ITableMetaDelegate {
                 event.setChangeAction(TableMetaChangeAction.DROP_DATABASE);
                 event.setPhyChange(isPhy);
                 event.setRc(rc);
-                event.setTopologyChange(isTopoChange);
+                event.setTopologyChange(true);
                 onEvent(event);
             } else {
                 TableMetaChangeEvent event = new TableMetaChangeEvent();
@@ -177,7 +180,25 @@ public class TableMetaDelegate implements ITableMetaDelegate {
 
     @Override
     public Map<String, Set<String>> buildTableFilter(String storageInstanceId) {
-        List<LogicMetaTopology.PhyTableTopology> phyTableTopologyList = target.getPhyTables(storageInstanceId);
+        Set<String> excludeLogicDbs = Sets.newHashSet();
+        Set<String> excludeLogicTables = Sets.newHashSet();
+
+        String dbBlackList = DynamicApplicationConfig.getString(TASK_EXTRACTOR_LOGIC_DB_BLACKLIST);
+        if (StringUtils.isNotBlank(dbBlackList)) {
+            dbBlackList = dbBlackList.toLowerCase();
+            String[] array = StringUtils.split(dbBlackList, ",");
+            excludeLogicDbs.addAll(Arrays.asList(array));
+        }
+
+        String tableBlackList = DynamicApplicationConfig.getString(TASK_EXTRACTOR_LOGIC_TABLE_BLACKLIST);
+        if (StringUtils.isNotBlank(tableBlackList)) {
+            tableBlackList = tableBlackList.toLowerCase();
+            String[] array = StringUtils.split(tableBlackList, ",");
+            excludeLogicTables.addAll(Arrays.asList(array));
+        }
+
+        List<LogicMetaTopology.PhyTableTopology> phyTableTopologyList =
+            target.getPhyTables(storageInstanceId, excludeLogicDbs, excludeLogicTables);
         Map<String, Set<String>> tmpFilter = new HashMap<>();
         phyTableTopologyList.forEach(s -> {
             final Set<String> phyTables = s.getPhyTables()
@@ -204,13 +225,6 @@ public class TableMetaDelegate implements ITableMetaDelegate {
         return tmpFilter;
     }
 
-    /**
-     * 获取存储实例id下面的所有物理库表信息
-     */
-    public List<LogicMetaTopology.PhyTableTopology> getPhyTables(String storageInstId) {
-        return target.getPhyTables(storageInstId);
-    }
-
     public Pair<LogicMetaTopology.LogicDbTopology, LogicMetaTopology.LogicTableMetaTopology> getTopology(
         String logicSchema, String logicTable) {
         return target.getTopology(logicSchema, logicTable);
@@ -218,6 +232,35 @@ public class TableMetaDelegate implements ITableMetaDelegate {
 
     public LogicMetaTopology getTopology() {
         return target.getTopology();
+    }
+
+    private boolean isIgnore(BinlogPosition position, DDLRecord record) {
+        if (!StringUtils.isBlank(lastApplyLogicTSO) && lastApplyLogicTSO.compareTo(position.getRtso()) >= 0) {
+            logger.warn("logic ddl apply is ignored by duplicate record, with tso {}, record detail is {}.",
+                position.getRtso(), position.getRtso());
+            return true;
+        }
+
+        if (MetaFilter.isDbInApplyBlackList(record.getSchemaName())) {
+            logger.warn("logic ddl apply is ignored by database blacklist, with tso {}, record detail is {}.",
+                position.getRtso(), record);
+            return true;
+        }
+
+        String fullTableName = record.getSchemaName() + "." + record.getTableName();
+        if (MetaFilter.isTableInApplyBlackList(fullTableName)) {
+            logger.warn("logic ddl apply is ignored by table blacklist, with tso {}, record detail is {}.",
+                position.getRtso(), record);
+            return true;
+        }
+
+        if (MetaFilter.isTsoInApplyBlackList(position.getRtso())) {
+            logger.warn("logic ddl apply is ignored by tso blacklist, with tso {}, record detail is {}.",
+                position.getRtso(), record);
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -229,8 +272,8 @@ public class TableMetaDelegate implements ITableMetaDelegate {
     }
 
     @Override
-    public LogicTableMeta compare(String schema, String table) {
-        return target.compare(schema, table);
+    public LogicTableMeta compare(String schema, String table, int columnCount) {
+        return target.compare(schema, table, columnCount);
     }
 
     @Override

@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.transfer;
 
 import com.google.common.collect.Lists;
@@ -70,15 +67,15 @@ public class Main {
             paramHashMap.put("pwd", "");
         } else {
             paramHashMap.put("ip", "127.0.0.1");
-            paramHashMap.put("db", "");
-            paramHashMap.put("user", "");
-            paramHashMap.put("pwd", "");
+            paramHashMap.put("db", "transfer");
+            paramHashMap.put("user", "polardbx_root");
+            paramHashMap.put("pwd", "123456");
         }
         String dbHost = getValue(paramHashMap, "ip", "127.0.0.1");
         String dbName = getValue(paramHashMap, "db", "");
-        String username = getValue(paramHashMap, "user", "");
-        String password = getValue(paramHashMap, "pwd", "");
-        int port = getValue(paramHashMap, "port", 3306);
+        String username = getValue(paramHashMap, "user", "polardbx_root");
+        String password = getValue(paramHashMap, "pwd", "123456");
+        int port = getValue(paramHashMap, "port", 8527);
 
         boolean usetso = Boolean.parseBoolean(getValue(paramHashMap, "useTSO", "true"));
 

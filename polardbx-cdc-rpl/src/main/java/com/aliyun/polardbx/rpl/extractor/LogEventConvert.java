@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,12 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.extractor;
 
-import com.alibaba.fastjson.JSON;
+import com.alibaba.polardbx.druid.wall.spi.MySqlWallProvider;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
@@ -54,7 +51,6 @@ import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMetaCache;
 import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DdlResult;
 import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DruidDdlParser;
-import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
@@ -67,7 +63,7 @@ import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.collections.CollectionUtils;
+import org.springframework.util.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 
@@ -76,7 +72,6 @@ import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.sql.Connection;
 import java.sql.Types;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -122,11 +117,24 @@ public class LogEventConvert {
     protected FieldMeta rdsImplicitIDFieldMeta;
     protected TableMeta rdsHeartBeatTableMeta;
 
-    public LogEventConvert(HostInfo metaHostInfo, BaseFilter filter, BinlogPosition startBinlogPosition, HostType srcHostType) {
+    public LogEventConvert(HostInfo metaHostInfo, BaseFilter filter, BinlogPosition startBinlogPosition,
+                           HostType srcHostType) {
         this.metaHostInfo = metaHostInfo;
         this.filter = filter;
         this.binlogFileName = startBinlogPosition.getFileName();
         this.srcHostType = srcHostType;
+    }
+
+    public static DBMSTransactionBegin createTransactionBegin(long threadId) {
+        DBMSTransactionBegin transactionBegin = new DBMSTransactionBegin();
+        transactionBegin.setThreadId(threadId);
+        return transactionBegin;
+    }
+
+    public static DBMSTransactionEnd createTransactionEnd(long transactionId) {
+        DBMSTransactionEnd transactionEnd = new DBMSTransactionEnd();
+        transactionEnd.setTransactionId(transactionId);
+        return transactionEnd;
     }
 
     public void refreshState() {
@@ -134,27 +142,20 @@ public class LogEventConvert {
     }
 
     public void init() throws Exception {
-        try {
-            this.setCharset(RplConstants.EXTRACTOR_DEFAULT_CHARSET);
-            DataSource dataSource = DataSourceUtil.createDruidMySqlDataSource(metaHostInfo.isUsePolarxPoolCN(),
-                metaHostInfo.getHost(),
-                metaHostInfo.getPort(),
-                "",
-                metaHostInfo.getUserName(),
-                metaHostInfo.getPassword(),
-                "",
-                1,
-                2,
-                null,
-                null);
-                Connection conn = dataSource.getConnection();
-                MysqlConnection connection = new MysqlConnection(conn);
-                this.tableMetaCache = new TableMetaCache(connection);
-            initMeta();
-        } catch (Throwable e) {
-            log.error("LogEventConvert init failed, metaHostInfo: {}, {}", e, JSON.toJSONString(metaHostInfo));
-            throw e;
-        }
+        this.setCharset(RplConstants.EXTRACTOR_DEFAULT_CHARSET);
+        DataSource dataSource = DataSourceUtil.createDruidMySqlDataSource(metaHostInfo.isUsePolarxPoolCN(),
+            metaHostInfo.getHost(),
+            metaHostInfo.getPort(),
+            "",
+            metaHostInfo.getUserName(),
+            metaHostInfo.getPassword(),
+            "",
+            1,
+            2,
+            null,
+            null);
+        this.tableMetaCache = new TableMetaCache(dataSource);
+        initMeta();
     }
 
     protected void initMeta() {
@@ -247,14 +248,22 @@ public class LogEventConvert {
         String queryString = event.getQuery();
         if (StringUtils.endsWithIgnoreCase(queryString, BEGIN)) {
             DBMSTransactionBegin transactionBegin = createTransactionBegin(event.getSessionId());
-            return new MySQLDBMSEvent(transactionBegin, createPosition(event.getHeader()));
+            return new MySQLDBMSEvent(transactionBegin, createPosition(event.getHeader()),
+                event.getHeader().getEventLen());
         } else if (StringUtils.endsWithIgnoreCase(queryString, COMMIT)) {
             DBMSTransactionEnd transactionEnd = createTransactionEnd(0L);
-            return new MySQLDBMSEvent(transactionEnd, createPosition(event.getHeader()));
+            return new MySQLDBMSEvent(transactionEnd, createPosition(event.getHeader()),
+                event.getHeader().getEventLen());
         } else {
             // DDL语句处理
             // 只保留最后一条，queryString都是一样的
             HashMap<String, String> ddlInfo = Maps.newHashMap();
+
+            // 校验 sql 语句合法
+            MySqlWallProvider provider = new MySqlWallProvider();
+            if (!provider.checkValid(queryString)) {
+                return null;
+            }
 
             // 解析 sql 语句
             if (StringUtils.startsWithIgnoreCase(StringUtils.trim(queryString), "flush")
@@ -265,7 +274,7 @@ public class LogEventConvert {
             }
             List<DdlResult> resultList = DruidDdlParser.parse(queryString, event.getDbName());
             if (CollectionUtils.isEmpty(resultList)) {
-                if(!(queryString.startsWith("/*!") && queryString.endsWith("*/"))) {
+                if (!(queryString.startsWith("/*!") && queryString.endsWith("*/"))) {
                     log.error("DDL result list is empty. Raw query string: {}, db: {}", queryString, event.getDbName());
                 }
                 return null;
@@ -331,7 +340,8 @@ public class LogEventConvert {
                 queryEvent.setOptionValue(DefaultQueryLog.ddlInfo, ddlInfo);
             }
 
-            MySQLDBMSEvent mySQLDBMSEvent = new MySQLDBMSEvent(queryEvent, createPosition(event.getHeader()));
+            MySQLDBMSEvent mySQLDBMSEvent =
+                new MySQLDBMSEvent(queryEvent, createPosition(event.getHeader()), event.getHeader().getEventLen());
 
             // 如果是 XA 事务，解析
             DBMSXATransaction xaTransaction = getXaTransaction(queryString);
@@ -398,7 +408,7 @@ public class LogEventConvert {
     protected MySQLDBMSEvent parseXidEvent(XidLogEvent event) {
         DBMSTransactionEnd transactionEnd = new DBMSTransactionEnd();
         transactionEnd.setTransactionId(event.getXid());
-        return new MySQLDBMSEvent(transactionEnd, createPosition(event.getHeader()));
+        return new MySQLDBMSEvent(transactionEnd, createPosition(event.getHeader()), event.getHeader().getEventLen());
     }
 
     protected MySQLDBMSEvent parseRowsEvent(RowsLogEvent event) {
@@ -497,7 +507,7 @@ public class LogEventConvert {
                 }
             }
 
-            MySQLDBMSEvent dbmsEvent = new MySQLDBMSEvent(rowChange, position);
+            MySQLDBMSEvent dbmsEvent = new MySQLDBMSEvent(rowChange, position, event.getHeader().getEventLen());
             if (tableError) {
                 log.warn("table parser error : " + rowChange.toString());
                 return null;
@@ -622,7 +632,11 @@ public class LogEventConvert {
                     break;
                 case Types.CHAR:
                 case Types.VARCHAR:
-                    dataValue = value.toString();
+                    if (value == null) {
+                        dataValue = null;
+                    } else {
+                        dataValue = value.toString();
+                    }
                     break;
                 default:
                     dataValue = value.toString();
@@ -688,7 +702,7 @@ public class LogEventConvert {
             0,
             action);
 
-        return new MySQLDBMSEvent(queryLog, createPosition(logHeader));
+        return new MySQLDBMSEvent(queryLog, createPosition(logHeader), logHeader.getEventLen());
     }
 
     protected BinlogPosition createPosition(LogHeader logHeader) {
@@ -728,19 +742,8 @@ public class LogEventConvert {
 
     protected boolean isRDSHeartBeat(String schema, String table) {
         return (MYSQL.equalsIgnoreCase(schema) && HA_HEALTH_CHECK.equalsIgnoreCase(table))
-            || DRDS_SYSTEM_MYSQL_HEARTBEAT.equalsIgnoreCase(table);
-    }
-
-    public static DBMSTransactionBegin createTransactionBegin(long threadId) {
-        DBMSTransactionBegin transactionBegin = new DBMSTransactionBegin();
-        transactionBegin.setThreadId(threadId);
-        return transactionBegin;
-    }
-
-    public static DBMSTransactionEnd createTransactionEnd(long transactionId) {
-        DBMSTransactionEnd transactionEnd = new DBMSTransactionEnd();
-        transactionEnd.setTransactionId(transactionId);
-        return transactionEnd;
+            || DRDS_SYSTEM_MYSQL_HEARTBEAT.equalsIgnoreCase(table) ||
+            "__drds__systable__leadership__".equalsIgnoreCase(table);
     }
 
     protected String getXid(String queryString, XATransactionType type) throws CanalParseException {

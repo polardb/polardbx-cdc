@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,15 +11,15 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.common;
 
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 
+import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
+import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta.PhysicalMeta;
 import lombok.Data;
 
 /**
@@ -29,13 +28,16 @@ import lombok.Data;
  */
 @Data
 public class TaskContext {
+    // note: 不要依赖taskcontext成员中易变的字段
     private RplStateMachine stateMachine;
     private RplService service;
     private RplTask task;
+    private RplTaskConfig taskConfig;
     private String worker;
     private String config;
     private static TaskContext instance;
     private int physicalId;
+    private PhysicalMeta physicalMeta;
 
     private TaskContext() {
     }

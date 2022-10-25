@@ -40,7 +40,7 @@ JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDateStamps"
 JAVA_OPTS="${JAVA_OPTS} -XX:+DisableExplicitGC"
 JAVA_OPTS="${JAVA_OPTS} -Xloggc:${HOME}/logs/polardbx-binlog/Daemon/gc.log"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs"
-JAVA_OPTS="${JAVA_OPTS} -Ddaemon.home.dir=${BASE_DIR}"
+JAVA_OPTS="${JAVA_OPTS} -Dcdc.home.dir=${BASE_DIR}"
 JAVA_OPTS="${JAVA_OPTS} -DtaskName=Daemon"
 
 if [ -f ${HOME}/bin/env.sh ]; then

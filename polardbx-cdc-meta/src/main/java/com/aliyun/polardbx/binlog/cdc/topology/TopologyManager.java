@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.cdc.topology;
 
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicDbTopology;
@@ -22,6 +19,7 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicTableMetaT
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyDbTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyTableTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -34,8 +32,16 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCase;
+import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCaseTopologyRecord;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.internTopologyRecord;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.needIntern;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.needShareString;
 
 /**
  * server内核打标时，物理库表名按照Mysql的lower_case_table_names参数进行了大小写处理
@@ -50,26 +56,27 @@ import java.util.stream.Collectors;
 @Slf4j
 public class TopologyManager {
     private static final Gson GSON = new Gson();
-    private LogicMetaTopology topology;
+    public static final Map<String, TopologyRecord> TOPOLOGY_RECORD_CACHE = new ConcurrentHashMap<>();
 
-    private Map<Pair<String, String>, LogicDbTopology> cache = Maps.newHashMap();
+    private LogicMetaTopology topology;
+    private final Map<Pair<String, String>, LogicDbTopology> cache = Maps.newHashMap();
 
     public TopologyManager() {
     }
 
     public TopologyManager(LogicMetaTopology topology) {
-        toLowerCase(topology);
+        this.checkTopology(topology);
         this.topology = topology;
     }
 
-    public void apply(String tso, String schema, String table, TopologyRecord record) {
+    public void apply(final String tso, String schema, String table, TopologyRecord record) {
         if (record == null) {
             //2do 特殊处理
             return;
         }
         schema = toLowerCase(schema);
         table = toLowerCase(table);
-        toLowerCase(record);
+        record = tryGetSharedRecord(tso, record);
 
         Preconditions.checkNotNull(schema);
         Preconditions.checkArgument((StringUtils.isEmpty(table) ^ record.getLogicTableMeta() == null) == false,
@@ -204,10 +211,14 @@ public class TopologyManager {
         return null;
     }
 
-    public List<PhyTableTopology> getPhyTables(String storageInstId) {
+    public List<PhyTableTopology> getPhyTables(String storageInstId, Set<String> excludeLogicDbs,
+                                               Set<String> excludeLogicTables) {
         Preconditions.checkNotNull(storageInstId);
         List<PhyTableTopology> result = topology.getLogicDbMetas().stream().flatMap(
-            l -> l.getLogicTableMetas().stream().flatMap(p -> p.getPhySchemas().stream())
+            l -> l.getLogicTableMetas().stream()
+                .filter(d -> !excludeLogicDbs.contains(l.getSchema()))
+                .filter(t -> !excludeLogicTables.contains(l.getSchema() + "." + t.getTableName()))
+                .flatMap(p -> p.getPhySchemas().stream())
                 .filter(s -> s.getStorageInstId().equals(storageInstId))).collect(
             Collectors.toList());
         return result;
@@ -245,56 +256,37 @@ public class TopologyManager {
     }
 
     public void setTopology(LogicMetaTopology topology) {
-        toLowerCase(topology);
+        this.checkTopology(topology);
         this.topology = topology;
     }
 
-    private String toLowerCase(String input) {
-        if (StringUtils.isBlank(input)) {
-            return input;
-        }
-        return input.toLowerCase();
-    }
-
-    private void toLowerCase(TopologyRecord topologyRecord) {
-        if (topologyRecord == null) {
-            return;
-        }
-
-        if (topologyRecord.getLogicDbMeta() != null) {
-            toLowerCase(topologyRecord.getLogicDbMeta());
-        }
-        if (topologyRecord.getLogicTableMeta() != null) {
-            toLowerCase(topologyRecord.getLogicTableMeta());
-        }
-    }
-
-    private void toLowerCase(LogicMetaTopology topology) {
+    private void checkTopology(LogicMetaTopology topology) {
         if (topology == null) {
             return;
         }
-        if (topology.getLogicDbMetas() != null) {
-            topology.getLogicDbMetas().forEach(this::toLowerCase);
+        if (needShareString() && !topology.isShared()) {
+            throw new PolardbxException("topology should be shared, but is not!");
+        }
+        if (!topology.isLowerCased()) {
+            throw new PolardbxException("topology should be lowerCased, but is not!");
+        }
+        if (needIntern() && !topology.isInterned()) {
+            throw new PolardbxException("topology should be interned, but is not!");
         }
     }
 
-    private void toLowerCase(LogicDbTopology logicDbTopology) {
-        if (logicDbTopology == null) {
-            return;
+    private TopologyRecord tryGetSharedRecord(String tso, TopologyRecord record) {
+        if (needShareString()) {
+            return TOPOLOGY_RECORD_CACHE.computeIfAbsent(tso, k -> {
+                toLowerCaseTopologyRecord(record);
+                if (needIntern()) {
+                    internTopologyRecord(record);
+                }
+                return record;
+            }).copy();
+        } else {
+            toLowerCaseTopologyRecord(record);
+            return record;
         }
-
-        String newSchema = toLowerCase(logicDbTopology.getSchema());
-        logicDbTopology.setSchema(newSchema);
-        if (logicDbTopology.getLogicTableMetas() != null) {
-            logicDbTopology.getLogicTableMetas().forEach(this::toLowerCase);
-        }
-    }
-
-    private void toLowerCase(LogicTableMetaTopology logicTableMetaTopology) {
-        if (logicTableMetaTopology == null) {
-            return;
-        }
-        String newSchema = toLowerCase(logicTableMetaTopology.getTableName());
-        logicTableMetaTopology.setTableName(newSchema);
     }
 }

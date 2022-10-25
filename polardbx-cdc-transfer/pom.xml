@@ -5,10 +5,13 @@
     <parent>
         <artifactId>polardbx-cdc</artifactId>
         <groupId>com.aliyun.polardbx</groupId>
-        <version>5.4.13-SNAPSHOT</version>
+        <version>5.4.15-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>polardbx-cdc-transfer</artifactId>
+    <properties>
+        <license.dir>${project.parent.basedir}</license.dir>
+    </properties>
     <build>
         <plugins>
             <plugin>

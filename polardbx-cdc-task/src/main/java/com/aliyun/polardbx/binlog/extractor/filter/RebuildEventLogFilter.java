@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor.filter;
 
 import com.alibaba.polardbx.druid.DbType;
@@ -30,6 +27,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.DrdsMoveDataBase;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
@@ -37,6 +35,7 @@ import com.aliyun.polardbx.binlog.canal.LogEventFilter;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.LowerCaseTableNameVariables;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
+import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
@@ -77,12 +76,15 @@ import com.aliyun.polardbx.binlog.format.field.SimpleField;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
-import com.aliyun.polardbx.binlog.format.utils.CharsetConversion;
+import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
+import com.aliyun.polardbx.binlog.util.DirectByteOutput;
 import com.aliyun.polardbx.binlog.util.FastSQLConstant;
 import com.google.gson.Gson;
+import com.google.protobuf.UnsafeByteOperations;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
+import org.rocksdb.RocksDBException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -95,6 +97,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static com.aliyun.polardbx.binlog.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_QUERY_EVENT_BLACKLIST;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_USE_HISTORY_TABLE_FIRST;
 import static com.aliyun.polardbx.binlog.canal.system.SystemDB.AUTO_LOCAL_INDEX_PREFIX;
 
@@ -128,8 +131,8 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         logDecoder.handle(LogEvent.TABLE_MAP_EVENT);
     }
 
-    private boolean reformat(TxnItemRef txnItemRef, LogEvent event, HandlerContext context, String virtualTSO)
-        throws Exception {
+    private boolean reformat(TxnItemRef txnItemRef, LogEvent event, HandlerContext context, String virtualTSO,
+                             EventData.Builder eventDataBuilder) throws Exception {
         int type = event.getHeader().getType();
 
         switch (type) {
@@ -138,18 +141,18 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             return false;
         case LogEvent.UPDATE_ROWS_EVENT_V1:
         case LogEvent.UPDATE_ROWS_EVENT:
-            rebuildRowLogEvent(txnItemRef, (RowsLogEvent) event, LogEvent.UPDATE_ROWS_EVENT);
+            rebuildRowLogEvent(txnItemRef, (RowsLogEvent) event, eventDataBuilder);
             break;
         case LogEvent.DELETE_ROWS_EVENT:
         case LogEvent.DELETE_ROWS_EVENT_V1:
-            rebuildRowLogEvent(txnItemRef, (RowsLogEvent) event, LogEvent.DELETE_ROWS_EVENT);
+            rebuildRowLogEvent(txnItemRef, (RowsLogEvent) event, eventDataBuilder);
             break;
         case LogEvent.WRITE_ROWS_EVENT:
         case LogEvent.WRITE_ROWS_EVENT_V1:
-            rebuildRowLogEvent(txnItemRef, (RowsLogEvent) event, LogEvent.WRITE_ROWS_EVENT);
+            rebuildRowLogEvent(txnItemRef, (RowsLogEvent) event, eventDataBuilder);
             break;
         case LogEvent.TABLE_MAP_EVENT:
-            rebuildTableMapEvent(txnItemRef, (TableMapLogEvent) event, context);
+            rebuildTableMapEvent(txnItemRef, (TableMapLogEvent) event, context, eventDataBuilder);
             break;
         default:
             // should not be here
@@ -158,12 +161,13 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         return true;
     }
 
-    private void rebuildTableMapEvent(TxnItemRef txnItemRef, TableMapLogEvent tle, HandlerContext context)
+    private void rebuildTableMapEvent(TxnItemRef txnItemRef, TableMapLogEvent tle, HandlerContext context,
+                                      EventData.Builder eventDataBuilder)
         throws Exception {
         if (SystemDB.isSys(tle.getDbName())) {
             return;
         }
-        LogicTableMeta tableMeta = delegate.compare(tle.getDbName(), tle.getTableName());
+        LogicTableMeta tableMeta = delegate.compare(tle.getDbName(), tle.getTableName(), tle.getColumnCnt());
         if (logger.isDebugEnabled()) {
             logger.debug("detected un compatible table meta for table map event, will reformat event "
                 + tableMeta.getPhySchema() + tableMeta.getPhyTable());
@@ -175,28 +179,25 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             try {
                 rebuildTableMapBuilder(tme, tableMeta);
             } catch (Exception e) {
-                TableMapLogEvent.ColumnInfo columnInfo[] = tle.getColumnInfo();
+                TableMapLogEvent.ColumnInfo[] columnInfo = tle.getColumnInfo();
                 StringBuilder errorInfo = new StringBuilder();
                 for (LogicTableMeta.FieldMetaExt fieldMetaExt : tableMeta.getLogicFields()) {
                     if (fieldMetaExt.getPhyIndex() >= columnInfo.length) {
-                        errorInfo
-                            .append("not found phy columnIndex " + fieldMetaExt.getPhyIndex() + " with column name : "
-                                + fieldMetaExt.getColumnName());
+                        errorInfo.append("not found phy columnIndex ").append(fieldMetaExt.getPhyIndex())
+                            .append(" with column name : ").append(fieldMetaExt.getColumnName());
                     }
                     if (fieldMetaExt.getLogicIndex() >= tableMeta.getLogicFields().size()) {
-                        errorInfo.append(
-                            "not found logic columnIndex " + fieldMetaExt.getLogicIndex() + " with column name : "
-                                + fieldMetaExt.getColumnName());
+                        errorInfo.append("not found logic columnIndex ").append(fieldMetaExt.getLogicIndex())
+                            .append(" with column name : ").append(fieldMetaExt.getColumnName());
                     }
                 }
-                logger.error(
-                    "rebuild table map error " + tme.getSchema() + "." + tme.getTableName() + " error : " + errorInfo,
-                    e);
+                logger.error("rebuild table map error " + tme.getSchema() + "." + tme.getTableName() + " error : "
+                    + errorInfo, e);
                 throw e;
             }
         }
-        txnItemRef.setSchema(tableMeta.getLogicSchema());
-        txnItemRef.setTable(tableMeta.getLogicTable());
+        eventDataBuilder.setSchemaName(tableMeta.getLogicSchema());
+        eventDataBuilder.setTableName(tableMeta.getLogicTable());
         tme.setSchema(tableMeta.getLogicSchema());
         tme.setTableName(tableMeta.getLogicTable());
         tle.setNewData(toByte(tme));
@@ -205,29 +206,40 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         }
     }
 
-    private void rebuildRowLogEvent(TxnItemRef txnItemRef, RowsLogEvent rle, int eventType) {
+    private void rebuildRowLogEvent(TxnItemRef txnItemRef, RowsLogEvent rle, EventData.Builder eventDataBuilder) {
         if (SystemDB.isSys(rle.getTable().getDbName())) {
             return;
         }
-        LogicTableMeta tableMeta = delegate.compare(rle.getTable().getDbName(), rle.getTable().getTableName());
+        LogicTableMeta tableMeta =
+            delegate.compare(rle.getTable().getDbName(), rle.getTable().getTableName(), rle.getColumnLen());
         // 整形只考虑 insert,其他可以不考虑,如果 是全镜像导致下游报错，则全部都需要处理
         if (logger.isDebugEnabled()) {
             logger.debug("detected compatible " + tableMeta.isCompatible() + " table meta for event, "
                 + "will reformat event " + tableMeta.getPhySchema() + tableMeta.getPhyTable());
         }
         try {
-            RowEventBuilder reb = RowsLogEventRebuilder.convert(rle, serviceId);
             if (!tableMeta.isCompatible()) {
+                RowEventBuilder reb = RowsLogEventRebuilder.convert(rle, serviceId);
                 rebuildRowEventBuilder(tableMeta, reb, rle.getTable());
+                rle.setNewData(toByte(reb));
+            } else {
+                writeServerId(rle.toBytes(), serviceId);
             }
-            txnItemRef.setSchema(tableMeta.getLogicSchema());
-            txnItemRef.setTable(tableMeta.getLogicTable());
-            rle.setNewData(toByte(reb));
+            eventDataBuilder.setSchemaName(tableMeta.getLogicSchema());
+            eventDataBuilder.setTableName(tableMeta.getLogicTable());
         } catch (Exception e) {
             throw new PolardbxException(" reformat log pos : " + rle.getHeader().getLogPos() + " occur error", e);
         }
         if (logger.isDebugEnabled()) {
             logger.debug("row event : " + new Gson().toJson(rle.toBytes()));
+        }
+    }
+
+    private void writeServerId(byte[] bytes, long serverId) {
+        int pos = 5;
+        for (int i = 0; i < 4; ++i) {
+            byte b = (byte) ((serverId >> (i << 3)) & 0xff);
+            bytes[pos++] = b;
         }
     }
 
@@ -304,10 +316,13 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                 boolean allRemove = true;
                 while (it.hasNext()) {
                     TxnItemRef tir = it.next();
-                    byte[] bytes = tir.getPayload();
+                    EventData eventData = tir.getEventData();
+                    EventData.Builder eventDataBuilder = eventData.toBuilder();
+
+                    byte[] bytes = DirectByteOutput.unsafeFetch(eventData.getPayload());
                     LogEvent e = logDecoder.decode(new LogBuffer(bytes, 0, bytes.length), lc);
                     if (!eventAcceptFilter.accept(e)) {
-                        it.remove();
+                        removeOneItem(tir, it);
                         continue;
                     }
                     final long oldServerId = serviceId;
@@ -315,8 +330,8 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                         serviceId = transaction.getServerId();
                     }
                     try {
-                        if (!reformat(tir, e, context, transaction.getVirtualTSO())) {
-                            it.remove();
+                        if (!reformat(tir, e, context, transaction.getVirtualTSO(), eventDataBuilder)) {
+                            removeOneItem(tir, it);
                             continue;
                         }
                     } finally {
@@ -324,7 +339,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                     }
 
                     allRemove = false;
-                    tir.setPayload(e.toBytes());
+                    tir.setEventData(eventDataBuilder.setPayload(UnsafeByteOperations.unsafeWrap(e.toBytes())).build());
                 }
                 if (allRemove) {
                     transaction.release();
@@ -340,24 +355,37 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             }
 
             if (transaction.isDDL()) {
+                final long oldServerId = serviceId;
                 try {
+                    if (transaction.getServerId() != null) {
+                        serviceId = transaction.getServerId();
+                    }
                     rebuildDDL(transaction, context);
                 } catch (Exception e) {
                     throw new PolardbxException(e);
+                } finally {
+                    serviceId = oldServerId;
                 }
             }
 
             if (!transaction.isVisible()) {
                 transaction.release();
                 tranIt.remove();
-                continue;
             }
-
         }
         if (!event.isEmpty()) {
             context.doNext(event);
         }
 
+    }
+
+    private void removeOneItem(TxnItemRef tir, Iterator<TxnItemRef> it) {
+        try {
+            tir.delete();
+            it.remove();
+        } catch (RocksDBException e) {
+            throw new PolardbxException("remove txn item ref failed!", e);
+        }
     }
 
     private void handleQueryLog(QueryLogEvent event, String virtualTSO, HandlerContext context) throws Exception {
@@ -366,23 +394,24 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             context.doNext(event);
             return;
         }
+
         if (SystemDB.isSys(event.getDbName())) {
             // ignore 系统库 DDL
             return;
         }
 
-        if (query.toLowerCase().contains("__drds_global_tx_log")) {
-            // ignore drds xa 表
-            return;
-        }
-
-        if (query.toLowerCase().startsWith("savepoint")) {
+        if (ignoreQueryEvent(query)) {
+            // 配置黑名单方式过滤解析失败、或不需要处理的queryEvent,比如:grant、savepoint等
             return;
         }
 
         RuntimeContext rc = context.getRuntimeContext();
         if (rc.getLowerCaseTableNames() == LowerCaseTableNameVariables.LOWERCASE.getValue()) {
             query = query.toLowerCase();
+        }
+
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DDL_REMOVEHINTS_SUPPORT)) {
+            query = com.aliyun.polardbx.binlog.canal.core.ddl.SQLUtils.removeDDLHints(query);
         }
 
         BinlogPosition position = new BinlogPosition(context.getRuntimeContext().getBinlogFile(),
@@ -407,6 +436,10 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             }
         }
         delegate.apply(position, event.getDbName(), query, null, context.getRuntimeContext());
+    }
+
+    private Boolean ignoreQueryEvent(String query) {
+        return RegexUtil.match(DynamicApplicationConfig.getString(META_QUERY_EVENT_BLACKLIST), query);
     }
 
     private void rebuildDDL(Transaction transaction, HandlerContext context) throws Exception {
@@ -522,7 +555,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             int logicIndex = fieldMetaExt.getLogicIndex();
             int phyIndex = fieldMetaExt.getPhyIndex();
 
-            if (phyIndex >= 0) {
+            if (fieldMetaExt.isTypeMatch() && phyIndex >= 0) {
                 newTypeDef[logicIndex] = typeDef[phyIndex];
                 newMetaDef[logicIndex] = metaDef[phyIndex];
                 newNullBitMap.set(logicIndex, nullBitmap.get(phyIndex));
@@ -553,9 +586,9 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
 
     private void rebuildRowEventBuilder(LogicTableMeta tableMeta, RowEventBuilder reb, TableMapLogEvent table) {
         List<LogicTableMeta.FieldMetaExt> fieldMetas = tableMeta.getLogicFields();
-        reb.setColumnCount(fieldMetas.size());
-        List<RowData> rowDataList = reb.getRowDataList();
         int newColSize = fieldMetas.size();
+        reb.setColumnCount(newColSize);
+        List<RowData> rowDataList = reb.getRowDataList();
         BitMap columnBitMap = new BitMap(newColSize);
         reb.setColumnsBitMap(columnBitMap);
 
@@ -571,12 +604,34 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
 
             newRowDataList.add(newRowData);
         }
+        if (reb.isUpdate()) {
+            resetChangeRowColumnBitMap(fieldMetas, reb);
+        }
         reb.setRowDataList(newRowDataList);
+    }
+
+    private void resetChangeRowColumnBitMap(List<LogicTableMeta.FieldMetaExt> fieldMetas,
+                                            RowEventBuilder reb) {
+        BitMap newAIChangeBitMap = new BitMap(fieldMetas.size());
+        BitMap orgAiChangeBitMap = reb.getColumnsChangeBitMap();
+        for (int i = 0; i < fieldMetas.size(); i++) {
+            LogicTableMeta.FieldMetaExt fieldMetaExt = fieldMetas.get(i);
+            int logicIndex = fieldMetaExt.getLogicIndex();
+            int phyIndex = fieldMetaExt.getPhyIndex();
+            if (phyIndex < 0) {
+                newAIChangeBitMap.set(logicIndex, true);
+            } else {
+                boolean exist = orgAiChangeBitMap.get(phyIndex);
+                newAIChangeBitMap.set(logicIndex, exist);
+            }
+        }
+        reb.setColumnsChangeBitMap(newAIChangeBitMap);
     }
 
     private void processBIImage(List<LogicTableMeta.FieldMetaExt> fieldMetas, TableMapLogEvent table,
                                 RowData oldRowData, RowData newRowData, RowEventBuilder reb) {
         List<Field> dataField = oldRowData.getBiFieldList();
+        BitMap biNullBitMap = oldRowData.getBiNullBitMap();
         List<Field> newBiFieldList = new ArrayList<>(fieldMetas.size());
         BitMap newBiNullBitMap = new BitMap(fieldMetas.size());
         BitMap newColumnBitMap = new BitMap(fieldMetas.size());
@@ -592,21 +647,48 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                     fieldMetaExt.getDefaultValue(),
                     charset,
                     fieldMetaExt.isNullable());
+                boolean isNull = biField.isNull();
+                newBiNullBitMap.set(logicIdx, isNull);
+                if (!isNull) {
+                    newBiFieldList.add(biField);
+                }
             } else {
                 biField = dataField.get(phyIndex);
+                boolean isNull = biNullBitMap.get(phyIndex);
+                newBiNullBitMap.set(logicIdx, isNull);
+                if (!isNull) {
+                    if (!fieldMetaExt.isTypeMatch()) {
+                        biField = resolveDataTypeNotMatch(biField, table, fieldMetaExt);
+                    }
+                    newBiFieldList.add(biField);
+                }
             }
-            newBiNullBitMap.set(i, biField.isNull());
-            newBiFieldList.add(biField);
         }
         newRowData.setBiNullBitMap(newBiNullBitMap);
         newRowData.setBiFieldList(newBiFieldList);
         reb.setColumnsBitMap(newColumnBitMap);
     }
 
+    private Field resolveDataTypeNotMatch(Field field, TableMapLogEvent tableMapLogEvent,
+                                          LogicTableMeta.FieldMetaExt fieldMetaExt) {
+        int phyIndex = fieldMetaExt.getPhyIndex();
+        SimpleField simpleField = (SimpleField) field;
+        TableMapLogEvent.ColumnInfo columnInfo = tableMapLogEvent.getColumnInfo()[phyIndex];
+        byte[] value = simpleField.getData();
+        LogBuffer logBuffer = new LogBuffer(value, 0, value.length);
+        String charset = getCharset(fieldMetaExt, tableMapLogEvent.getDbName(), tableMapLogEvent.getTableName());
+        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(logBuffer, 0, "utf8");
+        Serializable serializable = rowsLogBuffer.fetchValue(columnInfo.type, columnInfo.meta, false);
+        field = MakeFieldFactory.makeField(fieldMetaExt.getColumnType(),
+            String.valueOf(serializable),
+            charset,
+            fieldMetaExt.isNullable());
+        return field;
+    }
+
     private void processAIImage(List<LogicTableMeta.FieldMetaExt> fieldMetas, RowData oldRowData, RowData newRowData,
                                 RowEventBuilder reb, TableMapLogEvent table) {
         BitMap newAINullBitMap = new BitMap(fieldMetas.size());
-        BitMap newAIChangeBitMap = new BitMap(fieldMetas.size());
         List<Field> newAIFiledList = new ArrayList<>();
         BitMap orgAiChangeBitMap = reb.getColumnsChangeBitMap();
         BitMap orgAiNullBitMap = oldRowData.getAiNullBitMap();
@@ -616,7 +698,6 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             int logicIndex = fieldMetaExt.getLogicIndex();
             int phyIndex = fieldMetaExt.getPhyIndex();
             if (phyIndex < 0) {
-                newAIChangeBitMap.set(logicIndex, true);
                 String charset = getCharset(fieldMetaExt, table.getDbName(), table.getTableName());
                 Field aiField = MakeFieldFactory.makeField(fieldMetaExt.getColumnType(),
                     fieldMetaExt.getDefaultValue(),
@@ -627,18 +708,19 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                     newAIFiledList.add(aiField);
                 }
             } else {
-                boolean exist = orgAiChangeBitMap.get(phyIndex);
-                newAIChangeBitMap.set(logicIndex, exist);
-                if (exist) {
+                if (orgAiChangeBitMap.get(phyIndex)) {
                     boolean isNull = orgAiNullBitMap.get(phyIndex);
                     newAINullBitMap.set(logicIndex, isNull);
                     if (!isNull) {
-                        newAIFiledList.add(orgFieldList.get(phyIndex));
+                        Field aiField = orgFieldList.get(phyIndex);
+                        if (!fieldMetaExt.isTypeMatch()) {
+                            aiField = resolveDataTypeNotMatch(aiField, table, fieldMetaExt);
+                        }
+                        newAIFiledList.add(aiField);
                     }
                 }
             }
         }
-        reb.setColumnsChangeBitMap(newAIChangeBitMap);
         newRowData.setAiNullBitMap(newAINullBitMap);
         newRowData.setAiFieldList(newAIFiledList);
     }
@@ -705,32 +787,36 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
     }
 
     String tryRewriteDropTableSql(String schema, String tableName, String ddl) {
-        SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.FEATURES);
-        SQLStatement stmt = parser.parseStatementList().get(0);
+        try {
+            SQLStatementParser parser =
+                SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.FEATURES);
+            SQLStatement stmt = parser.parseStatementList().get(0);
 
-        //fix https://work.aone.alibaba-inc.com/issue/36762424
-        if (stmt instanceof SQLDropTableStatement) {
-            SQLDropTableStatement dropTableStatement = (SQLDropTableStatement) stmt;
-            if (dropTableStatement.getTableSources().size() > 1) {
-                Optional<SQLExprTableSource> optional = dropTableStatement.getTableSources().stream()
-                    .filter(ts ->
-                        tableName.equalsIgnoreCase(ts.getTableName(true)) && (StringUtils.isBlank(ts.getSchema())
-                            || schema.equalsIgnoreCase(SQLUtils.normalize(ts.getSchema())))
-                    ).findFirst();
-                if (!optional.isPresent()) {
-                    throw new PolardbxException(String.format("can`t find table %s in sql %s", tableName, ddl));
-                } else {
-                    dropTableStatement.getTableSources().clear();
-                    dropTableStatement.addTableSource(optional.get());
-                    String newSql = dropTableStatement.toUnformattedString();
-                    logger.info("rewrite drop table sql from {}, to {}", ddl, newSql);
-                    return newSql;
+            //fix https://work.aone.alibaba-inc.com/issue/36762424
+            if (stmt instanceof SQLDropTableStatement) {
+                SQLDropTableStatement dropTableStatement = (SQLDropTableStatement) stmt;
+                if (dropTableStatement.getTableSources().size() > 1) {
+                    Optional<SQLExprTableSource> optional = dropTableStatement.getTableSources().stream()
+                        .filter(ts ->
+                            tableName.equalsIgnoreCase(ts.getTableName(true)) && (StringUtils.isBlank(ts.getSchema())
+                                || schema.equalsIgnoreCase(SQLUtils.normalize(ts.getSchema())))
+                        ).findFirst();
+                    if (!optional.isPresent()) {
+                        throw new PolardbxException(String.format("can`t find table %s in sql %s", tableName, ddl));
+                    } else {
+                        dropTableStatement.getTableSources().clear();
+                        dropTableStatement.addTableSource(optional.get());
+                        String newSql = dropTableStatement.toUnformattedString();
+                        logger.info("rewrite drop table sql from {}, to {}", ddl, newSql);
+                        return newSql;
+                    }
                 }
             }
-        }
 
-        return ddl;
+            return ddl;
+        } catch (Throwable t) {
+            throw new PolardbxException("try rewrite drop table sql failed!!", t);
+        }
     }
 
     private String tryRewriteForDropIndex(String tso, String schema, String tableName, String sql, DDLEvent ddlEvent) {

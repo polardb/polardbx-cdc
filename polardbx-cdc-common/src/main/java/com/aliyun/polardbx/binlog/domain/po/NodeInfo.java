@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,13 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.domain.po;
 
-import javax.annotation.Generated;
 import java.util.Date;
+import javax.annotation.Generated;
 
 public class NodeInfo {
     @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-11-18T18:12:42.598+08:00",

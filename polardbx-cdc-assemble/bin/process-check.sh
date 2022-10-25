@@ -18,7 +18,7 @@ else
         echo "${PID_FILE} exist, but pid is empty"
         needStart=1;
     else
-        runningPid=`jps | grep "$pid" |  awk '{print $1}'`;
+        runningPid=`ps -ef | grep java | awk '{print $2}' | grep "$pid" |  awk '{print $1}'`;
         echo "Running pid: $runningPid"
         if  [ "$pid" != "$runningPid" ]; then
             echo "pid not empty, but process not exist"
@@ -27,7 +27,7 @@ else
     fi
 fi
 
-runningCount=`jps | grep DaemonBootStrap | wc -l`
+runningCount=`ps -ef | grep java | grep DaemonBootStrap | wc -l`
 echo "Running ${PID_FILE} count: $runningCount"
 if [ "$runningCount" -gt 1 ];then
     echo "Running ${PID_FILE} count more than 1";

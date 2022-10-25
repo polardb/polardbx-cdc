@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
@@ -69,39 +66,34 @@ public class SplitTransactionApplier extends MysqlApplier {
     protected boolean parallelExecSqlContexts(Map<String, List<DefaultRowChange>> allRowChanges, boolean tbTranExec)
         throws Throwable {
         boolean res = true;
-        List<Future> futures = new ArrayList<>();
+        List<Future<Boolean>> futures = new ArrayList<>();
 
         for (String fullTbName : allRowChanges.keySet()) {
             List<DefaultRowChange> tbRowChanges = allRowChanges.get(fullTbName);
             List<SqlContext> tbSqlContexts = new ArrayList<>();
 
             for (DefaultRowChange rowChange : tbRowChanges) {
-                tbSqlContexts.addAll(getSqlContexts(rowChange, rowChange.getTable()));
+                tbSqlContexts.addAll(getSqlContexts(rowChange, safeMode));
             }
 
             // execute
-            final Callable task;
+            final Callable<Boolean> task;
             if (tbTranExec) {
                 task = () -> {
-                    boolean succeed;
-                    if (skipAllException) {
-                        succeed = execSqlContexts(tbSqlContexts);
-                    } else {
-                        succeed = tranExecSqlContexts(tbSqlContexts);
-                    }
-                    if (succeed) {
+                    if (tranExecSqlContexts(tbSqlContexts)) {
                         recordTablePosition(fullTbName, tbRowChanges.get(tbRowChanges.size() - 1));
+                        return true;
                     }
-                    return succeed;
+                    return false;
                 };
             } else {
                 task = () -> execSqlContexts(tbSqlContexts);
             }
-            futures.add(executorService.submit(() -> task.call()));
+            futures.add(executorService.submit(task));
         }
 
-        for (Future future : futures) {
-            res &= (Boolean) future.get();
+        for (Future<Boolean> future : futures) {
+            res &= future.get();
         }
 
         return res;

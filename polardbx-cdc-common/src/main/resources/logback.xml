@@ -99,6 +99,30 @@
         </encoder>
     </appender>
 
+
+    <appender name="skipTransAppender"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/skipTrans.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/skipTrans.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>10</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
     <appender name="file.async.transaction" class="ch.qos.logback.classic.AsyncAppender">
         <!-- 不丢失日志.默认的,如果队列的80%已满,则会丢弃TRACT、DEBUG、INFO级别的日志 -->
         <discardingThreshold>0</discardingThreshold>
@@ -124,6 +148,11 @@
         <appender-ref ref="consoleAppender"/>
     </logger>
 
+    <logger name="SKIP_TRANS_LOG" level="INFO" additivity="false">
+        <appender-ref ref="skipTransAppender"/>
+        <appender-ref ref="consoleAppender"/>
+    </logger>
+
     <logger name="METRICS" level="INFO" additivity="false">
         <appender-ref ref="metricsAppender"/>
         <appender-ref ref="consoleAppender"/>
@@ -132,7 +161,7 @@
     <logger name="FileTest" level="INFO" additivity="false">
         <appender-ref ref="FILE_TEST"/>
     </logger>
-    <logger name="com.aliyun.polardbx.binlog.extractor.transaction" level="INFO" additivity="false">
+    <logger name="com.aliyun.polardbx.binlog.extractor.transaction" level="DEBUG" additivity="false">
         <appender-ref ref="file.async.transaction"/>
         <appender-ref ref="consoleAppender"/>
     </logger>

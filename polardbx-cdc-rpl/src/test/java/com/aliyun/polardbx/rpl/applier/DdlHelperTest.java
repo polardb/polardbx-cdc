@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,18 +11,13 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.applier;
 
-import java.sql.Timestamp;
-import java.util.List;
-
-import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DdlResult;
-import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DruidDdlParser;
 import org.junit.Assert;
 import org.junit.Test;
+
+import java.sql.Timestamp;
 
 /**
  * @author shicai.xsc 2021/4/19 11:18
@@ -48,16 +42,6 @@ public class DdlHelperTest {
     }
 
     @Test
-    public void getEnableKeysDdl() {
-        String sql = "/*! ALTER TABLE `test_tb` DISABLE KEYS */";
-        List<DdlResult> originSql = DruidDdlParser.parse(sql, "test_db");
-        Assert.assertEquals("CREATE TABLE aaaaaa (\n" + "\tid int,\n" + "\tvalue int,\n"
-                + "\tINDEX `auto_shard_key_id` USING BTREE(`ID`)\n" + ")\n" + "DBPARTITION BY hash(id)\n"
-                + "TBPARTITION BY hash(id) TBPARTITIONS 2",
-            originSql);
-    }
-
-    @Test
     public void getTso_1() {
         String sql = "/*POLARX_ORIGIN_SQL=CREATE TABLE aaaaaa (\n" + "    id int,\n" + "    value int,\n"
             + "    INDEX `auto_shard_key_id` USING BTREE(`ID`),\n"
@@ -66,7 +50,7 @@ public class DdlHelperTest {
             + "/*TSO=678700134612901433613180665615960145920000000000000000*/ CREATE TABLE aaaaaa ( id int, value "
             + "int, INDEX `auto_shard_key_id` USING BTREE(`ID`) ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = "
             + "utf8mb4_general_ci";
-        String tso = DdlHelper.getTso(sql, null, null);
+        String tso = DdlHelper.getTso(sql, null, "");
         Assert.assertEquals(tso, "678700134612901433613180665615960145920000000000000000");
     }
 
@@ -79,7 +63,7 @@ public class DdlHelperTest {
             + "CREATE TABLE aaaaaa ( id int, value "
             + "int, INDEX `auto_shard_key_id` USING BTREE(`ID`) ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = "
             + "utf8mb4_general_ci";
-        String tso = DdlHelper.getTso(sql, new Timestamp(1618802638), "test");
-        // Assert.assertEquals("-3519920771618802638", tso);
+        String tso = DdlHelper.getTso(sql, new Timestamp(1618802638), "");
+        Assert.assertEquals("-3519920771618802638", tso);
     }
 }

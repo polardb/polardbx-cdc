@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.extractor;
 
 import com.alibaba.polardbx.druid.DbType;
@@ -26,17 +23,41 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.parser.MySqlStatementParser;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter;
 import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.util.List;
 
 public class DDLConverterTest {
+
+    SpringContextBootStrap appContextBootStrap;
+    Gson gson = new GsonBuilder().create();
+
+    @Before
+    public void init() {
+        appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
+        appContextBootStrap.boot();
+    }
+
+    @Test
+    public void testDDL() {
+        String createTableSql = "CREATE ALGORITHM=UNDEFINED DEFINER=`xsy_admin`@`%` SQL SECURITY\n"
+            + "DEFINER VIEW `view_user` AS select `smartcourt-platform`.`t_pl_user_base`.`id` AS `id`,`smartcourt-platform`.`t_pl_user_base`.`name` AS `name` from `smartcourt-platfo\n"
+            + "rm`.`t_pl_user_base`;";
+        MySqlStatementParser parser = new MySqlStatementParser(createTableSql);
+        SQLStatement st = parser.parseStatement();
+        System.out.println(st.getClass());
+    }
 
     @Test
     public void testShard() {
@@ -59,6 +80,20 @@ public class DDLConverterTest {
         String formatDDL = DDLConverter.convertNormalDDL(ddl, "utf8mb4", null,
             1, "12345667788");
         System.out.println(formatDDL);
+    }
+
+    @Test
+    public void testDDLWithComment() {
+        String ddl =
+            "/* applicationname=datagrip 2021.2.4 */ create database /*!32312 if not exists*/ `slt_single` /*!40100 default character set utf8mb4 */";
+
+//        String ddl =
+//            " create database  `slt_single` ";
+        SQLStatementParser parser =
+            SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.MYSQL_FEATURES);
+        List<SQLStatement> statementList = parser.parseStatementList();
+        SQLStatement statement = statementList.get(0);
+        System.out.println(statement);
     }
 
     @Test
@@ -316,7 +351,7 @@ public class DDLConverterTest {
 
     @Test
     public void testConstraint() {
-        String sql = "alter table `xxx` drop key k1(`u`)";
+        String sql = "alter table omc_change_column_ordinal_test_tbl change column c cc bigint first ALGORITHM=OMC ";
         SQLStatementParser parser =
             SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FastSQLConstant.FEATURES);
         List<SQLStatement> stmtList = parser.parseStatementList();
@@ -327,4 +362,52 @@ public class DDLConverterTest {
         }
     }
 
+    @Test
+    public void testModifyColumn() {
+        String sql1 = "alter table nnn change column b bb bigint ALGORITHM=OMC";
+        String sql2 = DDLConverter.convertNormalDDL(sql1, null, null, 0, "");
+        System.out.println(sql2);
+
+        String sql3 = "alter table nnn change column b bb bigint ALGORITHM=XXX";
+        String sql4 = DDLConverter.convertNormalDDL(sql3, null, null, 0, "");
+        System.out.println(sql4);
+
+        String sql5 = "ALTER TABLE column_backfill_ts_tbl\n"
+            + "  MODIFY COLUMN c1_1 timestamp(6) DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),\n"
+            + "  ALGORITHM = omc";
+        String sql6 = DDLConverter.convertNormalDDL(sql5, null, null, 0, "");
+        System.out.println(sql6);
+    }
+
+    @Test
+    public void testSplitPartition() {
+        String sql1 = "alter table t1 split partition p1";
+        String sql2 = DDLConverter.convertNormalDDL(sql1, null, null, 0, "");
+        System.out.println(sql2);
+    }
+
+    @Test
+    public void testSplitPartitionxx() {
+        String sql =
+            "ALTER TABLE t_range_table_1660185492145 SPLIT PARTITION p1 INTO (PARTITION p10 VALUES LESS THAN (1994),\n"
+                + " PARTITION p11 VALUES LESS THAN(1996),\n"
+                + " PARTITION p12 VALUES LESS THAN(2000))";
+        SQLStatementParser parser =
+            SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FastSQLConstant.FEATURES);
+        SQLStatement stmt = parser.parseStatementList().get(0);
+    }
+
+    @Test
+    public void testAlterPartition() {
+        String sql =
+            "/* cdc_token : a12ea068-626b-4a6c-b6a5-47e19c92b89f */alter tablegroup tg118 modify partition p0 add values (1988,1989)";
+        SQLStatementParser parser =
+            SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FastSQLConstant.FEATURES);
+        SQLStatement stmt = parser.parseStatementList().get(0);
+        System.out.println(stmt.toString());
+        parser =
+            SQLParserUtils.createSQLStatementParser(stmt.toString(), DbType.mysql, FastSQLConstant.FEATURES);
+        System.out.println(parser.parseStatementList().get(0));
+
+    }
 }

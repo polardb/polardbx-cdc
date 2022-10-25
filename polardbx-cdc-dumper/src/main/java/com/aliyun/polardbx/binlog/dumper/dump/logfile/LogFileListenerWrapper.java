@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import org.slf4j.Logger;
@@ -59,10 +56,10 @@ public class LogFileListenerWrapper implements LogFileListener {
     }
 
     @Override
-    public void onFinishFile(File file) {
+    public void onFinishFile(File file, Long logEndTime) {
         try {
             for (LogFileListener logFileListener : logFileListeners) {
-                logFileListener.onFinishFile(file);
+                logFileListener.onFinishFile(file, logEndTime);
             }
         } catch (Exception e) {
             logger.error("on finish error", e);

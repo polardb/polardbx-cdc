@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.dbmeta;
 
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
@@ -44,7 +41,7 @@ public class DbMetaCache {
     private Map<String, TableInfo> tableInfos = new HashMap<>();
 
     private int minPoolSize = 1;
-    private int maxPoolSize = 60;
+    private int maxPoolSize = 30;
     private final static String POLARX_DEFAULT_SCHEMA = "polardbx";
     private final static String SET_POLARX_SERVER_ID = "set polardbx_server_id=%d";
 
@@ -56,10 +53,12 @@ public class DbMetaCache {
     public DataSource getDataSource(String schema) throws Exception {
         try {
             if (!dataSources.containsKey(schema)) {
-                List<String> connectionInitSqls = new ArrayList<>();
+                List<String> connectionInitSQLs = new ArrayList<>();
+                log.warn("set server id: {}", Math.abs(new Long(hostInfo.getServerId()).intValue()));
+
                 String setServerIdSql =
-                    String.format(SET_POLARX_SERVER_ID, hostInfo.getServerId());
-                connectionInitSqls.add(setServerIdSql);
+                    String.format(SET_POLARX_SERVER_ID, Math.abs(new Long(hostInfo.getServerId()).intValue()));
+                connectionInitSQLs.add(setServerIdSql);
                 DataSource dataSource = DataSourceUtil.createDruidMySqlDataSource(hostInfo.isUsePolarxPoolCN(),
                     hostInfo.getHost(),
                     hostInfo.getPort(),
@@ -70,7 +69,7 @@ public class DbMetaCache {
                     minPoolSize,
                     maxPoolSize,
                     null,
-                    connectionInitSqls);
+                    connectionInitSQLs);
                 dataSources.put(schema, dataSource);
             }
             return dataSources.get(schema);

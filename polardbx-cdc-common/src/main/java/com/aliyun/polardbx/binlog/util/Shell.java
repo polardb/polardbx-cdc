@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,7 +11,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
 package com.aliyun.polardbx.binlog.util;
 
@@ -74,7 +72,7 @@ public abstract class Shell {
     /**
      * System property for the Daemon home directory: {@value}.
      */
-    public static final String SYSPROP_DAEMON_HOME_DIR = "daemon.home.dir";
+    public static final String SYSPROP_CDC_HOME_DIR = "cdc.home.dir";
 
     /**
      * Environment variable for Daemon's home dir: {@value}.
@@ -525,15 +523,15 @@ public abstract class Shell {
      * privately for initialization once per process.
      *
      * @return A directory that exists and via was specified on the command line
-     * via <code>-Ddaemon.home.dir</code> or the <code>DAEMON_HOME</code>
+     * via <code>-Dcdc.home.dir</code> or the <code>DAEMON_HOME</code>
      * environment variable.
      * @throws FileNotFoundException if the properties are absent or the specified
      * path is not a reference to a valid directory.
      */
     private static File checkDaemonHome() throws FileNotFoundException {
 
-        // first check the Dflag daemon.home.dir with JVM scope
-        String home = System.getProperty(SYSPROP_DAEMON_HOME_DIR);
+        // first check the Dflag cdc.home.dir with JVM scope
+        String home = System.getProperty(SYSPROP_CDC_HOME_DIR);
 
         // fall back to the system/user-global env variable
         if (home == null) {
@@ -552,9 +550,9 @@ public abstract class Shell {
     static final String E_NO_EXECUTABLE = "Could not locate Daemon executable";
     static final String E_NOT_EXECUTABLE_FILE = "Not an executable file";
     static final String E_DAEMON_PROPS_UNSET = ENV_DAEMON_HOME + " and "
-        + SYSPROP_DAEMON_HOME_DIR + " are unset.";
+        + SYSPROP_CDC_HOME_DIR + " are unset.";
     static final String E_DAEMON_PROPS_EMPTY = ENV_DAEMON_HOME + " or "
-        + SYSPROP_DAEMON_HOME_DIR + " set to an empty string";
+        + SYSPROP_CDC_HOME_DIR + " set to an empty string";
     static final String E_NOT_A_WINDOWS_SYSTEM = "Not a Windows system";
 
     /**

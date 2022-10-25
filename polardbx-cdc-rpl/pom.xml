@@ -5,10 +5,14 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.13-SNAPSHOT</version>
+        <version>5.4.15-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
+
+    <properties>
+        <license.dir>${project.parent.basedir}</license.dir>
+    </properties>
 
     <artifactId>polardbx-cdc-rpl</artifactId>
     <dependencies>
@@ -76,10 +80,9 @@
             <scope>compile</scope>
         </dependency>
         <dependency>
-            <groupId>com.aliyun.polardbx</groupId>
-            <artifactId>polardbx-cdc-canal</artifactId>
-            <version>5.4.13-SNAPSHOT</version>
-            <scope>compile</scope>
+            <groupId>commons-beanutils</groupId>
+            <artifactId>commons-beanutils</artifactId>
+            <version>1.9.3</version>
         </dependency>
     </dependencies>
 

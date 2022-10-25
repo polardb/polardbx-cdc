@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,13 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.monitor;
 
 import com.aliyun.polardbx.binlog.AlarmEvent;
-import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.util.AlarmEventReporter;
 import com.google.common.cache.CacheBuilder;
@@ -83,6 +79,13 @@ public class MonitorManager {
 
     public static MonitorManager getInstance() {
         return MonitorManagerHolder.instance;
+    }
+
+    // 直接同步报警一般不会是阈值触发，所以content为null
+    public void triggerAlarmSync(MonitorType monitorType, Object... args) {
+        logger.info("receive an alarm trigger sync, monitorType is {}, args is \r\n {}", monitorType, args);
+        triggerAlarm(monitorType, null, args);
+        check();
     }
 
     public void triggerAlarm(MonitorType monitorType, Object... args) {
@@ -188,20 +191,6 @@ public class MonitorManager {
     }
 
     private void sendAlarm(MonitorType monitorType, MonitorContent monitorContent) {
-        try {
-            if (isAlarm(monitorType, monitorContent) && DynamicApplicationConfig.getBoolean(ConfigKeys.ALARM_OPEN)) {
-                logger.info("send alarm success, monitorType is {}, monitorMessage is {}", monitorType,
-                    monitorContent.errorMessage);
-                intervalTimeMap.put(monitorType, System.currentTimeMillis());
-            } else {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("alarm for monitorType {} is skipped.", monitorType);
-                }
-            }
-        } catch (Throwable t) {
-            logger.error("send alarm error.", t);
-        }
-
         try {
             if (monitorContent.errorCount.get() >= monitorType.getAlarmThreshold() &&
                 DynamicApplicationConfig.getBoolean(ALARM_REPORT_ALARM_EVENT)) {

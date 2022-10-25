@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
@@ -99,8 +96,9 @@ public class LogicTableMeta {
     }
 
     public static class FieldMetaExt extends FieldMeta {
-        private int logicIndex;
-        private int phyIndex;
+        private final int logicIndex;
+        private final int phyIndex;
+        private boolean typeMatch = true;
 
         public FieldMetaExt(FieldMeta fieldMeta, int logicIndex, int phyIndex) {
             super(fieldMeta.getColumnName(), fieldMeta.getColumnType(), fieldMeta.isNullable(), fieldMeta.isKey(),
@@ -109,20 +107,20 @@ public class LogicTableMeta {
             this.phyIndex = phyIndex;
         }
 
+        public void setTypeNotMatch() {
+            this.typeMatch = false;
+        }
+
+        public boolean isTypeMatch() {
+            return typeMatch;
+        }
+
         public int getLogicIndex() {
             return logicIndex;
         }
 
-        public void setLogicIndex(int logicIndex) {
-            this.logicIndex = logicIndex;
-        }
-
         public int getPhyIndex() {
             return phyIndex;
-        }
-
-        public void setPhyIndex(int phyIndex) {
-            this.phyIndex = phyIndex;
         }
 
         @Override
@@ -130,6 +128,7 @@ public class LogicTableMeta {
             return super.toString() + ", FieldMetaExt{" +
                 "logicIndex=" + logicIndex +
                 ", phyIndex=" + phyIndex +
+                ", typeMatch=" + typeMatch +
                 '}';
         }
     }

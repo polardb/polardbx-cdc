@@ -1,3 +1,17 @@
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.aliyun.polardbx.binlog.dao;
 
 import static com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryDynamicSqlSupport.*;
@@ -34,26 +48,26 @@ import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
 
 @Mapper
 public interface BinlogLogicMetaHistoryMapper {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.197+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.926+08:00", comments="Source Table: binlog_logic_meta_history")
     BasicColumn[] selectList = BasicColumn.columnList(id, gmtCreated, gmtModified, tso, dbName, tableName, sqlKind, type, ddlRecordId, ddlJobId, ddl, topology, extInfo);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.187+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.918+08:00", comments="Source Table: binlog_logic_meta_history")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     long count(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.188+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.919+08:00", comments="Source Table: binlog_logic_meta_history")
     @DeleteProvider(type=SqlProviderAdapter.class, method="delete")
     int delete(DeleteStatementProvider deleteStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.188+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.919+08:00", comments="Source Table: binlog_logic_meta_history")
     @InsertProvider(type=SqlProviderAdapter.class, method="insert")
     int insert(InsertStatementProvider<BinlogLogicMetaHistory> insertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.189+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.92+08:00", comments="Source Table: binlog_logic_meta_history")
     @InsertProvider(type=SqlProviderAdapter.class, method="insertMultiple")
     int insertMultiple(MultiRowInsertStatementProvider<BinlogLogicMetaHistory> multipleInsertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.19+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.92+08:00", comments="Source Table: binlog_logic_meta_history")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Integer.class, jdbcType=JdbcType.INTEGER, id=true),
@@ -72,7 +86,7 @@ public interface BinlogLogicMetaHistoryMapper {
     })
     Optional<BinlogLogicMetaHistory> selectOne(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.191+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.922+08:00", comments="Source Table: binlog_logic_meta_history")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Integer.class, jdbcType=JdbcType.INTEGER, id=true),
@@ -91,28 +105,28 @@ public interface BinlogLogicMetaHistoryMapper {
     })
     List<BinlogLogicMetaHistory> selectMany(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.192+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.922+08:00", comments="Source Table: binlog_logic_meta_history")
     @UpdateProvider(type=SqlProviderAdapter.class, method="update")
     int update(UpdateStatementProvider updateStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.192+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.922+08:00", comments="Source Table: binlog_logic_meta_history")
     default long count(CountDSLCompleter completer) {
         return MyBatis3Utils.countFrom(this::count, binlogLogicMetaHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.193+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.923+08:00", comments="Source Table: binlog_logic_meta_history")
     default int delete(DeleteDSLCompleter completer) {
         return MyBatis3Utils.deleteFrom(this::delete, binlogLogicMetaHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.193+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.923+08:00", comments="Source Table: binlog_logic_meta_history")
     default int deleteByPrimaryKey(Integer id_) {
         return delete(c -> 
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.193+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.923+08:00", comments="Source Table: binlog_logic_meta_history")
     default int insert(BinlogLogicMetaHistory record) {
         return MyBatis3Utils.insert(this::insert, record, binlogLogicMetaHistory, c ->
             c.map(id).toProperty("id")
@@ -131,7 +145,7 @@ public interface BinlogLogicMetaHistoryMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.195+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.925+08:00", comments="Source Table: binlog_logic_meta_history")
     default int insertMultiple(Collection<BinlogLogicMetaHistory> records) {
         return MyBatis3Utils.insertMultiple(this::insertMultiple, records, binlogLogicMetaHistory, c ->
             c.map(id).toProperty("id")
@@ -150,7 +164,7 @@ public interface BinlogLogicMetaHistoryMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.196+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.925+08:00", comments="Source Table: binlog_logic_meta_history")
     default int insertSelective(BinlogLogicMetaHistory record) {
         return MyBatis3Utils.insert(this::insert, record, binlogLogicMetaHistory, c ->
             c.map(id).toPropertyWhenPresent("id", record::getId)
@@ -169,34 +183,34 @@ public interface BinlogLogicMetaHistoryMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.198+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.927+08:00", comments="Source Table: binlog_logic_meta_history")
     default Optional<BinlogLogicMetaHistory> selectOne(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectOne(this::selectOne, selectList, binlogLogicMetaHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.198+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.927+08:00", comments="Source Table: binlog_logic_meta_history")
     default List<BinlogLogicMetaHistory> select(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectList(this::selectMany, selectList, binlogLogicMetaHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.199+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.928+08:00", comments="Source Table: binlog_logic_meta_history")
     default List<BinlogLogicMetaHistory> selectDistinct(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectDistinct(this::selectMany, selectList, binlogLogicMetaHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.199+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.928+08:00", comments="Source Table: binlog_logic_meta_history")
     default Optional<BinlogLogicMetaHistory> selectByPrimaryKey(Integer id_) {
         return selectOne(c ->
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.2+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.928+08:00", comments="Source Table: binlog_logic_meta_history")
     default int update(UpdateDSLCompleter completer) {
         return MyBatis3Utils.update(this::update, binlogLogicMetaHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.2+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.929+08:00", comments="Source Table: binlog_logic_meta_history")
     static UpdateDSL<UpdateModel> updateAllColumns(BinlogLogicMetaHistory record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(id).equalTo(record::getId)
                 .set(gmtCreated).equalTo(record::getGmtCreated)
@@ -213,7 +227,7 @@ public interface BinlogLogicMetaHistoryMapper {
                 .set(extInfo).equalTo(record::getExtInfo);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.201+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.929+08:00", comments="Source Table: binlog_logic_meta_history")
     static UpdateDSL<UpdateModel> updateSelectiveColumns(BinlogLogicMetaHistory record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(id).equalToWhenPresent(record::getId)
                 .set(gmtCreated).equalToWhenPresent(record::getGmtCreated)
@@ -230,7 +244,7 @@ public interface BinlogLogicMetaHistoryMapper {
                 .set(extInfo).equalToWhenPresent(record::getExtInfo);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.201+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.93+08:00", comments="Source Table: binlog_logic_meta_history")
     default int updateByPrimaryKey(BinlogLogicMetaHistory record) {
         return update(c ->
             c.set(gmtCreated).equalTo(record::getGmtCreated)
@@ -249,7 +263,7 @@ public interface BinlogLogicMetaHistoryMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-03-10T17:59:36.202+08:00", comments="Source Table: binlog_logic_meta_history")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-02-20T17:37:51.93+08:00", comments="Source Table: binlog_logic_meta_history")
     default int updateByPrimaryKeySelective(BinlogLogicMetaHistory record) {
         return update(c ->
             c.set(gmtCreated).equalToWhenPresent(record::getGmtCreated)

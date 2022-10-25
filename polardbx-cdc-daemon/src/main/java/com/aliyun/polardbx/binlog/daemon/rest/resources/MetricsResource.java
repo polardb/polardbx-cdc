@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
 import com.aliyun.polardbx.binlog.CommonMetrics;
@@ -40,8 +37,8 @@ import java.util.concurrent.TimeUnit;
 @Singleton
 public class MetricsResource {
 
-    private Cache<String, CommonMetrics> cache = CacheBuilder.newBuilder()
-        .maximumSize(256)
+    private static final Cache<String, CommonMetrics> CACHE = CacheBuilder.newBuilder()
+        .maximumSize(1024)
         .expireAfterWrite(10, TimeUnit.SECONDS)
         .build();
 
@@ -51,7 +48,7 @@ public class MetricsResource {
     public String data() throws IOException {
         CollectorRegistry registry = new CollectorRegistry();
         StringWriter writer = new StringWriter();
-        cache.asMap().forEach((k, v) -> {
+        CACHE.asMap().forEach((k, v) -> {
             CommonMetrics mark = CommonMetricsHelper.getALL().get(k);
             Gauge gauge = Gauge.build().name(k).help(mark == null ? k : mark.getDesc()).register(registry);
             gauge.set(v.getValue());
@@ -64,7 +61,7 @@ public class MetricsResource {
     @Path("/report")
     @Produces(MediaType.TEXT_PLAIN)
     public String report(CommonMetrics metrics) {
-        cache.put(metrics.getKey(), metrics);
+        CACHE.put(metrics.getKey(), metrics);
         return "success";
     }
 
@@ -73,8 +70,12 @@ public class MetricsResource {
     @Produces(MediaType.TEXT_PLAIN)
     public String reports(List<CommonMetrics> metricsList) {
         metricsList.forEach(metrics -> {
-            cache.put(metrics.getKey(), metrics);
+            CACHE.put(metrics.getKey(), metrics);
         });
         return "success";
+    }
+
+    public static CommonMetrics getMetricsByKey(String key) {
+        return CACHE.getIfPresent(key);
     }
 }

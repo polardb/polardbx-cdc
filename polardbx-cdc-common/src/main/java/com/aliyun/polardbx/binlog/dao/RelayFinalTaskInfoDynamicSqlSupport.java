@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,58 +11,71 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.dao;
 
-import java.sql.JDBCType;
-import java.util.Date;
-import javax.annotation.Generated;
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
+import javax.annotation.Generated;
+import java.sql.JDBCType;
+import java.util.Date;
+
 public final class RelayFinalTaskInfoDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source Table: binlog_task_info")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source Table: binlog_task_info")
     public static final RelayFinalTaskInfo relayFinalTaskInfo = new RelayFinalTaskInfo();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.id")
     public static final SqlColumn<Long> id = relayFinalTaskInfo.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.gmt_created")
     public static final SqlColumn<Date> gmtCreated = relayFinalTaskInfo.gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.gmt_modified")
     public static final SqlColumn<Date> gmtModified = relayFinalTaskInfo.gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.cluster_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.cluster_id")
     public static final SqlColumn<String> clusterId = relayFinalTaskInfo.clusterId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.task_name")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.task_name")
     public static final SqlColumn<String> taskName = relayFinalTaskInfo.taskName;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.ip")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.ip")
     public static final SqlColumn<String> ip = relayFinalTaskInfo.ip;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.port")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.port")
     public static final SqlColumn<Integer> port = relayFinalTaskInfo.port;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.role")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.role")
     public static final SqlColumn<String> role = relayFinalTaskInfo.role;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.status")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.status")
     public static final SqlColumn<Integer> status = relayFinalTaskInfo.status;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.gmt_heartbeat")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.gmt_heartbeat")
     public static final SqlColumn<Date> gmtHeartbeat = relayFinalTaskInfo.gmtHeartbeat;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.container_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.container_id")
     public static final SqlColumn<String> containerId = relayFinalTaskInfo.containerId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source field: binlog_task_info.version")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source field: binlog_task_info.version")
     public static final SqlColumn<Long> version = relayFinalTaskInfo.version;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-05-22T21:03:05.579+08:00", comments="Source Table: binlog_task_info")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.579+08:00",
+        comments = "Source Table: binlog_task_info")
     public static final class RelayFinalTaskInfo extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

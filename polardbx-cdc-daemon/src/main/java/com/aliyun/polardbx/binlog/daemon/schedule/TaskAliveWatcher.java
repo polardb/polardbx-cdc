@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
 import com.alibaba.fastjson.JSONObject;
@@ -33,14 +30,19 @@ import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoMapper;
 import com.aliyun.polardbx.binlog.domain.BinlogTaskConfigStatus;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
+import com.google.common.collect.Sets;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
@@ -48,7 +50,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TASK_STOP_NOLOCAL_WHITLIST;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_PATH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_DIR;
 
 /**
  * Created by ziyang.lb
@@ -90,6 +95,9 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
 
             // 停止没有分配在本机上的正在运行的任务
             stopNoLocalTasks(localTasks);
+
+            // 对已经不在本机运行的Task或Dumper遗留的资源进行GC
+            tryCleanResource(localTasks);
 
             if (log.isDebugEnabled()) {
                 log.debug("local binlog task config is " + JSONObject.toJSONString(localTaskConfigs));
@@ -134,10 +142,18 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS);
             if (now - info.startTime.getTime() > heartbeatTimeout * 2
                 && now - info.heartbeatTime.getTime() > heartbeatTimeout) {
-                log.info("prepare to restart task {}", config.getTaskName());
-                cleanInfo(config);
-                restartTask(config.getTaskName(), config.getMem());
                 MonitorManager.getInstance().triggerAlarm(MonitorType.PROCESS_HEARTBEAT_TIMEOUT_WARNING, info.name);
+
+                //心跳超时，但进程还在，一个典型的场景：大数据量场景下GC很频繁，导致cpu使用率很高，Task进程的心跳会出现超时
+                if (!isTaskProcessAlive(config.getTaskName())) {
+                    log.info("detected heartbeat timeout, and task is already down, prepare to restart, task name {}.",
+                        config.getTaskName());
+                    cleanInfo(config);
+                    restartTask(config.getTaskName(), config.getMem());
+                } else {
+                    log.info("detected heartbeat timeout, but task is still alive, will not restart, task name {}.",
+                        config.getTaskName());
+                }
             }
         } else {
             startTask(config.getTaskName(), config.getMem(), false);
@@ -145,18 +161,15 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
     }
 
     private void stopNoLocalTasks(Set<String> localTasks) throws Exception {
-        CommandResult result = commander.execCommand(
-            new String[] {
-                "bash", "-c",
-                "ps -u `whoami` -f | grep 'com.aliyun.polardbx.binlog' | grep -v 'DaemonBootStrap' | grep -v 'grep' |"
-                    + " sed 's/.*DtaskName=\\([A-Za-z]*[-]*[0-9]*\\).*/\\1/g'"},
-            3000);
-
+        CommandResult result = getAllTaskProcess();
+        Set<String> whiteList = stopTaskWhitList();
         if (result.getCode() == 0) {
             String[] runningTasks = StringUtils.split(result.getMsg(), System.getProperty("line.separator"));
-            log.debug("local running tasks {}", Arrays.toString(runningTasks));
+            if (log.isDebugEnabled()) {
+                log.debug("local running tasks {}", Arrays.toString(runningTasks));
+            }
             for (String runningTask : runningTasks) {
-                if (!localTasks.contains(runningTask)) {
+                if (!localTasks.contains(runningTask) && !whiteList.contains(runningTask)) {
                     commander.stopTask(runningTask);
                     log.warn("stop local running task {} not in {}", runningTask, localTasks);
                 }
@@ -164,6 +177,28 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         } else {
             log.warn("check local running task fail!");
         }
+    }
+
+    private boolean isTaskProcessAlive(String takName) throws Exception {
+        CommandResult result = getAllTaskProcess();
+        if (result.getCode() == 0) {
+            String[] runningTasks = StringUtils.split(result.getMsg(), System.getProperty("line.separator"));
+            for (String runningTask : runningTasks) {
+                if (StringUtils.equals(runningTask, takName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private CommandResult getAllTaskProcess() throws Exception {
+        return commander.execCommand(
+            new String[] {
+                "bash", "-c",
+                "ps -u `whoami` -f | grep 'com.aliyun.polardbx.binlog' | grep -v 'DaemonBootStrap' | grep -v 'grep' |"
+                    + " sed 's/.*DtaskName=\\([A-Za-z]*[-]*[0-9]*\\).*/\\1/g'"},
+            3000);
     }
 
     private void startTask(String taskName, int mem, boolean restart) throws Exception {
@@ -237,6 +272,62 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             s.where(RelayFinalTaskInfoDynamicSqlSupport.clusterId,
                 SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
                 .and(RelayFinalTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
+    }
+
+    private void tryCleanResource(Set<String> localTasks) {
+        tryCleanRocksDb(localTasks);
+        tryCleanRdsBinlog(localTasks);
+    }
+
+    private void tryCleanRocksDb(Set<String> localTasks) {
+        try {
+            String basePath = DynamicApplicationConfig.getString(STORAGE_PERSIST_PATH);
+            File baseDir = new File(basePath);
+            if (baseDir.exists()) {
+                File[] files = baseDir.listFiles((dir, name) -> !localTasks.contains(name));
+                assert files != null;
+                Arrays.stream(files).forEach(f -> {
+                    try {
+                        FileUtils.forceDelete(f);
+                        log.info("rocks db directory {} is cleaned.", f.getAbsolutePath());
+                    } catch (IOException e) {
+                        throw new PolardbxException("delete failed.", e);
+                    }
+                });
+            }
+        } catch (Throwable t) {
+            log.error("something goes wrong when clean rocksdb data.", t);
+        }
+    }
+
+    private void tryCleanRdsBinlog(Set<String> localTasks) {
+        try {
+            String basePath = DynamicApplicationConfig.getString(TASK_RDSBINLOG_DOWNLOAD_DIR);
+            File baseDir = new File(basePath);
+            if (baseDir.exists()) {
+                File[] files = baseDir
+                    .listFiles((dir, name) -> !localTasks.contains(name) && !StringUtils.equals("__test__", name));
+                assert files != null;
+                Arrays.stream(files).forEach(f -> {
+                    try {
+                        FileUtils.forceDelete(f);
+                        log.info("rds binlog directory {} is cleaned.", f.getAbsolutePath());
+                    } catch (IOException e) {
+                        throw new PolardbxException("delete failed.", e);
+                    }
+                });
+            }
+        } catch (Throwable t) {
+            log.error("something goes wrong when clean rds binlog data.", t);
+        }
+    }
+
+    private Set<String> stopTaskWhitList() {
+        String whitListStr = DynamicApplicationConfig.getString(DAEMON_TASK_STOP_NOLOCAL_WHITLIST);
+        if (StringUtils.isNotBlank(whitListStr)) {
+            return Sets.newHashSet(StringUtils.split(whitListStr, ","));
+        }
+        return Sets.newHashSet();
     }
 
     static class CommonInfo {

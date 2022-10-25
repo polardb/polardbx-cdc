@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.taskmeta;
 
 import com.alibaba.fastjson.JSON;
@@ -149,7 +146,7 @@ public class RplServiceManager {
             // assert services长度为1
             List<RplService> services = DbTaskMetaManager.listService(stateMachine.getId());
             for (RplService service : services) {
-                List<RplTask> tasks = DbTaskMetaManager.listTask(service.getId());
+                List<RplTask> tasks = DbTaskMetaManager.listTaskByService(service.getId());
                 RplTask slowestTask = findSlowestTask(tasks);
                 List<String> positionDetails;
                 if (StringUtils.isNotBlank(slowestTask.getPosition())) {
@@ -255,13 +252,13 @@ public class RplServiceManager {
                     replicateMeta.setIgnoreServerIds(ignoreServerIds);
                 }
                 if (params.containsKey(RplConstants.SOURCE_HOST_TYPE)) {
-                    if (StringUtils.equalsIgnoreCase("polardbx", params.get(RplConstants.SOURCE_HOST_TYPE))) {
-                        replicateMeta.setMasterType(HostType.POLARX2);
-                    } else if (StringUtils.equalsIgnoreCase("rds", params.get(RplConstants.SOURCE_HOST_TYPE))) {
+                    if (StringUtils.equalsIgnoreCase("rds", params.get(RplConstants.SOURCE_HOST_TYPE))) {
                         replicateMeta.setMasterType(HostType.RDS);
+                    } else if (StringUtils.equalsIgnoreCase("mysql", params.get(RplConstants.SOURCE_HOST_TYPE))) {
+                        replicateMeta.setMasterType(HostType.MYSQL);
                     }
                 } else {
-                    replicateMeta.setMasterType(HostType.MYSQL);
+                    replicateMeta.setMasterType(HostType.POLARX2);
                 }
 
                 replicateMeta.setDoDb("");

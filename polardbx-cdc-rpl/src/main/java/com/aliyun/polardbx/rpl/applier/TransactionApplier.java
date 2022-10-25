@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
@@ -41,9 +38,9 @@ public class TransactionApplier extends MysqlApplier {
     public boolean tranApply(List<Transaction> transactions) {
         boolean res = true;
         try {
-            if (transactions.size() == 1 && transactions.get(0).getEvents().size() > 0
-                && ApplyHelper.isDdl(transactions.get(0).getEvents().get(0))) {
-                return ddlApply(transactions.get(0).getEvents().get(0));
+            if (transactions.size() == 1 && transactions.get(0).getEventSize() > 0
+                && ApplyHelper.isDdl(transactions.get(0).peekFirst())) {
+                return ddlApply(transactions.get(0).peekFirst());
             }
 
             int i = 0;
@@ -53,18 +50,37 @@ public class TransactionApplier extends MysqlApplier {
                 // merge multiple small transactions into one to accelerate
                 while (i < transactions.size()) {
                     Transaction curTransaction = transactions.get(i);
-                    if (curTransaction.getEvents().size() == 0) {
+                    if (curTransaction.getEventSize() == 0) {
                         i++;
                         continue;
                     }
 
-                    if (sqlContexts.size() == 0
-                        || sqlContexts.size() + curTransaction.getEvents().size() < applierConfig.getSendBatchSize()) {
-                        sqlContexts.addAll(getSqlContexts(curTransaction));
-                        lastEvent = curTransaction.getEvents().get(curTransaction.getEvents().size() - 1);
-                        i++;
+                    if (curTransaction.isPersisted()) {
+                        log.info("current transaction is persisted, will apply with stream mode!");
+                        if (sqlContexts.size() > 0) {
+                            res &= tranExecSqlContexts(sqlContexts);
+                            sqlContexts.clear();
+                        }
+
+                        lastEvent = curTransaction.peekLast();
+                        Transaction.RangeIterator iterator = curTransaction.rangeIterator();
+                        while (iterator.hasNext()) {
+                            Transaction.Range range = iterator.next();
+                            for (DBMSEvent event : range.getEvents()) {
+                                DBMSRowChange rowChangeEvent = (DBMSRowChange) event;
+                                List<SqlContext> list = getSqlContexts(rowChangeEvent, safeMode);
+                                res &= tranExecSqlContexts(list);
+                            }
+                        }
                     } else {
-                        break;
+                        if (sqlContexts.size() == 0
+                            || sqlContexts.size() + curTransaction.getEventSize() < applierConfig.getSendBatchSize()) {
+                            lastEvent = curTransaction.peekLast();
+                            sqlContexts.addAll(getSqlContexts(curTransaction));
+                            i++;
+                        } else {
+                            break;
+                        }
                     }
                 }
 
@@ -90,11 +106,16 @@ public class TransactionApplier extends MysqlApplier {
 
     private List<SqlContext> getSqlContexts(Transaction transaction) {
         List<SqlContext> allSqlContexts = new ArrayList<>();
-        for (DBMSEvent event : transaction.getEvents()) {
-            DBMSRowChange rowChangeEvent = (DBMSRowChange) event;
-            List<SqlContext> sqlContexts = getSqlContexts(rowChangeEvent, rowChangeEvent.getTable());
-            allSqlContexts.addAll(sqlContexts);
+        Transaction.RangeIterator iterator = transaction.rangeIterator();
+        while (iterator.hasNext()) {
+            Transaction.Range range = iterator.next();
+            for (DBMSEvent event : range.getEvents()) {
+                DBMSRowChange rowChangeEvent = (DBMSRowChange) event;
+                List<SqlContext> sqlContexts = getSqlContexts(rowChangeEvent, safeMode);
+                allSqlContexts.addAll(sqlContexts);
+            }
         }
+
         return allSqlContexts;
     }
 }

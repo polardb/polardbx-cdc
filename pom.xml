@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.aliyun.polardbx</groupId>
     <artifactId>polardbx-cdc</artifactId>
-    <version>5.4.13-SNAPSHOT</version>
+    <version>5.4.15-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -20,8 +20,10 @@
         <module>polardbx-cdc-format</module>
         <module>polardbx-cdc-protocol</module>
         <module>polardbx-cdc-meta</module>
-        <module>polardbx-cdc-monitor</module>
+        <module>polardbx-cdc-test</module>
+        <module>polardbx-cdc-backup</module>
         <module>polardbx-cdc-rpl</module>
+        <module>polardbx-cdc-monitor</module>
     </modules>
 
     <properties>
@@ -34,7 +36,7 @@
         <apache.version>3.8.1</apache.version>
         <jdbc.version>5.1.49</jdbc.version>
         <druid.version>1.0.25.2018030201</druid.version>
-        <polardbx-parser.version>5.4.13-SNAPSHOT</polardbx-parser.version>
+        <polardbx-parser.version>5.4.15-SNAPSHOT</polardbx-parser.version>
         <fastjson.version>1.2.50_noneautotype</fastjson.version>
         <lombok.version>1.18.0</lombok.version>
         <spring.version>5.3.20</spring.version>
@@ -44,6 +46,7 @@
         <aliyun.version>3.10.2</aliyun.version>
         <commons-lang.version>2.6</commons-lang.version>
         <apache-thrift.version>0.14.1</apache-thrift.version>
+        <license.dir>${basedir}</license.dir>
     </properties>
 
     <!-- 定义本项目的依赖关系 -->
@@ -52,6 +55,22 @@
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
             <version>${guava.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.rholder</groupId>
+            <artifactId>guava-retrying</artifactId>
+            <version>2.0.0</version>
+            <!-- 排除与guava重复的依赖 -->
+            <exclusions>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.code.findbugs</groupId>
+                    <artifactId>jsr305</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>io.grpc</groupId>
@@ -236,12 +255,12 @@
 
     <profiles>
         <profile>
-            <id>dev</id>
+            <id>develop</id>
             <activation>
                 <activeByDefault>true</activeByDefault>
             </activation>
             <properties>
-                <env>dev</env>
+                <env>develop</env>
             </properties>
         </profile>
         <profile>
@@ -269,6 +288,42 @@
                     <target>1.8</target>
                     <encoding>UTF-8</encoding>
                 </configuration>
+            </plugin>
+            <plugin>
+                <!--see:https://dzone.com/articles/adding-license-information-->
+                <groupId>com.mycila.maven-license-plugin</groupId>
+                <artifactId>maven-license-plugin</artifactId>
+                <version>1.10.b1</version>
+                <configuration>
+                    <header>${license.dir}/HEADER.txt</header>
+                    <properties>
+                        <project>
+                            ${project.name}
+                        </project>
+                        <!--<founder>${project.organization.name}</founder>
+                        <year>${project.inceptionYear}</year>
+                        <website>${founder-website}</website>-->
+                    </properties>
+                    <includes>
+                        <include>src/main/java/**</include>
+                        <include>src/test/java/**</include>
+                    </includes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>format</goal>
+                        </goals>
+                        <phase>process-sources</phase>
+                    </execution>
+                </executions>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.mycila</groupId>
+                        <artifactId>licenses</artifactId>
+                        <version>1</version>
+                    </dependency>
+                </dependencies>
             </plugin>
         </plugins>
     </build>

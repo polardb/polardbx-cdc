@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,9 +11,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.canal.binlog.event;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
@@ -379,7 +376,12 @@ public final class TableMapLogEvent extends LogEvent {
         for (int i = 0; i < columnCnt; i++) {
             ColumnInfo info = columnInfo[i];
 
-            switch (info.type) {
+            int binlogType = info.type;
+            if (binlogType == MYSQL_TYPE_TYPED_ARRAY) {
+                binlogType = buffer.getUint8();
+            }
+
+            switch (binlogType) {
             case MYSQL_TYPE_TINY_BLOB:
             case MYSQL_TYPE_BLOB:
             case MYSQL_TYPE_MEDIUM_BLOB:
@@ -397,14 +399,6 @@ public final class TableMapLogEvent extends LogEvent {
                 break;
             case MYSQL_TYPE_SET:
             case MYSQL_TYPE_ENUM:
-                /*
-                 * log_event.h : MYSQL_TYPE_SET & MYSQL_TYPE_ENUM : This enumeration value is only used internally
-                 * and cannot exist in a binlog.
-                 */
-                logger.warn(
-                    "This enumeration value is only used internally " + "and cannot exist in a binlog: type="
-                        + info.type);
-                break;
             case MYSQL_TYPE_STRING: {
                 /*
                  * log_event.h : The first byte is always MYSQL_TYPE_VAR_STRING (i.e., 253). The second byte is the

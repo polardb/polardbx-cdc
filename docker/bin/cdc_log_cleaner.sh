@@ -28,7 +28,7 @@ else
 fi
 
 get_dir_size() {
-    raw_amount=`du -s $cdc_log_path | awk '{ print $1}' `
+    raw_amount=`du -s $cdc_log_path --exclude="rdsbinlog" --exclude="rocksdb" | awk '{ print $1}' `
     temp=`echo $raw_amount | awk '{printf("%.2f\n",$1/1024^2)}' `
     use=$( printf "%.0f" $temp)
     return $use
@@ -183,7 +183,9 @@ if [ $use -ge $max_used ];then
 fi
 
 #clean the big file
-sudo find /home/admin/ -type f -name "*.hprof" -mtime +1 -exec rm -f {} \;
+# shellcheck disable=SC2046
+# shellcheck disable=SC2006
+sudo rm -f `find /home/admin/ -type f -name "*.hprof" -exec ls -t {} + | awk 'NR > 3'` \;
 sudo find /var/log/ -type f -size +500M -exec cp /dev/null {} \;
 
 #use=`df -h $cdc_log_path|sed '1d'|awk '{print $5+0}'`

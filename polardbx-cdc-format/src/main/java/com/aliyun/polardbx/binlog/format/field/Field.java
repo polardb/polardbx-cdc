@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,15 +11,14 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.format.field;
 
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.CharsetMaxLenEnum;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
 
@@ -172,9 +170,9 @@ public abstract class Field {
         }
     }
 
-    protected void toBEByte(byte[] bytes, long data, int size, int offset) {
+    protected void toBEByte(ByteBuffer bytes, long data, int size) {
         for (int i = size - 1; i >= 0; i--) {
-            bytes[i + offset] = (byte) ((data >> (i * 8)) & (0xFF));
+            bytes.put((byte) ((data >> (i * 8)) & (0xFF)));
         }
     }
 

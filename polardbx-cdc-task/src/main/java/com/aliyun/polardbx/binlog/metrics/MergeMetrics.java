@@ -1,6 +1,5 @@
-/*
- *
- * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,22 +11,13 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-
 package com.aliyun.polardbx.binlog.metrics;
-
-import com.aliyun.polardbx.binlog.merge.MergeSource;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Created by ziyang.lb
  **/
 public class MergeMetrics {
-
-    private Map<String, MergeSource> mergeSources = new HashMap<>();
 
     /**
      * 从Task启动开始计算，通过LogEventMerger的TxnToken总量
@@ -82,6 +72,10 @@ public class MergeMetrics {
      */
     private long transmitQueuedSize;
     /**
+     * Transmit阶段，已经封装好Packet，准备网络发送的Packet数量
+     */
+    private long dumpingQueueSize;
+    /**
      * Storage清理队列的大小
      */
     private long storageCleanerQueuedSize;
@@ -100,7 +94,6 @@ public class MergeMetrics {
         snapshot.delayTimeOnTransmit = this.delayTimeOnTransmit;
         snapshot.ringBufferQueuedSize = this.ringBufferQueuedSize;
         snapshot.transmitQueuedSize = this.transmitQueuedSize;
-        snapshot.mergeSources = this.mergeSources;
         snapshot.storageCleanerQueuedSize = this.storageCleanerQueuedSize;
         return snapshot;
     }
@@ -127,10 +120,6 @@ public class MergeMetrics {
     public void addChunkTransmitCount(int count) {
         totalChunkTransmitCount += count;
         totalTransmitCount += count;
-    }
-
-    public void addMergeSources(Map<String, MergeSource> mergeSources) {
-        this.mergeSources.putAll(mergeSources);
     }
 
     // ---------------------------------单 例----------------------------------
@@ -233,10 +222,11 @@ public class MergeMetrics {
         this.storageCleanerQueuedSize = storageCleanerQueuedSize;
     }
 
-    public HashMap<String, Long> getMergeSourceQueuedSize() {
-        HashMap<String, Long> result = new HashMap<>();
-        mergeSources.forEach((k, v) -> result.put(k, v.getQueuedSize()));
-        return result;
+    public long getDumpingQueueSize() {
+        return dumpingQueueSize;
     }
 
+    public void setDumpingQueueSize(long dumpingQueueSize) {
+        this.dumpingQueueSize = dumpingQueueSize;
+    }
 }
