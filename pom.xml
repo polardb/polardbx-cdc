@@ -345,6 +345,7 @@
                         <goals>
                             <goal>install-file</goal>
                         </goals>
+                        <inherited>false</inherited>
                     </execution>
                 </executions>
             </plugin>
