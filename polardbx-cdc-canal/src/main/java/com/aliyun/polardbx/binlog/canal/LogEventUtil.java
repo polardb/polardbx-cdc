@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.canal;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.event.GcnLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.SequenceLogEvent;
@@ -184,8 +185,18 @@ public class LogEventUtil {
         return event.getHeader().getType() == LogEvent.SEQUENCE_EVENT;
     }
 
-    public static boolean isGCNEvent(LogEvent event) {
+    public static boolean isGcnEvent(LogEvent event) {
         return event.getHeader().getType() == LogEvent.GCN_EVENT;
+    }
+
+    public static boolean isHaveCommitSequence(GcnLogEvent gcnLogEvent) {
+        // 第一个bit位，目前恒为1
+        // 第二个bit位，如果为1，代表外部传入了snapshot tso；但如果为0，并不意味着外部没有传入snapshot tso；并不是一个充要条件
+        // 第三个bit位，如果位1，代表外部传入了commit tso; 如果为0，代表外部没有传入snapshot tso；是一个重要条件
+        // 当第二个bit位为1或者第三个bit位为1时，认为该事务是一个TSO事务
+        // 当第三个bit位为1时，认为该GCN中包含外部传入的commit sequence
+        int flagSeed = 0x00000004;
+        return ((flagSeed & gcnLogEvent.getFlag()) == flagSeed);
     }
 
     public static boolean isRowsQueryEvent(LogEvent event) {

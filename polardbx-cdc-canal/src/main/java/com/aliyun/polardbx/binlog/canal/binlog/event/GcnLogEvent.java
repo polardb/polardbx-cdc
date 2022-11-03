@@ -31,6 +31,7 @@ public class GcnLogEvent extends LogEvent {
     static final int POST_HEADER_LENGTH = ENCODED_FLAG_LEN + ENCODED_GCN_LEN;
 
     private final long gcn;
+    private final int flag;
 
     public GcnLogEvent(LogHeader header, LogBuffer buffer,
                        FormatDescriptionLogEvent descriptionEvent) throws IOException {
@@ -46,8 +47,12 @@ public class GcnLogEvent extends LogEvent {
             throw new IOException("gcn event length is too short.");
         }
         buffer.position(commonHeaderLen);
-        buffer.getInt8();
+        flag = buffer.getInt8();
         gcn = buffer.getLong64();
+    }
+
+    public int getFlag() {
+        return flag;
     }
 
     public long getGcn() {

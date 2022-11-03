@@ -248,7 +248,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
             if (!toBeRemovedServers.isEmpty()) {
                 onServerNodeRemove(toBeRemovedServers);
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error("something goes wrong in server node scan!", e);
         }
     }

@@ -27,6 +27,12 @@ public class WriteRowEventProcessor implements ILogEventProcessor<WriteRowsLogEv
 
     private static final Logger logger = LoggerFactory.getLogger("searchLogger");
 
+    private boolean searchCdcStart;
+
+    public WriteRowEventProcessor(boolean searchCdcStart) {
+        this.searchCdcStart = searchCdcStart;
+    }
+
     @Override
     public void handle(WriteRowsLogEvent event, ProcessorContext context) {
         TableMapLogEvent tm = event.getTable();
@@ -35,6 +41,9 @@ public class WriteRowEventProcessor implements ILogEventProcessor<WriteRowsLogEv
                 return;
             }
             InstructionCommand command = SystemDB.getInstance().parseInstructionCommand(event);
+            if (searchCdcStart && !command.isCdcStart()) {
+                return;
+            }
             context.getCurrentTran().setCommand(command);
             context.setCommandTran(context.getCurrentTran());
             logger.warn("find cdc instruction type : " + command);

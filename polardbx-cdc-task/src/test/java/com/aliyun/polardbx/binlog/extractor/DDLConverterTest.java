@@ -27,6 +27,8 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.parser.MySqlStatementParser;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter;
 import com.aliyun.polardbx.binlog.util.FastSQLConstant;
@@ -401,13 +403,38 @@ public class DDLConverterTest {
     public void testAlterPartition() {
         String sql =
             "/* cdc_token : a12ea068-626b-4a6c-b6a5-47e19c92b89f */alter tablegroup tg118 modify partition p0 add values (1988,1989)";
+        reformatDDL(sql);
+    }
+
+    @Test
+    public void testAlterPartitionAlignTo() {
+        String sql =
+            " alter table pt_k_2 partition align to t_a_t_s_tg2";
+        reformatDDL(sql);
+    }
+
+    private void reformatDDL(String ddl) {
         SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FastSQLConstant.FEATURES);
+            SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.FEATURES);
         SQLStatement stmt = parser.parseStatementList().get(0);
         System.out.println(stmt.toString());
         parser =
             SQLParserUtils.createSQLStatementParser(stmt.toString(), DbType.mysql, FastSQLConstant.FEATURES);
         System.out.println(parser.parseStatementList().get(0));
+    }
+
+    @Test
+    public void testPrivateDDLSwitch() {
+        DynamicApplicationConfig.setValue(ConfigKeys.TASK_DDL_PRIVATEDDL_SUPPORT, "true");
+        String sql1 = "alter table nnn change column b bb bigint ALGORITHM=OMC";
+        String sql2 = DDLConverter.convertNormalDDL(sql1, null, null, 0, "");
+        Assert.assertTrue(sql2.contains("# POLARX_ORIGIN_SQL="));
+        Assert.assertTrue(sql2.contains("# POLARX_TSO="));
+        DynamicApplicationConfig.setValue(ConfigKeys.TASK_DDL_PRIVATEDDL_SUPPORT, "false");
+        String sql3 = "alter table nnn change column b bb bigint ALGORITHM=XXX";
+        String sql4 = DDLConverter.convertNormalDDL(sql3, null, null, 0, "");
+        Assert.assertFalse(sql4.contains("# POLARX_ORIGIN_SQL="));
+        Assert.assertFalse(sql4.contains("# POLARX_TSO="));
 
     }
 }

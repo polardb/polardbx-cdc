@@ -187,7 +187,7 @@ public class SearchTsoEventHandleV1 implements ISearchTsoEventHandle {
             onTransactionEndEvent();
         } else if (LogEventUtil.isSequenceEvent(event)) {
             onSequence(event);
-        } else if (LogEventUtil.isGCNEvent(event)) {
+        } else if (LogEventUtil.isGcnEvent(event)) {
             onGcn(event);
         } else {
             if (currentTransaction != null) {
@@ -356,7 +356,9 @@ public class SearchTsoEventHandleV1 implements ISearchTsoEventHandle {
 
     private void onGcn(LogEvent event) {
         GcnLogEvent gcnLogEvent = (GcnLogEvent) event;
-        lastGcn = gcnLogEvent.getGcn();
+        if (LogEventUtil.isHaveCommitSequence(gcnLogEvent)) {
+            lastGcn = gcnLogEvent.getGcn();
+        }
     }
 
     private void onDdl(LogEvent event, LogPosition logPosition) {

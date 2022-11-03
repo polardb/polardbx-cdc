@@ -45,7 +45,7 @@ public class LogFileCursorProvider implements IFileCursorProvider {
     public boolean isCompleteFile(String currentFile) {
         Cursor latestCursor = logFileManager.getLatestFileCursor();
         if (latestCursor == null) {
-            return true;
+            return false;
         }
         return !currentFile.equalsIgnoreCase(latestCursor.getFileName());
     }

@@ -569,6 +569,10 @@ public abstract class ConfigKeys {
     public static final String TASK_EXTRACTOR_ROWIMAGE_TYPE_REBUILD_SUPPORT =
         "task.extractor.rowImage.type.rebuild.support";
 
+    /**
+     * 私有DDL开关
+     */
+    public static final String TASK_DDL_PRIVATEDDL_SUPPORT = "task.ddl.privateDdl.support";
     //******************************************************************************************************************
     //***********************************************Daemon和调度相关参数*************************************************
     //******************************************************************************************************************

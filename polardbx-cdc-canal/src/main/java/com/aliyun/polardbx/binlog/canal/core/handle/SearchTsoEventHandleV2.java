@@ -105,8 +105,8 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
                     new XARollbackEventProcessor()));
             this.processorMap.put(LogEvent.XID_EVENT, new XACommitEventProcessor(searchTSO, startCmdTSO));
             this.processorMap.put(LogEvent.XA_PREPARE_LOG_EVENT, new XAPrepareEventProcessor());
-            this.processorMap.put(LogEvent.WRITE_ROWS_EVENT, new WriteRowEventProcessor());
-            this.processorMap.put(LogEvent.WRITE_ROWS_EVENT_V1, new WriteRowEventProcessor());
+            this.processorMap.put(LogEvent.WRITE_ROWS_EVENT, new WriteRowEventProcessor(searchTSO == -1));
+            this.processorMap.put(LogEvent.WRITE_ROWS_EVENT_V1, new WriteRowEventProcessor(searchTSO == -1));
             this.processorMap.put(LogEvent.SEQUENCE_EVENT, new SequenceEventProcessor());
             this.processorMap.put(LogEvent.GCN_EVENT, new GcnEventProcessor());
         }

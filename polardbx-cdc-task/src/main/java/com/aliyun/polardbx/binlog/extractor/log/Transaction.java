@@ -30,7 +30,6 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.WriteRowsLogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.event.XaPrepareLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.IXaTransaction;
 import com.aliyun.polardbx.binlog.canal.system.InstructionType;
@@ -108,7 +107,6 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     private boolean xa = false;
     private boolean tsoTransaction = false;
     private VirtualTSO virtualTSOModel;
-    private Long snapshotSeq;
     private long realTSO = -1;
 
     //trace id
@@ -250,23 +248,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     public void processEvent(LogEvent event, RuntimeContext rc) throws Exception {
-        if (LogEventUtil.isPrepare(event)) {
-            XaPrepareLogEvent prepareLogEvent = (XaPrepareLogEvent) event;
-            if (prepareLogEvent.isOnePhase()) {
-                // 一阶段真实TSO会导致 noTSO事务与一阶段乱序的情况产生
-                this.xa = false;
-                this.tsoTransaction = false;
-                this.realTSO = -1;
-                this.snapshotSeq = null;
-                setCommit(rc);
-            } else {
-                setPrepare();
-            }
-        } else if (LogEventUtil.isEnd(event)) {
-            //do nothing
-        } else {
-            processEvent_0(event, rc);
-        }
+        processEvent_0(event, rc);
     }
 
     private void processEvent_0(LogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
@@ -750,8 +732,8 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         this.ddlEvent = ddlEvent;
     }
 
-    public void setTsoTransaction() {
-        this.tsoTransaction = true;
+    public void setTsoTransaction(boolean tsoTransaction) {
+        this.tsoTransaction = tsoTransaction;
     }
 
     public byte[] getDescriptionLogEventData() {
@@ -816,20 +798,16 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         return instructionType == InstructionType.CdcEnvConfigChange;
     }
 
-    public Long getSnapshotSeq() {
-        return snapshotSeq;
-    }
-
-    public void setSnapshotSeq(Long snapshotSeq) {
-        this.snapshotSeq = snapshotSeq;
-    }
-
     public String getBinlogFileName() {
         return binlogFileName;
     }
 
     public String getSourceCdcSchema() {
         return sourceCdcSchema;
+    }
+
+    public void setXa(boolean xa) {
+        this.xa = xa;
     }
 
     public FormatDescriptionLogEvent getFdle() {

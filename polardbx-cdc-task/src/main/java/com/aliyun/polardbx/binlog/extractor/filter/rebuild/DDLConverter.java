@@ -40,6 +40,7 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTab
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlTableIndex;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.LowerCaseTableNameVariables;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
@@ -122,9 +123,12 @@ public class DDLConverter {
         SQLStatement sqlStatement = statementList.get(0);
 
         StringBuilder commentsBuilder = new StringBuilder();
-        String privateDdlSql = SQLUtils.toSQLString(sqlStatement, DbType.mysql, new SQLUtils.FormatOption(true, false));
-        commentsBuilder.append("# POLARX_ORIGIN_SQL=").append(privateDdlSql).append("\n");
-        commentsBuilder.append("# POLARX_TSO=").append(tso).append("\n");
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DDL_PRIVATEDDL_SUPPORT)) {
+            String privateDdlSql =
+                SQLUtils.toSQLString(sqlStatement, DbType.mysql, new SQLUtils.FormatOption(true, false));
+            commentsBuilder.append("# POLARX_ORIGIN_SQL=").append(privateDdlSql).append("\n");
+            commentsBuilder.append("# POLARX_TSO=").append(tso).append("\n");
+        }
 
         if (sqlStatement instanceof SQLCreateDatabaseStatement) {
             SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) sqlStatement;

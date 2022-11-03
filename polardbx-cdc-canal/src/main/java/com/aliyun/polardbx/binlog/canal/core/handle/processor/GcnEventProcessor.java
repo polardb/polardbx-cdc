@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.handle.processor;
 
+import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.GcnLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.handle.ILogEventProcessor;
@@ -24,7 +25,8 @@ public class GcnEventProcessor implements ILogEventProcessor {
     @Override
     public void handle(LogEvent event, ProcessorContext context) {
         GcnLogEvent gcnLogEvent = (GcnLogEvent) event;
-        context.setLastTSO(gcnLogEvent.getGcn());
-
+        if (LogEventUtil.isHaveCommitSequence(gcnLogEvent)) {
+            context.setLastTSO(gcnLogEvent.getGcn());
+        }
     }
 }

@@ -23,6 +23,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.GcnLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.SequenceLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.event.XaPrepareLogEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.TransactionStorage;
@@ -46,16 +47,12 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
     private Transaction currentTran;
     private boolean receiveFormatDesc = false;
     /**
-     * DN 5.7，通过Sequence Event记录Snapshot Tso和Commit Tso，有两种SequenceType
-     * DN 8.0的V1版本，通过XA End Event记录Snapshot Tso，通过XA Commit Event记录Commit Tso
+     * 1> DN 5.7，通过Sequence Event记录Snapshot Tso和Commit Tso，有两种SequenceType
+     * 2> DN 8.0的V1版本，通过XA End Event记录Snapshot Tso，通过XA Commit Event记录Commit Tso
+     * 3> DN 8.0的V2版本，通过Gcn Event记录Snapshot Tso和Commit Tso，但所有类型的事务都有GcnEvent，需要靠flag来辨别是否是TSO事务
      * 对于这两种方式，它们的Snapshot Tso都是记录到XA Start之后的，所以处理模式类似
      */
-    private long lastCommitSequenceNum;
-    /**
-     * DN8.0的V2版本，通过Gcn Event记录Snapshot Tso和Commit Tso，未做类型的上区分，具体是记录的Snapshot还是Commit
-     * 依实际情况而定，lastGcn代表的可能是Snapshot Tso，也可能是 Commit Tso
-     */
-    private long lastGcn = -1L;
+    private long lastCommitSequenceNum = -1L;
 
     public TransactionBufferEventFilter(Storage storage) {
         this.storage = storage;
@@ -72,27 +69,25 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         if (LogEventUtil.isStart(event)) {
             processStart(event, context);
         } else if (LogEventUtil.isEnd(event)) {
-            processEnd(event, context);
+            // do nothing
         } else if (LogEventUtil.isCommit(event)) {
             processCommit(event, context);
             tryDoNext(context);
         } else if (LogEventUtil.isRollback(event)) {
             processRollback(event, context);
             tryDoNext(context);
+        } else if (LogEventUtil.isPrepare(event)) {
+            processPrepare(event, context);
         } else if (LogEventUtil.isSequenceEvent(event)) {
             processSequence(event, context);
-        } else if (LogEventUtil.isGCNEvent(event)) {
+        } else if (LogEventUtil.isGcnEvent(event)) {
             processGcn(event, context);
         } else {
             processEvent(event, context);
         }
-    }
-
-    private void processPrepareSequence(long sequence) {
-        if (currentTran.isXa()) {
-            currentTran.setTsoTransaction();
+        if (currentTran != null && !currentTran.isStart()) {
+            currentTran = null;
         }
-        currentTran.setSnapshotSeq(sequence);
     }
 
     private void processCommitSequence(long sequence) {
@@ -116,7 +111,23 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         transactionStorage.clear();
     }
 
-    private void processRollback(LogEvent logEvent, HandlerContext context) throws Exception {
+    private void processPrepare(LogEvent event, HandlerContext context) throws Exception {
+        XaPrepareLogEvent prepareLogEvent = (XaPrepareLogEvent) event;
+        if (prepareLogEvent.isOnePhase()) {
+            // 一阶段真实TSO会导致 noTSO事务与一阶段乱序的情况产生，所以把one phase当作单机事务来处理
+            currentTran.setXa(false);
+            currentTran.setRealTSO(-1);
+            currentTran.setTsoTransaction(false);
+            currentTran.setCommit(context.getRuntimeContext());
+            lastCommitSequenceNum = -1L;
+            tryDoNext(context);
+        } else {
+            currentTran.setPrepare();
+        }
+    }
+
+    private void processRollback(LogEvent logEvent, HandlerContext context) {
+        lastCommitSequenceNum = -1;
         String xid = LogEventUtil.getXid(logEvent);
         RuntimeContext rc = context.getRuntimeContext();
 
@@ -134,6 +145,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
     }
 
     private void processStart(LogEvent logEvent, HandlerContext context) {
+        lastCommitSequenceNum = -1L;
         if (currentTran != null && currentTran.isStart()) {
             String errorMsg = "occur fatal error, new transaction start but last transaction not finish! last id: "
                 + currentTran.getTransactionId() + " ,last pos: " + currentTran.getStartLogPos() +
@@ -147,19 +159,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             currentTran = tran;
             if (tran.isCdcSingle()) {
                 tran.release();
-                lastGcn = -1L;
                 return;
-            }
-            // 1> DN8.0的V2版本，将Snapshot tso通过Gcn Event记录到了XA Start前面，所以，需要在此处对Snapshot tso进行处理
-            // 2> DN8.0的V2版本，为单机事务也记录了Commit TSO，通过Gcn Event记录到了Begin Event前面，但我们和5.7的行为保持一致，
-            //    通过前序2pc事务的真实tso为单机事务生成虚拟tso，不使用Gcn
-            // 3> 处理完成后，需立即将lastGcn设置为-1，以免对后序普通XA事务(事务策略不是tso的MySQL原生XA事务)造成影响
-            if (lastGcn != -1L) {
-                if (currentTran.isXa()) {
-                    currentTran.setTsoTransaction();
-                    currentTran.setSnapshotSeq(lastGcn);
-                }
-                lastGcn = -1L;
             }
             if (tran.isIgnore()) {
                 return;
@@ -172,64 +172,51 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
     }
 
-    private void processEnd(LogEvent event, HandlerContext context) {
-        // DN8.0的V1版本，将Snapshot Tso通过Variables的方式，记录到了XA End Event
-        if (LogEventUtil.containsPrepareGCN(event)) {
-            processPrepareSequence(((QueryLogEvent) event).getPrepareGCN());
-        }
-    }
-
     private void processCommit(LogEvent event, HandlerContext context) throws Exception {
         //DN8.0的V1版本将Commit Tso通过Variables的方式，记录到了XA Commit Event
         if (LogEventUtil.containsCommitGCN(event)) {
             processCommitSequence(((QueryLogEvent) event).getCommitGCN());
         }
 
+        // init commitTran
+        Transaction commitTran;
         String xid = LogEventUtil.getXid(event);
-        Transaction commitTran = null;
         if (StringUtils.isNotBlank(xid)) {
             commitTran = transactionStorage.getByXid(xid);
-        }
-
-        if (commitTran == null) {
+            if (commitTran != null && lastCommitSequenceNum > 0) {
+                commitTran.setTsoTransaction(true);
+                commitTran.setRealTSO(lastCommitSequenceNum);
+            }
+        } else {
             commitTran = currentTran;
         }
-        currentTran = null;
-        if (commitTran == null) {
-            // maybe other commit
-            return;
+
+        // reset some variables
+        lastCommitSequenceNum = -1L;
+
+        // cdc single or ignored transaction is null
+        if (commitTran != null) {
+            commitTran.setCommit(context.getRuntimeContext());
         }
-        if (commitTran.isTsoTransaction()) {
-            if (lastGcn > 0 && lastCommitSequenceNum > 0) {
-                throw new PolardbxException(
-                    "lastGcn and lastCommitSequenceNum can`t be greater than zero in the mean while.");
-            }
-            if (lastCommitSequenceNum > 0) {
-                commitTran.setRealTSO(lastCommitSequenceNum);
-            } else if (lastGcn > 0) {
-                commitTran.setRealTSO(lastGcn);
-            }
-        }
-        commitTran.setCommit(context.getRuntimeContext());
     }
 
     private void processSequence(LogEvent event, HandlerContext context) {
-        //check prepare and commit tso for DN 5.7
+        //check commit sequence for DN 5.7
         SequenceLogEvent sequenceLogEvent = (SequenceLogEvent) event;
         if (sequenceLogEvent.isCommitSequence()) {
             processCommitSequence(sequenceLogEvent.getSequenceNum());
-        } else if (sequenceLogEvent.isSnapSequence()) {
-            processPrepareSequence(sequenceLogEvent.getSequenceNum());
         }
     }
 
     private void processGcn(LogEvent event, HandlerContext context) {
+        //check commit sequence for DN 8.0 V2
         GcnLogEvent gcnLogEvent = (GcnLogEvent) event;
-        lastGcn = gcnLogEvent.getGcn();
+        if (LogEventUtil.isHaveCommitSequence(gcnLogEvent)) {
+            lastCommitSequenceNum = gcnLogEvent.getGcn();
+        }
     }
 
     private void tryDoNext(HandlerContext context) throws Exception {
-        lastGcn = -1L;
         transactionStorage.purge();
         TransactionGroup group;
         while ((group = transactionStorage.fetchNext()) != null) {
@@ -257,23 +244,13 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
                 writeFormatDescriptionEvent((FormatDescriptionLogEvent) event, context);
             }
             // 如果currentTran==null，说明此Query Event是DDL，识别出是DDL，直接push清空storage
-            // DN8.0的V2版本在ddl语句前面会跟随一个Gcn Event，需要对Gcn进行reset操作
             if (event.getHeader().getType() == LogEvent.QUERY_EVENT) {
                 Transaction transaction = new Transaction((QueryLogEvent) event, context.getRuntimeContext(), storage);
                 transactionStorage.add(transaction);
                 transaction.setCommit(context.getRuntimeContext());
-                lastGcn = -1L;
             }
             return;
         }
         currentTran.processEvent(event, context.getRuntimeContext());
-
-        if (currentTran.isCommit()) {
-            tryDoNext(context);
-        }
-
-        if (!currentTran.isStart()) {
-            currentTran = null;
-        }
     }
 }

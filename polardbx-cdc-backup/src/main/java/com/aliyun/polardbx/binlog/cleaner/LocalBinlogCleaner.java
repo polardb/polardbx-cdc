@@ -205,7 +205,7 @@ public class LocalBinlogCleaner {
     public void scan() {
         try {
             purgeRemote();
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error("purge oss binlog occur exception!", e);
         }
         try {
@@ -213,7 +213,7 @@ public class LocalBinlogCleaner {
             if (enable) {
                 purgeLocal();
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error("purge binlog occur exception!", e);
         }
     }

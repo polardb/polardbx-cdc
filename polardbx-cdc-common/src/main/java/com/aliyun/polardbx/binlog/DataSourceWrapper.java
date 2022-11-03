@@ -176,7 +176,7 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
             if (!toBeRemovedServers.isEmpty()) {
                 onServerNodeRemove(toBeRemovedServers);
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             logger.error("something goes wrong in server node scan!", e);
         }
     }
@@ -339,320 +339,6 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
     }
 
     /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setDriverClassName(String driverClassName) {
-        this.poolProperties.setDriverClassName(driverClassName);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setInitialSize(int initialSize) {
-        this.poolProperties.setInitialSize(initialSize);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setInitSQL(String initSQL) {
-        this.poolProperties.setInitSQL(initSQL);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setLogAbandoned(boolean logAbandoned) {
-        this.poolProperties.setLogAbandoned(logAbandoned);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setMaxActive(int maxActive) {
-        this.poolProperties.setMaxActive(maxActive);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setMaxIdle(int maxIdle) {
-        this.poolProperties.setMaxIdle(maxIdle);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setMaxWait(int maxWait) {
-        this.poolProperties.setMaxWait(maxWait);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setMinEvictableIdleTimeMillis(int minEvictableIdleTimeMillis) {
-        this.poolProperties.setMinEvictableIdleTimeMillis(minEvictableIdleTimeMillis);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setMinIdle(int minIdle) {
-        this.poolProperties.setMinIdle(minIdle);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setNumTestsPerEvictionRun(int numTestsPerEvictionRun) {
-        this.poolProperties.setNumTestsPerEvictionRun(numTestsPerEvictionRun);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setPassword(String password) {
-        if (useEncryptedPassword) {
-            password = PasswdUtil.decryptBase64(password, dnPasswordKey);
-        }
-        this.poolProperties.setPassword(password);
-        this.poolProperties.getDbProperties().setProperty("password", this.poolProperties.getPassword());
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setRemoveAbandoned(boolean removeAbandoned) {
-        this.poolProperties.setRemoveAbandoned(removeAbandoned);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setRemoveAbandonedTimeout(int removeAbandonedTimeout) {
-        this.poolProperties.setRemoveAbandonedTimeout(removeAbandonedTimeout);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setTestOnBorrow(boolean testOnBorrow) {
-        this.poolProperties.setTestOnBorrow(testOnBorrow);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setTestOnConnect(boolean testOnConnect) {
-        this.poolProperties.setTestOnConnect(testOnConnect);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setTestOnReturn(boolean testOnReturn) {
-        this.poolProperties.setTestOnReturn(testOnReturn);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setTestWhileIdle(boolean testWhileIdle) {
-        this.poolProperties.setTestWhileIdle(testWhileIdle);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setTimeBetweenEvictionRunsMillis(int timeBetweenEvictionRunsMillis) {
-        this.poolProperties.setTimeBetweenEvictionRunsMillis(timeBetweenEvictionRunsMillis);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setUrl(String url) {
-        this.poolProperties.setUrl(url);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setUsername(String username) {
-        this.poolProperties.setUsername(username);
-        this.poolProperties.getDbProperties().setProperty("user", getPoolProperties().getUsername());
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setValidationInterval(long validationInterval) {
-        this.poolProperties.setValidationInterval(validationInterval);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setValidationQuery(String validationQuery) {
-        this.poolProperties.setValidationQuery(validationQuery);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setValidatorClassName(String className) {
-        this.poolProperties.setValidatorClassName(className);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setValidationQueryTimeout(int validationQueryTimeout) {
-        this.poolProperties.setValidationQueryTimeout(validationQueryTimeout);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setJdbcInterceptors(String interceptors) {
-        this.getPoolProperties().setJdbcInterceptors(interceptors);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setJmxEnabled(boolean enabled) {
-        this.getPoolProperties().setJmxEnabled(enabled);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setFairQueue(boolean fairQueue) {
-        this.getPoolProperties().setFairQueue(fairQueue);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setUseLock(boolean useLock) {
-        this.getPoolProperties().setUseLock(useLock);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setDefaultCatalog(String catalog) {
-        this.getPoolProperties().setDefaultCatalog(catalog);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setDefaultAutoCommit(Boolean autocommit) {
-        this.getPoolProperties().setDefaultAutoCommit(autocommit);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setDefaultTransactionIsolation(int defaultTransactionIsolation) {
-        this.getPoolProperties().setDefaultTransactionIsolation(defaultTransactionIsolation);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setConnectionProperties(String properties) {
-        try {
-            java.util.Properties prop = PoolProperties.getProperties(properties, null);
-            Iterator<?> i = prop.keySet().iterator();
-            while (i.hasNext()) {
-                String key = (String) i.next();
-                String value = prop.getProperty(key);
-                getPoolProperties().getDbProperties().setProperty(key, value);
-            }
-
-        } catch (Exception x) {
-            logger.error("Unable to parse connection properties.", x);
-            throw new RuntimeException(x);
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setUseEquals(boolean useEquals) {
-        this.getPoolProperties().setUseEquals(useEquals);
-    }
-
-    /**
      * no-op
      * {@link javax.sql.DataSource#getParentLogger}
      *
@@ -731,10 +417,6 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
         getPoolProperties().setSuspectTimeout(seconds);
     }
 
-    //=========================================================
-    //  PROPERTIES / CONFIGURATION
-    //=========================================================
-
     /**
      * {@inheritDoc}
      */
@@ -742,6 +424,27 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
     @Override
     public String getConnectionProperties() {
         return getPoolProperties().getConnectionProperties();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setConnectionProperties(String properties) {
+        try {
+            java.util.Properties prop = PoolProperties.getProperties(properties, null);
+            Iterator<?> i = prop.keySet().iterator();
+            while (i.hasNext()) {
+                String key = (String) i.next();
+                String value = prop.getProperty(key);
+                getPoolProperties().getDbProperties().setProperty(key, value);
+            }
+
+        } catch (Exception x) {
+            logger.error("Unable to parse connection properties.", x);
+            throw new RuntimeException(x);
+        }
     }
 
     /**
@@ -758,8 +461,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setDbProperties(Properties dbProperties) {
+        getPoolProperties().setDbProperties(dbProperties);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public String getDefaultCatalog() {
         return getPoolProperties().getDefaultCatalog();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setDefaultCatalog(String catalog) {
+        this.getPoolProperties().setDefaultCatalog(catalog);
     }
 
     /**
@@ -776,8 +497,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setDefaultTransactionIsolation(int defaultTransactionIsolation) {
+        this.getPoolProperties().setDefaultTransactionIsolation(defaultTransactionIsolation);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public String getDriverClassName() {
         return getPoolProperties().getDriverClassName();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setDriverClassName(String driverClassName) {
+        this.poolProperties.setDriverClassName(driverClassName);
     }
 
     /**
@@ -794,8 +533,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setInitialSize(int initialSize) {
+        this.poolProperties.setInitialSize(initialSize);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public String getInitSQL() {
         return getPoolProperties().getInitSQL();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setInitSQL(String initSQL) {
+        this.poolProperties.setInitSQL(initSQL);
     }
 
     /**
@@ -812,8 +569,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setJdbcInterceptors(String interceptors) {
+        this.getPoolProperties().setJdbcInterceptors(interceptors);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public int getMaxActive() {
         return getPoolProperties().getMaxActive();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setMaxActive(int maxActive) {
+        this.poolProperties.setMaxActive(maxActive);
     }
 
     /**
@@ -830,8 +605,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setMaxIdle(int maxIdle) {
+        this.poolProperties.setMaxIdle(maxIdle);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public int getMaxWait() {
         return getPoolProperties().getMaxWait();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setMaxWait(int maxWait) {
+        this.poolProperties.setMaxWait(maxWait);
     }
 
     /**
@@ -848,8 +641,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setMinEvictableIdleTimeMillis(int minEvictableIdleTimeMillis) {
+        this.poolProperties.setMinEvictableIdleTimeMillis(minEvictableIdleTimeMillis);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public int getMinIdle() {
         return getPoolProperties().getMinIdle();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setMinIdle(int minIdle) {
+        this.poolProperties.setMinIdle(minIdle);
     }
 
     /**
@@ -866,8 +677,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setMaxAge(long maxAge) {
+        getPoolProperties().setMaxAge(maxAge);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public String getName() {
         return getPoolProperties().getName();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setName(String name) {
+        getPoolProperties().setName(name);
     }
 
     /**
@@ -880,11 +709,37 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
     }
 
     /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setNumTestsPerEvictionRun(int numTestsPerEvictionRun) {
+        this.poolProperties.setNumTestsPerEvictionRun(numTestsPerEvictionRun);
+    }
+
+    /**
      * @return DOES NOT RETURN THE PASSWORD, IT WOULD SHOW UP IN JMX
      */
     @Override
     public String getPassword() {
         return "Password not available as DataSource/JMX operation.";
+    }
+
+    //=========================================================
+    //  PROPERTIES / CONFIGURATION
+    //=========================================================
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setPassword(String password) {
+        if (useEncryptedPassword) {
+            password = PasswdUtil.decryptBase64(password, dnPasswordKey);
+        }
+        this.poolProperties.setPassword(password);
+        this.poolProperties.getDbProperties().setProperty("password", this.poolProperties.getPassword());
     }
 
     /**
@@ -901,8 +756,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setRemoveAbandonedTimeout(int removeAbandonedTimeout) {
+        this.poolProperties.setRemoveAbandonedTimeout(removeAbandonedTimeout);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public int getTimeBetweenEvictionRunsMillis() {
         return getPoolProperties().getTimeBetweenEvictionRunsMillis();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setTimeBetweenEvictionRunsMillis(int timeBetweenEvictionRunsMillis) {
+        this.poolProperties.setTimeBetweenEvictionRunsMillis(timeBetweenEvictionRunsMillis);
     }
 
     /**
@@ -919,8 +792,27 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setUrl(String url) {
+        this.poolProperties.setUrl(url);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public String getUsername() {
         return getPoolProperties().getUsername();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setUsername(String username) {
+        this.poolProperties.setUsername(username);
+        this.poolProperties.getDbProperties().setProperty("user", getPoolProperties().getUsername());
     }
 
     /**
@@ -937,8 +829,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setValidationInterval(long validationInterval) {
+        this.poolProperties.setValidationInterval(validationInterval);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public String getValidationQuery() {
         return getPoolProperties().getValidationQuery();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setValidationQuery(String validationQuery) {
+        this.poolProperties.setValidationQuery(validationQuery);
     }
 
     /**
@@ -955,8 +865,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setValidationQueryTimeout(int validationQueryTimeout) {
+        this.poolProperties.setValidationQueryTimeout(validationQueryTimeout);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public String getValidatorClassName() {
         return getPoolProperties().getValidatorClassName();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setValidatorClassName(String className) {
+        this.poolProperties.setValidatorClassName(className);
     }
 
     /**
@@ -983,6 +911,15 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
     @Override
     public boolean isAccessToUnderlyingConnectionAllowed() {
         return getPoolProperties().isAccessToUnderlyingConnectionAllowed();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setAccessToUnderlyingConnectionAllowed(boolean accessToUnderlyingConnectionAllowed) {
+        getPoolProperties().setAccessToUnderlyingConnectionAllowed(accessToUnderlyingConnectionAllowed);
     }
 
     /**
@@ -1017,6 +954,15 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setLogAbandoned(boolean logAbandoned) {
+        this.poolProperties.setLogAbandoned(logAbandoned);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public boolean isPoolSweeperEnabled() {
         return getPoolProperties().isPoolSweeperEnabled();
     }
@@ -1035,8 +981,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setRemoveAbandoned(boolean removeAbandoned) {
+        this.poolProperties.setRemoveAbandoned(removeAbandoned);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public int getAbandonWhenPercentageFull() {
         return getPoolProperties().getAbandonWhenPercentageFull();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setAbandonWhenPercentageFull(int percentage) {
+        getPoolProperties().setAbandonWhenPercentageFull(percentage);
     }
 
     /**
@@ -1053,8 +1017,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setTestOnBorrow(boolean testOnBorrow) {
+        this.poolProperties.setTestOnBorrow(testOnBorrow);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public boolean isTestOnConnect() {
         return getPoolProperties().isTestOnConnect();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setTestOnConnect(boolean testOnConnect) {
+        this.poolProperties.setTestOnConnect(testOnConnect);
     }
 
     /**
@@ -1071,8 +1053,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setTestOnReturn(boolean testOnReturn) {
+        this.poolProperties.setTestOnReturn(testOnReturn);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public boolean isTestWhileIdle() {
         return getPoolProperties().isTestWhileIdle();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setTestWhileIdle(boolean testWhileIdle) {
+        this.poolProperties.setTestWhileIdle(testWhileIdle);
     }
 
     /**
@@ -1089,8 +1089,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setDefaultAutoCommit(Boolean autocommit) {
+        this.getPoolProperties().setDefaultAutoCommit(autocommit);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public Boolean getDefaultReadOnly() {
         return getPoolProperties().getDefaultReadOnly();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setDefaultReadOnly(Boolean defaultReadOnly) {
+        getPoolProperties().setDefaultReadOnly(defaultReadOnly);
     }
 
     /**
@@ -1116,8 +1134,26 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setUseLock(boolean useLock) {
+        this.getPoolProperties().setUseLock(useLock);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public boolean isFairQueue() {
         return getPoolProperties().isFairQueue();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
+    public void setFairQueue(boolean fairQueue) {
+        this.getPoolProperties().setFairQueue(fairQueue);
     }
 
     /**
@@ -1134,6 +1170,15 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
+    public void setJmxEnabled(boolean enabled) {
+        this.getPoolProperties().setJmxEnabled(enabled);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+
+    @Override
     public boolean isUseEquals() {
         return getPoolProperties().isUseEquals();
     }
@@ -1143,61 +1188,8 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      */
 
     @Override
-    public void setAbandonWhenPercentageFull(int percentage) {
-        getPoolProperties().setAbandonWhenPercentageFull(percentage);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setAccessToUnderlyingConnectionAllowed(boolean accessToUnderlyingConnectionAllowed) {
-        getPoolProperties().setAccessToUnderlyingConnectionAllowed(accessToUnderlyingConnectionAllowed);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setDbProperties(Properties dbProperties) {
-        getPoolProperties().setDbProperties(dbProperties);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setDefaultReadOnly(Boolean defaultReadOnly) {
-        getPoolProperties().setDefaultReadOnly(defaultReadOnly);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setMaxAge(long maxAge) {
-        getPoolProperties().setMaxAge(maxAge);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-
-    @Override
-    public void setName(String name) {
-        getPoolProperties().setName(name);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public void setDataSource(Object ds) {
-        getPoolProperties().setDataSource(ds);
+    public void setUseEquals(boolean useEquals) {
+        this.getPoolProperties().setUseEquals(useEquals);
     }
 
     /**
@@ -1212,8 +1204,8 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      * {@inheritDoc}
      */
     @Override
-    public void setDataSourceJNDI(String jndiDS) {
-        getPoolProperties().setDataSourceJNDI(jndiDS);
+    public void setDataSource(Object ds) {
+        getPoolProperties().setDataSource(ds);
     }
 
     /**
@@ -1222,6 +1214,14 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
     @Override
     public String getDataSourceJNDI() {
         return getPoolProperties().getDataSourceJNDI();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setDataSourceJNDI(String jndiDS) {
+        getPoolProperties().setDataSourceJNDI(jndiDS);
     }
 
     /**
@@ -1244,14 +1244,6 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      * {@inheritDoc}
      */
     @Override
-    public void setCommitOnReturn(boolean commitOnReturn) {
-        getPoolProperties().setCommitOnReturn(commitOnReturn);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
     public boolean getCommitOnReturn() {
         return getPoolProperties().getCommitOnReturn();
     }
@@ -1260,8 +1252,8 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      * {@inheritDoc}
      */
     @Override
-    public void setRollbackOnReturn(boolean rollbackOnReturn) {
-        getPoolProperties().setRollbackOnReturn(rollbackOnReturn);
+    public void setCommitOnReturn(boolean commitOnReturn) {
+        getPoolProperties().setCommitOnReturn(commitOnReturn);
     }
 
     /**
@@ -1276,8 +1268,8 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      * {@inheritDoc}
      */
     @Override
-    public void setUseDisposableConnectionFacade(boolean useDisposableConnectionFacade) {
-        getPoolProperties().setUseDisposableConnectionFacade(useDisposableConnectionFacade);
+    public void setRollbackOnReturn(boolean rollbackOnReturn) {
+        getPoolProperties().setRollbackOnReturn(rollbackOnReturn);
     }
 
     /**
@@ -1292,8 +1284,8 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
      * {@inheritDoc}
      */
     @Override
-    public void setLogValidationErrors(boolean logValidationErrors) {
-        getPoolProperties().setLogValidationErrors(logValidationErrors);
+    public void setUseDisposableConnectionFacade(boolean useDisposableConnectionFacade) {
+        getPoolProperties().setUseDisposableConnectionFacade(useDisposableConnectionFacade);
     }
 
     /**
@@ -1302,6 +1294,14 @@ public class DataSourceWrapper implements PoolConfiguration, javax.sql.DataSourc
     @Override
     public boolean getLogValidationErrors() {
         return getPoolProperties().getLogValidationErrors();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setLogValidationErrors(boolean logValidationErrors) {
+        getPoolProperties().setLogValidationErrors(logValidationErrors);
     }
 
     /**

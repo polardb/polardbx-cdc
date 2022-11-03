@@ -23,6 +23,7 @@ import com.aliyun.polardbx.binlog.io.OSSFile;
 import com.aliyun.polardbx.binlog.io.OSSFileSystem;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.github.rholder.retry.RetryException;
 import com.github.rholder.retry.Retryer;
 import com.github.rholder.retry.RetryerBuilder;
 import com.github.rholder.retry.StopStrategies;
@@ -38,6 +39,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -66,9 +68,12 @@ public class BinlogBackupManager {
             getThreadFactory("binlog-download" + "-%d", false));
         executorService.setKeepAliveTime(60, TimeUnit.SECONDS);
         executorService.allowCoreThreadTimeOut(true);
+
+        // 需要执行完prepare，然后再启动ActionManager
+        prepareLocalLastBinlog(binlogFileDir);
+
         actionManager = new ActionManager(binlogFileDir, provider, taskName);
         actionManager.start();
-        prepareLocalLastBinlog(binlogFileDir);
     }
 
     private List<BinlogOssRecord> prepareDownloadList() {
@@ -81,6 +86,8 @@ public class BinlogBackupManager {
         BinlogOssRecordMapper mapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
         List<BinlogOssRecord> recordList = mapper.select(s -> s.where(BinlogOssRecordDynamicSqlSupport.purgeStatus,
             SqlBuilder.isNotEqualTo(BinlogPurgeStatusEnum.COMPLETE.getValue()))
+            .and(BinlogOssRecordDynamicSqlSupport.uploadStatus,
+                SqlBuilder.isNotEqualTo(BinlogUploadStatusEnum.IGNORE.getValue()))
             .orderBy(BinlogOssRecordDynamicSqlSupport.binlogFile.descending()));
 
         int timeoutSecond = DynamicApplicationConfig.getInt(BINLOG_BACKUP_DOWNLOAD_WAIT_UPLOAD_TIMEOUT);
@@ -94,7 +101,6 @@ public class BinlogBackupManager {
                     mapper.select(s -> s.where(BinlogOssRecordDynamicSqlSupport.id, SqlBuilder.isEqualTo(id))).get(0);
                 if (i != 0 && record.getUploadStatus() != BinlogUploadStatusEnum.SUCCESS.getValue()) {
                     notUploadFiles.add(record.getBinlogFile());
-                    break;
                 }
             }
             if (!notUploadFiles.isEmpty()) {
@@ -154,31 +160,63 @@ public class BinlogBackupManager {
     }
 
     private void downloadList(List<String> downloadLogList, boolean localHasBinlog) {
-        int firstIdx = 0;
+        int fileIdx = 0;
         if (!localHasBinlog) {
-            String lastFileName = downloadLogList.get(firstIdx++);
-            // 先下载最后一个
-            doDownloadFile(lastFileName);
+            while (fileIdx < downloadLogList.size()) {
+                // 先下载最后一个
+                String lastFileName = downloadLogList.get(fileIdx++);
+                try {
+                    downloadWithRetry(lastFileName);
+                    break;
+                } catch (Throwable t) {
+                    processDownLoadError(lastFileName, t, true);
+                }
+            }
         }
 
         // 遍历列表，异步下载文件
-        for (int i = firstIdx; i < downloadLogList.size(); i++) {
+        for (int i = fileIdx; i < downloadLogList.size(); i++) {
             String fileName = downloadLogList.get(i);
             executorService.execute(() -> {
                 try {
-                    Retryer<Boolean> retryer = RetryerBuilder.<Boolean>newBuilder().retryIfException()
-                        .withWaitStrategy(WaitStrategies.fixedWait(500,
-                            TimeUnit.MILLISECONDS)).withStopStrategy(StopStrategies.stopAfterAttempt(5))
-                        .build();
-                    retryer.call(() -> {
-                        doDownloadFile(fileName);
-                        return true;
-                    });
-                } catch (Exception e) {
-                    logger.error("download " + fileName + " failed!");
-                    MonitorManager.getInstance().triggerAlarm(MonitorType.BINLOG_DOWNLOAD_FAILED_WARNING, fileName);
+                    downloadWithRetry(fileName);
+                } catch (Throwable e) {
+                    processDownLoadError(fileName, e, false);
                 }
             });
+        }
+    }
+
+    private void downloadWithRetry(String fileName) throws ExecutionException, RetryException {
+        Retryer<Boolean> retryer = RetryerBuilder.<Boolean>newBuilder().retryIfException()
+            .withWaitStrategy(WaitStrategies.fixedWait(500,
+                TimeUnit.MILLISECONDS)).withStopStrategy(StopStrategies.stopAfterAttempt(5))
+            .build();
+        retryer.call(() -> {
+            doDownloadFile(fileName);
+            return true;
+        });
+    }
+
+    private void processDownLoadError(String fileName, Throwable t, boolean throwError) {
+        BinlogOssRecordMapper mapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
+        List<BinlogOssRecord> recordList = mapper.select(
+            s -> s.where(BinlogOssRecordDynamicSqlSupport.binlogFile, SqlBuilder.isEqualTo(fileName)));
+        if (!recordList.isEmpty()) {
+            int status = recordList.get(0).getUploadStatus();
+            if (status == BinlogUploadStatusEnum.CREATE.getValue() ||
+                status == BinlogUploadStatusEnum.UPLOADING.getValue()) {
+                logger.warn("download " + fileName + " failed, record status is " + status
+                    + ", will skipped the error !", t);
+                DownloadLogManager.getInstance().successDownload(fileName);
+                return;
+            }
+        }
+
+        logger.error("download " + fileName + " failed!", t);
+        MonitorManager.getInstance().triggerAlarm(MonitorType.BINLOG_DOWNLOAD_FAILED_WARNING, fileName);
+        if (throwError) {
+            throw new PolardbxException("download file " + fileName + " failed!", t);
         }
     }
 

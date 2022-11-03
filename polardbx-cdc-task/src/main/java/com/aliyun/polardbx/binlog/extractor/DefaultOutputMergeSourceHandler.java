@@ -106,8 +106,7 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             .setType(TxnType.DML)
             .setSchema("")
             .setTsoTransaction(transaction.isTsoTransaction())
-            .setXaTxn(transaction.isXa())
-            .setSnapshotSeq(transaction.getSnapshotSeq() == null ? -1 : transaction.getSnapshotSeq());
+            .setXaTxn(transaction.isXa());
 
         if (transaction.isDescriptionEvent()) {
             txnTokenBuilder.setType(TxnType.FORMAT_DESC);
