@@ -1,23 +1,23 @@
 
-[![LICENSE](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://github.com/ApsaraDB/galaxysql/blob/main/LICENSE)
+[![LICENSE](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://github.com/polardb/polardbx-sql/blob/main/LICENSE)
 [![Language](https://img.shields.io/badge/Language-Java-blue.svg)](https://www.java.com/)
 
 [中文文档](docs/zh_CN/README.md)
 
-## What is ApsaraDB GalaxyCDC ?
-GalaxyCDC is a core component of [PolarDB-X](https://github.com/ApsaraDB/galaxysql) which is responsible for global binary log generation, publication and subscription.
+## What is PolarDB-X CDC ?
+PolarDB-X CDC is a core component of [PolarDB-X](https://github.com/polardb/polardbx-sql) which is responsible for global binary log generation, publication and subscription.
 
-With GalaxyCDC, PolarDB-X database can provide binary log fully compatible with MySQL binary log, which can be consumed seamlessly by MySQL binary log tools.
+With PolarDB-X CDC, PolarDB-X database can provide binary log fully compatible with MySQL binary log, which can be consumed seamlessly by MySQL binary log tools.
 And it can play the role of MySQL slave through MySQL Replication protocol.
 
 ## Quick Start
-The GalaxyCDC is a builtin component of the PolarDB-X.
+The PolarDB-X CDC is a builtin component of the PolarDB-X.
 
-Try GalaxyCDC by following these steps:
+Try PolarDB-X CDC by following these steps:
 
 1. Start a PolarDB-X
 
-See [Quick Start](https://github.com/ApsaraDB/galaxysql#to-quick-start-with-polardb-x) to start a PolarDB-X.
+See [Quick Start](https://github.com/polardb/polardbx-sql#to-quick-start-with-polardb-x) to start a PolarDB-X.
    
 2. Try MySQL Binary Log Commands
 
@@ -25,16 +25,12 @@ PolarDB-X is fully compatible with MySQL binary log related commands, such as `S
    
 3. PolarDB-X as MySQL Slave
 
-PolarDB-X supports MySQL Replica related commands, such as `CHANGE MASTER TO`，`START/STOP/RESET SLAVE`，`SHOW SLAVE STATUS`, etc. you can use PolarDB-X as MySQL slave, refer to  [Replica Reference Manual](https://github.com/ApsaraDB/galaxycdc/tree/main/polardbx-cdc-rpl/README.md) for command details.
+PolarDB-X supports MySQL Replica related commands, such as `CHANGE MASTER TO`，`START/STOP/RESET SLAVE`，`SHOW SLAVE STATUS`, etc. you can use PolarDB-X as MySQL slave, refer to  [Replica Reference Manual](https://github.com/polardb/polardbx-cdc/tree/main/polardbx-cdc-rpl/README.md) for command details.
 
-See [more docs](https://github.com/ApsaraDB/galaxysql#quick-start) about PolarDB-X.
+See [more docs](https://github.com/polardb/polardbx-sql#quick-start) about PolarDB-X.
 
 ## License
-ApsaraDB GalaxyCDC is under Apache License 2.0, see the [license](LICENSE) for details.
+PolarDB-X CDC is under Apache License 2.0, see the [license](LICENSE) for details.
 
 ## Contributing
-See [how to contribute](https://github.com/ApsaraDB/galaxysql#contributing).
-
-
-
-
+See [how to contribute](https://github.com/polardb/polardbx-sql#contributing).
