@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.client;
 
+import com.aliyun.polardbx.binlog.dumper.dump.codec.Lz4;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
@@ -25,6 +26,8 @@ import com.aliyun.polardbx.rpc.cdc.DumpRequest;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.aliyun.polardbx.rpc.cdc.Request;
+import io.grpc.CompressorRegistry;
+import io.grpc.DecompressorRegistry;
 import io.grpc.ManagedChannel;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.stub.StreamObserver;
@@ -66,9 +69,12 @@ public class DumpClient {
 
     public void connect() {
         if (connected.compareAndSet(false, true)) {
+            CompressorRegistry.getDefaultInstance().register(new Lz4());
             channel = NettyChannelBuilder
                 .forAddress(host, port)
                 .usePlaintext()
+                .compressorRegistry(CompressorRegistry.getDefaultInstance())
+                .decompressorRegistry(DecompressorRegistry.getDefaultInstance().with(new Lz4(), true))
                 .maxInboundMessageSize(Integer.MAX_VALUE)
                 .flowControlWindow(1048576 * flowControlWindowSize)
                 .build();

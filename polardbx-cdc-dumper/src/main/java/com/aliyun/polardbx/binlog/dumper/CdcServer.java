@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.dumper;
 
 import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.dumper.dump.codec.Lz4;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManager;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileReader;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
@@ -37,6 +38,8 @@ import com.aliyun.polardbx.rpc.cdc.StartSlaveRequest;
 import com.aliyun.polardbx.rpc.cdc.StopSlaveRequest;
 import com.aliyun.polardbx.rpl.common.LogUtil;
 import com.aliyun.polardbx.rpl.taskmeta.RplServiceManager;
+import io.grpc.CompressorRegistry;
+import io.grpc.DecompressorRegistry;
 import io.grpc.Server;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.stub.ServerCallStreamObserver;
@@ -144,6 +147,7 @@ public class CdcServer {
             public void sync(DumpRequest request, StreamObserver<DumpStream> responseObserver) {
                 final ServerCallStreamObserver<DumpStream> serverCallStreamObserver =
                     (ServerCallStreamObserver<DumpStream>) responseObserver;
+                serverCallStreamObserver.setCompression("lz4");
                 TxnOutputStream<DumpStream> txnOutputStream = new TxnOutputStream<>(serverCallStreamObserver);
                 txnOutputStream.init();
 
@@ -196,9 +200,12 @@ public class CdcServer {
         };
 
         try {
+            CompressorRegistry.getDefaultInstance().register(new Lz4());
             server = NettyServerBuilder
                 .forPort(port)
                 .addService(svc)
+                .compressorRegistry(CompressorRegistry.getDefaultInstance())
+                .decompressorRegistry(DecompressorRegistry.getDefaultInstance().with(new Lz4(), true))
                 .build()
                 .start();
             log.info("Listening on " + server.getPort());
