@@ -36,7 +36,7 @@
         <apache.version>3.8.1</apache.version>
         <jdbc.version>5.1.49</jdbc.version>
         <druid.version>1.0.25.2018030201</druid.version>
-        <polardbx-parser.version>2.8</polardbx-parser.version>
+        <polardbx-parser.version>3.3</polardbx-parser.version>
         <fastjson.version>1.2.50_noneautotype</fastjson.version>
         <lombok.version>1.18.0</lombok.version>
         <spring.version>5.3.20</spring.version>
@@ -334,11 +334,11 @@
                         <id>install-external</id>
                         <phase>clean</phase>
                         <configuration>
-                            <file>${basedir}/lib/polardbx-parser-2.8.jar</file>
+                            <file>${basedir}/lib/polardbx-parser-3.3.jar</file>
                             <repositoryLayout>default</repositoryLayout>
                             <groupId>com.alibaba.polardbx</groupId>
                             <artifactId>polardbx-parser</artifactId>
-                            <version>2.8</version>
+                            <version>3.3</version>
                             <packaging>jar</packaging>
                             <generatePom>true</generatePom>
                         </configuration>
