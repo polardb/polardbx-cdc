@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -64,7 +64,7 @@ public class BinlogExtractor implements Extractor {
     private static final String QUERY_VIP_STORAGE =
         "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";
     private static final String QUERY_STORAGE_LIMIT_1 =
-        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
+        "select * from storage_info where inst_kind=0 and storage_inst_id = '%s' and xport <> -1 limit 1";
     private static final String QUERY_CDC_INFO =
         "select d.phy_db_name from db_group_info d inner join group_detail_info g on d.group_name = g.group_name where storage_inst_id = '%s';";
     private static final String QUERY_FOR_VERSION = "select version()";
