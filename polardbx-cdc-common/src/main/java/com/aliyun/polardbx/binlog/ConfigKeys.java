@@ -1088,7 +1088,7 @@ public abstract class ConfigKeys {
     public static final String BINLOG_X_TRANSMIT_WRITE_SLOWDOWN_SPEED = "binlogx.transmit.write.slowdown.speed";
     public static final String BINLOG_X_TRANSMIT_WRITE_STOP_THRESHOLD = "binlogx.transmit.write.stop.threshold";
     public static final String BINLOG_X_TRANSMIT_WRITE_LOG_DETAIL_ENABLE = "binlogx.transmit.write.logDetail.enable";
-    public static final String BINLOG_X_TRANSMIT_HASH_LEVEL = "binlogx_transmit_hashLevel";
+    public static final String BINLOG_X_TRANSMIT_HASH_LEVEL = "binlogx_transmit_hash_level";
     public static final String BINLOG_X_USE_RECORD_LEVEL_HASH_DB_LIST = "binlogx.useRecordLevelHash.dbList";
     public static final String BINLOG_X_USE_RECORD_LEVEL_HASH_TABLE_LIST = "binlogx.useRecordLevelHash.tableList";
     public static final String BINLOG_X_USE_DB_LEVEL_HASH_DB_LIST = "binlogx.useDbLevelHash.dbList";

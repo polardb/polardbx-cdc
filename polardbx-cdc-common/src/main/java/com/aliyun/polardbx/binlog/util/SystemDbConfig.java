@@ -98,7 +98,7 @@ public class SystemDbConfig {
                 }
 
                 // step3. read from SprintContext
-                res = getConfigValue(configName, SpringContextHolder::getPropertiesValue);
+                res = SpringContextHolder.getPropertiesValue(configName);
                 if (StringUtils.isNotBlank(res)) {
                     return res;
                 }
