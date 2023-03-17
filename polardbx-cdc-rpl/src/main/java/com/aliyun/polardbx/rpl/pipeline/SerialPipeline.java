@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,6 +19,8 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSXATransaction;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
@@ -129,7 +131,7 @@ public class SerialPipeline extends BasePipeline {
                     TaskContext.getInstance().getTaskId(), e.getMessage());
             }
             log.error("start extractor occur error", e);
-            Runtime.getRuntime().halt(1);
+            System.exit(-1);
         }
     }
 
@@ -193,9 +195,13 @@ public class SerialPipeline extends BasePipeline {
             log.error("failed to call applier, exit");
             MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_FULL_ERROR,
                 TaskContext.getInstance().getTaskId(), "apply error");
-            Runtime.getRuntime().halt(1);
+            System.exit(-1);
         }
-        StatisticalProxy.getInstance().addMessageCount(events.size());
+        int rowCount = 0;
+        for (DBMSEvent event: events) {
+            rowCount += ((DefaultRowChange)event).getRowSize();
+        }
+        StatisticalProxy.getInstance().addMessageCount(rowCount);
     }
 
     private void takeStatisticsWithFlowControl(long currentBatchSize, long sequence, long start, int xaNum) {
@@ -240,14 +246,23 @@ public class SerialPipeline extends BasePipeline {
 
         @Override
         public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) throws Exception {
-            boolean isDdl = false;
             DBMSEvent dbmsEvent = messageEvent.getDbmsEventWithEffect();
             if (dbmsEvent instanceof DBMSRowChange) {
                 eventBatch.add(dbmsEvent);
+                position = messageEvent.getPosition();
             } else if (ApplyHelper.isDdl(dbmsEvent)) {
-                isDdl = true;
-                // first apply all exist events
-                StatisticalProxy.getInstance().apply(eventBatch);
+                // first apply all existing events
+                long start = System.currentTimeMillis();
+                if (!StatisticalProxy.getInstance().apply(eventBatch)) {
+                    log.error("failed to call applier, exit");
+                    // 延迟半小时以上才报警
+                    if (StatisticalProxy.getInstance().computeTaskDelay() > 1800) {
+                        MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                            TaskContext.getInstance().getTaskId(), "apply error");
+                    }
+                    System.exit(-1);
+                }
+                takeStatisticsWithFlowControl(eventBatch.size(), sequence, start, 0);
                 eventBatch.clear();
                 // apply DDL one by one
                 eventBatch.add(dbmsEvent);
@@ -268,17 +283,18 @@ public class SerialPipeline extends BasePipeline {
                     long start = System.currentTimeMillis();
                     if (!StatisticalProxy.getInstance().apply(eventBatch)) {
                         log.error("failed to call applier, exit");
-                        Runtime.getRuntime().halt(1);
+                        // 延迟半小时以上才报警
+                        if (StatisticalProxy.getInstance().computeTaskDelay() > 1800) {
+                            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                                TaskContext.getInstance().getTaskId(), "apply error");
+                        }
+                        System.exit(-1);
                     }
                     takeStatisticsWithFlowControl(eventBatch.size(), sequence, start, 0);
-                    // force flush position info if Ddl happened
-                    if (isDdl) {
-                        StatisticalProxy.getInstance().flushPosition();
-                    }
                     eventBatch.clear();
                 } catch (Throwable e) {
                     log.error("failed to call applier, exit", e);
-                    Runtime.getRuntime().halt(1);
+                    System.exit(-1);
                 }
             }
         }
@@ -347,7 +363,7 @@ public class SerialPipeline extends BasePipeline {
                     // apply
                     if (!StatisticalProxy.getInstance().tranApply(transactionBatch)) {
                         log.error("failed to call applier, exit");
-                        Runtime.getRuntime().halt(1);
+                        System.exit(-1);
                     }
                     takeStatisticsWithFlowControl(eventCount, sequence, start, 0);
                     eventCount = 0;
@@ -363,7 +379,7 @@ public class SerialPipeline extends BasePipeline {
                     }
                 } catch (Throwable e) {
                     log.error("failed to call applier, exit", e);
-                    Runtime.getRuntime().halt(1);
+                    System.exit(-1);
                 }
             }
         }
@@ -470,13 +486,10 @@ public class SerialPipeline extends BasePipeline {
                         transactionBatch.add(thisTransaction);
                     } else {
                         // 收到了commit，但却没有拿到xa事务start和end之间的event，存在丢数据风险
-                        // 触发同步报警 并 exit
+                        // 触发同步报警
                         String errorInfo = "receive commit but not start and end in xa transaction, xid: " +
-                            messageEvent.getXaTransaction().getXid();
+                            messageEvent.getXaTransaction().getXid() + "position: " + messageEvent.getPosition();
                         log.error(errorInfo);
-                        MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
-                            TaskContext.getInstance().getTaskId(), errorInfo);
-                        Runtime.getRuntime().halt(1);
                     }
                     break;
                 case XA_ROLLBACK:
@@ -515,7 +528,7 @@ public class SerialPipeline extends BasePipeline {
                             log.error("failed to call applier, exit");
                             MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
                                 TaskContext.getInstance().getTaskId(), "apply error");
-                            Runtime.getRuntime().halt(1);
+                            System.exit(-1);
                         }
                     } else {
                         // 展开transactionBatch
@@ -554,7 +567,7 @@ public class SerialPipeline extends BasePipeline {
                     }
                 } catch (Throwable e) {
                     log.error("failed to call applier, exit", e);
-                    Runtime.getRuntime().halt(1);
+                    System.exit(-1);
                 }
             }
         }
@@ -584,9 +597,12 @@ public class SerialPipeline extends BasePipeline {
             }
             if (!StatisticalProxy.getInstance().apply(events)) {
                 log.error("failed to call applier, exit");
-                MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
-                    TaskContext.getInstance().getTaskId(), "apply error");
-                Runtime.getRuntime().halt(1);
+                // 延迟半小时以上才报警
+                if (StatisticalProxy.getInstance().computeTaskDelay() > 1800) {
+                    MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                        TaskContext.getInstance().getTaskId(), "apply error");
+                }
+                System.exit(-1);
             }
         }
 
@@ -642,7 +658,7 @@ public class SerialPipeline extends BasePipeline {
                     log.error("applier return false, stop pipeline");
                     stop();
                 }
-                StatisticalProxy.getInstance().recordPosition(position, true);
+                StatisticalProxy.getInstance().recordPosition(position, log.isDebugEnabled());
                 eventBatch.clear();
             }
         }

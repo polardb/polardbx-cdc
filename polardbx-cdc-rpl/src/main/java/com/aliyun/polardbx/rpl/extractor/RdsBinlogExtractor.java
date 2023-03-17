@@ -3,16 +3,15 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /*
  *
  * Copyright (c) 2013-2021, Alibaba Group Holding Limited;
@@ -32,14 +31,14 @@
 
 package com.aliyun.polardbx.rpl.extractor;
 
+import com.aliyun.polardbx.binlog.api.BinlogProcessor;
+import com.aliyun.polardbx.binlog.api.DescribeBinlogFilesResult;
+import com.aliyun.polardbx.binlog.api.RdsApi;
+import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.canal.core.AbstractEventParser;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.exception.ServerIdNotMatchException;
-import com.aliyun.polardbx.binlog.download.BinlogProcessor;
-import com.aliyun.polardbx.binlog.download.DescribeBinlogFilesResult;
-import com.aliyun.polardbx.binlog.download.RdsApi;
-import com.aliyun.polardbx.binlog.download.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
@@ -130,10 +129,9 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
             // need to download binlog from oss
             if (newPosition == null) {
                 log.warn("find no remote start position");
-                // 由于应该以主的server id为准
-                // 如果主server id和position里的server id不同,则直接清除表位点
-                if (remoteParser.getCurrentServerId() != oldServerId) {
-                    StatisticalProxy.getInstance().deleteTaskTablePosition();
+                BinlogPosition refreshedPosition = StatisticalProxy.getInstance().getLatestPosition();
+                if (refreshedPosition != null) {
+                    position = refreshedPosition;
                 }
                 long begin = (position.getTimestamp() - RplConstants.FALLBACK_INTERVAL_SECONDS) * 1000;
                 long end = System.currentTimeMillis();
@@ -191,6 +189,7 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
                 binlogDownloader.start();
                 // 等待第一个文件下载完成，这样才能使用localConnection
                 while (binlogDownloader.getNumberOfDownloadedFile() == 0) {
+                    StatisticalProxy.getInstance().heartbeat();
                     Thread.sleep(2000L);
                 }
                 parser = localParser;
@@ -229,8 +228,8 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
     }
 
     private void initLocalEventParser() {
-        localParser =
-            new LocalBinlogEventParser(extractorConfig.getEventBufferSize(), true, new ILocalBinlogEventListener() {
+        localParser = new LocalBinlogEventParser(extractorConfig.getEventBufferSize(),
+            true, new ILocalBinlogEventListener() {
                 @Override
                 public void onEnd() {
                     log.info("local file parser end!");

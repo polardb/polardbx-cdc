@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,7 @@ package com.aliyun.polardbx.binlog.daemon.schedule;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.cdc.meta.RollbackMode;
+import com.aliyun.polardbx.binlog.cdc.meta.RollbackModeUtil;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistCleanPointDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistCleanPointMapper;
@@ -30,7 +31,9 @@ import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang.StringUtils;
 import org.joda.time.DateTime;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -51,7 +54,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_RECORD_LOGIC_COUNT_
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_RECORD_MARK_COUNT_CLEAN_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_RECORD_PHY_COUNT_ALARM_THRESHOD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_RECORD_PHY_COUNT_CLEAN_THRESHOLD;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_ROLLBACK_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_ROLLBACK_MODE_SUPPORT_INSTANT_CREATE_TABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_SEMI_SNAPSHOT_HOLDING_TIME;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
@@ -66,6 +69,7 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
  **/
 @Slf4j
 public class HistoryMonitor {
+    private final static String HISTORY_MONITOR_LOCK = "CDC_HISTORY_MONITOR_LOCK";
     private final ScheduledExecutorService monitor;
     private final JdbcTemplate polarxJdbcTemplate;
     private final JdbcTemplate metaJdbcTemplate;
@@ -85,9 +89,9 @@ public class HistoryMonitor {
         monitor.scheduleAtFixedRate(() -> {
             try {
                 if (!RuntimeLeaderElector.isDaemonLeader()) {
-                    if (log.isDebugEnabled()) {
-                        log.debug("current daemon is not a leader, skip the ddl record check!");
-                    }
+                    return;
+                }
+                if (!RuntimeLeaderElector.isLeader(HISTORY_MONITOR_LOCK)) {
                     return;
                 }
 
@@ -96,15 +100,23 @@ public class HistoryMonitor {
                 tryCleanCdcDdlRecord();
                 tryCleanScheduleHistory();
                 tryCleanEnvConfigHistory();
-                tryCleanExpiredSemiSnapshot();
+                if (StringUtils
+                    .contains(DynamicApplicationConfig.getString(META_ROLLBACK_MODE_SUPPORT_INSTANT_CREATE_TABLE),
+                        RollbackMode.SNAPSHOT_SEMI.name())) {
+                    tryCleanExpiredSemiSnapshot();
+                }
             } catch (Throwable e) {
                 log.error("check ddl record error!", e);
             }
         }, 0, period, TimeUnit.MINUTES);
+        log.info("history monitor started!");
     }
 
+    @SneakyThrows
     public void stop() {
         monitor.shutdownNow();
+        monitor.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+        log.info("history monitor stopped!");
     }
 
     private void tryCleanCdcDdlRecord() {
@@ -237,9 +249,7 @@ public class HistoryMonitor {
             log.info("successfully deleted expired semi snapshot records which tso is less than {}, delete count: "
                 + "{}. ", list.get(0).getTso(), count);
 
-            String rollbackModeStr = DynamicApplicationConfig.getString(META_ROLLBACK_MODE);
-            RollbackMode rollbackMode = RollbackMode.valueOf(rollbackModeStr);
-
+            RollbackMode rollbackMode = RollbackModeUtil.getRollbackMode();
             long phyCount = phyHistMapper
                 .count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.storageInstId, isEqualTo(storageInstId)));
             if (rollbackMode == RollbackMode.SNAPSHOT_SEMI && phyCount > cleanThreshold) {

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,6 +24,7 @@ import org.apache.http.entity.ContentType;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * http相关的工具类，带连接池配置
@@ -34,6 +35,19 @@ public class MetricsReporter {
         try {
             int daemonPort = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_PORT);
             PooledHttpHelper.doPost("http://127.0.0.1:" + daemonPort + "/cdc/reports",
+                ContentType.APPLICATION_JSON,
+                JSON.toJSONString(metricsList), 1000);
+        } catch (URISyntaxException e) {
+            log.error("metrics report fail,invalid uri", e);
+        } catch (IOException e) {
+            log.error("metrics report fail", e);
+        }
+    }
+
+    public static void binlogxReport(Map<String, List<CommonMetrics>> metricsList) {
+        try {
+            int daemonPort = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_PORT);
+            PooledHttpHelper.doPost("http://127.0.0.1:" + daemonPort + "/cdc/binlogx/reports",
                 ContentType.APPLICATION_JSON,
                 JSON.toJSONString(metricsList), 1000);
         } catch (URISyntaxException e) {

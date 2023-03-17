@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,7 +30,7 @@ import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
 import com.aliyun.polardbx.binlog.error.RetryableException;
-import com.aliyun.polardbx.binlog.io.OSSFileSystem;
+import com.aliyun.polardbx.binlog.filesys.CdcFileSystem;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
@@ -49,12 +49,12 @@ import com.aliyun.polardbx.rpl.common.fsmutil.RecoveryFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.ReplicaFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.ServiceDetail;
 import com.aliyun.polardbx.rpl.common.fsmutil.TaskDetail;
-import com.google.common.collect.Maps;
+import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
 import com.google.common.collect.Sets;
-import org.apache.commons.beanutils.BeanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
 import org.slf4j.Logger;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
 
@@ -65,6 +65,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -86,28 +87,11 @@ public class FSMMetaManager {
         new ResourceManager(DynamicApplicationConfig.getString(CLUSTER_ID));
     private final static String GREP_RPL_TASK_COUNT_COMMAND = "ps -ef | grep 'RplTaskEngine' | grep -v grep | wc -l";
     private final static String GREP_RPL_TASK_COMMAND = "ps -ef | grep 'RplTaskEngine' | grep -v grep";
-
-    /* /v1/import/service/create */
-    public static ResultCode createFSM(StateMachineType type, Object meta) {
-        long FSMId = RplConstants.ERROR_FSMID;
-        switch (StateMachineType.from(type.getValue())) {
-        case DATA_IMPORT:
-            FSMId = DataImportFSM.getInstance().create((DataImportMeta) meta);
-            break;
-        case REPLICA:
-            FSMId = ReplicaFSM.getInstance().create((ReplicateMeta) meta);
-            break;
-        default:
-            break;
-        }
-        if (FSMId == RplConstants.ERROR_FSMID) {
-            return new ResultCode(RplConstants.FAILURE_CODE, "create failed", RplConstants.FAILURE);
-        } else {
-            ResultCode returnResult = new ResultCode(RplConstants.SUCCESS_CODE, "create success");
-            returnResult.setData(FSMId);
-            return returnResult;
-        }
-    }
+    private final static Boolean SUPPORT_RUNNING_CHECK = DynamicApplicationConfig
+        .getBoolean(ConfigKeys.RPL_SUPPORT_RUNNING_CHECK);
+    private static final String OPTIMIZE_TABLE = "optimize table `%s`.`%s`";
+    private static final String ANALYZE_TABLE = "analyze table `%s`.`%s`";
+    private static final JdbcTemplate cnJdbcTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
 
     /* /v1/import/service/start */
     public static ResultCode startStateMachine(long FSMId) {
@@ -241,7 +225,6 @@ public class FSMMetaManager {
             return new ResultCode(RplConstants.FAILURE_CODE, "taskgroup not found", RplConstants.FAILURE);
         }
         DbTaskMetaManager.updateTaskStatus(taskId, TaskStatus.STOPPED);
-        DbTaskMetaManager.deleteTablePositionByTask(taskId);
         DbTaskMetaManager.deleteDbFullPositionByTask(taskId);
         DbTaskMetaManager.deleteDdlByTask(taskId);
         // TODO :
@@ -310,7 +293,6 @@ public class FSMMetaManager {
         DbTaskMetaManager.updateTaskConfig(taskId, null, newConfigStr, null);
         return new ResultCode(RplConstants.SUCCESS_CODE, "success", RplConstants.SUCCESS);
     }
-
 
     /* /v1/import/task/exception/skip/start/{taskId} */
     public static ResultCode startIncValidation(long fsmId) {
@@ -444,8 +426,8 @@ public class FSMMetaManager {
         taskDetail.setLastError(task.getLastError());
         String stat = task.getStatistic();
         StatisticUnit unit = JSON.parseObject(stat, StatisticUnit.class);
-        if (unit != null && unit.getMessageTps() != null && !unit.getMessageTps().isEmpty()) {
-            taskDetail.setRps(unit.getMessageTps().get(StatisticalProxy.INTERVAL_1M));
+        if (unit != null && unit.getMessageRps() != null && !unit.getMessageRps().isEmpty()) {
+            taskDetail.setRps(unit.getMessageRps().get(StatisticalProxy.INTERVAL_1M));
         }
         switch (ServiceType.from(task.getType())) {
         case FULL_COPY:
@@ -516,10 +498,8 @@ public class FSMMetaManager {
                 .addService(stateMachine.getId(), ServiceType.INC_COPY,
                     Arrays.asList(FSMState.INC_COPY,
                         FSMState.CATCH_UP_VALIDATION,
-                        FSMState.RECONCILIATION,
                         FSMState.RECON_FINISHED_WAIT_CATCH_UP,
-                        FSMState.RECON_FINISHED_CATCH_UP,
-                        FSMState.BACK_FLOW));
+                        FSMState.RECON_FINISHED_CATCH_UP));
             createImportTasks(incService, meta);
             metaLogger.info("initStateMachine, created incService: {}", incService.getId());
 
@@ -565,7 +545,7 @@ public class FSMMetaManager {
         }
     }
 
-    public static RplStateMachine initStateMachine(StateMachineType type, ReplicateMeta meta, ReplicaFSM fsm) {
+    public static RplStateMachine initStateMachine(StateMachineType type, ReplicaMeta meta, ReplicaFSM fsm) {
         if (type.getValue() != StateMachineType.REPLICA.getValue()) {
             metaLogger.error("initStateMachine failed because of unmatched type and meta");
             return null;
@@ -576,15 +556,24 @@ public class FSMMetaManager {
 
             // create stateMachine
             RplStateMachine stateMachine = DbTaskMetaManager.createStateMachine(config, StateMachineType.REPLICA,
-                fsm, meta.channel, DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID), null);
+                fsm, meta.channel, StringUtils.isNotBlank(meta.getClusterId()) ?
+                    meta.getClusterId():DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID), null);
             metaLogger.info("initStateMachine, created stateMachine, {}", stateMachine.getId());
 
-            // rpl service
-            RplService rplService = DbTaskMetaManager
-                .addService(stateMachine.getId(), ServiceType.REPLICA,
-                    Arrays.asList(FSMState.REPLICA));
-            createReplicaTasks(rplService, meta);
-            metaLogger.info("initStateMachine, created rplService: {}", rplService.getId());
+            // rpl full extraction service
+            if (meta.isImageMode()) {
+                RplService rplFullService = DbTaskMetaManager
+                    .addService(stateMachine.getId(), ServiceType.REPLICA_FULL,
+                        Arrays.asList(FSMState.REPLICA_FULL));
+                createReplicaTasks(rplFullService, meta);
+                metaLogger.info("initStateMachine, created rplFullService: {}", rplFullService.getId());
+            }
+            // rpl incremental extraction service
+            RplService rplIncService = DbTaskMetaManager
+                .addService(stateMachine.getId(), ServiceType.REPLICA_INC,
+                    Arrays.asList(FSMState.REPLICA_INC));
+            createReplicaTasks(rplIncService, meta);
+            metaLogger.info("initStateMachine, created rplIncService: {}", rplIncService.getId());
             // should not start automatically for replica task
             return stateMachine;
         } catch (Throwable e) {
@@ -633,7 +622,6 @@ public class FSMMetaManager {
      */
     public static boolean checkIncServiceCatchUp(long FSMId) {
         // boolean allCatchUp = true;
-        List<RplService> services = DbTaskMetaManager.listService(FSMId);
         RplService incService = DbTaskMetaManager.getService(FSMId, ServiceType.INC_COPY);
         if (incService == null || incService.getStatus() != ServiceStatus.RUNNING.getValue()) {
             return false;
@@ -679,6 +667,15 @@ public class FSMMetaManager {
         return true;
     }
 
+    public static boolean isReplicaImageMode(long FSMId) {
+        RplStateMachine stateMachine = DbTaskMetaManager.getStateMachine(FSMId);
+        if (stateMachine != null && stateMachine.getConfig() != null) {
+            ReplicaMeta replicaMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
+            return replicaMeta.isImageMode();
+        }
+        return false;
+    }
+
     public static ResultCode startService(RplService service) {
         metaLogger.info("startService, {}", service.getId());
         if (service.getStatus() != ServiceStatus.FINISHED.getValue()) {
@@ -704,7 +701,8 @@ public class FSMMetaManager {
         try {
             List<List<String>> lst = new ArrayList<>();
             List<String> binlogFiles =
-                OSSFileSystem.getAllLogFileNamesBetweenTimeRange(meta.getStartTimestamp(), meta.getEndTimestamp());
+                CdcFileSystem
+                    .listGlobalBinlogFilesBetweenTimeRange(meta.getStartTimestamp(), meta.getEndTimestamp());
             for (int i = 0; i < binlogFiles.size(); i += meta.getBinlogFilesCountPerTask()) {
                 List<String> tempList = new ArrayList<>();
                 for (int j = i; j < binlogFiles.size() && j < i + meta.getBinlogFilesCountPerTask(); j++) {
@@ -717,7 +715,7 @@ public class FSMMetaManager {
             for (int i = 0; i < lst.size(); i++) {
                 RecoveryExtractorConfig extractorConfig = new RecoveryExtractorConfig();
                 extractorConfig.setExtractorType(ExtractorType.RECOVERY.getValue());
-                extractorConfig.setFilterType(FilterType.NO_FILTER.getValue());
+                extractorConfig.setFilterType(FilterType.FLASHBACK_FILTER.getValue());
                 extractorConfig.setHostInfo(getRecoveryExtractorHostInfo(meta));
                 extractorConfig.setBinlogList(lst.get(i));
                 extractorConfigStr = JSON.toJSONString(extractorConfig);
@@ -782,7 +780,7 @@ public class FSMMetaManager {
     }
 
 
-    private static void createReplicaTasks(RplService rplService, ReplicateMeta meta) {
+    private static void createReplicaTasks(RplService rplService, ReplicaMeta meta) {
         metaLogger.info("createTasks start, service: {}", rplService.getId());
         try {
             RplTask rplTask = DbTaskMetaManager.addTask(rplService.getStateMachineId(),
@@ -813,75 +811,110 @@ public class FSMMetaManager {
         }
     }
 
-    public static void updateReplicaConfig(RplStateMachine stateMachine, ReplicateMeta replicateMeta,
-                                           boolean useMetaPosition) {
-        metaLogger.info("update rpl config start, statemachine: {}", stateMachine.getId());
-        String config = JSON.toJSONString(replicateMeta);
+    public static void resetReplicaFsm(RplStateMachine stateMachine) {
         RplStateMachine newStateMachine = new RplStateMachine();
         newStateMachine.setId(stateMachine.getId());
-        newStateMachine.setConfig(config);
-        DbTaskMetaManager.updateStateMachine(newStateMachine);
+        newStateMachine.setState(FSMState.REPLICA_INIT.getValue());
         List<RplService> services = DbTaskMetaManager.listService(stateMachine.getId());
         for (RplService service: services) {
-            FSMMetaManager.updateReplicaTasksConfig(service, replicateMeta, useMetaPosition);
+            DbTaskMetaManager.updateServiceStatus(service.getId(), ServiceStatus.STOPPED);
+            List<RplTask> tasks = DbTaskMetaManager.listTaskByService(service.getId());
+            for (RplTask task: tasks) {
+                DbTaskMetaManager.updateTaskStatus(task.getId(), TaskStatus.STOPPED);
+            }
         }
     }
 
-    private static void updateReplicaTasksConfig(RplService rplService, ReplicateMeta meta, boolean useMetaPosition) {
+    public static void updateReplicaConfig(RplStateMachine stateMachine, ReplicaMeta replicaMeta,
+                                           boolean useMetaPosition, boolean resetFsm) {
+        metaLogger.info("update rpl config start, statemachine: {}", stateMachine.getId());
+        String config = JSON.toJSONString(replicaMeta);
+        RplStateMachine newStateMachine = new RplStateMachine();
+        newStateMachine.setId(stateMachine.getId());
+        newStateMachine.setConfig(config);
+        if (resetFsm) {
+            resetReplicaFsm(stateMachine);
+        }
+        DbTaskMetaManager.updateStateMachine(newStateMachine);
+        List<RplService> services = DbTaskMetaManager.listService(stateMachine.getId());
+        for (RplService service: services) {
+            FSMMetaManager.updateReplicaTasksConfig(service, replicaMeta, useMetaPosition);
+        }
+    }
+
+    private static void updateReplicaTasksConfig(RplService rplService, ReplicaMeta meta, boolean useMetaPosition) {
         String extractorConfigStr = "";
         String pipelineConfigStr = "";
         String applierConfigStr = "";
         metaLogger.info("update rpl tasks start, service: {}", rplService.getId());
+        int memory = RplConstants.DEFAULT_MEMORY_SIZE;
+        switch (Objects.requireNonNull(ServiceType.from(rplService.getServiceType()))) {
+        case REPLICA_FULL:
+            FullExtractorConfig fullExtractorConfig = new FullExtractorConfig();
+            fullExtractorConfig.setExtractorType(ExtractorType.RPL_FULL.getValue());
+            fullExtractorConfig.setFilterType(FilterType.RPL_FILTER.getValue());
+            fullExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(meta));
+            fullExtractorConfig.setHostInfo(getRplExtractorHostInfo(meta));
+            fullExtractorConfig.setParallelCount(RplConstants.PRODUCER_DEFAULT_PARALLEL_COUNT);
+            fullExtractorConfig.setFetchBatchSize(RplConstants.DEFAULT_FETCH_BATCH_SIZE);
+            extractorConfigStr = JSON.toJSONString(fullExtractorConfig);
 
-        ExtractorConfig extractorConfig = new ExtractorConfig();
-        extractorConfig.setExtractorType(ExtractorType.RPL_INC.getValue());
-        extractorConfig.setFilterType(FilterType.RPL_FILTER.getValue());
-        extractorConfig.setSourceToTargetConfig(JSON.toJSONString(meta));
-        extractorConfig.setHostInfo(getRplExtractorHostInfo(meta));
-        extractorConfig.setEnableHeartbeat(true);
-        extractorConfigStr = JSON.toJSONString(extractorConfig);
+            PipelineConfig fullPipelineConfig = new PipelineConfig();
+            pipelineConfigStr = JSON.toJSONString(fullPipelineConfig);
 
-        PipelineConfig pipelineConfig = new PipelineConfig();
-        pipelineConfigStr = JSON.toJSONString(pipelineConfig);
+            ApplierConfig fullApplierConfig = new ApplierConfig();
+            fullApplierConfig.setHostInfo(getRplApplierHostInfo());
+            fullApplierConfig.setLogCommitLevel(RplConstants.LOG_NO_COMMIT);
+            fullApplierConfig.setApplierType(ApplierType.FULL_COPY.getValue());
+            applierConfigStr = JSON.toJSONString(fullApplierConfig);
+            memory = RplConstants.DEFAULT_MEMORY_SIZE_FOR_FULL_COPY;
+            break;
+        case REPLICA_INC:
+            ExtractorConfig extractorConfig = new ExtractorConfig();
+            extractorConfig.setExtractorType(ExtractorType.RPL_INC.getValue());
+            extractorConfig.setFilterType(FilterType.RPL_FILTER.getValue());
+            extractorConfig.setSourceToTargetConfig(JSON.toJSONString(meta));
+            extractorConfig.setHostInfo(getRplExtractorHostInfo(meta));
+            extractorConfigStr = JSON.toJSONString(extractorConfig);
 
-        ApplierConfig applierConfig = new ApplierConfig();
-        applierConfig.setHostInfo(getRplApplierHostInfo());
-        applierConfig.setLogCommitLevel(RplConstants.LOG_ALL_COMMIT);
-        applierConfigStr = JSON.toJSONString(applierConfig);
+            PipelineConfig pipelineConfig = new PipelineConfig();
+            pipelineConfigStr = JSON.toJSONString(pipelineConfig);
+
+            ApplierConfig applierConfig = new ApplierConfig();
+            applierConfig.setHostInfo(getRplApplierHostInfo());
+            applierConfig.setLogCommitLevel(RplConstants.LOG_ALL_COMMIT);
+            applierConfigStr = JSON.toJSONString(applierConfig);
+            break;
+        }
 
         List<RplTask> tasks = DbTaskMetaManager.listTaskByService(rplService.getId());
         for (RplTask task: tasks) {
             DbTaskMetaManager.updateTaskConfig(task.getId(), extractorConfigStr, pipelineConfigStr, applierConfigStr);
+            DbTaskMetaManager.updateTaskMemory(task.getId(), memory);
             if (useMetaPosition) {
                 DbTaskMetaManager.updateBinlogPosition(task.getId(), meta.position);
             }
         }
     }
 
-    public static void clearReplicaHistory(RplStateMachine stateMachine, boolean clearPosOnly) {
+    public static void clearReplicaHistory(RplStateMachine stateMachine, boolean resetFsm) {
         metaLogger.info("clear rpl history start, statemachine: {}", stateMachine.getId());
-        if (!clearPosOnly) {
-            RplStateMachine newStateMachine = new RplStateMachine();
-            newStateMachine.setId(stateMachine.getId());
-            newStateMachine.setContext("");
-            DbTaskMetaManager.updateStateMachine(newStateMachine);
+        if (resetFsm) {
+            DbTaskMetaManager.deleteDbFullPositionByFSM(stateMachine.getId());
         }
-        DbTaskMetaManager.deleteTablePositionByFsm(stateMachine.getId());
         DbTaskMetaManager.deleteDdlByFSM(stateMachine.getId());
         List<RplService> services = DbTaskMetaManager.listService(stateMachine.getId());
-        for (RplService service: services) {
-            FSMMetaManager.clearReplicaTasksHistory(service, clearPosOnly);
+        for (RplService service : services) {
+            FSMMetaManager.clearReplicaTasksHistory(service);
         }
     }
 
-    private static void clearReplicaTasksHistory(RplService rplService, boolean clearPosOnly) {
+    private static void clearReplicaTasksHistory(RplService rplService) {
         metaLogger.info("clear history of rpl tasks start, service: {}", rplService.getId());
         List<RplTask> tasks = DbTaskMetaManager.listTaskByService(rplService.getId());
         for (RplTask task: tasks) {
             metaLogger.info("clear history of rpl task start, task: {}", task.getId());
-            if (!clearPosOnly) {
-                DbTaskMetaManager.clearHistory(task.getId());
-            }
+            DbTaskMetaManager.clearHistory(task.getId());
             DbTaskMetaManager.updateBinlogPosition(task.getId(), CommonUtil.getRplInitialPosition());
         }
     }
@@ -899,8 +932,8 @@ public class FSMMetaManager {
                 switch (ServiceType.from(rplService.getServiceType())) {
                 case FULL_COPY:
                     FullExtractorConfig fullExtractorConfig = new FullExtractorConfig();
-                    fullExtractorConfig.setExtractorType(ExtractorType.MYSQL_FULL.getValue());
-                    fullExtractorConfig.setFilterType(FilterType.NORMAL_FILTER.getValue());
+                    fullExtractorConfig.setExtractorType(ExtractorType.DATA_IMPORT_FULL.getValue());
+                    fullExtractorConfig.setFilterType(FilterType.IMPORT_FILTER.getValue());
                     fullExtractorConfig.setParallelCount(meta.getProducerParallelCount());
                     fullExtractorConfig.setFetchBatchSize(meta.getFetchBatchSize());
                     fullExtractorConfig.setSourceToTargetConfig(
@@ -910,11 +943,10 @@ public class FSMMetaManager {
                     break;
                 case INC_COPY:
                     RdsExtractorConfig extractorConfig = new RdsExtractorConfig();
-                    extractorConfig.setExtractorType(ExtractorType.MYSQL_INC.getValue());
-                    extractorConfig.setFilterType(FilterType.NORMAL_FILTER.getValue());
+                    extractorConfig.setExtractorType(ExtractorType.DATA_IMPORT_INC.getValue());
+                    extractorConfig.setFilterType(FilterType.IMPORT_FILTER.getValue());
                     extractorConfig.setSourceToTargetConfig(JSON.toJSONString(physicalMeta));
                     extractorConfig.setHostInfo(getImportExtractorHostInfo(physicalMeta));
-                    extractorConfig.setEnableHeartbeat(false);
                     extractorConfig.setUid(physicalMeta.getRdsUid());
                     extractorConfig.setBid(physicalMeta.getRdsBid());
                     extractorConfig.setRdsInstanceId(physicalMeta.getRdsInstanceId());
@@ -923,7 +955,7 @@ public class FSMMetaManager {
                 case FULL_VALIDATION:
                     ValidationExtractorConfig validationExtractorConfig = new ValidationExtractorConfig();
                     validationExtractorConfig.setExtractorType(ExtractorType.FULL_VALIDATION.getValue());
-                    validationExtractorConfig.setFilterType(FilterType.NORMAL_FILTER.getValue());
+                    validationExtractorConfig.setFilterType(FilterType.IMPORT_FILTER.getValue());
                     validationExtractorConfig.setParallelCount(meta.getProducerParallelCount());
                     validationExtractorConfig.setHostInfo(getImportExtractorHostInfo(physicalMeta));
                     validationExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(physicalMeta));
@@ -932,29 +964,11 @@ public class FSMMetaManager {
                 case RECONCILIATION:
                     ReconExtractorConfig config = new ReconExtractorConfig();
                     config.setExtractorType(ExtractorType.RECONCILIATION.getValue());
-                    config.setFilterType(FilterType.NORMAL_FILTER.getValue());
+                    config.setFilterType(FilterType.IMPORT_FILTER.getValue());
                     config.setParallelCount(meta.getProducerParallelCount());
                     config.setHostInfo(getImportExtractorHostInfo(physicalMeta));
                     config.setSourceToTargetConfig(JSON.toJSONString(physicalMeta));
                     extractorConfigStr = JSON.toJSONString(config);
-                    break;
-                case FULL_VALIDATION_CROSSCHECK:
-                    ValidationExtractorConfig validationCrossCheckExtractorConfig = new ValidationExtractorConfig();
-                    validationCrossCheckExtractorConfig.setExtractorType(ExtractorType.FULL_VALIDATION_CROSSCHECK.getValue());
-                    validationCrossCheckExtractorConfig.setFilterType(FilterType.NORMAL_FILTER.getValue());
-                    validationCrossCheckExtractorConfig.setParallelCount(meta.getProducerParallelCount());
-                    validationCrossCheckExtractorConfig.setHostInfo(getImportApplierHostInfo(physicalMeta));
-                    validationCrossCheckExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(physicalMeta));
-                    extractorConfigStr = JSON.toJSONString(validationCrossCheckExtractorConfig);
-                    break;
-                case RECONCILIATION_CROSSCHECK:
-                    ReconExtractorConfig reconCrossCheckConfig = new ReconExtractorConfig();
-                    reconCrossCheckConfig.setExtractorType(ExtractorType.RECONCILIATION_CROSSCHECK.getValue());
-                    reconCrossCheckConfig.setFilterType(FilterType.NORMAL_FILTER.getValue());
-                    reconCrossCheckConfig.setParallelCount(meta.getProducerParallelCount());
-                    reconCrossCheckConfig.setHostInfo(getImportApplierHostInfo(physicalMeta));
-                    reconCrossCheckConfig.setSourceToTargetConfig(JSON.toJSONString(physicalMeta));
-                    extractorConfigStr = JSON.toJSONString(reconCrossCheckConfig);
                     break;
                 case CDC_INC:
                     DumperInfoMapper mapper = SpringContextHolder.getObject(DumperInfoMapper.class);
@@ -977,23 +991,28 @@ public class FSMMetaManager {
                     cdcExtractorConfig.setCdcServerIp(info.getIp());
                     cdcExtractorConfig.setCdcServerPort(info.getPort());
                     cdcExtractorConfig.setExtractorType(ExtractorType.CDC_INC.getValue());
-                    cdcExtractorConfig.setFilterType(FilterType.NORMAL_FILTER.getValue());
-                    DataImportMeta.PhysicalMeta backflowMeta =
-                        (DataImportMeta.PhysicalMeta) BeanUtils.cloneBean(physicalMeta);
-                    backflowMeta.setIgnoreServerIds(meta.getBackflowIgnoreServerId() + "");
-                    backflowMeta.setDstServerId(meta.getBackflowServerId());
-                    Map<String, Set<String>> allowTableList = Maps.newHashMap();
-                    allowTableList.put(meta.getBackflowDbName(), Sets.newHashSet(meta.getBackflowTableList()));
-                    backflowMeta.setAllowTableList(allowTableList);
-                    backflowMeta.setRewriteTableMapping(Maps.newHashMap());
-                    backflowMeta.setDstDb(meta.getBackflowDstDbName());
-                    Set set = Sets.newHashSet();
-                    set.add(meta.getBackflowDbName());
-                    backflowMeta.setSrcDbList(set);
-                    cdcExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(backflowMeta));
-                    // define source to target config here
+                    cdcExtractorConfig.setFilterType(FilterType.IMPORT_FILTER.getValue());
+                    cdcExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(meta.getBackFlowMeta()));
                     cdcExtractorConfig.setHostInfo(getImportApplierHostInfo(physicalMeta));
                     extractorConfigStr = JSON.toJSONString(cdcExtractorConfig);
+                    break;
+                case FULL_VALIDATION_CROSSCHECK:
+                    ValidationExtractorConfig validationCrossCheckExtractorConfig = new ValidationExtractorConfig();
+                    validationCrossCheckExtractorConfig.setExtractorType(ExtractorType.FULL_VALIDATION_CROSSCHECK.getValue());
+                    validationCrossCheckExtractorConfig.setFilterType(FilterType.IMPORT_FILTER.getValue());
+                    validationCrossCheckExtractorConfig.setParallelCount(meta.getProducerParallelCount());
+                    validationCrossCheckExtractorConfig.setHostInfo(getImportApplierHostInfo(physicalMeta));
+                    validationCrossCheckExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(meta.getBackFlowMeta()));
+                    extractorConfigStr = JSON.toJSONString(validationCrossCheckExtractorConfig);
+                    break;
+                case RECONCILIATION_CROSSCHECK:
+                    ReconExtractorConfig reconCrossCheckConfig = new ReconExtractorConfig();
+                    reconCrossCheckConfig.setExtractorType(ExtractorType.RECONCILIATION_CROSSCHECK.getValue());
+                    reconCrossCheckConfig.setFilterType(FilterType.IMPORT_FILTER.getValue());
+                    reconCrossCheckConfig.setParallelCount(meta.getProducerParallelCount());
+                    reconCrossCheckConfig.setHostInfo(getImportApplierHostInfo(physicalMeta));
+                    reconCrossCheckConfig.setSourceToTargetConfig(JSON.toJSONString(meta.getBackFlowMeta()));
+                    extractorConfigStr = JSON.toJSONString(reconCrossCheckConfig);
                     break;
                 default:
                     break;
@@ -1121,12 +1140,11 @@ public class FSMMetaManager {
     }
 
     private static HostInfo getImportApplierHostInfo(DataImportMeta.PhysicalMeta physicalMeta) {
-        // DataImportMeta.PhysicalMeta tempMeta = importMeta.getMetaList().get(physicalId);
         HostInfo info = new HostInfo(physicalMeta.getDstHost(),
             physicalMeta.getDstPort(),
             physicalMeta.getDstUser(),
             physicalMeta.getDstPassword(),
-            physicalMeta.getDstDb(),
+            "",
             physicalMeta.getDstType(), physicalMeta.getDstServerId());
         info.setUsePolarxPoolCN(true);
         return info;
@@ -1138,14 +1156,14 @@ public class FSMMetaManager {
         return info;
     }
 
-    private static HostInfo getRplExtractorHostInfo(ReplicateMeta replicateMeta) {
-        HostInfo info = new HostInfo(replicateMeta.getMasterHost(),
-            replicateMeta.getMasterPort(),
-            replicateMeta.getMasterUser(),
-            replicateMeta.getMasterPassword(),
+    private static HostInfo getRplExtractorHostInfo(ReplicaMeta replicaMeta) {
+        HostInfo info = new HostInfo(replicaMeta.getMasterHost(),
+            replicaMeta.getMasterPort(),
+            replicaMeta.getMasterUser(),
+            replicaMeta.getMasterPassword(),
             "",
-            replicateMeta.getMasterType(), RplConstants.SERVER_ID_NULL);
-        info.setUsePolarxPoolCN(true);
+            replicaMeta.getMasterType(), RplConstants.SERVER_ID_NULL);
+        info.setUsePolarxPoolCN(false);
         return info;
     }
 
@@ -1168,14 +1186,16 @@ public class FSMMetaManager {
     }
 
     private static HostInfo getBackflowApplierHostInfo(DataImportMeta meta) {
-        return new HostInfo(meta.getBackflowHost(),
-            meta.getBackflowPort(),
-            meta.getBackflowUser(),
-            meta.getBackflowPwd(),
-            meta.getBackflowDstDbName(),
-            meta.getBackflowType(),
-            meta.getBackflowServerId());
+        return new HostInfo(meta.getBackFlowMeta().getDstHost(),
+            meta.getBackFlowMeta().getDstPort(),
+            meta.getBackFlowMeta().getDstUser(),
+            meta.getBackFlowMeta().getDstPassword(),
+            "",
+            meta.getBackFlowMeta().getDstType(),
+            meta.getBackFlowMeta().getDstServerId());
     }
+
+    //////////////////////////// For Daemon //////////////////////////////
 
     private static int computeValProgress(RplTask task) {
         if (task.getStatus() == TaskStatus.FINISHED.getValue()) {
@@ -1183,12 +1203,12 @@ public class FSMMetaManager {
         }
 
         long fsmId = task.getStateMachineId();
-        int totalCount = DbTaskMetaManager.countTotalValTask(fsmId, task.getType());
+        int totalCount = DbTaskMetaManager.countTotalValTask(fsmId, ValidationTypeEnum.FORWARD.getValue());
         if (totalCount == 0) {
             metaLogger.error("Validation task total count returns 0. fsmId: {}", fsmId);
             return 0;
         }
-        int doneTask = DbTaskMetaManager.countDoneValTask(fsmId, task.getType());
+        int doneTask = DbTaskMetaManager.countDoneValTask(fsmId, ValidationTypeEnum.FORWARD.getValue());
 
         return (doneTask * 100) / totalCount;
     }
@@ -1215,7 +1235,22 @@ public class FSMMetaManager {
         return (int) (dealtCount * 100 / totalCount);
     }
 
-    //////////////////////////// For Daemon //////////////////////////////
+    public static boolean optimizeImportTables(long fsmId) {
+//        RplStateMachine stateMachine = DbTaskMetaManager.getStateMachine(fsmId);
+//        metaLogger.info("optimize table for fsm : {}", stateMachine.getConfig());
+//
+//        // 全量 增量 校验 订正 需要修一下
+//        DataImportMeta dataImportMeta = JSON.parseObject(stateMachine.getConfig(), DataImportMeta.class);
+//        for (String table: dataImportMeta.getAllTableList()) {
+//            cnJdbcTemplate.execute(String.format(OPTIMIZE_TABLE, dataImportMeta.getMetaList().get(0).getDstDb(), table));
+//        }
+//        for (String table: dataImportMeta.getAllTableList()) {
+//            cnJdbcTemplate.execute(String.format(ANALYZE_TABLE, dataImportMeta.getMetaList().get(0).getDstDb(), table));
+//        }
+        return true;
+    }
+
+    //////////////////////////// For Daemon dispatcher//////////////////////////////
 
     /**
      * For Leader
@@ -1292,7 +1327,7 @@ public class FSMMetaManager {
     public static int computeMaxRunningTaskNum(List<Container> workers) {
         int totalCpu = 0;
         int totalMem = 0;
-        for (Container worker: workers) {
+        for (Container worker : workers) {
             totalCpu = totalCpu + worker.getCapability().getCpu();
             totalMem = totalMem + worker.getCapability().getMemory_mb();
         }
@@ -1309,12 +1344,22 @@ public class FSMMetaManager {
         List<RplTask> localNeedRunTasks =
             DbTaskMetaManager.listTaskByService(DynamicApplicationConfig.getString(INST_IP),
                 TaskStatus.RUNNING,clusterId);
+        List<RplTask> localNeedRestartTasks = DbTaskMetaManager.listTaskByService(DynamicApplicationConfig.getString(INST_IP),
+            TaskStatus.RESTART, clusterId);
+        for (RplTask task: localNeedRunTasks) {
+            if (!isTaskRunning(task)) {
+                DbTaskMetaManager.updateTask(task.getId(), null, null, null, null,
+                    new Date(System.currentTimeMillis()));
+                commander.stopRplTask(task.getId());
+            }
+        }
+        for (RplTask task : localNeedRestartTasks) {
+            commander.stopRplTask(task.getId());
+        }
         Set<Long> needRunTaskIds = localNeedRunTasks.stream().map(RplTask::getId).collect(Collectors.toSet());
         Set<Long> runningTaskIds = Sets.newHashSet(listLocalRunningTaskId());
         stopNoLocalTasks(runningTaskIds, needRunTaskIds);
         startLocalTasks(runningTaskIds, localNeedRunTasks);
-        List<RplTask> localNeedRestartTasks = DbTaskMetaManager.listTaskByService(DynamicApplicationConfig.getString(INST_IP),
-            TaskStatus.RESTART, clusterId);
         for (RplTask task : localNeedRestartTasks) {
             // restart means MUST stop once
             // 1. leader set tasks to restart
@@ -1337,6 +1382,9 @@ public class FSMMetaManager {
      * Check if task is RUNNING on any worker
      */
     private static boolean isTaskRunning(RplTask task) {
+        if (!ServiceType.supportRunningCheck(task.getType()) || !SUPPORT_RUNNING_CHECK) {
+            return true;
+        }
         long when = System.currentTimeMillis() - RplConstants.TASK_KEEP_ALIVE_INTERVAL_SECONDS * 1000;
         boolean after = task.getGmtModified()
             .after(new Date(when));

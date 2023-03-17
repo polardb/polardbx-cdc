@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -54,6 +54,8 @@ public class BaseApplier {
         return true;
     }
 
+    public boolean applyDdlSql(String sql, String schema) throws Exception {return true; }
+
     public void logCommitInfo(List<DBMSEvent> dbmsEvents) {
         List<String> logs = new ArrayList<>();
         if (applierConfig.getLogCommitLevel() == RplConstants.LOG_ALL_COMMIT) {
@@ -63,7 +65,6 @@ public class BaseApplier {
         } else if (dbmsEvents.size() > 0 && applierConfig.getLogCommitLevel() == RplConstants.LOG_END_COMMIT) {
             logs.addAll(LogUtil.generateCommitLog(dbmsEvents.get(dbmsEvents.size() - 1), null));
         }
-
         LogUtil.writeBatchLogs(logs, LogUtil.getCommitLogger());
     }
 

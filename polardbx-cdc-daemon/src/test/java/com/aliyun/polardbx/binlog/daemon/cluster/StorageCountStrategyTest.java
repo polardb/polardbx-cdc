@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,12 +19,13 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.daemon.cluster.topology.GlobalBinlogTopologyBuilder;
 import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
-import com.aliyun.polardbx.binlog.scheduler.model.TaskConfig;
+import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -54,10 +55,10 @@ public class StorageCountStrategyTest {
                 .and(instKind, isEqualTo(0))
                 .groupBy(ip, port)
         );
-        StorageCountStrategy storageCountStrategy =
-            new StorageCountStrategy(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID));
+        GlobalBinlogTopologyBuilder storageCountStrategy =
+            new GlobalBinlogTopologyBuilder(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID));
         List<BinlogTaskConfig> apply =
-            storageCountStrategy.apply(capacity, storageInfo, TaskConfig.ORIGIN_TSO, 100, "");
+            storageCountStrategy.buildTopology(capacity, storageInfo, ExecutionConfig.ORIGIN_TSO, 100, "");
         System.out.println(JSON.toJSONString(apply));
 
         //BinlogTaskConfigMapper binlogTaskConfigMapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);

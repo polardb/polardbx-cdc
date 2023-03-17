@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,8 +20,10 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.TopologyManager;
+import com.aliyun.polardbx.binlog.TopologyManagerValidator;
 import com.aliyun.polardbx.binlog.daemon.rest.ann.ACL;
 import com.aliyun.polardbx.binlog.daemon.rest.resources.request.ConnectionInfo;
+import com.aliyun.polardbx.binlog.daemon.rest.resources.request.ImportTaskConfigList;
 import com.aliyun.polardbx.binlog.daemon.rest.resources.request.ImportTaskConfig;
 import com.aliyun.polardbx.binlog.dao.ServerInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
@@ -36,17 +38,14 @@ import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
 import com.aliyun.polardbx.rpl.taskmeta.CdcExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
-import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
-import com.aliyun.polardbx.rpl.taskmeta.ExtractorType;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
-import com.aliyun.polardbx.rpl.taskmeta.FilterType;
+import com.aliyun.polardbx.rpl.taskmeta.FullExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.RdsExtractorConfig;
+import com.aliyun.polardbx.rpl.taskmeta.ReconExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
 import com.aliyun.polardbx.rpl.taskmeta.StateMachineStatus;
 import com.aliyun.polardbx.rpl.taskmeta.ValidationExtractorConfig;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.sun.jersey.spi.resource.Singleton;
 import lombok.Data;
 import org.apache.commons.lang3.math.NumberUtils;
@@ -60,8 +59,8 @@ import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
-import java.lang.reflect.Constructor;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -83,91 +82,36 @@ public class ImportApiResource {
     public ImportApiResource() {
         System.out.println("constructor importApiResource");
     }
+    private final int REFRESH_ONLY_FULL_COPY = 1;
+    private final int REFRESH_ONLY_NOT_FULL_COPY = 2;
+    private final int REFRESH_ALL = 3;
+
 
     @POST
     @Path("/service/create")
-    public ResultCode create(ImportTaskConfig config) {
+    public ResultCode create(ImportTaskConfigList config) {
         logger.warn("msg : " + JSON.toJSONString(config));
         try {
             DataImportMeta importMeta = new DataImportMeta();
-            List<DataImportMeta.PhysicalMeta> metaList = new ArrayList<>();
-            ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
-            List<ServerInfo> serverInfoList = serverInfoMapper.select(c ->
-                c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
-                    .and(status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
-            );
-            String dstIp = serverInfoList.get(0).getIp();
-            Integer dstPort = serverInfoList.get(0).getPort();
-            String dstUser = DynamicApplicationConfig.getString(ConfigKeys.POLARX_USERNAME);
-            String dstPwd = DynamicApplicationConfig.getString(ConfigKeys.POLARX_PASSWORD);
-
-            // TopologyManager tm = new TopologyManagerImpl(config.getRules());
-            Constructor<?> tmConstructor =
-                Class.forName("com.aliyun.polardbx.binlog.TopologyManagerImpl").getConstructor(String.class);
-            TopologyManager tm = (TopologyManager) tmConstructor.newInstance(config.getRules());
-            importMeta.setAllTableList(config.getTableList().stream().map(String::toLowerCase).collect(Collectors.toList()));
-            importMeta.setRules(config.getRules());
+            Map<String, List<String>> allTableList = new HashMap<>();
+            importMeta.setRules(new HashMap<>());
+            importMeta.setLogicalDbMappings(new HashMap<>());
+            importMeta.setSrcLogicalTableList(new HashMap<>());
+            for (ImportTaskConfig oneDbConfig: config.getImportTaskConfigs()) {
+                importMeta.getSrcLogicalTableList().put(oneDbConfig.getSrcDbName(),
+                    oneDbConfig.getTableList().stream().map(String::toLowerCase).collect(Collectors.toList()));
+                importMeta.getRules().put(oneDbConfig.getSrcDbName(), oneDbConfig.getRules());
+            }
             importMeta.setSupportXa(true);
             importMeta.setCdcClusterId(config.getClusterId());
-            int drdsServerId = Math.abs(Objects.hash(config.getRules()));
+            int drdsServerId = Math.abs(Objects.hash(config.getImportTaskConfigs().get(0).getRules()));
             int polarxServerId = Math.abs(new Long(ServerConfigUtil.getGlobalNumberVar("SERVER_ID")).intValue());
             if (drdsServerId == polarxServerId) {
                 drdsServerId = (drdsServerId - 1) > 0 ? (drdsServerId - 1) : (drdsServerId + 1);
             }
-            List<String> logicTableList = config.getTableList();
-            for (ConnectionInfo connectionInfo : config.getSrcPhyConnList()) {
-                DataImportMeta.PhysicalMeta meta = new DataImportMeta.PhysicalMeta();
-                meta.setDstDb(config.getDstDbName().toLowerCase());
-                meta.setDstHost(dstIp);
-                meta.setDstPort(dstPort);
-                meta.setDstUser(dstUser);
-                meta.setDstPassword(dstPwd);
-                meta.setDstType(HostType.POLARX2);
-                meta.setSrcDbList(Sets.newHashSet(connectionInfo.getDbNameList()));
-                Map<String, Set<String>> doTables = Maps.newHashMap();
-                for (String dbName : connectionInfo.getDbNameList()) {
-                    List<String> phyTableList = tm.getAllPhyTableList(dbName, new HashSet<>(logicTableList));
-                    phyTableList = phyTableList.stream().map(String::toLowerCase).collect(Collectors.toList());
-                    dbName = dbName.toLowerCase();
-                    doTables.put(dbName, new HashSet<>(phyTableList));
-                }
-                // each instance should have same logical table list
-                meta.setLogicalTableList(logicTableList);
-                meta.setAllowTableList(doTables);
-                meta.setSrcHost(connectionInfo.getIp());
-                meta.setSrcPort(connectionInfo.getPort());
-                meta.setSrcUser(connectionInfo.getUser());
-                meta.setSrcPassword(connectionInfo.getPwd());
-                meta.setDenyTableList(Sets.newHashSet());
-                meta.setSrcType(HostType.RDS);
-                meta.setIgnoreServerIds(polarxServerId + "");
-                meta.setDstServerId(drdsServerId);
-                meta.setRdsBid(config.getRdsBid());
-                meta.setRdsUid(config.getRdsUid());
-                meta.setRdsInstanceId(connectionInfo.getDbInstanceId());
 
-                Map<String, String> rewriteTableMap = Maps.newHashMap();
-                for (Set<String> phyTabs : doTables.values()) {
-                    for (String pt : phyTabs) {
-                        pt = pt.toLowerCase();
-                        rewriteTableMap.put(pt, tm.getLogicTable(pt));
-                    }
-                }
-                meta.setRewriteTableMapping(rewriteTableMap);
-                metaList.add(meta);
-            }
-            importMeta.setMetaList(metaList);
-            ConnectionInfo drdsConn = config.getSrcConn();
-            importMeta.setBackflowHost(drdsConn.getIp());
-            importMeta.setBackflowPort(drdsConn.getPort());
-            importMeta.setBackflowUser(drdsConn.getUser());
-            importMeta.setBackflowTableList(logicTableList);
-            importMeta.setBackflowPwd(drdsConn.getPwd());
-            importMeta.setBackflowDbName(config.getDstDbName());
-            importMeta.setBackflowDstDbName(config.getSrcDbName());
-            importMeta.setBackflowServerId(polarxServerId);
-            importMeta.setBackflowIgnoreServerId(drdsServerId);
-            importMeta.setBackflowType(HostType.POLARX1);
+            generatePhysicalMeta(config, importMeta, drdsServerId, polarxServerId);
+            generateBackFlowMeta(config, importMeta, drdsServerId, polarxServerId);
             long fsmId = DataImportFSM.getInstance().create(importMeta);
             logger.warn("create import fsm id : " + fsmId);
             logger.warn("import meta:" + JSON.toJSONString(importMeta));
@@ -183,6 +127,236 @@ public class ImportApiResource {
                 .build();
         }
     }
+
+    private void generatePhysicalMeta(ImportTaskConfigList config,
+                                      DataImportMeta importMeta, int drdsServerId, int polarxServerId) {
+        ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
+        List<ServerInfo> serverInfoList = serverInfoMapper.select(c ->
+            c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
+                .and(status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
+        );
+        String dstIp = serverInfoList.get(0).getIp();
+        Integer dstPort = serverInfoList.get(0).getPort();
+        String dstUser = DynamicApplicationConfig.getString(ConfigKeys.POLARX_USERNAME);
+        String dstPwd = DynamicApplicationConfig.getString(ConfigKeys.POLARX_PASSWORD);
+        List<DataImportMeta.PhysicalMeta> metaList = new ArrayList<>();
+        Map<String, DataImportMeta.PhysicalMeta> metaMap = new HashMap<>();
+        for (ImportTaskConfig oneDbConfig: config.getImportTaskConfigs()) {
+            ConnectionInfo srcConn = oneDbConfig.getSrcConn();
+            importMeta.getLogicalDbMappings().put(oneDbConfig.getSrcDbName().toLowerCase(),
+                oneDbConfig.getDstDbName().toLowerCase());
+            TopologyManager topologyManager = new TopologyManagerValidator(oneDbConfig.getRules(), srcConn.getIp(),
+                srcConn.getPort(), oneDbConfig.getSrcDbName(), srcConn.getUser(), srcConn.getPwd());
+            List<String> logicTableList = importMeta.getSrcLogicalTableList().get(oneDbConfig.getSrcDbName());
+            for (ConnectionInfo connectionInfo : oneDbConfig.getSrcPhyConnList()) {
+                DataImportMeta.PhysicalMeta meta;
+                if (metaMap.containsKey(connectionInfo.getDbInstanceId())) {
+                    meta = metaMap.get(connectionInfo.getDbInstanceId());
+                } else {
+                    meta = new DataImportMeta.PhysicalMeta();
+                    meta.setDstHost(dstIp);
+                    meta.setDstPort(dstPort);
+                    meta.setDstUser(dstUser);
+                    meta.setDstPassword(dstPwd);
+                    meta.setDstType(HostType.POLARX2);
+                    meta.setSrcHost(connectionInfo.getIp());
+                    meta.setSrcPort(connectionInfo.getPort());
+                    meta.setSrcUser(connectionInfo.getUser());
+                    meta.setSrcPassword(connectionInfo.getPwd());
+                    meta.setSrcType(HostType.RDS);
+                    meta.setIgnoreServerIds(polarxServerId + "");
+                    meta.setDstServerId(drdsServerId);
+                    meta.setRdsBid(config.getImportTaskConfigs().get(0).getRdsBid());
+                    meta.setRdsUid(config.getImportTaskConfigs().get(0).getRdsUid());
+                    meta.setRdsInstanceId(connectionInfo.getDbInstanceId());
+                    meta.setDstDbMapping(new HashMap<>());
+                    meta.setSrcDbList(new HashSet<>());
+                    meta.setPhysicalDoTableList(new HashMap<>());
+                    meta.setRewriteTableMapping(new HashMap<>());
+                }
+                for (String srcPhysicalDbName: connectionInfo.getDbNameList()) {
+                    meta.getDstDbMapping().put(srcPhysicalDbName.toLowerCase(), oneDbConfig.getDstDbName().toLowerCase());
+                }
+                meta.getSrcDbList().addAll(connectionInfo.getDbNameList());
+                for (String dbName : connectionInfo.getDbNameList()) {
+                    List<String> physicalTableList = topologyManager.getAllPhyTableList(dbName, new HashSet<>(logicTableList));
+                    physicalTableList = physicalTableList.stream().map(String::toLowerCase).collect(Collectors.toList());
+                    dbName = dbName.toLowerCase();
+                    meta.getPhysicalDoTableList().put(dbName, new HashSet<>(physicalTableList));
+                }
+                Map<String, String> rewriteTableMap = meta.getRewriteTableMapping();
+                for (Set<String> physicalTables : meta.getPhysicalDoTableList().values()) {
+                    for (String physicalTable : physicalTables) {
+                        physicalTable = physicalTable.toLowerCase();
+                        rewriteTableMap.put(physicalTable, topologyManager.getLogicTable(physicalTable));
+                    }
+                }
+                metaList.add(meta);
+                metaMap.put(connectionInfo.getDbInstanceId(), meta);
+            }
+        }
+        importMeta.setMetaList(metaList);
+    }
+
+    private void generateBackFlowMeta(ImportTaskConfigList config,
+                                      DataImportMeta importMeta, int drdsServerId, int polarxServerId) {
+        ConnectionInfo drdsConn = config.getImportTaskConfigs().get(0).getSrcConn();
+        DataImportMeta.PhysicalMeta backFlowMeta = new DataImportMeta.PhysicalMeta();
+        backFlowMeta.setDstHost(drdsConn.getIp());
+        backFlowMeta.setDstPort(drdsConn.getPort());
+        backFlowMeta.setDstUser(drdsConn.getUser());
+        backFlowMeta.setDstPassword(drdsConn.getPwd());
+        backFlowMeta.setDstType(HostType.POLARX1);
+        backFlowMeta.setSrcType(HostType.POLARX2);
+        backFlowMeta.setDstServerId(polarxServerId);
+        backFlowMeta.setIgnoreServerIds(drdsServerId + "");
+        backFlowMeta.setSrcDbList(new HashSet<>());
+        backFlowMeta.setDstDbMapping(new HashMap<>());
+        backFlowMeta.setPhysicalDoTableList(new HashMap<>());
+        for (ImportTaskConfig oneDbConfig: config.getImportTaskConfigs()) {
+            backFlowMeta.getSrcDbList().add(oneDbConfig.getDstDbName().toLowerCase());
+            backFlowMeta.getDstDbMapping().put(oneDbConfig.getDstDbName().toLowerCase(),
+                oneDbConfig.getSrcDbName().toLowerCase());
+            List<String> logicTableList = importMeta.getSrcLogicalTableList().get(oneDbConfig.getSrcDbName());
+            backFlowMeta.getPhysicalDoTableList().put(oneDbConfig.getDstDbName(), new HashSet<>(logicTableList));
+        }
+        backFlowMeta.setRewriteTableMapping(new HashMap<>());
+        importMeta.setBackFlowMeta(backFlowMeta);
+    }
+
+    @POST
+    @Path("/service/refresh/{fsmId}")
+    public ResultCode refreshImportMeta(@PathParam("fsmId") Long fsmId, ImportTaskConfigList config) {
+        try {
+            logger.warn("msg : " + JSON.toJSONString(config));
+            RplStateMachine stateMachine = DbTaskMetaManager.getStateMachine(fsmId);
+            logger.info("old fsm config: {}", stateMachine.getConfig());
+
+            // 更新rule和allTableList
+            DataImportMeta dataImportMeta = JSON.parseObject(stateMachine.getConfig(), DataImportMeta.class);
+            dataImportMeta.setSrcLogicalTableList(new HashMap<>());
+            for (ImportTaskConfig oneDbConfig: config.getImportTaskConfigs()) {
+                dataImportMeta.getSrcLogicalTableList().put(oneDbConfig.getSrcDbName(),
+                    oneDbConfig.getTableList().stream().map(String::toLowerCase).collect(Collectors.toList()));
+                dataImportMeta.getRules().put(oneDbConfig.getSrcDbName(), oneDbConfig.getRules());
+            }
+
+            // 更新physical meta
+            generatePhysicalMeta(config, dataImportMeta, (int)(dataImportMeta.getMetaList().get(0).getDstServerId()),
+                Integer.valueOf(dataImportMeta.getMetaList().get(0).getIgnoreServerIds()));
+            generateBackFlowMeta(config, dataImportMeta, (int)(dataImportMeta.getMetaList().get(0).getDstServerId()),
+                Integer.valueOf(dataImportMeta.getMetaList().get(0).getIgnoreServerIds()));
+
+            stateMachine.setConfig(JSON.toJSONString(dataImportMeta));
+            DbTaskMetaManager.updateStateMachine(stateMachine);
+
+            reGenerateSourceToTargetConfigV2(config, fsmId, REFRESH_ALL);
+            return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(true).build();
+        } catch (Exception e) {
+            logger.error("create error!", e);
+            return ResultCode.builder().code(RplConstants.FAILURE_CODE).msg(e.getMessage()).data(false)
+                .build();
+        }
+    }
+
+
+
+    public ResultCode reGenerateSourceToTargetConfigV2(ImportTaskConfigList config, Long fsmId, int option)
+        throws Exception{
+        RplStateMachine stateMachine = DbTaskMetaManager.getStateMachine(fsmId);
+        logger.info("old fsm config: {}", stateMachine.getConfig());
+
+        // 全量 增量 校验 订正 需要修一下
+        DataImportMeta dataImportMeta = JSON.parseObject(stateMachine.getConfig(), DataImportMeta.class);
+        for (int i = 0; i < dataImportMeta.getMetaList().size(); ++i) {
+            DataImportMeta.PhysicalMeta meta = dataImportMeta.getMetaList().get(i);
+            String extractorConfigStr;
+            if (option == REFRESH_ONLY_FULL_COPY || option == REFRESH_ALL) {
+                RplService fullService = DbTaskMetaManager.getService(fsmId, ServiceType.FULL_COPY);
+                List<RplTask> fullTasks = DbTaskMetaManager.listTaskByService(fullService.getId());
+                RplTaskConfig config1 =  DbTaskMetaManager.getTaskConfig(fullTasks.get(i).getId());
+                logger.info("old full config1: {}", config1.getExtractorConfig());
+                FullExtractorConfig fullExtractorConfig = JSON.parseObject(config1.getExtractorConfig(),
+                    FullExtractorConfig.class);
+                fullExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(meta));
+                extractorConfigStr = JSON.toJSONString(fullExtractorConfig);
+                DbTaskMetaManager.updateTaskConfig(fullTasks.get(i).getId(), extractorConfigStr, null, null);
+            }
+            if (option == REFRESH_ONLY_NOT_FULL_COPY || option == REFRESH_ALL) {
+                stateMachine.setConfig(JSON.toJSONString(dataImportMeta));
+                DbTaskMetaManager.updateStateMachine(stateMachine);
+
+                RplService incService = DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY);
+                List<RplTask> incTasks = DbTaskMetaManager.listTaskByService(incService.getId());
+                RplTaskConfig config3 =  DbTaskMetaManager.getTaskConfig(incTasks.get(i).getId());
+                logger.info("old inc config3: {}", config3.getExtractorConfig());
+                RdsExtractorConfig incExtractorConfig1 = JSON.parseObject(config3.getExtractorConfig(),
+                    RdsExtractorConfig.class);
+                incExtractorConfig1.setSourceToTargetConfig(JSON.toJSONString(meta));
+                extractorConfigStr = JSON.toJSONString(incExtractorConfig1);
+                DbTaskMetaManager.updateTaskConfig(incTasks.get(i).getId(), extractorConfigStr, null, null);
+
+                RplService validService = DbTaskMetaManager.getService(fsmId, ServiceType.FULL_VALIDATION);
+                List<RplTask> validTasks = DbTaskMetaManager.listTaskByService(validService.getId());
+                RplTaskConfig config5 =  DbTaskMetaManager.getTaskConfig(validTasks.get(i).getId());
+                logger.info("old valid config5: {}", config5.getExtractorConfig());
+                ValidationExtractorConfig validExtractorConfig1 = JSON.parseObject(config5.getExtractorConfig(),
+                    ValidationExtractorConfig.class);
+                validExtractorConfig1.setSourceToTargetConfig(JSON.toJSONString(meta));
+                extractorConfigStr = JSON.toJSONString(validExtractorConfig1);
+                DbTaskMetaManager.updateTaskConfig(validTasks.get(i).getId(), extractorConfigStr, null, null);
+
+                RplService reconService = DbTaskMetaManager.getService(fsmId, ServiceType.RECONCILIATION);
+                List<RplTask> reconTasks = DbTaskMetaManager.listTaskByService(reconService.getId());
+                RplTaskConfig config7 =  DbTaskMetaManager.getTaskConfig(reconTasks.get(i).getId());
+                logger.info("old recon config7: {}", config7.getExtractorConfig());
+                ReconExtractorConfig reconExtractorConfig1 = JSON.parseObject(config7.getExtractorConfig(),
+                    ReconExtractorConfig.class);
+                reconExtractorConfig1.setSourceToTargetConfig(JSON.toJSONString(meta));
+                extractorConfigStr = JSON.toJSONString(reconExtractorConfig1);
+                DbTaskMetaManager.updateTaskConfig(reconTasks.get(i).getId(), extractorConfigStr, null, null);
+            }
+        }
+
+        String extractorConfigStr;
+        RplService backFlowService = DbTaskMetaManager.getService(fsmId, ServiceType.CDC_INC);
+        List<RplTask> backFlowTasks = DbTaskMetaManager.listTaskByService(backFlowService.getId());
+        RplTaskConfig taskConfig =  DbTaskMetaManager.getTaskConfig(backFlowTasks.get(0).getId());
+        logger.info("old backFlow config: {}", taskConfig.getExtractorConfig());
+        CdcExtractorConfig cdcExtractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(),
+            CdcExtractorConfig.class);
+        cdcExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(dataImportMeta.getBackFlowMeta()));
+        extractorConfigStr = JSON.toJSONString(cdcExtractorConfig);
+        DbTaskMetaManager.updateTaskConfig(backFlowTasks.get(0).getId(),
+            extractorConfigStr, null, null);
+
+        RplService validCrossService = DbTaskMetaManager.getService(fsmId, ServiceType.FULL_VALIDATION_CROSSCHECK);
+        RplService reconCrossService = DbTaskMetaManager.getService(fsmId, ServiceType.RECONCILIATION_CROSSCHECK);
+        List<RplTask> validCrossTasks = DbTaskMetaManager.listTaskByService(validCrossService.getId());
+        List<RplTask> reconCrossTasks = DbTaskMetaManager.listTaskByService(reconCrossService.getId());
+        RplTaskConfig config1 =  DbTaskMetaManager.getTaskConfig(validCrossTasks.get(0).getId());
+        RplTaskConfig config2 =  DbTaskMetaManager.getTaskConfig(reconCrossTasks.get(0).getId());
+        logger.info("old validation config: {}", config1.getExtractorConfig());
+        logger.info("old recon config: {}", config2.getExtractorConfig());
+        ValidationExtractorConfig validExtractorConfig = JSON.parseObject(config1.getExtractorConfig(),
+            ValidationExtractorConfig.class);
+        ReconExtractorConfig reconExtractorConfig = JSON.parseObject(config2.getExtractorConfig(),
+            ReconExtractorConfig.class);
+
+        validExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(dataImportMeta.getBackFlowMeta()));
+        reconExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(dataImportMeta.getBackFlowMeta()));
+        extractorConfigStr = JSON.toJSONString(validExtractorConfig);
+        DbTaskMetaManager.updateTaskConfig(validCrossTasks.get(0).getId(),
+            extractorConfigStr, null, null);
+        extractorConfigStr = JSON.toJSONString(reconExtractorConfig);
+        DbTaskMetaManager.updateTaskConfig(reconCrossTasks.get(0).getId(),
+            extractorConfigStr, null, null);
+
+        return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(fsmId).build();
+    }
+
+
+
 
     @POST
     @Path("/service/start/{fsmId}")
@@ -259,54 +433,6 @@ public class ImportApiResource {
     public ResultCode detail(@PathParam("fsmId") Long fsmId) {
         logger.warn("receive detail fsm request " + fsmId);
         return FSMMetaManager.getStateMachineDetail(fsmId);
-    }
-
-    @Deprecated
-    @POST
-    @Path("/service/setupCrossCheck/{fsmId}")
-    public ResultCode setupCrossCheck(@PathParam("fsmId") Long fsmId) {
-        logger.info("Received setupCrossCheck request. fsmId: {}", fsmId);
-        RplService backFlowService = DbTaskMetaManager.getService(fsmId, ServiceType.CDC_INC);
-        RplTask backFlowTask = DbTaskMetaManager.listTaskByService(backFlowService.getId()).get(0);
-        RplTaskConfig taskConfig = DbTaskMetaManager.getTaskConfig(backFlowTask.getId());
-        ExtractorConfig cdcExtractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(), CdcExtractorConfig.class);
-        ValidationExtractorConfig validationExtractorConfig = new ValidationExtractorConfig();
-        validationExtractorConfig.setExtractorType(ExtractorType.FULL_VALIDATION_CROSSCHECK.getValue());
-        validationExtractorConfig.setFilterType(FilterType.NORMAL_FILTER.getValue());
-        validationExtractorConfig.setParallelCount(4);
-        validationExtractorConfig.setHostInfo(cdcExtractorConfig.getHostInfo());
-        validationExtractorConfig.setSourceToTargetConfig(cdcExtractorConfig.getSourceToTargetConfig());
-
-        DataImportMeta.PhysicalMeta importMeta = JSON.parseObject(
-            validationExtractorConfig.getSourceToTargetConfig(), DataImportMeta.PhysicalMeta.class);
-
-        // It should only have one db, which is the logical db
-        String db = importMeta.getSrcDbList().stream().findFirst().get();
-        importMeta.setLogicalTableList(new ArrayList<>(importMeta.getAllowTableList().get(db)));
-        validationExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(importMeta));
-
-        // Add validation crosscheck config service and task
-        RplService valServiceCrossCheck = DbTaskMetaManager.addService(backFlowService.getStateMachineId(), ServiceType.FULL_VALIDATION_CROSSCHECK, new ArrayList<>());
-        RplTask rplTask = DbTaskMetaManager.addTask(backFlowService.getStateMachineId(),
-            valServiceCrossCheck.getId(),
-            JSON.toJSONString(validationExtractorConfig),
-            taskConfig.getPipelineConfig(),
-            taskConfig.getApplierConfig(),
-            ServiceType.from(valServiceCrossCheck.getServiceType()), 0, backFlowTask.getClusterId());
-        logger.info("Finished setting up CrossCheckValidation, service: {}, task: {}", valServiceCrossCheck.getId(), rplTask.getId());
-
-        // Add reconciliation crosscheck
-        validationExtractorConfig.setExtractorType(ExtractorType.RECONCILIATION_CROSSCHECK.getValue());
-        RplService reconXCheckService = DbTaskMetaManager.addService(backFlowService.getStateMachineId(), ServiceType.RECONCILIATION_CROSSCHECK, new ArrayList<>());
-        RplTask reconXCheckTask = DbTaskMetaManager.addTask(backFlowService.getStateMachineId(),
-            reconXCheckService.getId(),
-            JSON.toJSONString(validationExtractorConfig),
-            taskConfig.getPipelineConfig(),
-            taskConfig.getApplierConfig(),
-            ServiceType.from(reconXCheckService.getServiceType()), 0, backFlowTask.getClusterId());
-        logger.info("Finished setting up XCheckReconciliation, service: {}, task: {}", reconXCheckService.getId(), reconXCheckTask.getId());
-
-        return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(RplConstants.SUCCESS).build();
     }
 
     @POST

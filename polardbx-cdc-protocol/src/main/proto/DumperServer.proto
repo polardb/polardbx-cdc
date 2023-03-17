@@ -34,6 +34,8 @@ service CdcService {
 
 message Request {
   string req = 1;
+  string streamName = 2;
+  bool excludeRemoteFiles = 3;
 }
 
 message ShowBinlogEventsRequest{
@@ -41,12 +43,16 @@ message ShowBinlogEventsRequest{
   int64       pos = 2;
   int64       offset = 3;
   int64       rowCount = 4;
+  string      streamName = 5;
 }
 
 message DumpRequest{
-  string      fileName = 1;
-  int64       position = 2;
-  EventSplitMode       splitMode = 3;
+  string           fileName = 1;
+  int64            position = 2;
+  EventSplitMode   splitMode = 3;
+  bool             registered = 4;
+  string           ext = 5;
+  string           streamName = 6;
 }
 
 message BinaryLog {

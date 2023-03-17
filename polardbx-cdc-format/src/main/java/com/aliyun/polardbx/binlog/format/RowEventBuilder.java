@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -47,6 +47,8 @@ public class RowEventBuilder extends BinlogBuilder {
     private int columnCount;
     private int _flags;
     private String commitLog;
+    private int hashKey;
+    private List<byte[]> primaryKey;
 
     public RowEventBuilder(long tableId, int columnCount, BinlogEventType type, int createTime, long serverId) {
         this(tableId, columnCount, type.getType(), createTime, serverId);
@@ -56,7 +58,21 @@ public class RowEventBuilder extends BinlogBuilder {
         super(createTime, eventType, serverId);
         this.tableId = tableId;
         this.columnCount = columnCount;
-        _flags = ROW_FLAG_END_STATMENT;
+        this._flags = ROW_FLAG_END_STATMENT;
+    }
+
+    public static void main(String[] args) {
+        System.out.println(FormatDescriptionEvent.EVENT_HEADER_LENGTH[BinlogEventType.DELETE_ROWS_EVENT.getType() - 1]);
+        System.out
+            .println(FormatDescriptionEvent.EVENT_HEADER_LENGTH[BinlogEventType.DELETE_ROWS_EVENT_V1.getType() - 1]);
+    }
+
+    public RowEventBuilder duplicateHeader() {
+        RowEventBuilder rowEventBuilder = new RowEventBuilder(tableId, columnCount, eventType, timestamp, serverId);
+        rowEventBuilder.set_flags(_flags);
+        rowEventBuilder.setColumnsBitMap(columnsBitMap);
+        rowEventBuilder.setColumnsChangeBitMap(columnsChangeBitMap);
+        return rowEventBuilder;
     }
 
     @Override
@@ -148,13 +164,5 @@ public class RowEventBuilder extends BinlogBuilder {
 
     public void addRowData(RowData rowData) {
         this.rowDataList.add(rowData);
-    }
-
-    public String getCommitLog() {
-        return commitLog;
-    }
-
-    public void setCommitLog(String commitLog) {
-        this.commitLog = commitLog;
     }
 }

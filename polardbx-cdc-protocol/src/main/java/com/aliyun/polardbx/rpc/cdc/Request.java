@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,6 +31,7 @@ private static final long serialVersionUID = 0L;
   }
   private Request() {
     req_ = "";
+    streamName_ = "";
   }
 
   @java.lang.Override
@@ -67,6 +68,17 @@ private static final long serialVersionUID = 0L;
             java.lang.String s = input.readStringRequireUtf8();
 
             req_ = s;
+            break;
+          }
+          case 18: {
+            java.lang.String s = input.readStringRequireUtf8();
+
+            streamName_ = s;
+            break;
+          }
+          case 24: {
+
+            excludeRemoteFiles_ = input.readBool();
             break;
           }
           default: {
@@ -139,6 +151,55 @@ private static final long serialVersionUID = 0L;
     }
   }
 
+  public static final int STREAMNAME_FIELD_NUMBER = 2;
+  private volatile java.lang.Object streamName_;
+  /**
+   * <code>string streamName = 2;</code>
+   * @return The streamName.
+   */
+  @java.lang.Override
+  public java.lang.String getStreamName() {
+    java.lang.Object ref = streamName_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      streamName_ = s;
+      return s;
+    }
+  }
+  /**
+   * <code>string streamName = 2;</code>
+   * @return The bytes for streamName.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getStreamNameBytes() {
+    java.lang.Object ref = streamName_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      streamName_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
+  public static final int EXCLUDEREMOTEFILES_FIELD_NUMBER = 3;
+  private boolean excludeRemoteFiles_;
+  /**
+   * <code>bool excludeRemoteFiles = 3;</code>
+   * @return The excludeRemoteFiles.
+   */
+  @java.lang.Override
+  public boolean getExcludeRemoteFiles() {
+    return excludeRemoteFiles_;
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -156,6 +217,12 @@ private static final long serialVersionUID = 0L;
     if (!getReqBytes().isEmpty()) {
       com.google.protobuf.GeneratedMessageV3.writeString(output, 1, req_);
     }
+    if (!getStreamNameBytes().isEmpty()) {
+      com.google.protobuf.GeneratedMessageV3.writeString(output, 2, streamName_);
+    }
+    if (excludeRemoteFiles_ != false) {
+      output.writeBool(3, excludeRemoteFiles_);
+    }
     unknownFields.writeTo(output);
   }
 
@@ -167,6 +234,13 @@ private static final long serialVersionUID = 0L;
     size = 0;
     if (!getReqBytes().isEmpty()) {
       size += com.google.protobuf.GeneratedMessageV3.computeStringSize(1, req_);
+    }
+    if (!getStreamNameBytes().isEmpty()) {
+      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(2, streamName_);
+    }
+    if (excludeRemoteFiles_ != false) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeBoolSize(3, excludeRemoteFiles_);
     }
     size += unknownFields.getSerializedSize();
     memoizedSize = size;
@@ -185,6 +259,10 @@ private static final long serialVersionUID = 0L;
 
     if (!getReq()
         .equals(other.getReq())) return false;
+    if (!getStreamName()
+        .equals(other.getStreamName())) return false;
+    if (getExcludeRemoteFiles()
+        != other.getExcludeRemoteFiles()) return false;
     if (!unknownFields.equals(other.unknownFields)) return false;
     return true;
   }
@@ -198,6 +276,11 @@ private static final long serialVersionUID = 0L;
     hash = (19 * hash) + getDescriptor().hashCode();
     hash = (37 * hash) + REQ_FIELD_NUMBER;
     hash = (53 * hash) + getReq().hashCode();
+    hash = (37 * hash) + STREAMNAME_FIELD_NUMBER;
+    hash = (53 * hash) + getStreamName().hashCode();
+    hash = (37 * hash) + EXCLUDEREMOTEFILES_FIELD_NUMBER;
+    hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+        getExcludeRemoteFiles());
     hash = (29 * hash) + unknownFields.hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -333,6 +416,10 @@ private static final long serialVersionUID = 0L;
       super.clear();
       req_ = "";
 
+      streamName_ = "";
+
+      excludeRemoteFiles_ = false;
+
       return this;
     }
 
@@ -360,6 +447,8 @@ private static final long serialVersionUID = 0L;
     public com.aliyun.polardbx.rpc.cdc.Request buildPartial() {
       com.aliyun.polardbx.rpc.cdc.Request result = new com.aliyun.polardbx.rpc.cdc.Request(this);
       result.req_ = req_;
+      result.streamName_ = streamName_;
+      result.excludeRemoteFiles_ = excludeRemoteFiles_;
       onBuilt();
       return result;
     }
@@ -411,6 +500,13 @@ private static final long serialVersionUID = 0L;
       if (!other.getReq().isEmpty()) {
         req_ = other.req_;
         onChanged();
+      }
+      if (!other.getStreamName().isEmpty()) {
+        streamName_ = other.streamName_;
+        onChanged();
+      }
+      if (other.getExcludeRemoteFiles() != false) {
+        setExcludeRemoteFiles(other.getExcludeRemoteFiles());
       }
       this.mergeUnknownFields(other.unknownFields);
       onChanged();
@@ -513,6 +609,113 @@ private static final long serialVersionUID = 0L;
   checkByteStringIsUtf8(value);
       
       req_ = value;
+      onChanged();
+      return this;
+    }
+
+    private java.lang.Object streamName_ = "";
+    /**
+     * <code>string streamName = 2;</code>
+     * @return The streamName.
+     */
+    public java.lang.String getStreamName() {
+      java.lang.Object ref = streamName_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        streamName_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <code>string streamName = 2;</code>
+     * @return The bytes for streamName.
+     */
+    public com.google.protobuf.ByteString
+        getStreamNameBytes() {
+      java.lang.Object ref = streamName_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        streamName_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <code>string streamName = 2;</code>
+     * @param value The streamName to set.
+     * @return This builder for chaining.
+     */
+    public Builder setStreamName(
+        java.lang.String value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  
+      streamName_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string streamName = 2;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearStreamName() {
+      
+      streamName_ = getDefaultInstance().getStreamName();
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string streamName = 2;</code>
+     * @param value The bytes for streamName to set.
+     * @return This builder for chaining.
+     */
+    public Builder setStreamNameBytes(
+        com.google.protobuf.ByteString value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  checkByteStringIsUtf8(value);
+      
+      streamName_ = value;
+      onChanged();
+      return this;
+    }
+
+    private boolean excludeRemoteFiles_ ;
+    /**
+     * <code>bool excludeRemoteFiles = 3;</code>
+     * @return The excludeRemoteFiles.
+     */
+    @java.lang.Override
+    public boolean getExcludeRemoteFiles() {
+      return excludeRemoteFiles_;
+    }
+    /**
+     * <code>bool excludeRemoteFiles = 3;</code>
+     * @param value The excludeRemoteFiles to set.
+     * @return This builder for chaining.
+     */
+    public Builder setExcludeRemoteFiles(boolean value) {
+      
+      excludeRemoteFiles_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>bool excludeRemoteFiles = 3;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearExcludeRemoteFiles() {
+      
+      excludeRemoteFiles_ = false;
       onChanged();
       return this;
     }

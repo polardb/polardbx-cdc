@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -39,6 +39,7 @@ private static final long serialVersionUID = 0L;
     allParties_ = com.google.protobuf.LazyStringArrayList.EMPTY;
     payload_ = com.google.protobuf.ByteString.EMPTY;
     table_ = "";
+    ddl_ = "";
   }
 
   @java.lang.Override
@@ -159,6 +160,12 @@ private static final long serialVersionUID = 0L;
               serverId_ = subBuilder.buildPartial();
             }
 
+            break;
+          }
+          case 122: {
+            java.lang.String s = input.readStringRequireUtf8();
+
+            ddl_ = s;
             break;
           }
           default: {
@@ -637,6 +644,44 @@ private static final long serialVersionUID = 0L;
     return getServerId();
   }
 
+  public static final int DDL_FIELD_NUMBER = 15;
+  private volatile java.lang.Object ddl_;
+  /**
+   * <code>string ddl = 15;</code>
+   * @return The ddl.
+   */
+  @java.lang.Override
+  public java.lang.String getDdl() {
+    java.lang.Object ref = ddl_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      ddl_ = s;
+      return s;
+    }
+  }
+  /**
+   * <code>string ddl = 15;</code>
+   * @return The bytes for ddl.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getDdlBytes() {
+    java.lang.Object ref = ddl_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      ddl_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -692,6 +737,9 @@ private static final long serialVersionUID = 0L;
     }
     if (serverId_ != null) {
       output.writeMessage(14, getServerId());
+    }
+    if (!getDdlBytes().isEmpty()) {
+      com.google.protobuf.GeneratedMessageV3.writeString(output, 15, ddl_);
     }
     unknownFields.writeTo(output);
   }
@@ -756,6 +804,9 @@ private static final long serialVersionUID = 0L;
       size += com.google.protobuf.CodedOutputStream
         .computeMessageSize(14, getServerId());
     }
+    if (!getDdlBytes().isEmpty()) {
+      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(15, ddl_);
+    }
     size += unknownFields.getSerializedSize();
     memoizedSize = size;
     return size;
@@ -801,6 +852,8 @@ private static final long serialVersionUID = 0L;
       if (!getServerId()
           .equals(other.getServerId())) return false;
     }
+    if (!getDdl()
+        .equals(other.getDdl())) return false;
     if (!unknownFields.equals(other.unknownFields)) return false;
     return true;
   }
@@ -847,6 +900,8 @@ private static final long serialVersionUID = 0L;
       hash = (37 * hash) + SERVERID_FIELD_NUMBER;
       hash = (53 * hash) + getServerId().hashCode();
     }
+    hash = (37 * hash) + DDL_FIELD_NUMBER;
+    hash = (53 * hash) + getDdl().hashCode();
     hash = (29 * hash) + unknownFields.hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -1012,6 +1067,8 @@ private static final long serialVersionUID = 0L;
         serverId_ = null;
         serverIdBuilder_ = null;
       }
+      ddl_ = "";
+
       return this;
     }
 
@@ -1061,6 +1118,7 @@ private static final long serialVersionUID = 0L;
       } else {
         result.serverId_ = serverIdBuilder_.build();
       }
+      result.ddl_ = ddl_;
       onBuilt();
       return result;
     }
@@ -1163,6 +1221,10 @@ private static final long serialVersionUID = 0L;
       }
       if (other.hasServerId()) {
         mergeServerId(other.getServerId());
+      }
+      if (!other.getDdl().isEmpty()) {
+        ddl_ = other.ddl_;
+        onChanged();
       }
       this.mergeUnknownFields(other.unknownFields);
       onChanged();
@@ -2297,6 +2359,82 @@ private static final long serialVersionUID = 0L;
         serverId_ = null;
       }
       return serverIdBuilder_;
+    }
+
+    private java.lang.Object ddl_ = "";
+    /**
+     * <code>string ddl = 15;</code>
+     * @return The ddl.
+     */
+    public java.lang.String getDdl() {
+      java.lang.Object ref = ddl_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        ddl_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <code>string ddl = 15;</code>
+     * @return The bytes for ddl.
+     */
+    public com.google.protobuf.ByteString
+        getDdlBytes() {
+      java.lang.Object ref = ddl_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        ddl_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <code>string ddl = 15;</code>
+     * @param value The ddl to set.
+     * @return This builder for chaining.
+     */
+    public Builder setDdl(
+        java.lang.String value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  
+      ddl_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string ddl = 15;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearDdl() {
+      
+      ddl_ = getDefaultInstance().getDdl();
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string ddl = 15;</code>
+     * @param value The bytes for ddl to set.
+     * @return This builder for chaining.
+     */
+    public Builder setDdlBytes(
+        com.google.protobuf.ByteString value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  checkByteStringIsUtf8(value);
+      
+      ddl_ = value;
+      onChanged();
+      return this;
     }
     @java.lang.Override
     public final Builder setUnknownFields(

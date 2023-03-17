@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,10 +31,12 @@ import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.Cursor;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.client.DumpClient;
-import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
-import com.aliyun.polardbx.binlog.dumper.metrics.Metrics;
+import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
+import com.aliyun.polardbx.binlog.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.filesys.CdcFile;
+import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
@@ -68,6 +70,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_FLOW_CONTROL_WIN
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_INJECT_TROUBLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_DRYRUN;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_USE_DIRECT_BYTE_BUFFER;
+import static com.aliyun.polardbx.binlog.Constants.STREAM_NAME_GLOBAL;
 
 /**
  * Created by ziyang.lb
@@ -88,6 +91,7 @@ public class LogFileCopier {
     private final ByteBuffer contactBuffer;
     private final int flowControlWindowSize;
     private final boolean injectTrouble;
+    private final StreamMetrics metrics;
 
     private ExecutorService executor;
     private BinlogFile binlogFile;
@@ -114,6 +118,7 @@ public class LogFileCopier {
         this.injectTrouble = DynamicApplicationConfig.getBoolean(BINLOG_SYNC_INJECT_TROUBLE);
         this.lastInjectTroubleTime = System.currentTimeMillis();
         this.contactBuffer = ByteBuffer.allocate(65536);
+        this.metrics = StreamMetrics.getStreamMetrics(STREAM_NAME_GLOBAL);
     }
 
     public void start() {
@@ -191,7 +196,7 @@ public class LogFileCopier {
         if (StringUtils.isNotBlank(lastTso)) {
             DynamicApplicationVersionConfig.applyConfigByTso(lastTso);
         }
-        Metrics.get().setLatestDelayTimeOnCommit(0);
+        metrics.setLatestDelayTimeOnCommit(0);
     }
 
     private void buildTarget() {
@@ -228,10 +233,10 @@ public class LogFileCopier {
     }
 
     public void consume(byte[] packet, boolean isHeartBeat) throws IOException {
-        Metrics.get().setLatestDataReceiveTime(System.currentTimeMillis());
+        metrics.setLatestDataReceiveTime(System.currentTimeMillis());
 
         if (dryRun) {
-            Metrics.get().incrementTotalWriteBytes(packet.length);
+            metrics.incrementTotalWriteBytes(packet.length);
             return;
         }
 
@@ -254,8 +259,9 @@ public class LogFileCopier {
                     currentContactContext.currentWriteLength = currentContactContext.currentWriteLength + packet.length;
                     offset += packet.length;
                 } else {
+                    //先check，再write，避免数据不一致
+                    binlogFile.checkPosition(currentContactContext.eventPos, binlogFile.writePointer() + remaining);
                     binlogFile.writeData(packet, 0, remaining);
-                    binlogFile.checkPosition(currentContactContext.eventPos, binlogFile.writePointer());
                     offset += remaining;
                     currentContactContext = null;
                 }
@@ -364,7 +370,7 @@ public class LogFileCopier {
         }
 
         if (eventType == LogEvent.XID_EVENT) {
-            Metrics.get().incrementTotalWriteTxnCount();
+            metrics.incrementTotalWriteTxnCount();
         }
 
         if (injectTrouble && System.currentTimeMillis() - lastInjectTroubleTime > 5 * 60 * 1000) {
@@ -383,15 +389,18 @@ public class LogFileCopier {
     }
 
     public void buildBinlogFile() throws IOException {
-        File maxFile = logFileManager.getMaxBinlogFile();
-        logger.info("maxFile {}", maxFile);
-        if (maxFile == null) {
-            maxFile = findFirstFile();
-            logFileManager.createFile(maxFile);
-            binlogFile = new BinlogFile(maxFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer);
+        CdcFile maxLocalCdcFile = logFileManager.getLocalMaxBinlogFile();
+        File maxLocalFile;
+        if (maxLocalCdcFile == null) {
+            maxLocalFile = findFirstFile();
+            logFileManager.createLocalFileHelper(maxLocalFile);
+            binlogFile =
+                new BinlogFile(maxLocalFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
             binlogFile.writeHeader();
         } else {
-            binlogFile = new BinlogFile(maxFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer);
+            maxLocalFile = maxLocalCdcFile.newFile();
+            binlogFile =
+                new BinlogFile(maxLocalFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
             if (binlogFile.fileSize() == 0) {
                 binlogFile.writeHeader();
             } else {
@@ -403,7 +412,8 @@ public class LogFileCopier {
                 } else if (seekResult.getLastEventType() == LogEvent.ROTATE_EVENT) {
                     String oldFileName = binlogFile.getFileName();
                     File newFile = logFileManager.rotateFile(binlogFile.getFile(), null);
-                    binlogFile = new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer);
+                    binlogFile =
+                        new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
                     binlogFile.writeHeader();
                     logger.info("Last event in file [{}] is a rotate event, will start sync from next file [{}].",
                         oldFileName, newFile.getName());
@@ -411,19 +421,17 @@ public class LogFileCopier {
             }
         }
 
-        if (binlogFile.filePointer() < binlogFile.fileSize()) {
-            binlogFile.truncate(binlogFile.filePointer());
-        }
+        binlogFile.tryTruncate();
         logger.info("buildBinlogFile {}#{}", binlogFile.getFileName(), binlogFile.filePointer());
     }
 
     public String seekLastTso() throws IOException {
-        List<String> binlogFileNames = logFileManager.getAllLogFileNamesOrdered();
+        List<String> binlogFileNames = logFileManager.getAllLocalBinlogFileNamesOrdered();
         for (int i = binlogFileNames.size() - 1; i >= 0; i--) {
             String fileName = binlogFileNames.get(i);
             BinlogFile binlogFile =
-                new BinlogFile(new File(logFileManager.getBinlogFileDirPath() + File.separator + fileName), "rw",
-                    writeBufferSize, seekBufferSize, useDirectByteBuffer);
+                new BinlogFile(new File(logFileManager.getLocalBinlogPath() + File.separator + fileName), "rw",
+                    writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
             BinlogFile.SeekResult result = binlogFile.seekLastTso();
             binlogFile.close();
             if (StringUtils.isNotBlank(result.getLastTso())) {
@@ -434,14 +442,14 @@ public class LogFileCopier {
     }
 
     private void rotate(String rotateFileName) throws IOException {
-        String nextFileName = logFileManager.nextBinlogFileName(binlogFile.getFileName());
+        String nextFileName = BinlogFileUtil.getNextBinlogFileName(binlogFile.getFileName());
         if (!StringUtils.equals(nextFileName, rotateFileName)) {
             throw new PolardbxException("invalid rotate file name :" + rotateFileName);
         }
 
         binlogFile.close();
         File newFile = logFileManager.rotateFile(binlogFile.getFile(), null);
-        binlogFile = new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer);
+        binlogFile = new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
         binlogFile.writeHeader();
     }
 
@@ -450,8 +458,16 @@ public class LogFileCopier {
         try {
             dumpClient = new DumpClient(leaderHost, leaderPort, rpcUseAsyncMode, asyncQueueSize, flowControlWindowSize);
             dumpClient.connect();
-            File file = new File(logFileManager.getFullName(dumpClient.findMasterFirstLogFile()));
-            return file;
+            String firstLogFileName;
+            do {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                }
+
+                firstLogFileName = dumpClient.findMasterFirstLogFile();
+            } while (firstLogFileName == null);
+            return new File(logFileManager.getFullNameOfLocalBinlogFile(firstLogFileName));
         } finally {
             if (dumpClient != null) {
                 dumpClient.disconnect();
@@ -469,7 +485,7 @@ public class LogFileCopier {
             }
 
             long delayTime = System.currentTimeMillis() - timestamp * 1000;//Binlog中时间戳的单位是秒，需要转化为毫秒再计算
-            Metrics.get().setLatestDelayTimeOnCommit(delayTime);
+            metrics.setLatestDelayTimeOnCommit(delayTime);
         }
     }
 
@@ -480,6 +496,7 @@ public class LogFileCopier {
             List<EventSplitMode> list = Lists.newArrayList(EventSplitMode.SERVER, EventSplitMode.CLIENT);
             Collections.shuffle(list);
             this.splitMode = list.get(0);
+            logger.info("random split mode is " + splitMode);
         } else {
             this.splitMode = mode;
         }

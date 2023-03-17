@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -58,13 +58,11 @@ public class TransactionStorage implements TransactionCommitListener {
                 sortItem.getTransaction().getBinlogFileName() + ":" + sortItem.getTransaction().getStartLogPos());
             recorder.setFirstTransXidInSorter(sortItem.getXid());
         }
-        tryPersistAll();
+        tryPersistAll(t);
     }
 
-    private void tryPersistAll() {
-        persistAllChecker.checkWithCallback(() -> {
-            logger.info("prepare to persist all txn buffer in sorter.");
-
+    private void tryPersistAll(Transaction t) {
+        persistAllChecker.checkWithCallback(t.isLargeTrans(), () -> {
             List<Transaction> tranList = sorter.getAllQueuedTransactions();
             if (!tranList.isEmpty()) {
                 AtomicLong newlyPersistCount = new AtomicLong();
@@ -84,21 +82,20 @@ public class TransactionStorage implements TransactionCommitListener {
                         hasPersistedCount.incrementAndGet();
                     }
                 });
-                logger.warn("persisting detail info of this round in sorter is: total trans count is {}, newly "
-                        + "persisted trans count is {}, all persisted trans count is {}, heartbeat trans count is {},"
-                        + " first trans xid is {}, first trans pos is {}.", tranList.size(), newlyPersistCount.get(),
-                    hasPersistedCount.get(), heartbeatCount.get(), firstTrans.getXid(),
-                    firstTrans.getBinlogFileName() + ":" + firstTrans.getStartLogPos());
+                return String.format("persist detail info of this round in sorter is: total trans count is %s, newly "
+                        + "persisted trans count is %s, all persisted trans count is %s, heartbeat trans count is %s,"
+                        + " first trans xid is %s, first trans pos is %s.",
+                    tranList.size(), newlyPersistCount.get(), hasPersistedCount.get(), heartbeatCount.get(),
+                    firstTrans.getXid(), firstTrans.getBinlogFileName() + ":" + firstTrans.getStartLogPos());
             } else {
-                logger.info("persisting detail info of this round in sorter is empty.");
+                return "persisting detail info of this round in sorter is empty.";
             }
-            return null;
         });
     }
 
     public void purge() {
         doCommit();
-        recorder.setQueuedTransSizeInSorter(size + "");
+        recorder.setQueuedTransSizeInSorter(size);
     }
 
     private void doCommit() {

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.merge;
 
 import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import lombok.extern.slf4j.Slf4j;
 
@@ -25,6 +26,7 @@ import java.util.function.Consumer;
  **/
 @Slf4j
 public class MergeBarrier {
+    private final TaskType taskType;
     /**
      * 正在进行排队，等待合并完成的XA事务
      */
@@ -38,7 +40,8 @@ public class MergeBarrier {
      */
     private final Consumer<TxnToken> consumer;
 
-    public MergeBarrier(boolean isMergeNoTsoXa, Consumer<TxnToken> consumer) {
+    public MergeBarrier(TaskType taskType, boolean isMergeNoTsoXa, Consumer<TxnToken> consumer) {
+        this.taskType = taskType;
         this.isMergeNoTsoXa = isMergeNoTsoXa;
         this.xaTransactionHolder = new XaTransactionHolder();
         this.consumer = consumer;
@@ -47,7 +50,7 @@ public class MergeBarrier {
     public void addTxnToken(TxnToken token) {
         // 如果是一个TsoXa事务，必须进行合并
         // 如果是一个NoTsoXa事务，当isMergeNoTsoXa开关为true的时候才进行合并
-        if (token.getXaTxn() && (token.getTsoTransaction() || isMergeNoTsoXa)) {
+        if (token.getXaTxn() && (shouldMerge() && (token.getTsoTransaction() || isMergeNoTsoXa))) {
             addXaTokenForMerge(token);
         } else {
             addTokenWithoutMerge(token);
@@ -111,6 +114,11 @@ public class MergeBarrier {
 
     private void throwUnSupport() {
         throw new UnsupportedOperationException("Merging for NoTsoXa transaction is not supported yet.");
+    }
+
+    private boolean shouldMerge() {
+        //return taskType != TaskType.Dispatcher;
+        return true;
     }
 
     private static class XaTransactionHolder {

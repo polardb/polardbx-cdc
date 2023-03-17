@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -40,18 +40,6 @@ public class MergeMetrics {
      */
     private long totalPushToCollectorBlockTime;
     /**
-     * 从Task启动开始计算，已经向下游发送的TxnToken总数
-     */
-    private long totalTransmitCount;
-    /**
-     * 从Task启动开始计算，以Single模式，向下游发送的TxnToken总数
-     */
-    private long totalSingleTransmitCount;
-    /**
-     * 从Task启动开始计算，以Chunk模式，向下游发送的TxnToken总数
-     */
-    private long totalChunkTransmitCount;
-    /**
      * Merger阶段的延迟时间(ms)
      */
     private long delayTimeOnMerge;
@@ -60,25 +48,9 @@ public class MergeMetrics {
      */
     private long delayTimeOnCollect;
     /**
-     * Transmit阶段的延迟时间(ms)
-     */
-    private long delayTimeOnTransmit;
-    /**
      * Collect阶段，RingBuffer队列中正在排队的TxnToken数量
      */
-    private long ringBufferQueuedSize;
-    /**
-     * Transmit阶段，队列中正在排队的TxnToken数量
-     */
-    private long transmitQueuedSize;
-    /**
-     * Transmit阶段，已经封装好Packet，准备网络发送的Packet数量
-     */
-    private long dumpingQueueSize;
-    /**
-     * Storage清理队列的大小
-     */
-    private long storageCleanerQueuedSize;
+    private long collectQueuedSize;
 
     public MergeMetrics snapshot() {
         MergeMetrics snapshot = new MergeMetrics();
@@ -86,15 +58,9 @@ public class MergeMetrics {
         snapshot.totalMergePass1PCCount = this.totalMergePass1PCCount;
         snapshot.totalMergePass2PCCount = this.totalMergePass2PCCount;
         snapshot.totalPushToCollectorBlockTime = this.totalPushToCollectorBlockTime;
-        snapshot.totalTransmitCount = this.totalTransmitCount;
-        snapshot.totalSingleTransmitCount = this.totalSingleTransmitCount;
-        snapshot.totalChunkTransmitCount = this.totalChunkTransmitCount;
         snapshot.delayTimeOnMerge = this.delayTimeOnMerge;
         snapshot.delayTimeOnCollect = this.delayTimeOnCollect;
-        snapshot.delayTimeOnTransmit = this.delayTimeOnTransmit;
-        snapshot.ringBufferQueuedSize = this.ringBufferQueuedSize;
-        snapshot.transmitQueuedSize = this.transmitQueuedSize;
-        snapshot.storageCleanerQueuedSize = this.storageCleanerQueuedSize;
+        snapshot.collectQueuedSize = this.collectQueuedSize;
         return snapshot;
     }
 
@@ -108,18 +74,8 @@ public class MergeMetrics {
         totalMergePass2PCCount++;
     }
 
-    public void incrementSingleTransmitCount() {
-        totalSingleTransmitCount++;
-        totalTransmitCount++;
-    }
-
     public void incrementMergePollEmptyCount() {
         totalMergePollEmptyCount++;
-    }
-
-    public void addChunkTransmitCount(int count) {
-        totalChunkTransmitCount += count;
-        totalTransmitCount += count;
     }
 
     // ---------------------------------单 例----------------------------------
@@ -138,18 +94,6 @@ public class MergeMetrics {
 
     // ---------------------------------get&set---------------------------------
 
-    public long getTotalTransmitCount() {
-        return totalTransmitCount;
-    }
-
-    public long getTotalSingleTransmitCount() {
-        return totalSingleTransmitCount;
-    }
-
-    public long getTotalChunkTransmitCount() {
-        return totalChunkTransmitCount;
-    }
-
     public long getDelayTimeOnMerge() {
         return delayTimeOnMerge;
     }
@@ -166,28 +110,12 @@ public class MergeMetrics {
         this.delayTimeOnCollect = delayTimeOnCollect;
     }
 
-    public long getDelayTimeOnTransmit() {
-        return delayTimeOnTransmit;
+    public long getCollectQueuedSize() {
+        return collectQueuedSize;
     }
 
-    public void setDelayTimeOnTransmit(long delayTimeOnTransmit) {
-        this.delayTimeOnTransmit = delayTimeOnTransmit;
-    }
-
-    public long getRingBufferQueuedSize() {
-        return ringBufferQueuedSize;
-    }
-
-    public void setRingBufferQueuedSize(long ringBufferQueuedSize) {
-        this.ringBufferQueuedSize = ringBufferQueuedSize;
-    }
-
-    public long getTransmitQueuedSize() {
-        return transmitQueuedSize;
-    }
-
-    public void setTransmitQueuedSize(long transmitQueuedSize) {
-        this.transmitQueuedSize = transmitQueuedSize;
+    public void setCollectQueuedSize(long collectQueuedSize) {
+        this.collectQueuedSize = collectQueuedSize;
     }
 
     public long getTotalMergePassCount() {
@@ -212,21 +140,5 @@ public class MergeMetrics {
 
     public long getTotalMergePass2PCCount() {
         return totalMergePass2PCCount;
-    }
-
-    public long getStorageCleanerQueuedSize() {
-        return storageCleanerQueuedSize;
-    }
-
-    public void setStorageCleanerQueuedSize(long storageCleanerQueuedSize) {
-        this.storageCleanerQueuedSize = storageCleanerQueuedSize;
-    }
-
-    public long getDumpingQueueSize() {
-        return dumpingQueueSize;
-    }
-
-    public void setDumpingQueueSize(long dumpingQueueSize) {
-        this.dumpingQueueSize = dumpingQueueSize;
     }
 }

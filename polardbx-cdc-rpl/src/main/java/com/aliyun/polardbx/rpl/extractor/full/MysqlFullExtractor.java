@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,27 +15,38 @@
 package com.aliyun.polardbx.rpl.extractor.full;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import javax.sql.DataSource;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.domain.po.RplDbFullPosition;
+import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
+import com.aliyun.polardbx.rpl.dbmeta.DbMetaCache;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
 import com.aliyun.polardbx.rpl.filter.DataImportFilter;
+import com.aliyun.polardbx.rpl.filter.ReplicaFilter;
+import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FullExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * @author shicai.xsc 2020/12/6 19:10
@@ -48,18 +59,38 @@ public class MysqlFullExtractor extends BaseExtractor {
     protected FullExtractorConfig extractorConfig;
     protected ExecutorService executorService;
     protected List<MysqlFullProcessor> runningProcessors;
-    protected List<Future> runningFetchTasks;
-    protected List<Future> runningCountTasks;
+    protected List<Future<?>> runningFetchTasks;
+    protected List<Future<?>> runningCountTasks;
     protected HostInfo hostInfo;
     protected String extractorName;
-    protected DataImportFilter filter;
+    protected DataImportFilter dataImportFilter;
+    protected ReplicaFilter replicaFilter;
+    /*
+    only for replica full
+    * */
+    protected boolean isReplicaFull;
+    protected Set<String> defaultIgnoreDbList;
+    private static final String CREATE_DB = "CREATE DATABASE IF NOT EXISTS `%s` mode='auto'";
+    protected Map<String, Map<String, String>> structureImportDdl;
+
 
     public MysqlFullExtractor(FullExtractorConfig extractorConfig, HostInfo hostInfo, DataImportFilter filter) {
         super(extractorConfig);
         this.extractorName = "MysqlFullExtractor";
         this.extractorConfig = extractorConfig;
         this.hostInfo = hostInfo;
-        this.filter = filter;
+        this.dataImportFilter = filter;
+        isReplicaFull = false;
+    }
+
+    public MysqlFullExtractor(FullExtractorConfig extractorConfig, HostInfo hostInfo, ReplicaFilter replicaFilter)
+        throws Exception{
+        super(extractorConfig);
+        this.extractorName = "MysqlFullExtractor";
+        this.extractorConfig = extractorConfig;
+        this.hostInfo = hostInfo;
+        this.replicaFilter = replicaFilter;
+        isReplicaFull = true;
     }
 
     @Override
@@ -67,21 +98,6 @@ public class MysqlFullExtractor extends BaseExtractor {
         try {
             log.info("initializing {}", extractorName);
             super.init();
-            dataSourceMap = new HashMap<>();
-            for (String db : filter.getDoDbs()) {
-                DataSource dataSource =
-                    DataSourceUtil.createDruidMySqlDataSource(hostInfo.isUsePolarxPoolCN(), hostInfo.getHost(),
-                        hostInfo.getPort(),
-                        db,
-                        hostInfo.getUserName(),
-                        hostInfo.getPassword(),
-                        "",
-                        1,
-                        extractorConfig.getParallelCount(),
-                        null,
-                        null);
-                dataSourceMap.put(db, dataSource);
-            }
             executorService = ThreadPoolUtil.createExecutorWithFixedNum(
                 extractorConfig.getParallelCount(),
                 extractorName);
@@ -98,39 +114,72 @@ public class MysqlFullExtractor extends BaseExtractor {
     @Override
     public void start() throws Exception {
         log.info("starting {}", extractorName);
+        if (isReplicaFull) {
+            initIgnoreDbList();
+            getDoDbAndTableFromReplicaFilter();
+        }
 
-        // We support change ignoreTable after the service created
-        Set<String> dbNames = filter.getDoDbs();
-        Set<String> ignoreTables = filter.getIgnoreTables();
+        dataSourceMap = new HashMap<>(4);
+        for (String db : dataImportFilter.getDoDbs()) {
+            DataSource dataSource =
+                DataSourceUtil.createDruidMySqlDataSource(hostInfo.isUsePolarxPoolCN(), hostInfo.getHost(),
+                    hostInfo.getPort(),
+                    db,
+                    hostInfo.getUserName(),
+                    hostInfo.getPassword(),
+                    "",
+                    1,
+                    extractorConfig.getParallelCount(),
+                    null,
+                    null);
+            dataSourceMap.put(db, dataSource);
+        }
+
+        Set<String> dbNames = dataImportFilter.getDoDbs();
         for (String dbName : dbNames) {
-            for (String tbName : filter.getDoTables().get(dbName)) {
-                if (ignoreTables.contains(tbName)) {
-                    log.info("tbName:{} ignored", tbName);
-                    continue;
+            if (isReplicaFull) {
+                String dstDbName = dataImportFilter.getRewriteDb(dbName, DBMSAction.INSERT);
+                if (!StatisticalProxy.getInstance().applyDdlSql("", String.format(CREATE_DB, dstDbName))) {
+                    log.error("Fail to create db: {}", dstDbName);
+                    System.exit(-1);
                 }
-
+            }
+            for (String tbName : dataImportFilter.getDoTables().get(dbName)) {
+                String dstDbName = dataImportFilter.getRewriteDb(dbName, DBMSAction.INSERT);
+                String dstTbName = dataImportFilter.getRewriteTable(tbName);
+                if (isReplicaFull) {
+                    Optional<String> ddl = Optional.ofNullable(structureImportDdl.get(dstDbName))
+                        .map(data -> data.get(dstTbName));
+                    if (ddl.isPresent()) {
+                        if (!StatisticalProxy.getInstance().applyDdlSql(dstDbName, ddl.get())) {
+                            log.error("Fail to create table: {}.{}", dstDbName, dstTbName);
+                            System.exit(-1);
+                        }
+                    }
+                }
                 MysqlFullProcessor processor = new MysqlFullProcessor();
                 processor.setExtractorConfig(extractorConfig);
                 processor.setDataSource(dataSourceMap.get(dbName));
                 processor.setSchema(dbName);
                 processor.setTbName(tbName);
-                processor.setLogicalSchema(filter.getRewriteDb(dbName, null));
-                processor.setLogicalTbName(filter.getRewriteTable(tbName));
+                processor.setLogicalSchema(dstDbName);
+                processor.setLogicalTbName(dstTbName);
                 processor.setHostInfo(hostInfo);
                 processor.setPipeline(pipeline);
                 // 获得所有的待全量的表的行数，用来计算进度
-                Future future = executorService.submit(() -> processor.preStart());
+                Future<?> future = executorService.submit(processor::preStart);
                 runningCountTasks.add(future);
                 runningProcessors.add(processor);
                 log.info("{} submit for schema:{}, tbName:{}", extractorName, dbName, tbName);
             }
         }
 
-        for (Future future : runningCountTasks) {
+        for (Future<?> future : runningCountTasks) {
             future.get();
         }
+        Collections.shuffle(runningProcessors);
         for (MysqlFullProcessor processor: runningProcessors) {
-            Future future = executorService.submit(() -> processor.start());
+            Future<?> future = executorService.submit(processor::start);
             runningFetchTasks.add(future);
         }
     }
@@ -138,30 +187,26 @@ public class MysqlFullExtractor extends BaseExtractor {
     @Override
     public boolean isDone() {
         boolean allDone = true;
-        for (Future future : runningFetchTasks) {
+        for (Future<?> future : runningFetchTasks) {
             allDone &= future.isDone();
         }
-        // here if alldone but !isAllDataTransferred()
+        // here if allDone but !isAllDataTransferred()
         // need to exit process to retry tasks failed
         if (allDone)  {
-            if (isAllDataTransfered()) {
+            if (isAllDataTransferred()) {
                 return true;
             } else {
-                Runtime.getRuntime().halt(1);
+                log.error("All futures have been done but some tasks are not finished");
+                System.exit(-1);
             }
         }
         return false;
     }
 
-    public boolean isAllDataTransfered() {
-        Set<String> ignoreTables = filter.getIgnoreTables();
-        Set<String> dbNames = filter.getDoDbs();
+    public boolean isAllDataTransferred() {
+        Set<String> dbNames = dataImportFilter.getDoDbs();
         for (String dbName : dbNames) {
-            for (String tbName : filter.getDoTables().get(dbName)) {
-                if (ignoreTables.contains(tbName)) {
-                    continue;
-                }
-
+            for (String tbName : dataImportFilter.getDoTables().get(dbName)) {
                 String fullTableName = dbName + "." + tbName;
                 RplDbFullPosition position = DbTaskMetaManager
                     .getDbFullPosition(TaskContext.getInstance().getTaskId(), fullTableName);
@@ -170,7 +215,6 @@ public class MysqlFullExtractor extends BaseExtractor {
                 }
             }
         }
-
         return true;
     }
 
@@ -178,4 +222,60 @@ public class MysqlFullExtractor extends BaseExtractor {
     public void stop() {
         log.warn("stopping {}", extractorName);
     }
+
+    public void getDoDbAndTableFromReplicaFilter() throws Exception {
+        structureImportDdl = new HashMap<>();
+        Map<String, Set<String>> doTables = new HashMap<>();
+        Map<String, String> dbMappings = new HashMap<>();
+        DbMetaCache dbMetaCache = new DbMetaCache(hostInfo, 2);
+        List<String> dbs = dbMetaCache.getDatabases();
+        Set<String> doDbs = new HashSet<>();
+        log.info("source db list: {}", dbs);
+        for (String dbName: dbs) {
+            if (defaultIgnoreDbList.contains(dbName.toLowerCase())) {
+                continue;
+            }
+            if (replicaFilter.ignoreEvent(replicaFilter.getRewriteDb(dbName, DBMSAction.CREATEDB),null
+                , DBMSAction.CREATEDB, Integer.MIN_VALUE)) {
+                continue;
+            }
+            doDbs.add(dbName);
+            Set<String> nowDoTables = new HashSet<>();
+            Map<String, String> nowStructureImportDdl = new HashMap<>();
+            doTables.put(dbName, nowDoTables);
+            structureImportDdl.put(dbName, nowStructureImportDdl);
+            List<String> tbNames = dbMetaCache.getTables(dbName);
+            log.debug("from db: {} source table list: {}", dbName, doTables);
+            for (String tbName: tbNames) {
+                if (!replicaFilter.ignoreEvent(replicaFilter.getRewriteDb(dbName, DBMSAction.INSERT),tbName
+                    , DBMSAction.INSERT, Integer.MIN_VALUE)) {
+                    String tableSchema = dbMetaCache.getCreateTable(dbName, tbName);
+                    nowStructureImportDdl.put(tbName, tableSchema);
+                    log.debug("from db: {} source table: {}, ddl: {}", dbName, tbName, tableSchema);
+                    nowDoTables.add(tbName);
+                }
+            }
+        }
+        DataImportMeta.PhysicalMeta importMeta = new DataImportMeta.PhysicalMeta();
+        importMeta.setRewriteTableMapping(new HashMap<>());
+        importMeta.setIgnoreServerIds("");;
+        importMeta.setDstDbMapping(dbMappings);
+        importMeta.setSrcDbList(doDbs);
+        importMeta.setPhysicalDoTableList(doTables);
+        dataImportFilter = new DataImportFilter(importMeta);
+        dataImportFilter.init();
+        log.info("generated data import filter: {}", dataImportFilter);
+    }
+
+    protected void initIgnoreDbList() {
+        String config = DynamicApplicationConfig.getString(ConfigKeys.RPL_DEFAULT_IGNORE_DB_LIST);
+        Set<String> filters = new HashSet<>();
+        if (StringUtils.isNotBlank(config)) {
+            for (String token : config.trim().toLowerCase().split(RplConstants.COMMA)) {
+                filters.add(token.trim());
+            }
+        }
+        defaultIgnoreDbList = filters;
+    }
+
 }

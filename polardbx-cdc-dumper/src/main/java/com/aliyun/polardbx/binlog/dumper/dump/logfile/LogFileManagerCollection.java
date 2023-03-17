@@ -1,0 +1,80 @@
+/**
+ * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.aliyun.polardbx.binlog.dumper.dump.logfile;
+
+import com.aliyun.polardbx.binlog.task.ICursorProvider;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+/**
+ * Created by ziyang.lb
+ **/
+public class LogFileManagerCollection {
+    private final Map<String, LogFileManager> nestedLogFileManagers;
+
+    public LogFileManagerCollection() {
+        this.nestedLogFileManagers = new HashMap<>();
+    }
+
+    public void add(String key, LogFileManager value) {
+        this.nestedLogFileManagers.put(key, value);
+    }
+
+    public LogFileManager get(String key) {
+        return this.nestedLogFileManagers.get(key);
+    }
+
+    /**
+     * 多线程启动各个流的LogFileManager，加快恢复速度
+     */
+    public void start() {
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        List<Future<?>> futureList = new ArrayList<>();
+        nestedLogFileManagers.forEach(
+            (streamName, logFileManager) -> {
+                futureList.add(executorService.submit(logFileManager::start));
+            });
+
+        futureList.forEach(f -> {
+            try {
+                f.get();
+            } catch (InterruptedException | ExecutionException e) {
+                throw new RuntimeException(e);
+            }
+        });
+
+        executorService.shutdownNow();
+    }
+
+    public void stop() {
+        nestedLogFileManagers.forEach((key, value) -> value.stop());
+    }
+
+    public Map<String, ICursorProvider> getCursorProviders() {
+        return new HashMap<>(nestedLogFileManagers);
+    }
+
+    public Set<String> streamSet() {
+        return nestedLogFileManagers.keySet();
+    }
+}

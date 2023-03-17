@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -35,6 +35,7 @@ private static final long serialVersionUID = 0L;
     rowsQuery_ = "";
     schema_ = "";
     table_ = "";
+    primaryKey_ = java.util.Collections.emptyList();
   }
 
   @java.lang.Override
@@ -57,6 +58,7 @@ private static final long serialVersionUID = 0L;
     if (extensionRegistry == null) {
       throw new java.lang.NullPointerException();
     }
+    int mutable_bitField0_ = 0;
     com.google.protobuf.UnknownFieldSet.Builder unknownFields =
         com.google.protobuf.UnknownFieldSet.newBuilder();
     try {
@@ -101,6 +103,19 @@ private static final long serialVersionUID = 0L;
             table_ = s;
             break;
           }
+          case 56: {
+
+            hashKey_ = input.readInt32();
+            break;
+          }
+          case 66: {
+            if (!((mutable_bitField0_ & 0x00000001) != 0)) {
+              primaryKey_ = new java.util.ArrayList<com.google.protobuf.ByteString>();
+              mutable_bitField0_ |= 0x00000001;
+            }
+            primaryKey_.add(input.readBytes());
+            break;
+          }
           default: {
             if (!parseUnknownField(
                 input, unknownFields, extensionRegistry, tag)) {
@@ -116,6 +131,9 @@ private static final long serialVersionUID = 0L;
       throw new com.google.protobuf.InvalidProtocolBufferException(
           e).setUnfinishedMessage(this);
     } finally {
+      if (((mutable_bitField0_ & 0x00000001) != 0)) {
+        primaryKey_ = java.util.Collections.unmodifiableList(primaryKey_); // C
+      }
       this.unknownFields = unknownFields.build();
       makeExtensionsImmutable();
     }
@@ -361,6 +379,64 @@ private static final long serialVersionUID = 0L;
     }
   }
 
+  public static final int HASHKEY_FIELD_NUMBER = 7;
+  private int hashKey_;
+  /**
+   * <pre>
+   **
+   *参与dispatcher 分发的hashKey
+   * </pre>
+   *
+   * <code>int32 hashKey = 7;</code>
+   * @return The hashKey.
+   */
+  @java.lang.Override
+  public int getHashKey() {
+    return hashKey_;
+  }
+
+  public static final int PRIMARYKEY_FIELD_NUMBER = 8;
+  private java.util.List<com.google.protobuf.ByteString> primaryKey_;
+  /**
+   * <pre>
+   **
+   *主键信息
+   * </pre>
+   *
+   * <code>repeated bytes primaryKey = 8;</code>
+   * @return A list containing the primaryKey.
+   */
+  @java.lang.Override
+  public java.util.List<com.google.protobuf.ByteString>
+      getPrimaryKeyList() {
+    return primaryKey_;
+  }
+  /**
+   * <pre>
+   **
+   *主键信息
+   * </pre>
+   *
+   * <code>repeated bytes primaryKey = 8;</code>
+   * @return The count of primaryKey.
+   */
+  public int getPrimaryKeyCount() {
+    return primaryKey_.size();
+  }
+  /**
+   * <pre>
+   **
+   *主键信息
+   * </pre>
+   *
+   * <code>repeated bytes primaryKey = 8;</code>
+   * @param index The index of the element to return.
+   * @return The primaryKey at the given index.
+   */
+  public com.google.protobuf.ByteString getPrimaryKey(int index) {
+    return primaryKey_.get(index);
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -393,6 +469,12 @@ private static final long serialVersionUID = 0L;
     if (!getTableBytes().isEmpty()) {
       com.google.protobuf.GeneratedMessageV3.writeString(output, 6, table_);
     }
+    if (hashKey_ != 0) {
+      output.writeInt32(7, hashKey_);
+    }
+    for (int i = 0; i < primaryKey_.size(); i++) {
+      output.writeBytes(8, primaryKey_.get(i));
+    }
     unknownFields.writeTo(output);
   }
 
@@ -422,6 +504,19 @@ private static final long serialVersionUID = 0L;
     if (!getTableBytes().isEmpty()) {
       size += com.google.protobuf.GeneratedMessageV3.computeStringSize(6, table_);
     }
+    if (hashKey_ != 0) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeInt32Size(7, hashKey_);
+    }
+    {
+      int dataSize = 0;
+      for (int i = 0; i < primaryKey_.size(); i++) {
+        dataSize += com.google.protobuf.CodedOutputStream
+          .computeBytesSizeNoTag(primaryKey_.get(i));
+      }
+      size += dataSize;
+      size += 1 * getPrimaryKeyList().size();
+    }
     size += unknownFields.getSerializedSize();
     memoizedSize = size;
     return size;
@@ -449,6 +544,10 @@ private static final long serialVersionUID = 0L;
         .equals(other.getSchema())) return false;
     if (!getTable()
         .equals(other.getTable())) return false;
+    if (getHashKey()
+        != other.getHashKey()) return false;
+    if (!getPrimaryKeyList()
+        .equals(other.getPrimaryKeyList())) return false;
     if (!unknownFields.equals(other.unknownFields)) return false;
     return true;
   }
@@ -472,6 +571,12 @@ private static final long serialVersionUID = 0L;
     hash = (53 * hash) + getSchema().hashCode();
     hash = (37 * hash) + TABLE_FIELD_NUMBER;
     hash = (53 * hash) + getTable().hashCode();
+    hash = (37 * hash) + HASHKEY_FIELD_NUMBER;
+    hash = (53 * hash) + getHashKey();
+    if (getPrimaryKeyCount() > 0) {
+      hash = (37 * hash) + PRIMARYKEY_FIELD_NUMBER;
+      hash = (53 * hash) + getPrimaryKeyList().hashCode();
+    }
     hash = (29 * hash) + unknownFields.hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -617,6 +722,10 @@ private static final long serialVersionUID = 0L;
 
       table_ = "";
 
+      hashKey_ = 0;
+
+      primaryKey_ = java.util.Collections.emptyList();
+      bitField0_ = (bitField0_ & ~0x00000001);
       return this;
     }
 
@@ -643,12 +752,19 @@ private static final long serialVersionUID = 0L;
     @java.lang.Override
     public com.aliyun.polardbx.binlog.protocol.TxnItem buildPartial() {
       com.aliyun.polardbx.binlog.protocol.TxnItem result = new com.aliyun.polardbx.binlog.protocol.TxnItem(this);
+      int from_bitField0_ = bitField0_;
       result.traceId_ = traceId_;
       result.eventType_ = eventType_;
       result.payload_ = payload_;
       result.rowsQuery_ = rowsQuery_;
       result.schema_ = schema_;
       result.table_ = table_;
+      result.hashKey_ = hashKey_;
+      if (((bitField0_ & 0x00000001) != 0)) {
+        primaryKey_ = java.util.Collections.unmodifiableList(primaryKey_);
+        bitField0_ = (bitField0_ & ~0x00000001);
+      }
+      result.primaryKey_ = primaryKey_;
       onBuilt();
       return result;
     }
@@ -719,6 +835,19 @@ private static final long serialVersionUID = 0L;
         table_ = other.table_;
         onChanged();
       }
+      if (other.getHashKey() != 0) {
+        setHashKey(other.getHashKey());
+      }
+      if (!other.primaryKey_.isEmpty()) {
+        if (primaryKey_.isEmpty()) {
+          primaryKey_ = other.primaryKey_;
+          bitField0_ = (bitField0_ & ~0x00000001);
+        } else {
+          ensurePrimaryKeyIsMutable();
+          primaryKey_.addAll(other.primaryKey_);
+        }
+        onChanged();
+      }
       this.mergeUnknownFields(other.unknownFields);
       onChanged();
       return this;
@@ -747,6 +876,7 @@ private static final long serialVersionUID = 0L;
       }
       return this;
     }
+    private int bitField0_;
 
     private java.lang.Object traceId_ = "";
     /**
@@ -1253,6 +1383,172 @@ private static final long serialVersionUID = 0L;
   checkByteStringIsUtf8(value);
       
       table_ = value;
+      onChanged();
+      return this;
+    }
+
+    private int hashKey_ ;
+    /**
+     * <pre>
+     **
+     *参与dispatcher 分发的hashKey
+     * </pre>
+     *
+     * <code>int32 hashKey = 7;</code>
+     * @return The hashKey.
+     */
+    @java.lang.Override
+    public int getHashKey() {
+      return hashKey_;
+    }
+    /**
+     * <pre>
+     **
+     *参与dispatcher 分发的hashKey
+     * </pre>
+     *
+     * <code>int32 hashKey = 7;</code>
+     * @param value The hashKey to set.
+     * @return This builder for chaining.
+     */
+    public Builder setHashKey(int value) {
+      
+      hashKey_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     **
+     *参与dispatcher 分发的hashKey
+     * </pre>
+     *
+     * <code>int32 hashKey = 7;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearHashKey() {
+      
+      hashKey_ = 0;
+      onChanged();
+      return this;
+    }
+
+    private java.util.List<com.google.protobuf.ByteString> primaryKey_ = java.util.Collections.emptyList();
+    private void ensurePrimaryKeyIsMutable() {
+      if (!((bitField0_ & 0x00000001) != 0)) {
+        primaryKey_ = new java.util.ArrayList<com.google.protobuf.ByteString>(primaryKey_);
+        bitField0_ |= 0x00000001;
+       }
+    }
+    /**
+     * <pre>
+     **
+     *主键信息
+     * </pre>
+     *
+     * <code>repeated bytes primaryKey = 8;</code>
+     * @return A list containing the primaryKey.
+     */
+    public java.util.List<com.google.protobuf.ByteString>
+        getPrimaryKeyList() {
+      return ((bitField0_ & 0x00000001) != 0) ?
+               java.util.Collections.unmodifiableList(primaryKey_) : primaryKey_;
+    }
+    /**
+     * <pre>
+     **
+     *主键信息
+     * </pre>
+     *
+     * <code>repeated bytes primaryKey = 8;</code>
+     * @return The count of primaryKey.
+     */
+    public int getPrimaryKeyCount() {
+      return primaryKey_.size();
+    }
+    /**
+     * <pre>
+     **
+     *主键信息
+     * </pre>
+     *
+     * <code>repeated bytes primaryKey = 8;</code>
+     * @param index The index of the element to return.
+     * @return The primaryKey at the given index.
+     */
+    public com.google.protobuf.ByteString getPrimaryKey(int index) {
+      return primaryKey_.get(index);
+    }
+    /**
+     * <pre>
+     **
+     *主键信息
+     * </pre>
+     *
+     * <code>repeated bytes primaryKey = 8;</code>
+     * @param index The index to set the value at.
+     * @param value The primaryKey to set.
+     * @return This builder for chaining.
+     */
+    public Builder setPrimaryKey(
+        int index, com.google.protobuf.ByteString value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  ensurePrimaryKeyIsMutable();
+      primaryKey_.set(index, value);
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     **
+     *主键信息
+     * </pre>
+     *
+     * <code>repeated bytes primaryKey = 8;</code>
+     * @param value The primaryKey to add.
+     * @return This builder for chaining.
+     */
+    public Builder addPrimaryKey(com.google.protobuf.ByteString value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  ensurePrimaryKeyIsMutable();
+      primaryKey_.add(value);
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     **
+     *主键信息
+     * </pre>
+     *
+     * <code>repeated bytes primaryKey = 8;</code>
+     * @param values The primaryKey to add.
+     * @return This builder for chaining.
+     */
+    public Builder addAllPrimaryKey(
+        java.lang.Iterable<? extends com.google.protobuf.ByteString> values) {
+      ensurePrimaryKeyIsMutable();
+      com.google.protobuf.AbstractMessageLite.Builder.addAll(
+          values, primaryKey_);
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     **
+     *主键信息
+     * </pre>
+     *
+     * <code>repeated bytes primaryKey = 8;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearPrimaryKey() {
+      primaryKey_ = java.util.Collections.emptyList();
+      bitField0_ = (bitField0_ & ~0x00000001);
       onChanged();
       return this;
     }

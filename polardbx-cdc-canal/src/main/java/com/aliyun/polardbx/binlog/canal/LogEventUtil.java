@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -84,6 +84,13 @@ public class LogEventUtil {
 
     public static Long getTranIdFromXid(String xid, String encoding) throws Exception {
         return processTranId(StringUtils.substringBefore(xid, ","), encoding);
+    }
+
+    public static String getHexTranIdFromXid(String xid, String encoding) throws Exception {
+        xid = StringUtils.substringBefore(xid, ",");
+        String hexTid = new String(Hex.decodeHex(unwrap(xid)), encoding);
+        hexTid = hexTid.substring(DRDS_TRAN_PREFIX.length());
+        return hexTid.split("@")[0];
     }
 
     public static String getGroupFromXid(String xid, String encoding) throws Exception {
@@ -192,7 +199,7 @@ public class LogEventUtil {
     public static boolean isHaveCommitSequence(GcnLogEvent gcnLogEvent) {
         // 第一个bit位，目前恒为1
         // 第二个bit位，如果为1，代表外部传入了snapshot tso；但如果为0，并不意味着外部没有传入snapshot tso；并不是一个充要条件
-        // 第三个bit位，如果位1，代表外部传入了commit tso; 如果为0，代表外部没有传入snapshot tso；是一个重要条件
+        // 第三个bit位，如果为1，代表外部传入了commit tso; 如果为0，代表外部没有传入snapshot tso；是一个充要条件
         // 当第二个bit位为1或者第三个bit位为1时，认为该事务是一个TSO事务
         // 当第三个bit位为1时，认为该GCN中包含外部传入的commit sequence
         int flagSeed = 0x00000004;
@@ -230,6 +237,7 @@ public class LogEventUtil {
     }
 
     public static String buildTraceId(String mainSeq, String subSeq) {
+        mainSeq = StringUtils.isBlank(mainSeq) ? "0" : mainSeq;
         subSeq = StringUtils.isBlank(subSeq) ? "0" : subSeq;
         String main = StringUtils.leftPad(mainSeq, TRACE_MAIN_LEN, "0");
         String sub = StringUtils.leftPad(subSeq, TRACE_SUB_LEN, "0");

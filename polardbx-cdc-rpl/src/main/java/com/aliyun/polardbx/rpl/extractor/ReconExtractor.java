@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -66,7 +66,7 @@ public class ReconExtractor extends BaseExtractor {
     @Override
     public boolean init() throws Exception {
         log.info("Initializing extractor {}", extractorName);
-        contextList = ValidationContext.getFactory().createCtxList(srcHost, dstHost);
+        contextList = ValidationContext.getFactory().createCtxList(srcHost, dstHost, filter);
         return true;
     }
 
@@ -92,17 +92,22 @@ public class ReconExtractor extends BaseExtractor {
             if (isReconFinished()) {
                 return true;
             } else {
-                Runtime.getRuntime().halt(1);
+                log.error("All futures have been done but some tasks are not finished");
+                System.exit(-1);
             }
         }
         return false;
     }
 
     private boolean isReconFinished() {
-        String smid = Long.toString(TaskContext.getInstance().getStateMachineId());
+        String fsmId = Long.toString(TaskContext.getInstance().getStateMachineId());
+        // compute corresponding validation task id
+        String taskId = Long.toString(TaskContext.getInstance().getTaskId() -
+            TaskContext.getInstance().getPhysicalNum());
         ValidationDiffMapper mapper = SpringContextHolder.getObject(ValidationDiffMapper.class);
         long diffCnt = mapper.count(s -> s
-            .where(ValidationDiffDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(smid))
+            .where(ValidationDiffDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(fsmId))
+            .and(ValidationDiffDynamicSqlSupport.taskId, SqlBuilder.isEqualTo(taskId))
             .and(ValidationDiffDynamicSqlSupport.type, SqlBuilder.isEqualTo(getType().getValue()))
             .and(ValidationDiffDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false)));
 

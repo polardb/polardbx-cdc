@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,12 +20,15 @@ package com.aliyun.polardbx.rpl.taskmeta;
  */
 public enum ExtractorType {
     // MYSQL数据库全量
-    MYSQL_FULL(10),
+    DATA_IMPORT_FULL(10),
 
     // MYSQL数据库增量
-    MYSQL_INC(20),
+    DATA_IMPORT_INC(20),
 
-    // 用于replica
+    // 用于replica全量
+    RPL_FULL(31),
+
+    // 用于replica增量
     RPL_INC(30),
 
     // 用于CDC的增量

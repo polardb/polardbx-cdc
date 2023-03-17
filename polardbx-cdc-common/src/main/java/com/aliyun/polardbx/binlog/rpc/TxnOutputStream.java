@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,11 +28,18 @@ public class TxnOutputStream<T> {
     private final static Logger logger = LoggerFactory.getLogger(TxnOutputStream.class);
     private final ServerCallStreamObserver<T> observer;
     private final AtomicLong onReadyCallBackCount;
+    private int streamSeq;
     private Thread executingThead;
 
     public TxnOutputStream(ServerCallStreamObserver<T> observer) {
         this.observer = observer;
         this.onReadyCallBackCount = new AtomicLong(0);
+        this.streamSeq = Integer.MAX_VALUE;
+    }
+
+    public TxnOutputStream(int streamSeq, ServerCallStreamObserver<T> observer) {
+        this(observer);
+        this.streamSeq = streamSeq;
     }
 
     public void onNext(T reply) {
@@ -80,6 +87,10 @@ public class TxnOutputStream<T> {
 
     public void onError(Throwable t) {
         observer.onError(t);
+    }
+
+    public int getStreamSeq() {
+        return streamSeq;
     }
 
     private void onCancelled() {

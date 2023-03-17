@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -57,7 +57,7 @@ import java.util.List;
  */
 public class DruidDdlParser {
 
-    public static List<DdlResult> parse(String queryString, String schmeaName) {
+    public static List<DdlResult> parse(String queryString, String schemaName) {
         List<SQLStatement> stmtList = null;
         try {
             stmtList = SQLUtils.parseStatements(queryString, JdbcConstants.MYSQL, false);
@@ -74,39 +74,40 @@ public class DruidDdlParser {
             if (statement instanceof SQLCreateTableStatement) {
                 DdlResult ddlResult = new DdlResult();
                 SQLCreateTableStatement createTable = (SQLCreateTableStatement) statement;
-                processName(ddlResult, schmeaName, createTable.getName(), false);
+                processName(ddlResult, schemaName, createTable.getName(), false);
                 ddlResult.setType(DBMSAction.CREATE);
+                ddlResult.setHasIfExistsOrNotExists(createTable.isIfNotExists());
                 ddlResults.add(ddlResult);
             } else if (statement instanceof SQLAlterTableStatement) {
                 SQLAlterTableStatement alterTable = (SQLAlterTableStatement) statement;
                 if (alterTable.getTableOptions().size() > 0) {
                     DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schmeaName, alterTable.getName(), false);
+                    processName(ddlResult, schemaName, alterTable.getName(), false);
                     ddlResult.setType(DBMSAction.ALTER);
                     ddlResults.add(ddlResult);
                 }
                 for (SQLAlterTableItem item : alterTable.getItems()) {
                     if (item instanceof SQLAlterTableRename) {
                         DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schmeaName, alterTable.getName(), true);
-                        processName(ddlResult, schmeaName, ((SQLAlterTableRename) item).getToName(), false);
+                        processName(ddlResult, schemaName, alterTable.getName(), true);
+                        processName(ddlResult, schemaName, ((SQLAlterTableRename) item).getToName(), false);
                         // alter table `seller_table2` rename `seller_table3` , add key
                         // `idx_create`(`gmt_create`)
                         ddlResult.setType(DBMSAction.RENAME);
                         ddlResults.add(ddlResult);
                     } else if (item instanceof SQLAlterTableAddIndex) {
                         DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schmeaName, alterTable.getName(), false);
+                        processName(ddlResult, schemaName, alterTable.getName(), false);
                         ddlResult.setType(DBMSAction.CINDEX);
                         ddlResults.add(ddlResult);
                     } else if (item instanceof SQLAlterTableDropIndex || item instanceof SQLAlterTableDropKey) {
                         DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schmeaName, alterTable.getName(), false);
+                        processName(ddlResult, schemaName, alterTable.getName(), false);
                         ddlResult.setType(DBMSAction.DINDEX);
                         ddlResults.add(ddlResult);
                     } else if (item instanceof SQLAlterTableAddConstraint) {
                         DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schmeaName, alterTable.getName(), false);
+                        processName(ddlResult, schemaName, alterTable.getName(), false);
                         SQLConstraint constraint = ((SQLAlterTableAddConstraint) item).getConstraint();
                         if (constraint instanceof SQLUnique) {
                             ddlResult.setType(DBMSAction.CINDEX);
@@ -114,12 +115,12 @@ public class DruidDdlParser {
                         }
                     } else if (item instanceof SQLAlterTableDropConstraint) {
                         DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schmeaName, alterTable.getName(), false);
+                        processName(ddlResult, schemaName, alterTable.getName(), false);
                         ddlResult.setType(DBMSAction.DINDEX);
                         ddlResults.add(ddlResult);
                     } else {
                         DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schmeaName, alterTable.getName(), false);
+                        processName(ddlResult, schemaName, alterTable.getName(), false);
                         ddlResult.setType(DBMSAction.ALTER);
                         ddlResults.add(ddlResult);
                     }
@@ -128,29 +129,30 @@ public class DruidDdlParser {
                 SQLDropTableStatement dropTable = (SQLDropTableStatement) statement;
                 for (SQLExprTableSource tableSource : dropTable.getTableSources()) {
                     DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schmeaName, tableSource.getExpr(), false);
+                    processName(ddlResult, schemaName, tableSource.getExpr(), false);
                     ddlResult.setType(DBMSAction.ERASE);
+                    ddlResult.setHasIfExistsOrNotExists(dropTable.isIfExists());
                     ddlResults.add(ddlResult);
                 }
             } else if (statement instanceof SQLCreateIndexStatement) {
                 SQLCreateIndexStatement createIndex = (SQLCreateIndexStatement) statement;
                 SQLTableSource tableSource = createIndex.getTable();
                 DdlResult ddlResult = new DdlResult();
-                processName(ddlResult, schmeaName, ((SQLExprTableSource) tableSource).getExpr(), false);
+                processName(ddlResult, schemaName, ((SQLExprTableSource) tableSource).getExpr(), false);
                 ddlResult.setType(DBMSAction.CINDEX);
                 ddlResults.add(ddlResult);
             } else if (statement instanceof SQLDropIndexStatement) {
                 SQLDropIndexStatement dropIndex = (SQLDropIndexStatement) statement;
                 SQLExprTableSource tableSource = dropIndex.getTableName();
                 DdlResult ddlResult = new DdlResult();
-                processName(ddlResult, schmeaName, tableSource.getExpr(), false);
+                processName(ddlResult, schemaName, tableSource.getExpr(), false);
                 ddlResult.setType(DBMSAction.DINDEX);
                 ddlResults.add(ddlResult);
             } else if (statement instanceof SQLTruncateStatement) {
                 SQLTruncateStatement truncate = (SQLTruncateStatement) statement;
                 for (SQLExprTableSource tableSource : truncate.getTableSources()) {
                     DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schmeaName, tableSource.getExpr(), false);
+                    processName(ddlResult, schemaName, tableSource.getExpr(), false);
                     ddlResult.setType(DBMSAction.TRUNCATE);
                     ddlResults.add(ddlResult);
                 }
@@ -158,42 +160,44 @@ public class DruidDdlParser {
                 MySqlRenameTableStatement rename = (MySqlRenameTableStatement) statement;
                 for (Item item : rename.getItems()) {
                     DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schmeaName, item.getName(), true);
-                    processName(ddlResult, schmeaName, item.getTo(), false);
+                    processName(ddlResult, schemaName, item.getName(), true);
+                    processName(ddlResult, schemaName, item.getTo(), false);
                     ddlResult.setType(DBMSAction.RENAME);
                     ddlResults.add(ddlResult);
                 }
             } else if (statement instanceof SQLInsertStatement) {
                 DdlResult ddlResult = new DdlResult();
                 SQLInsertStatement insert = (SQLInsertStatement) statement;
-                processName(ddlResult, schmeaName, insert.getTableName(), false);
+                processName(ddlResult, schemaName, insert.getTableName(), false);
                 ddlResult.setType(DBMSAction.INSERT);
                 ddlResults.add(ddlResult);
             } else if (statement instanceof SQLUpdateStatement) {
                 DdlResult ddlResult = new DdlResult();
                 SQLUpdateStatement update = (SQLUpdateStatement) statement;
                 // 拿到的表名可能为null,比如update a,b set a.id=x
-                processName(ddlResult, schmeaName, update.getTableName(), false);
+                processName(ddlResult, schemaName, update.getTableName(), false);
                 ddlResult.setType(DBMSAction.UPDATE);
                 ddlResults.add(ddlResult);
             } else if (statement instanceof SQLDeleteStatement) {
                 DdlResult ddlResult = new DdlResult();
                 SQLDeleteStatement delete = (SQLDeleteStatement) statement;
                 // 拿到的表名可能为null,比如delete a,b from a where a.id = b.id
-                processName(ddlResult, schmeaName, delete.getTableName(), false);
+                processName(ddlResult, schemaName, delete.getTableName(), false);
                 ddlResult.setType(DBMSAction.DELETE);
                 ddlResults.add(ddlResult);
             } else if (statement instanceof SQLDropDatabaseStatement) {
                 DdlResult ddlResult = new DdlResult();
                 SQLDropDatabaseStatement dropDataBase = (SQLDropDatabaseStatement) statement;
-                processName(ddlResult, schmeaName, dropDataBase.getDatabase(), false);
+                processName(ddlResult, schemaName, dropDataBase.getDatabase(), false);
                 ddlResult.setType(DBMSAction.DROPDB);
+                ddlResult.setHasIfExistsOrNotExists(dropDataBase.isIfExists());
                 ddlResults.add(ddlResult);
             } else if (statement instanceof SQLCreateDatabaseStatement) {
                 DdlResult ddlResult = new DdlResult();
                 SQLCreateDatabaseStatement createDataBase = (SQLCreateDatabaseStatement) statement;
-                processName(ddlResult, schmeaName, createDataBase.getName(), false);
+                processName(ddlResult, schemaName, createDataBase.getName(), false);
                 ddlResult.setType(DBMSAction.CREATEDB);
+                ddlResult.setHasIfExistsOrNotExists(createDataBase.isIfNotExists());
                 ddlResults.add(ddlResult);
             }
         }
@@ -209,10 +213,10 @@ public class DruidDdlParser {
         String table = null;
         if (sqlName instanceof SQLPropertyExpr) {
             SQLIdentifierExpr owner = (SQLIdentifierExpr) ((SQLPropertyExpr) sqlName).getOwner();
-            schema = unescapeName(owner.getName());
-            table = unescapeName(((SQLPropertyExpr) sqlName).getName());
+            schema = SQLUtils.normalize(owner.getName());
+            table = SQLUtils.normalize(((SQLPropertyExpr) sqlName).getName());
         } else if (sqlName instanceof SQLIdentifierExpr) {
-            table = unescapeName(((SQLIdentifierExpr) sqlName).getName());
+            table = SQLUtils.normalize(((SQLIdentifierExpr) sqlName).getName());
         }
 
         if (isOri) {
@@ -223,29 +227,4 @@ public class DruidDdlParser {
             ddlResult.setTableName(table);
         }
     }
-
-    public static String unescapeName(String name) {
-        if (name != null && name.length() > 2) {
-            char c0 = name.charAt(0);
-            char x0 = name.charAt(name.length() - 1);
-            if ((c0 == '"' && x0 == '"') || (c0 == '`' && x0 == '`')) {
-                return name.substring(1, name.length() - 1);
-            }
-        }
-
-        return name;
-    }
-
-    public static String unescapeQuotaName(String name) {
-        if (name != null && name.length() > 2) {
-            char c0 = name.charAt(0);
-            char x0 = name.charAt(name.length() - 1);
-            if (c0 == '\'' && x0 == '\'') {
-                return name.substring(1, name.length() - 1);
-            }
-        }
-
-        return name;
-    }
-
 }

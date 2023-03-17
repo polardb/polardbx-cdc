@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -999,7 +999,7 @@ public class DdlE2ETest extends TestBase {
 
     /**
      * 不跨库，有 rewriteDbs，在源库 DB_1 上执行的 DDL，在目标库 DB_2 上发生。 有 filter。rewriteDbs 对
-     * filter 的影响仅在 ReplicateFilter 的 ignoreEvent(String schema, String tbName,
+     * filter 的影响仅在 ReplicaFilter 的 ignoreEvent(String schema, String tbName,
      * DBMSAction action) 入口处，故只写这一个测试用例即可。 rewriteDbs 对 create database 和 drop
      * database 不生效。
      */
@@ -1440,7 +1440,7 @@ public class DdlE2ETest extends TestBase {
 
     /**
      * 跨库，有 rewriteDbs，在源库 DB_1 上执行的 DDL，在目标库 DB_1 上发生。 有 filter。rewriteDbs 对 filter
-     * 的影响仅在 ReplicateFilter 的 ignoreEvent(String schema, String tbName, DBMSAction
+     * 的影响仅在 ReplicaFilter 的 ignoreEvent(String schema, String tbName, DBMSAction
      * action) 入口处。 rewriteDbs 对 create database 和 drop database 不生效。
      */
     @Test
@@ -1528,7 +1528,7 @@ public class DdlE2ETest extends TestBase {
 
     /**
      * 跨库，有 rewriteDbs，在源库 DB_1 上执行的 DDL，在目标库 DB_1 上发生。 有 filter。rewriteDbs 对 filter
-     * 的影响仅在 ReplicateFilter 的 ignoreEvent(String schema, String tbName, DBMSAction
+     * 的影响仅在 ReplicaFilter 的 ignoreEvent(String schema, String tbName, DBMSAction
      * action) 入口处，故只写这一个测试用例即可。 rewriteDbs 对 create database 和 drop database 不生效。
      */
     @Test

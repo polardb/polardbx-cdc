@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,10 @@ package com.aliyun.polardbx.binlog.daemon.rest.tools;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.api.BinlogProcessor;
+import com.aliyun.polardbx.binlog.api.DescribeBinlogFilesResult;
+import com.aliyun.polardbx.binlog.api.RdsApi;
+import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
@@ -26,10 +30,6 @@ import com.aliyun.polardbx.binlog.canal.binlog.cache.CacheMode;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
-import com.aliyun.polardbx.binlog.download.BinlogProcessor;
-import com.aliyun.polardbx.binlog.download.DescribeBinlogFilesResult;
-import com.aliyun.polardbx.binlog.download.RdsApi;
-import com.aliyun.polardbx.binlog.download.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
 import lombok.extern.slf4j.Slf4j;

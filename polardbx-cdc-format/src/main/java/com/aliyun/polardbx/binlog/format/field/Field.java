@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,10 +14,16 @@
  */
 package com.aliyun.polardbx.binlog.format.field;
 
+import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
+import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogBuffer;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.CharsetMaxLenEnum;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
+import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
@@ -27,12 +33,13 @@ import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_BLOB;
 import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_ENUM;
 import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_GEOMETRY;
 import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_JSON;
-import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_LONG_BLOB;
-import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_MEDIUM_BLOB;
+import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_LONGBLOB;
+import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_MEDIUMBLOB;
 import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_SET;
-import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_TINY_BLOB;
+import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_TINYBLOB;
 import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_YEAR;
 
+@Slf4j
 public abstract class Field {
 
     public static final int portable_sizeof_char_ptr = 8;
@@ -82,7 +89,7 @@ public abstract class Field {
     /// where one is the letter E and the other one is the quotation mark above
     /// the letter.
     protected int m_max_display_width_in_codepoints;
-    protected String data;
+    protected Serializable data;
     protected MySQLType mysqlType;
     protected long fieldLength;
     protected int packageLength;
@@ -122,7 +129,7 @@ public abstract class Field {
             case BINARY:
             case VARBINARY:
                 if (createField.getParameters() != null) {
-                    this.fieldLength = Long.valueOf(createField.getParameters()[0]);
+                    this.fieldLength = Long.parseLong(createField.getParameters()[0]);
                 }
                 break;
             default:
@@ -134,7 +141,59 @@ public abstract class Field {
 
     }
 
-    public String getValue() {
+    public long parseLong(String dataStr) {
+        if (log.isDebugEnabled()) {
+            log.debug("data str for parsing to long is " + dataStr);
+        }
+
+        dataStr = dataStr.toLowerCase();
+        int sign = 0;
+        if (dataStr.startsWith("-")) {
+            sign = -1;
+            dataStr = StringUtils.substring(dataStr, 1);
+        }
+        long v;
+        if (StringUtils.startsWith(dataStr, "b'")) {
+            dataStr = StringUtils.substringAfter(dataStr, "b'");
+            dataStr = StringUtils.substringBefore(dataStr, "'");
+            v = Long.parseUnsignedLong(dataStr, 2);
+        } else if (StringUtils.startsWith(dataStr, "0x") || StringUtils.startsWith(dataStr, "0X")) {
+            dataStr = StringUtils.substring(dataStr, 2);
+            v = Long.parseUnsignedLong(dataStr, 16);
+        } else if (StringUtils.startsWith(dataStr, "x'")) {
+            dataStr = StringUtils.substringAfter(dataStr, "x'");
+            dataStr = StringUtils.substringBefore(dataStr, "'");
+            v = Long.parseUnsignedLong(dataStr, 16);
+        } else if (StringUtils.startsWith(dataStr, "X'")) {
+            dataStr = StringUtils.substringAfter(dataStr, "X'");
+            dataStr = StringUtils.substringBefore(dataStr, "'");
+            v = Long.parseUnsignedLong(dataStr, 16);
+        } else {
+            v = Long.parseLong(dataStr);
+        }
+        if (sign == -1) {
+            return -v;
+        }
+        return v;
+    }
+
+    public boolean isOctOrHexOrBin(String dataStr) {
+        if (StringUtils.isNotBlank(dataStr)) {
+            dataStr = dataStr.trim();
+            char first = dataStr.charAt(0);
+            if (first == 'b' ||
+                first == 'x' || first == 'X') {
+                return true;
+            }
+            if (dataStr.length() > 2) {
+                char second = dataStr.charAt(1);
+                return (first == '0' && (second == 'x' || second == 'X'));
+            }
+        }
+        return false;
+    }
+
+    public Serializable getValue() {
         return data;
     }
 
@@ -146,7 +205,27 @@ public abstract class Field {
         return data == null;
     }
 
-    public abstract byte[] encode() throws Exception;
+    public final byte[] encode() {
+        if (isNull()) {
+            return EMPTY;
+        } else {
+            byte[] bytes = encodeInternal();
+            if (bytes == null || bytes.length == 0) {
+                throw new PolardbxException("encoded data value can`t be null or empty!");
+            }
+            return bytes;
+        }
+    }
+
+    public abstract byte[] encodeInternal();
+
+    protected String buildDataStr() {
+        if (data instanceof byte[]) {
+            return new String((byte[]) data, charset);
+        } else {
+            return String.valueOf(data);
+        }
+    }
 
     protected byte[] toByte(long data, int size) {
         byte[] bytes = new byte[size];
@@ -159,7 +238,7 @@ public abstract class Field {
     protected byte[] toBEByte(long data, int size) {
         byte[] bytes = new byte[size];
         for (int i = size - 1; i >= 0; i--) {
-            bytes[i] = (byte) ((data >> (i * 8)) & (0xFF));
+            bytes[size - i - 1] = (byte) ((data >> (i * 8)) & (0xFF));
         }
         return bytes;
     }
@@ -196,7 +275,7 @@ public abstract class Field {
 
     protected int calcPackLength(MySQLType type, int length) {
         switch (type) {
-        case MYSQL_TYPE_VAR_STRING:
+        case MYSQL_TYPE_VARSTRING:
         case MYSQL_TYPE_STRING:
         case MYSQL_TYPE_DECIMAL:
             return (length);
@@ -234,13 +313,13 @@ public abstract class Field {
             return 8; /* Don't crash if no longlong */
         case MYSQL_TYPE_NULL:
             return 0;
-        case MYSQL_TYPE_TINY_BLOB:
+        case MYSQL_TYPE_TINYBLOB:
             return 1 + portable_sizeof_char_ptr;
         case MYSQL_TYPE_BLOB:
             return 2 + portable_sizeof_char_ptr;
-        case MYSQL_TYPE_MEDIUM_BLOB:
+        case MYSQL_TYPE_MEDIUMBLOB:
             return 3 + portable_sizeof_char_ptr;
-        case MYSQL_TYPE_LONG_BLOB:
+        case MYSQL_TYPE_LONGBLOB:
             return 4 + portable_sizeof_char_ptr;
         case MYSQL_TYPE_GEOMETRY:
             return 4 + portable_sizeof_char_ptr;
@@ -272,7 +351,7 @@ public abstract class Field {
             || sql_type == MYSQL_TYPE_BIT) {
             // Numeric types, temporal types, YEAR or BIT are never multi-byte.
             return max_display_width_in_codepoints(sql_type);
-        } else if (sql_type == MYSQL_TYPE_TINY_BLOB) {
+        } else if (sql_type == MYSQL_TYPE_TINYBLOB) {
             return MAX_TINY_BLOB_WIDTH;
         } else if (sql_type == MYSQL_TYPE_BLOB && !explicit_display_width()) {
             // For BLOB and TEXT, the user can give a display width (BLOB(25), TEXT(25))
@@ -281,9 +360,9 @@ public abstract class Field {
             // user has given an explicit display width, return that instead of the
             // max BLOB size.
             return MAX_SHORT_BLOB_WIDTH;
-        } else if (sql_type == MYSQL_TYPE_MEDIUM_BLOB) {
+        } else if (sql_type == MYSQL_TYPE_MEDIUMBLOB) {
             return MAX_MEDIUM_BLOB_WIDTH;
-        } else if (sql_type == MYSQL_TYPE_LONG_BLOB || sql_type == MYSQL_TYPE_JSON || sql_type == MYSQL_TYPE_GEOMETRY) {
+        } else if (sql_type == MYSQL_TYPE_LONGBLOB || sql_type == MYSQL_TYPE_JSON || sql_type == MYSQL_TYPE_GEOMETRY) {
             return MAX_LONG_BLOB_WIDTH;
         } else {
             // If the user has given a display width to the TEXT type where the display
@@ -318,7 +397,7 @@ public abstract class Field {
             }
 
             return Math.min(max_display_width_in_codepoints, MAX_FIELD_WIDTH - 1);
-        } else if (sql_type == MYSQL_TYPE_TINY_BLOB) {
+        } else if (sql_type == MYSQL_TYPE_TINYBLOB) {
             return (int) (MAX_TINY_BLOB_WIDTH / mbmaxlen);
         } else if (sql_type == MYSQL_TYPE_BLOB && !explicit_display_width()) {
             // For BLOB and TEXT, the user can give a display width explicitly in CREATE
@@ -327,9 +406,9 @@ public abstract class Field {
             // display width. If the user has given an explicit display width, return
             // that instead of the max BLOB size.
             return (int) (MAX_SHORT_BLOB_WIDTH / mbmaxlen);
-        } else if (sql_type == MYSQL_TYPE_MEDIUM_BLOB) {
+        } else if (sql_type == MYSQL_TYPE_MEDIUMBLOB) {
             return (int) (MAX_MEDIUM_BLOB_WIDTH / mbmaxlen);
-        } else if (sql_type == MYSQL_TYPE_LONG_BLOB || sql_type == MYSQL_TYPE_JSON || sql_type == MYSQL_TYPE_GEOMETRY) {
+        } else if (sql_type == MYSQL_TYPE_LONGBLOB || sql_type == MYSQL_TYPE_JSON || sql_type == MYSQL_TYPE_GEOMETRY) {
             return (int) (MAX_LONG_BLOB_WIDTH / mbmaxlen);
         } else {
             return m_max_display_width_in_codepoints;
@@ -386,11 +465,11 @@ public abstract class Field {
     boolean is_string_type(MySQLType type) {
         switch (type) {
         case MYSQL_TYPE_VARCHAR:
-        case MYSQL_TYPE_VAR_STRING:
+        case MYSQL_TYPE_VARSTRING:
         case MYSQL_TYPE_STRING:
-        case MYSQL_TYPE_TINY_BLOB:
-        case MYSQL_TYPE_MEDIUM_BLOB:
-        case MYSQL_TYPE_LONG_BLOB:
+        case MYSQL_TYPE_TINYBLOB:
+        case MYSQL_TYPE_MEDIUMBLOB:
+        case MYSQL_TYPE_LONGBLOB:
         case MYSQL_TYPE_BLOB:
         case MYSQL_TYPE_ENUM:
         case MYSQL_TYPE_SET:
@@ -494,4 +573,11 @@ public abstract class Field {
     boolean explicit_display_width() {
         return m_explicit_display_width;
     }
+
+    Serializable decode(byte[] value, int meta) {
+        LogBuffer logBuffer = new LogBuffer(value, 0, value.length);
+        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(logBuffer, 0, charset.name());
+        return rowsLogBuffer.fetchValue(mysqlType.getType(), meta, false, false);
+    }
+
 }

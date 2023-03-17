@@ -111,28 +111,6 @@
         </encoder>
     </appender>
 
-    <appender name="checkResultAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
-        <discriminator class="com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator">
-            <Key>taskName</Key>
-            <DefaultValue>default</DefaultValue>
-        </discriminator>
-        <sift>
-            <appender name="checkResultAppender-${taskName}"
-                      class="ch.qos.logback.core.FileAppender">
-                <file>${HOME}/logs/polardbx-rpl/${taskName}/check.log</file>
-                <append>true</append>
-                <encoder>
-                    <pattern>
-                        <![CDATA[
-                        %m%n
-                        ]]>
-                    </pattern>
-                    <charset class="java.nio.charset.Charset">UTF-8</charset>
-                </encoder>
-            </appender>
-        </sift>
-    </appender>
-
     <appender name="taskAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
         <discriminator class="com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator">
             <Key>taskName</Key>
@@ -193,7 +171,7 @@
         </discriminator>
         <sift>
             <appender name="statisticAppender-${taskName}"
-                      class="ch.qos.logback.core.RollingFileAppender">
+                      class="ch.qos.logback.core.rolling.RollingFileAppender">
                 <file>${HOME}/logs/polardbx-rpl/${taskName}/statistic.log</file>
                 <append>true</append>
                 <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
@@ -232,11 +210,6 @@
     <logger name="commitLogger" additivity="false">
         <level value="INFO"/>
         <appender-ref ref="commitAppender" additivity="false"/>
-    </logger>
-
-    <logger name="checkResultLogger" additivity="false">
-        <level value="INFO"/>
-        <appender-ref ref="checkResultAppender" additivity="false"/>
     </logger>
 
     <logger name="taskLogger" additivity="false">

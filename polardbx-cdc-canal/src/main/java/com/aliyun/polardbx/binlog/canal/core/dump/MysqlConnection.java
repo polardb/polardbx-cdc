@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -129,6 +129,7 @@ public class MysqlConnection implements ErosaConnection {
         try (DirectLogFetcher fetcher = new DirectLogFetcher(bufferSize)) {
             fetcher.open(conn, binlogfilename, binlogPosition, (int) generateUniqueServerId());
             LogDecoder decoder = new LogDecoder();
+            decoder.setNeedFixRotate(false);
             decoder.setBinlogFileSizeFetcher(new DefaultBinlogFileInfoFetcher(this));
             decoder.handle(LogEvent.ROTATE_EVENT);
             decoder.handle(LogEvent.FORMAT_DESCRIPTION_EVENT);
@@ -139,6 +140,10 @@ public class MysqlConnection implements ErosaConnection {
             decoder.handle(LogEvent.XA_PREPARE_LOG_EVENT);
             decoder.handle(LogEvent.WRITE_ROWS_EVENT_V1);
             decoder.handle(LogEvent.WRITE_ROWS_EVENT);
+            decoder.handle(LogEvent.UPDATE_ROWS_EVENT_V1);
+            decoder.handle(LogEvent.UPDATE_ROWS_EVENT);
+            decoder.handle(LogEvent.DELETE_ROWS_EVENT_V1);
+            decoder.handle(LogEvent.DELETE_ROWS_EVENT);
             decoder.handle(LogEvent.TABLE_MAP_EVENT);
             decoder.handle(LogEvent.ROWS_QUERY_LOG_EVENT);
             LogContext context = new LogContext();
@@ -173,6 +178,7 @@ public class MysqlConnection implements ErosaConnection {
         try(DirectLogFetcher fetcher = new DirectLogFetcher(bufferSize)) {
             fetcher.open(conn, binlogfilename, binlogPosition, (int) generateUniqueServerId());
             LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
+            decoder.setNeedFixRotate(false);
             decoder.setBinlogFileSizeFetcher(new DefaultBinlogFileInfoFetcher(this));
             LogContext context = new LogContext();
             context.setFormatDescription(new FormatDescriptionLogEvent(4, binlogChecksum));

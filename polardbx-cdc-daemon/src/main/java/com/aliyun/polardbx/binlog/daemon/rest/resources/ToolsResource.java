@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,6 +20,8 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.daemon.rest.resources.request.XidRegion;
 import com.aliyun.polardbx.binlog.daemon.rest.tools.OssSearchTools;
+import com.aliyun.polardbx.binlog.transmit.relay.HashConfig;
+import com.google.common.collect.Lists;
 import com.sun.jersey.spi.resource.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -30,6 +32,7 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -64,4 +67,23 @@ public class ToolsResource {
 
     }
 
+    @POST
+    @Path("/getHashLevel")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<String> getHashLevel(Map<String, String> parameter) {
+        String db = parameter.get("db");
+        String table = parameter.get("table");
+        HashConfig.clearTableStreamMapping();
+        return Lists.newArrayList(HashConfig.getHashLevel(db, table).name());
+    }
+
+    @POST
+    @Path("/getHashStreamSeq")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<String> getHashStreamSeq(Map<String, String> parameter) {
+        String db = parameter.get("db");
+        String table = parameter.get("table");
+        HashConfig.clearTableStreamMapping();
+        return Lists.newArrayList(String.valueOf(HashConfig.getStreamSeq(db, table, -1)));
+    }
 }

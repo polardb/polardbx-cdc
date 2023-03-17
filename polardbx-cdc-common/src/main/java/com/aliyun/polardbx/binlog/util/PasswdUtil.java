@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,10 +17,10 @@ package com.aliyun.polardbx.binlog.util;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import sun.misc.BASE64Decoder;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
+import java.util.Base64;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.DN_PASSWORD_KEY;
 
@@ -47,7 +47,8 @@ public class PasswdUtil {
             SecretKeySpec skeySpec = new SecretKeySpec(raw, "AES");
             Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
             cipher.init(Cipher.DECRYPT_MODE, skeySpec);
-            byte[] encrypted1 = new BASE64Decoder().decodeBuffer(sSrc);//先用base64解密
+            //先用base64解密
+            byte[] encrypted1 = Base64.getDecoder().decode(sSrc);
             byte[] original = cipher.doFinal(encrypted1);
             String originalString = new String(original, "utf-8");
             return originalString;

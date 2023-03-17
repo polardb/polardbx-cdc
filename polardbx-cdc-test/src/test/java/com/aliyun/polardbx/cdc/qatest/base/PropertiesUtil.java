@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,6 +23,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
@@ -75,7 +76,7 @@ public class PropertiesUtil {
     }
 
     public static boolean isStrictType() {
-        return Boolean.valueOf(configProp.getProperty("strictTypeTest", "false"));
+        return Boolean.parseBoolean(configProp.getProperty("strictTypeTest", "false"));
     }
 
     public static String polardbXDBName1(boolean part) {
@@ -124,12 +125,30 @@ public class PropertiesUtil {
                 "allowMultiQueries=true&rewriteBatchedStatements=true&characterEncoding=utf-8");
     }
 
+    public static int getCompareDetailParallelism() {
+        return Integer.parseInt(configProp.getProperty("compareDetailParallelism", "8"));
+    }
+
     public static boolean isMySQL80() {
         String drdsVersion = configProp.getProperty("drdsVersion", "5.7");
         return drdsVersion != null && drdsVersion.equalsIgnoreCase("8.0");
     }
 
-    public static boolean enableAsyncDDL = Boolean.valueOf(configProp.getProperty("enableAsyncDDL", "true"));
+    public static String getCdcCheckDbBlackList() {
+        return configProp.getProperty("cdcCheckDbBlackList", "");
+    }
+
+    public static String getCdcCheckTableBlackList() {
+        return configProp.getProperty("cdcCheckTableBlackList", "");
+    }
+
+    public static String getCdcCheckTableWhiteList() {
+        String str =  configProp.getProperty("cdcCheckTableWhiteList", "");
+        // 表名可能有中文
+        return new String(str.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+    }
+
+    public static boolean enableAsyncDDL = Boolean.parseBoolean(configProp.getProperty("enableAsyncDDL", "true"));
 
     public static String getMetaDB =
         configProp.getProperty(ConfigConstant.META_DB, "polardbx_meta_db_polardbx");
@@ -142,7 +161,7 @@ public class PropertiesUtil {
         return getConnectionProperties().contains("useSSL=true");
     }
 
-    public static final boolean useDruid = Boolean.valueOf(configProp.getProperty("useDruid", "false"));
+    public static final boolean useDruid = Boolean.parseBoolean(configProp.getProperty("useDruid", "false"));
 
     public static final Integer dnCount = Integer.valueOf(configProp.getProperty("dnCount", "1"));
 

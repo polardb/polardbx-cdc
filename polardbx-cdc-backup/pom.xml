@@ -23,18 +23,25 @@
         </dependency>
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-external</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-monitor</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>com.aliyun.oss</groupId>
-            <artifactId>aliyun-sdk-oss</artifactId>
-            <version>${aliyun.version}</version>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-module-junit4</artifactId>
+            <version>2.0.9</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.thrift</groupId>
-            <artifactId>libthrift</artifactId>
-            <version>${apache-thrift.version}</version>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-api-mockito2</artifactId>
+            <version>2.0.9</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

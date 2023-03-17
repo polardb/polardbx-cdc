@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -56,6 +56,7 @@ public class MysqlApplier extends BaseApplier {
     protected DbMetaCache dbMetaCache;
     protected ExecutorService executorService;
     protected DataSource defaultDataSource;
+    protected boolean firstDdl = true;
 
     public MysqlApplier(ApplierConfig applierConfig, HostInfo hostInfo) {
         super(applierConfig);
@@ -113,6 +114,16 @@ public class MysqlApplier extends BaseApplier {
         }
     }
 
+    @Override
+    public boolean applyDdlSql(String schema, String sql) throws Exception {
+        log.debug("direct apply sql, schema: {}, sql: {}", schema, sql);
+        DataSource dataSource = StringUtils.isNotBlank(schema) ? dbMetaCache
+            .getDataSource(schema) : dbMetaCache.getDefaultDataSource();
+        SqlContext sqlContext = new SqlContext(sql, schema, null, null);
+        return ApplyHelper.execUpdate(dataSource, ApplyHelper.processDdlSql(sqlContext, schema));
+    }
+
+
     protected boolean ddlApply(DBMSEvent dbmsEvent) throws Throwable {
         if (!applierConfig.isEnableDdl()) {
             log.warn("ddlApply ignore since ddl is not enabled, dbmsEvent: {}", dbmsEvent);
@@ -124,7 +135,7 @@ public class MysqlApplier extends BaseApplier {
         String tso = DdlHelper.getTso(queryLog.getQuery(), queryLog.getTimestamp(), position);
 
         // get ddlSqlContext
-        SqlContext sqlContext = ApplyHelper.getDdlSqlContext(queryLog, tso);
+        SqlContext sqlContext = ApplyHelper.getDdlSqlContext(queryLog, tso, applierConfig.isUseOriginalSql());
         if (sqlContext == null) {
             log.warn("get ddl sql context error");
             return true;
@@ -132,14 +143,21 @@ public class MysqlApplier extends BaseApplier {
         log.info("ddlApply start, schema: {}, sql: {}", sqlContext.getDstSchema(), sqlContext.getSql());
 
         // try get ddl lock
-        boolean lock = DdlHelper.getDdlLock(tso, sqlContext.getSql());
-        RplDdl ddl = DbTaskMetaManager.getDdl(tso);
+        RplDdl ddl = new RplDdl();
+        boolean lock = DdlHelper.getDdlLock(tso, sqlContext.getSql(), ddl);
 
         // for ddl like: create table db1.t1_1(id int, f1 int, f2 int),
         // the schema will be db2 if there is a record (db1, db2) in rewriteDbs,
         // db2 may not exists, but the ddl should be executed in db1
         DataSource dataSource = StringUtils.isNotBlank(sqlContext.getDstSchema()) ? dbMetaCache
             .getDataSource(sqlContext.getDstSchema()) : dbMetaCache.getDefaultDataSource();
+
+        // only repair state of first ddl when restart
+        if (firstDdl) {
+            firstDdl = false;
+            ApplyHelper.tryRepairRplDdlState(dataSource, tso, ddl);
+        }
+
         // execute ddl if get ddl lock
         if (lock && ddl.getState() == DdlState.NOT_START.getValue()) {
             boolean res = ApplyHelper.execUpdate(dataSource, sqlContext);
@@ -154,7 +172,7 @@ public class MysqlApplier extends BaseApplier {
                 sqlContext.getSql());
             if (!res) {
                 log.error("ddlApply failed when submit ddl job");
-                return res;
+                return false;
             }
         }
 
@@ -172,9 +190,8 @@ public class MysqlApplier extends BaseApplier {
 
             if (DdlState.from(ddl.getState()).isFinished()) {
                 break;
-            } else {
-                Thread.sleep(1000);
             }
+            Thread.sleep(100);
         }
 
         // check ddl succeed
@@ -230,8 +247,9 @@ public class MysqlApplier extends BaseApplier {
             } else {
                 switch (rowChangeEvent.getAction()) {
                 case INSERT:
-                    sqlContexts = ApplyHelper.getInsertSqlExecContext(rowChangeEvent, dstTableInfo,
-                        RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE);
+                    sqlContexts = ApplyHelper.getDeleteSqlExecContext(rowChangeEvent, dstTableInfo);
+                    sqlContexts.addAll(ApplyHelper.getInsertSqlExecContext(rowChangeEvent, dstTableInfo,
+                        RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE));
                     break;
                 case UPDATE:
                     sqlContexts = ApplyHelper.getUpdateSqlExecContext(rowChangeEvent, dstTableInfo);
@@ -257,46 +275,41 @@ public class MysqlApplier extends BaseApplier {
         if (sqlContexts == null || sqlContexts.size() == 0) {
             return true;
         }
-        boolean res = true;
-        if (skipAllException) {
-            // do not batch send when skip exception
-            for (SqlContext sqlContext : sqlContexts) {
-                long startTime = System.currentTimeMillis();
-                res = ApplyHelper.execUpdate(defaultDataSource, sqlContext);
-                if (!res) {
-                    log.error("execSqlContexts failed, sqlContext: {}", sqlContext);
-                    StatisticalProxy.getInstance().addSkipExceptionCount(1);
-                }
+        boolean res;
+        for (SqlContext sqlContext : sqlContexts) {
+            long startTime = System.currentTimeMillis();
+            res = ApplyHelper.execUpdate(defaultDataSource, sqlContext);
+            if (!res) {
+                return false;
+            }
+            long endTime = System.currentTimeMillis();
+            StatisticalProxy.getInstance().addApplyCount(1);
+            StatisticalProxy.getInstance().addRt(endTime - startTime);
+        }
+        return true;
+    }
 
-                // counter
-                long endTime = System.currentTimeMillis();
-                StatisticalProxy.getInstance().addApplyCount(1);
-                StatisticalProxy.getInstance().addRt(endTime - startTime);
+    protected boolean execSqlContextsV2(List<SqlContextV2> sqlContexts) {
+        if (sqlContexts == null || sqlContexts.size() == 0) {
+            return true;
+        }
+        boolean res;
+        for (SqlContextV2 sqlContext : sqlContexts) {
+            long startTime = System.currentTimeMillis();
+            res = ApplyHelper.execUpdate(defaultDataSource, sqlContext);
+            if (!res) {
+                return false;
             }
-        } else {
-            List<SqlContext> batchSqlContexts = ApplyHelper.mergeSendBatchSqlContexts(sqlContexts,
-                applierConfig.getSendBatchSize());
-            for (SqlContext sqlContext : batchSqlContexts) {
-                long startTime = System.currentTimeMillis();
-                // todo by jiyue need to deal with all result
-                res = ApplyHelper.execUpdate(defaultDataSource, sqlContext);
-                if (!res) {
-                    return false;
-                }
-                // counter
-                long endTime = System.currentTimeMillis();
-                StatisticalProxy.getInstance().addApplyCount(1);
-                StatisticalProxy.getInstance().addRt(endTime - startTime);
-            }
+            long endTime = System.currentTimeMillis();
+            StatisticalProxy.getInstance().addApplyCount(1);
+            StatisticalProxy.getInstance().addRt(endTime - startTime);
         }
         return true;
     }
 
     protected boolean tranExecSqlContexts(List<SqlContext> sqlContexts) {
         long startTime = System.currentTimeMillis();
-        List<SqlContext> mergeSqlContexts = ApplyHelper.mergeSendBatchSqlContexts(sqlContexts,
-            applierConfig.getSendBatchSize());
-        boolean res = ApplyHelper.tranExecUpdate(defaultDataSource, mergeSqlContexts);
+        boolean res = ApplyHelper.tranExecUpdate(defaultDataSource, sqlContexts);
         if (res) {
             long endTime = System.currentTimeMillis();
             StatisticalProxy.getInstance().addApplyCount(1);
@@ -305,34 +318,6 @@ public class MysqlApplier extends BaseApplier {
         return res;
     }
 
-    protected void recordTablePosition(String tbName, DefaultRowChange lastRowChange) {
-        logCommitInfo(Arrays.asList(lastRowChange));
-        StatisticalProxy.getInstance().recordTablePosition(tbName, lastRowChange);
-    }
-
-    protected boolean filterCommitedEvent(String fullTbName, DefaultRowChange rowChange) {
-        Map<String, String> lastRunTablePositions = StatisticalProxy.getInstance().getLastRunTablePositions();
-
-        if (!lastRunTablePositions.containsKey(fullTbName)) {
-            return false;
-        }
-
-        String lastRunTablePosition = lastRunTablePositions.get(fullTbName);
-        if (StringUtils.isBlank(lastRunTablePosition)) {
-            return false;
-        }
-
-        String position = (String) (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue());
-        if (CommonUtil.comparePosition(position, lastRunTablePosition) <= 0) {
-            log.info("event filtered, tbName: {}, position: {}, lastRunTablePosition:{}", fullTbName, position,
-                lastRunTablePosition);
-            return true;
-        }
-
-        // 走到这里，说明当前位点已经超过了上次任务退出时记录的该表最后位点，则后续都不需要校验是否 filter
-        lastRunTablePositions.remove(fullTbName);
-        return false;
-    }
 
     protected List<Integer> getIdentifyColumnsIndex(Map<String, List<Integer>> allTbIdentifyColumns,
                                                     String fullTbName,

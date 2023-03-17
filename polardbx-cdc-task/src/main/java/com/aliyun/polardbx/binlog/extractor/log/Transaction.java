@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -42,6 +42,7 @@ import com.aliyun.polardbx.binlog.extractor.TransactionMemoryLeakDectorManager;
 import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.storage.AlreadyExistException;
+import com.aliyun.polardbx.binlog.storage.IteratorBuffer;
 import com.aliyun.polardbx.binlog.storage.Storage;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnBufferItem;
@@ -256,14 +257,13 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             RowsQueryLogEvent queryLogEvent = (RowsQueryLogEvent) event;
             try {
                 originalTraceId = queryLogEvent.getRowsQuery();
-                String results[] = LogEventUtil.buildTrace(queryLogEvent);
+                String[] results = LogEventUtil.buildTrace(queryLogEvent);
                 if (results != null) {
                     nextTraceId = results[0];
                     if (NumberUtils.isCreatable(results[1])) {
                         serverId = NumberUtils.createLong(results[1]);
                     }
                 }
-
             } catch (Exception e) {
                 logger.error("parser trace error " + queryLogEvent.getRowsQuery(), e);
                 throw e;
@@ -370,6 +370,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
                     event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT
                         || event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT_V1)) {
                     processInstruction((WriteRowsLogEvent) rowsLogEvent, rc);
+                    if (isMetadataBuildCommand()) {
+
+                    }
                 }
                 releaseBuffer();
                 this.sourceCdcSchema = rowsLogEvent.getTable().getDbName();
@@ -537,11 +540,10 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             uniqueTxnId = StringUtils.leftPad("0", 29, "0");
         } else {
             if (isTsoTransaction()) {
-                rc.setMaxTxnId(transactionId);
                 computeTransactionId = transactionId;
                 long tmpCurrentTso = txGlobal ? txGlobalTso : realTSO;
                 if (tmpCurrentTso > currentTso) {
-                    rc.setMaxTSO(tmpCurrentTso);
+                    rc.setMaxTSO(tmpCurrentTso, transactionId);
                 }
                 currentTso = tmpCurrentTso;
                 uniqueTxnId = StringUtils.leftPad(String.valueOf(transactionId), 19, "0") + ZERO_19_PADDING;
@@ -621,6 +623,10 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         return xa;
     }
 
+    public void setXa(boolean xa) {
+        this.xa = xa;
+    }
+
     public String getXid() {
         return xid;
     }
@@ -671,6 +677,10 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     public boolean isTsoTransaction() {
         return tsoTransaction;
+    }
+
+    public void setTsoTransaction(boolean tsoTransaction) {
+        this.tsoTransaction = tsoTransaction;
     }
 
     public boolean isRollback() {
@@ -732,10 +742,6 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         this.ddlEvent = ddlEvent;
     }
 
-    public void setTsoTransaction(boolean tsoTransaction) {
-        this.tsoTransaction = tsoTransaction;
-    }
-
     public byte[] getDescriptionLogEventData() {
         AutoExpandBuffer data = new AutoExpandBuffer(1024, 1024);
         try {
@@ -758,15 +764,14 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder();
-        return "Transaction {" + "tso = '" + virtualTSO + '\'' + ", xid = '" + xid + '\'' + ", transactionId = '"
-            + transactionId + '\'' + ", eventCount = " + getEventCount() + ", partitionId = '" + generatePartitionId()
-            + '\''
-            + ", txGlobal = " + txGlobal + ", txGlobalTso = '" + txGlobalTso + '\'' + ", txGlobalTid = '" + txGlobalTid
-            + '\'' + ", xa = " + xa + ", tsoTransaction = " + tsoTransaction + ", heartbeat = " + heartbeat
-            + ", hasBuffer = " + (buffer != null) + ", startLogPos = " + binlogFileName + ":" + startLogPos
-            + ", stopLogPos = " + stopLogPos + ", virtualTsoModel = " + virtualTSOModel + '}'
-            + sb.toString();
+        return "Transaction {" + "tso = " + virtualTSO + ", xid = " + xid + ", transactionId = " + transactionId +
+            ", eventCount = " + getEventCount() + ", partitionId = " + generatePartitionId() + ", txGlobal = "
+            + txGlobal + ", txGlobalTso = " + txGlobalTso + ", txGlobalTid = " + txGlobalTid + ", xa = " + xa
+            + ", tsoTransaction = " + tsoTransaction + ", isHeartbeat = " + heartbeat + ", hasBuffer = " +
+            (buffer != null) + ", startLogPos = " + binlogFileName + ":" + startLogPos + ", stopLogPos = " + stopLogPos
+            + ", memSize = " + getMemSize() + ", persisted = " + isBufferPersisted() + ", isDdl = " + isDDL() +
+            ", isStorageChangeCommand = " + isStorageChangeCommand() + ", isDescriptionEvent = " + isDescriptionEvent()
+            + ", virtualTsoModel = " + virtualTSOModel + '}';
     }
 
     @Override
@@ -794,6 +799,10 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         return instructionType == InstructionType.CdcStart;
     }
 
+    public boolean isMetadataBuildCommand() {
+        return instructionType == InstructionType.MetaSnapshot;
+    }
+
     public boolean isEnvConfigChangeCommand() {
         return instructionType == InstructionType.CdcEnvConfigChange;
     }
@@ -804,10 +813,6 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     public String getSourceCdcSchema() {
         return sourceCdcSchema;
-    }
-
-    public void setXa(boolean xa) {
-        this.xa = xa;
     }
 
     public FormatDescriptionLogEvent getFdle() {
@@ -834,18 +839,22 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         }
     }
 
-    public long getSize() {
+    public long getMemSize() {
         return buffer != null ? buffer.memSize() : 0;
     }
 
-    public Iterator<TxnItemRef> iterator() {
+    public IteratorBuffer iterator() {
         if (buffer == null) {
             return null;
         }
-        return buffer.iterator();
+        return buffer.iteratorWrapper();
     }
 
-    public static enum TRANSACTION_STATE {
+    public boolean isLargeTrans() {
+        return buffer != null && buffer.isLargeTrans();
+    }
+
+    public enum TRANSACTION_STATE {
         STATE_START, STATE_PREPARE, STATE_COMMIT, STATE_ROLLBACK
     }
 

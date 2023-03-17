@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,19 +21,18 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
-import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
+import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
+import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.List;
 
 /**
@@ -46,29 +45,22 @@ public class BinlogEventReader {
     private final String fileName;
     private final long pos;
     private final long offset;
-    private long rowCount;
-    private long fp;
-    private final FileInputStream inputStream;
-    private final FileChannel channel;
+    private final BinlogFileReadChannel channel;
     private final ByteBuffer buffer = ByteBuffer.allocate(EVENT_MAX_SIZE);
     private final LogContext context = new LogContext();
     private final LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
+    private long rowCount;
+    private long fp;
 
-    public BinlogEventReader(LogFileManager logFileManager, String fileName, long pos, long offset, long rowCount)
+    public BinlogEventReader(CdcFile cdcFile, long pos, long offset, long rowCount)
         throws IOException {
-        this(new File(logFileManager.getFullName(fileName)), pos, offset, rowCount);
-    }
-
-    public BinlogEventReader(File file, long pos, long offset, long rowCount)
-        throws IOException {
-        this.fileName = file.getName();
+        this.fileName = cdcFile.getName();
         this.pos = pos < 0 ? 0 : pos;
         this.offset = offset < 0 ? 0 : offset;
         this.rowCount = rowCount < 0 ? Integer.MAX_VALUE : rowCount;
         this.context.setLogPosition(new LogPosition(fileName, pos));
         this.context.setServerCharactorSet(loadCharactorSet());
-        this.inputStream = new FileInputStream(file);
-        this.channel = inputStream.getChannel();
+        this.channel = cdcFile.getReadChannel();
         log.info("[fixed] show binlog events in {} from {} limit {}, {}", fileName, this.pos, this.offset,
             this.rowCount);
     }
@@ -258,7 +250,6 @@ public class BinlogEventReader {
         try {
             buffer.clear();
             channel.close();
-            inputStream.close();
         } catch (IOException e) {
             log.warn("{} close fail ", fileName, e);
         }

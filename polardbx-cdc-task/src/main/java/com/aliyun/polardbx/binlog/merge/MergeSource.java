@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,7 +17,6 @@ package com.aliyun.polardbx.binlog.merge;
 import com.aliyun.polardbx.binlog.error.TimeoutException;
 import com.aliyun.polardbx.binlog.extractor.Extractor;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
-import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.storage.Storage;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
@@ -25,8 +24,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -46,8 +43,6 @@ public class MergeSource {
     private Extractor extractor;
     private long passCount;
     private long pollCount;
-    private MergeItem currentMergeItem;
-    private MergeType mergeType;
     private volatile boolean running;
 
     public MergeSource(String sourceId, Storage storage) {
@@ -103,31 +98,18 @@ public class MergeSource {
             buffer.markComplete();
         }
 
-        if (mergeType == MergeType.BATCH && txnToken.getType() != TxnType.FORMAT_DESC) {
-            if (currentMergeItem == null) {
-                currentMergeItem = new MergeItem(sourceId, this);
-            }
-            currentMergeItem.addTxnToken(txnToken);
-            if (txnToken.getType() == TxnType.META_HEARTBEAT) {
-                this.queue.put(currentMergeItem);
-                currentMergeItem = null;
-            }
+        MergeItem mergeItem = new MergeItem(sourceId, txnToken);
+        if (timeout == -1) {
+            this.queue.put(mergeItem);
         } else {
-            MergeItem mergeItem = new MergeItem(sourceId, txnToken, this);
-            if (timeout == -1) {
-                this.queue.put(mergeItem);
-            } else {
-                if (!this.queue.offer(mergeItem, timeout, TimeUnit.MILLISECONDS)) {
-                    throw new TimeoutException("waiting up to the space failed");
-                }
+            if (!this.queue.offer(mergeItem, timeout, TimeUnit.MILLISECONDS)) {
+                throw new TimeoutException("waiting up to the space failed");
             }
         }
-
     }
 
     public MergeItem poll() throws InterruptedException {
-        MergeItem item = null;
-        item = this.queue.poll(1, TimeUnit.MILLISECONDS);
+        MergeItem item = this.queue.poll(1, TimeUnit.MILLISECONDS);
         if (item != null) {
             passCount++;
         }
@@ -152,12 +134,8 @@ public class MergeSource {
         return Objects.hash(sourceId);
     }
 
-    public Iterator<TxnToken> iterator() {
-        LinkedList<TxnToken> list = new LinkedList<>();
-        for (MergeItem mergeItem : queue) {
-            list.addAll(mergeItem.getAllTxnTokens());
-        }
-        return list.iterator();
+    public int tryPersist() {
+        return PersistUtil.persist(queue, storage);
     }
 
     public void setStartTSO(String startTSO) {
@@ -170,10 +148,6 @@ public class MergeSource {
 
     public void setExtractor(Extractor extractor) {
         this.extractor = extractor;
-    }
-
-    public void setMergeType(MergeType mergeType) {
-        this.mergeType = mergeType;
     }
 
     public String getSourceId() {
@@ -190,5 +164,9 @@ public class MergeSource {
 
     public long getPollCount() {
         return pollCount;
+    }
+
+    public Storage getStorage() {
+        return storage;
     }
 }

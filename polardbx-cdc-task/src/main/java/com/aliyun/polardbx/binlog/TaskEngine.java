@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,7 +19,8 @@ import com.aliyun.polardbx.binlog.cdc.meta.MetaMonitor;
 import com.aliyun.polardbx.binlog.collect.Collector;
 import com.aliyun.polardbx.binlog.collect.LogEventCollector;
 import com.aliyun.polardbx.binlog.domain.MergeSourceType;
-import com.aliyun.polardbx.binlog.domain.TaskInfo;
+import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
+import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.BinlogExtractor;
@@ -32,6 +33,7 @@ import com.aliyun.polardbx.binlog.metadata.MetaGenerator;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
 import com.aliyun.polardbx.binlog.rpc.TxnMessageProvider;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
+import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.storage.DeleteMode;
 import com.aliyun.polardbx.binlog.storage.LogEventStorage;
 import com.aliyun.polardbx.binlog.storage.PersistMode;
@@ -40,6 +42,7 @@ import com.aliyun.polardbx.binlog.storage.Storage;
 import com.aliyun.polardbx.binlog.transmit.ChunkMode;
 import com.aliyun.polardbx.binlog.transmit.LogEventTransmitter;
 import com.aliyun.polardbx.binlog.transmit.Transmitter;
+import com.aliyun.polardbx.binlog.transmit.relay.RelayLogEventTransmitter;
 import com.aliyun.polardbx.binlog.util.StorageUtil;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -48,6 +51,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -67,7 +71,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_QUEUE_MERGESOURCE_MAX_T
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_QUEUE_MERGESOURCE_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_QUEUE_TRANSMITTER_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_DIR;
-import static com.aliyun.polardbx.binlog.scheduler.model.TaskConfig.ORIGIN_TSO;
+import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 
 /**
  * Created by ziyang.lb
@@ -78,8 +82,8 @@ public class TaskEngine implements TxnMessageProvider {
     private static final Logger logger = LoggerFactory.getLogger(TaskEngine.class);
 
     private final MetaGenerator metaGenerator;
-    private final TaskInfoProvider taskInfoProvider;
-    private volatile TaskInfo taskInfo;
+    private final TaskConfigProvider taskConfigProvider;
+    private volatile TaskRuntimeConfig taskRuntimeConfig;
 
     private LogEventMerger merger;
     private Storage storage;
@@ -87,9 +91,9 @@ public class TaskEngine implements TxnMessageProvider {
     private Transmitter transmitter;
     private volatile boolean running;
 
-    public TaskEngine(TaskInfoProvider taskInfoProvider, TaskInfo taskInfo) {
-        this.taskInfoProvider = taskInfoProvider;
-        this.taskInfo = taskInfo;
+    public TaskEngine(TaskConfigProvider taskConfigProvider, TaskRuntimeConfig taskRuntimeConfig) {
+        this.taskConfigProvider = taskConfigProvider;
+        this.taskRuntimeConfig = taskRuntimeConfig;
         this.metaGenerator = new MetaGenerator();
     }
 
@@ -99,7 +103,9 @@ public class TaskEngine implements TxnMessageProvider {
         }
         running = true;
 
-        metaGenerator.tryStart();
+        if (StringUtils.isBlank(startTSO)) {
+            metaGenerator.tryStart();
+        }
 
         //采取一个简单的策略，每次重启的时候，重新初始化所有的组件，这样可以尽可能规避出现脏的数据状态，减少出Bug的概率
         build(startTSO);
@@ -165,20 +171,27 @@ public class TaskEngine implements TxnMessageProvider {
         }
     }
 
-    private void build(String startTSO) {
-        checkValid(startTSO);
+    private void build(String startTso) {
+        checkValid(startTso);
         this.storage = buildStorage();
-        this.transmitter = buildTransmitter(startTSO);
+        this.transmitter = buildTransmitter(startTso);
+        //对startTso进行重写，多流模式下startTso从Transmitter获取
+        if (taskRuntimeConfig.getType() == TaskType.Dispatcher && transmitter instanceof RelayLogEventTransmitter) {
+            startTso = ((RelayLogEventTransmitter) transmitter).getStartTso();
+        }
+
         this.collector = buildCollector();
-        this.merger = buildMerger(startTSO);
+        this.merger = buildMerger(startTso);
 
         AtomicInteger extractorNum = new AtomicInteger();
+        final String finalStartTso = startTso;
         String rdsBinlogPath = DynamicApplicationConfig.getString(TASK_RDSBINLOG_DOWNLOAD_DIR) + File.separator +
             DynamicApplicationConfig.getString(TASK_NAME);
-        this.taskInfo.getMergeSourceInfos().forEach(i -> {
+
+        this.taskRuntimeConfig.getMergeSourceInfos().forEach(i -> {
             MergeSource mergeSource =
                 new MergeSource(i.getId(), new ArrayBlockingQueue<>(calcMergeSourceQueueSize()), storage);
-            mergeSource.setStartTSO(startTSO);
+            mergeSource.setStartTSO(finalStartTso);
 
             if (i.getType() == MergeSourceType.BINLOG) {
                 BinlogExtractor extractor =
@@ -186,8 +199,8 @@ public class TaskEngine implements TxnMessageProvider {
                 mergeSource.setExtractor(extractor);
                 extractorNum.incrementAndGet();
             } else if (i.getType() == MergeSourceType.RPC) {
-                RpcExtractor extractor = new RpcExtractor(i.getTaskName(), mergeSource, storage);
-                extractor.setRpcParameter(i.getRpcParameter());// 可以为空，测试专用
+                RpcExtractor extractor = new RpcExtractor(mergeSource, storage);
+                extractor.setRpcParameter(i.getRpcParameter());
                 mergeSource.setExtractor(extractor);
             } else if (i.getType() == MergeSourceType.MOCK) {
                 MockExtractor extractor =
@@ -203,26 +216,25 @@ public class TaskEngine implements TxnMessageProvider {
             merger.addMergeSource(mergeSource);
         });
         BinlogDownloader.getInstance().init(rdsBinlogPath, extractorNum.get());
-        MetaMonitor.getInstance().setStorageCount(taskInfo.getMergeSourceInfos().size());
+        MetaMonitor.getInstance().setStorageCount(taskRuntimeConfig.getMergeSourceInfos().size());
     }
 
     private int calcMergeSourceQueueSize() {
         int defaultSize = DynamicApplicationConfig.getInt(TASK_QUEUE_MERGESOURCE_SIZE);
         int maxTotalSize = DynamicApplicationConfig.getInt(TASK_QUEUE_MERGESOURCE_MAX_TOTAL_SIZE);
-        int mergeSourceSize = taskInfo.getMergeSourceInfos().size();
+        int mergeSourceSize = taskRuntimeConfig.getMergeSourceInfos().size();
         double calcSize = maxTotalSize / ((double) mergeSourceSize);
         return Math.min(defaultSize, new Double(calcSize).intValue());
     }
 
     private void checkValid(String startTso) {
         String expectedStorageTso = StorageUtil.buildExpectedStorageTso(startTso);
-        if (taskInfo.getBinlogTaskConfig() != null) {
+        //TODO for dispatcher
+        if (taskRuntimeConfig.getType() != TaskType.Dispatcher && taskRuntimeConfig.getBinlogTaskConfig() != null) {
             long start = System.currentTimeMillis();
             while (true) {
-                BinlogTaskConfig binlogTaskConfig = taskInfo.getBinlogTaskConfig();
-                com.aliyun.polardbx.binlog.scheduler.model.TaskConfig taskConfig =
-                    GSON.fromJson(binlogTaskConfig.getConfig(),
-                        com.aliyun.polardbx.binlog.scheduler.model.TaskConfig.class);
+                BinlogTaskConfig binlogTaskConfig = taskRuntimeConfig.getBinlogTaskConfig();
+                ExecutionConfig taskConfig = GSON.fromJson(binlogTaskConfig.getConfig(), ExecutionConfig.class);
 
                 if (!StringUtils.equals(expectedStorageTso, taskConfig.getTso())) {
                     logger.error("The input tso {} is inconsistent with the expected tso {}, will retry.",
@@ -238,7 +250,7 @@ public class TaskEngine implements TxnMessageProvider {
                                 + expectedStorageTso);
                     }
 
-                    taskInfo = taskInfoProvider.get();
+                    taskRuntimeConfig = taskConfigProvider.getTaskRuntimeConfig();
                 } else {
                     break;
                 }
@@ -267,27 +279,38 @@ public class TaskEngine implements TxnMessageProvider {
     }
 
     private Transmitter buildTransmitter(String startTso) {
-        return new LogEventTransmitter(taskInfo.getType(),
-            DynamicApplicationConfig.getInt(TASK_QUEUE_TRANSMITTER_SIZE),
-            storage,
-            ChunkMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.TASK_TRANSMITTER_CHUNK_MODE)),
-            DynamicApplicationConfig.getInt(ConfigKeys.TASK_TRANSMITTER_CHUNK_ITEMSIZE),
-            DynamicApplicationConfig.getInt(ConfigKeys.TASK_TRANSMITTER_MAX_MESSAGE_SIZE),
-            DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_TRANSMITTER_DRYRUN),
-            startTso);
+        if (taskRuntimeConfig.getType() == TaskType.Dispatcher) {
+            return new RelayLogEventTransmitter(storage, taskRuntimeConfig.getBinlogTaskConfig().getVersion(),
+                extractRecoverTsoMapFromTaskConfig());
+        } else {
+            return new LogEventTransmitter(taskRuntimeConfig.getType(),
+                DynamicApplicationConfig.getInt(TASK_QUEUE_TRANSMITTER_SIZE),
+                storage,
+                ChunkMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.TASK_TRANSMITTER_CHUNK_MODE)),
+                DynamicApplicationConfig.getInt(ConfigKeys.TASK_TRANSMITTER_CHUNK_ITEMSIZE),
+                DynamicApplicationConfig.getInt(ConfigKeys.TASK_TRANSMITTER_MAX_MESSAGE_SIZE),
+                DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_TRANSMITTER_DRYRUN),
+                startTso);
+        }
+    }
+
+    private Map<String, String> extractRecoverTsoMapFromTaskConfig() {
+        BinlogTaskConfig binlogTaskConfig = taskRuntimeConfig.getBinlogTaskConfig();
+        ExecutionConfig taskConfig = GSON.fromJson(binlogTaskConfig.getConfig(), ExecutionConfig.class);
+        return taskConfig.getRecoverTsoMap();
     }
 
     private Collector buildCollector() {
         return new LogEventCollector(storage,
             transmitter,
             DynamicApplicationConfig.getInt(TASK_QUEUE_COLLECTOR_SIZE),
-            taskInfo.getType(),
+            taskRuntimeConfig.getType(),
             DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_MERGER_MERGE_NOTSO_XA));
     }
 
     private LogEventMerger buildMerger(String startTSO) {
         String expectedStorageTso = StorageUtil.buildExpectedStorageTso(startTSO);
-        LogEventMerger result = new LogEventMerger(taskInfo.getType(),
+        LogEventMerger result = new LogEventMerger(taskRuntimeConfig.getType(),
             collector,
             DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_MERGER_MERGE_NOTSO_XA),
             startTSO,
@@ -296,7 +319,7 @@ public class TaskEngine implements TxnMessageProvider {
             storage,
             StringUtils.equals(expectedStorageTso, ORIGIN_TSO) ? null : expectedStorageTso);
         result.addHeartBeatWindowAware(collector);
-        result.setForceCompleteHbWindow(taskInfo.isForceCompleteHbWindow());
+        result.setForceCompleteHbWindow(taskRuntimeConfig.isForceCompleteHbWindow());
         return result;
     }
 }

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,19 +14,25 @@
  */
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
+import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.Constants;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.RemoteBinlogProxy;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.api.BinlogProcessor;
+import com.aliyun.polardbx.binlog.api.DescribeBinlogFilesResult;
+import com.aliyun.polardbx.binlog.api.RdsApi;
+import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.canal.binlog.BinlogDownloader;
 import com.aliyun.polardbx.binlog.canal.binlog.download.DownloadTask;
 import com.aliyun.polardbx.binlog.canal.exception.PositionNotFoundException;
-import com.aliyun.polardbx.binlog.download.BinlogProcessor;
-import com.aliyun.polardbx.binlog.download.DescribeBinlogFilesResult;
-import com.aliyun.polardbx.binlog.download.RdsApi;
-import com.aliyun.polardbx.binlog.download.rds.BinlogFile;
+import com.aliyun.polardbx.binlog.daemon.rest.resources.response.BinlogListResponse;
+import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapperExtend;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.google.common.collect.Maps;
 import com.sun.jersey.spi.resource.Singleton;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +43,7 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
 import java.io.File;
+import java.text.MessageFormat;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -47,6 +54,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Path("/backup")
 @Produces(MediaType.APPLICATION_JSON)
@@ -58,7 +66,34 @@ public class BinlogBackupResource {
     @Path("/generateLinks")
     public Map<String, String> generateLink(List<String> fileNames) {
         Map<String, String> linkMap = Maps.newHashMap();
+        String clusterType = DynamicApplicationConfig.getClusterType();
+        ClusterTypeEnum clusterTypeEnum = ClusterTypeEnum.valueOf(clusterType);
+        if (ClusterTypeEnum.BINLOG == clusterTypeEnum) {
+            generateGlobalBinlog(fileNames, linkMap);
+        } else if (ClusterTypeEnum.BINLOG_X == clusterTypeEnum) {
+            generateBinlogXBinlog(fileNames, linkMap);
+        }
 
+        return linkMap;
+    }
+
+    private void generateBinlogXBinlog(List<String> fileNames, Map<String, String> linkMap) {
+        String groupName = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_X_STREAM_GROUP_NAME);
+        try {
+            for (String f : fileNames) {
+                String subStreamBinlogName = f.substring(groupName.length() + 1);
+                String streamName = StringUtils.substringBefore(subStreamBinlogName, "_binlog.");
+                String partName = MessageFormat.format("{0}/{1}_{2}/", groupName, groupName, streamName);
+                String link = RemoteBinlogProxy.getInstance().prepareDownLink(partName + f,
+                    DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DOWNLOAD_LINK_AVAILABLE_INTERVAL));
+                linkMap.put(f, link);
+            }
+        } catch (Exception e) {
+            logger.error("generate link failed! ", e);
+        }
+    }
+
+    private void generateGlobalBinlog(List<String> fileNames, Map<String, String> linkMap) {
         try {
             for (String f : fileNames) {
                 String link = RemoteBinlogProxy.getInstance().prepareDownLink(f,
@@ -67,10 +102,7 @@ public class BinlogBackupResource {
             }
         } catch (Exception e) {
             logger.error("generate link failed! ", e);
-            return Maps.newHashMap();
         }
-
-        return linkMap;
     }
 
     @GET
@@ -145,5 +177,53 @@ public class BinlogBackupResource {
             }
         }
         return linkMap;
+    }
+
+    @POST
+    @Path("/binlog/list")
+    public BinlogListResponse listBinlog(Map<String, String> params) {
+        String begin = params.get("begin");
+        String end = params.get("end");
+        Integer countPerSize = Integer.valueOf(params.get("countPerSize"));
+        Integer pageNum = Integer.valueOf(params.get("pageNum"));
+        BinlogListResponse response = new BinlogListResponse();
+
+        String groupName;
+        if (DynamicApplicationConfig.getClusterType().equals(ClusterTypeEnum.BINLOG.name())) {
+            groupName = Constants.GROUP_NAME_GLOBAL;
+        } else {
+            groupName = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_X_STREAM_GROUP_NAME);
+        }
+
+        BinlogOssRecordMapperExtend binlogOssRecordMapperExtend =
+            SpringContextHolder.getObject(BinlogOssRecordMapperExtend.class);
+        int totalCount = binlogOssRecordMapperExtend
+            .count(begin, end, groupName);
+
+        final boolean backupOn = RemoteBinlogProxy.getInstance().isBackupOn();
+        List<BinlogListResponse.BinlogInfo> binlogInfoList =
+            binlogOssRecordMapperExtend.selectList(begin, end, groupName, (pageNum - 1) * countPerSize, countPerSize)
+                .stream().map((r) -> {
+                BinlogListResponse.BinlogInfo bi = new BinlogListResponse.BinlogInfo();
+                bi.setBinlogFile(r.getBinlogFile());
+                bi.setGmtCreated(r.getGmtCreated());
+                bi.setGmtModified(r.getGmtModified());
+                bi.setId(r.getId().longValue());
+                bi.setLogBegin(r.getLogBegin());
+                bi.setLogEnd(r.getLogEnd());
+                bi.setLogSize(r.getLogSize());
+                bi.setPurgeStatus(r.getPurgeStatus());
+                bi.setUploadHost(r.getUploadHost());
+                bi.setUploadStatus(r.getUploadStatus());
+                if (backupOn) {
+                    bi.setDownloadLink(RemoteBinlogProxy.getInstance().prepareDownLink(r.getBinlogFile(),
+                        DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DOWNLOAD_LINK_AVAILABLE_INTERVAL)));
+                }
+                return bi;
+            }).collect(Collectors.toList());
+
+        response.setBinlogInfoList(binlogInfoList);
+        response.setTotalCount(totalCount);
+        return response;
     }
 }

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,12 +14,8 @@
  */
 package com.aliyun.polardbx.rpl.filter;
 
-import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
-import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
-import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -39,9 +35,8 @@ public class DataImportFilter extends BaseFilter {
     private DataImportMeta.PhysicalMeta importMeta;
     private Set<String> doDbs;
     private Map<String, Set<String>> doTables;
-    private String dstDb;
+    private Map<String, String> dstDbMapping;
     private Map<String, String> tableNameMapping;
-    private Set<String> ignoreTables;
     private Set<Long> ignoreServerIds;
     private Map<String, Boolean> filterCache;
 
@@ -52,17 +47,16 @@ public class DataImportFilter extends BaseFilter {
     @Override
     public boolean init() {
         try {
-            doTables = importMeta.getAllowTableList();
-            ignoreTables = importMeta.getDenyTableList();
+            doTables = importMeta.getPhysicalDoTableList();
             doDbs = importMeta.getSrcDbList();
-            dstDb = importMeta.getDstDb();
+            dstDbMapping = importMeta.getDstDbMapping();
             tableNameMapping = importMeta.getRewriteTableMapping();
             ignoreServerIds = initIgnoreServerIds(importMeta.getIgnoreServerIds());
             log.warn("ignore server ids: {}", ignoreServerIds);
             filterCache = new HashMap<>(128);
             return true;
         } catch (Throwable e) {
-            log.error("ReplicateFilter init failed", e);
+            log.error("DataImportFilter init failed", e);
             return false;
         }
     }
@@ -95,10 +89,11 @@ public class DataImportFilter extends BaseFilter {
         if (!doTables.containsKey(db)) {
             return false;
         }
-        if (doTables.size() > 0 && doTables.get(db).contains(tb)) {
+        if (doTables.get(db).contains(tb)) {
             return true;
         }
-        if (ignoreTables.size() > 0 && ignoreTables.contains(tb)) {
+        // 如果doTables没有（源库为空或者广播表）
+        if (doTables.get(db).size() == 0) {
             return false;
         }
         return doTables.get(db).size() == 0;
@@ -123,10 +118,8 @@ public class DataImportFilter extends BaseFilter {
 
     @Override
     public String getRewriteDb(String schema, DBMSAction action) {
-        if (doDbs.contains(schema)) {
-            return dstDb;
-        }
-        return schema;
+        return (dstDbMapping != null && dstDbMapping.containsKey(schema)) ?
+            dstDbMapping.get(schema) : schema;
     }
 
 }

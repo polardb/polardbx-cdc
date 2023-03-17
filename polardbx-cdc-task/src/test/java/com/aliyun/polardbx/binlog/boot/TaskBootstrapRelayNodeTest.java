@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,12 +15,12 @@
 package com.aliyun.polardbx.binlog.boot;
 
 import com.aliyun.polardbx.binlog.TaskBootStrap;
-import com.aliyun.polardbx.binlog.TaskInfoProvider;
+import com.aliyun.polardbx.binlog.TaskConfigProvider;
 import com.aliyun.polardbx.binlog.domain.BinlogParameter;
 import com.aliyun.polardbx.binlog.domain.DbHostVO;
 import com.aliyun.polardbx.binlog.domain.MergeSourceInfo;
 import com.aliyun.polardbx.binlog.domain.MergeSourceType;
-import com.aliyun.polardbx.binlog.domain.TaskInfo;
+import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 
 import java.util.ArrayList;
@@ -36,18 +36,18 @@ public class TaskBootstrapRelayNodeTest {
 
     public static void main(String args[]) {
         TaskBootStrap bootStrap = new TaskBootStrap();
-        bootStrap.setTaskInfoProvider(new TaskInfoProvider("relay-task") {
+        bootStrap.setTaskConfigProvider(new TaskConfigProvider("relay-task") {
 
             @Override
-            public TaskInfo get() {
-                TaskInfo info = new TaskInfo();
-                info.setId(2L);
-                info.setName("task relay test");
-                info.setType(TaskType.Relay);
-                info.setStartTSO(START_TSO);
-                info.setServerPort(8913);
-                info.setMergeSourceInfos(buildMergeSources());
-                return info;
+            public TaskRuntimeConfig getTaskRuntimeConfig() {
+                TaskRuntimeConfig taskRuntimeConfig = new TaskRuntimeConfig();
+                taskRuntimeConfig.setId(2L);
+                taskRuntimeConfig.setName("task relay test");
+                taskRuntimeConfig.setType(TaskType.Relay);
+                taskRuntimeConfig.setStartTSO(START_TSO);
+                taskRuntimeConfig.setServerPort(8913);
+                taskRuntimeConfig.setMergeSourceInfos(buildMergeSources());
+                return taskRuntimeConfig;
             }
 
             private List<MergeSourceInfo> buildMergeSources() {
@@ -55,7 +55,6 @@ public class TaskBootstrapRelayNodeTest {
                 for (int i = 0; i < 1; i++) {
                     MergeSourceInfo info = new MergeSourceInfo();
                     info.setId(String.valueOf(i));
-                    info.setTaskName("source-" + i);
                     info.setType(MergeSourceType.BINLOG);
                     info.setQueueSize(1024);
                     info.setBinlogParameter(buildBinlogParameter());

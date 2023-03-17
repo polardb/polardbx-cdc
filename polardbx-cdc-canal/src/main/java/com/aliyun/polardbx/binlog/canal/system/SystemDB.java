@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,21 +15,20 @@
 package com.aliyun.polardbx.binlog.canal.system;
 
 import com.alibaba.polardbx.druid.sql.SQLUtils;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.BinlogParser;
-import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.WriteRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.ConsoleTableMetaTSDB;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.PropertyChangeListener;
 
 import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_IGNORE_APPLY_ERROR;
-
-public class SystemDB {
+public class SystemDB implements PropertyChangeListener {
 
     public static final String DDL_RECORD_FIELD_DDL_ID = "ID";
     public static final String DDL_RECORD_FIELD_JOB_ID = "JOB_ID";
@@ -66,10 +65,6 @@ public class SystemDB {
     public static final String AUTO_LOCAL_INDEX_PREFIX = "_local_";
 
     private static final SystemDB instance = new SystemDB();
-    private final TableMeta ddlTableMeta;
-    private final TableMeta instructionTableMeta;
-    private final TableMeta heartbeatTableMeta;
-    private final TableMeta globalTxLogTableMeta;
     /**
      * 需注意"SCHEMA_NAME列"和"TABLE_NAME列"的长度不能小于meta db中"db_info表"和"tables表"中对应列的长度
      */
@@ -106,10 +101,14 @@ public class SystemDB {
         + "  `CONTEXT` text NOT NULL,\n" + "  `ERROR` text,\n"
         + "  PRIMARY KEY (`TXID`)\n"
         + ") ENGINE=InnoDB DEFAULT CHARSET=utf8", DRDS_GLOBAL_TX_LOG);
+    private TableMeta ddlTableMeta;
+    private TableMeta instructionTableMeta;
+    private TableMeta heartbeatTableMeta;
+    private TableMeta globalTxLogTableMeta;
 
     private SystemDB() {
         MemoryTableMeta memoryTableMeta =
-            new MemoryTableMeta(null, DynamicApplicationConfig.getBoolean(META_DDL_IGNORE_APPLY_ERROR));
+            new MemoryTableMeta(null, false);
         memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_CDC_DDL_RECORD_TABLE, null);
         memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_CDC_INSTRUCTION_TABLE, null);
         memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_DRDS_GLOBAL_TX_LOG, null);
@@ -118,6 +117,8 @@ public class SystemDB {
         instructionTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_INSTRUCTION);
         heartbeatTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_HEARTBEAT);
         globalTxLogTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_GLOBAL_TX_LOG);
+
+        DynamicApplicationConfig.addPropListener(ConfigKeys.META_DDL_IGNORE_APPLY_ERROR, this);
     }
 
     public static boolean isDrdsImplicitId(String colName) {
@@ -158,6 +159,19 @@ public class SystemDB {
         return DRDS_GLOBAL_TX_LOG.equalsIgnoreCase(tableName);
     }
 
+    public void init(boolean ignoreApplyError) {
+        MemoryTableMeta memoryTableMeta =
+            new MemoryTableMeta(null, ignoreApplyError);
+        memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_CDC_DDL_RECORD_TABLE, null);
+        memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_CDC_INSTRUCTION_TABLE, null);
+        memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_DRDS_GLOBAL_TX_LOG, null);
+        memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_CDC_HEARTBEAT_TABLE, null);
+        ddlTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_DDL_RECORD);
+        instructionTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_INSTRUCTION);
+        heartbeatTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_HEARTBEAT);
+        globalTxLogTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_GLOBAL_TX_LOG);
+    }
+
     public TableMeta getDdlTableMeta() {
         return ddlTableMeta;
     }
@@ -175,7 +189,6 @@ public class SystemDB {
     }
 
     public InstructionCommand parseInstructionCommand(WriteRowsLogEvent wr) {
-        TableMapLogEvent tm = wr.getTable();
         BinlogParser parser = new BinlogParser();
         try {
             parser.parse(instructionTableMeta, wr, "utf8");
@@ -204,5 +217,15 @@ public class SystemDB {
             txGlobalTso = Long.valueOf((String) commitTs);
         }
         return new TxGlobalEvent(txGlobalTid, txGlobalTso);
+    }
+
+    @Override
+    public void onInit(String propsName, String value) {
+        this.init(Boolean.valueOf(value));
+    }
+
+    @Override
+    public void onPropertyChange(String propsName, String oldValue, String newValue) {
+        this.init(Boolean.valueOf(newValue));
     }
 }

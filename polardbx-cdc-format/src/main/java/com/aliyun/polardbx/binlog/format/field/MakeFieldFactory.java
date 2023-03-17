@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,46 +14,49 @@
  */
 package com.aliyun.polardbx.binlog.format.field;
 
-import com.alibaba.polardbx.druid.sql.SQLUtils;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
+import lombok.SneakyThrows;
 
-import java.nio.charset.Charset;
+import java.io.Serializable;
 
 public class MakeFieldFactory {
 
-    private Charset defaultCharset = Charset.forName("utf8");
-
-    public static void main(String[] args) {
-        String ddl = "create table tttt(id bigint primary key , name varchar(20))";
-        SQLCreateTableStatement cts = (SQLCreateTableStatement) SQLUtils.parseSingleMysqlStatement(ddl);
-        SQLColumnDefinition definition = cts.getColumn("name");
-        System.out.println(definition.getNameAsString());
+    @SneakyThrows
+    public static Field makField4TypeMisMatch(String typefunc, Serializable data, String charset, boolean nullable,
+                                              String logicDefault, boolean unsigned) {
+        try {
+            CreateField createField = CreateField.parse(typefunc, data, charset, nullable, unsigned);
+            return makeFieldInternal(createField);
+        } catch (InvalidInputDataException e) {
+            CreateField createField = CreateField.parse(typefunc, logicDefault, charset, nullable, unsigned);
+            return makeFieldInternal(createField);
+        }
     }
 
-    public static Field makeField(String typefunc, String data, String charset, boolean nullable) {
-        CreateField createField = CreateField.parse(typefunc, data, charset, nullable);
-        MySQLType fieldType = MySQLType.valueOf(createField.getDataType());
+    @SneakyThrows
+    public static Field makeField(String typefunc, Serializable data, String charset, boolean nullable,
+                                  boolean unsigned) {
+        CreateField createField = CreateField.parse(typefunc, data, charset, nullable, unsigned);
+        return makeFieldInternal(createField);
+    }
 
+    private static Field makeFieldInternal(CreateField createField) throws InvalidInputDataException {
+        MySQLType fieldType = MySQLType.valueOf(createField.getDataType());
         switch (fieldType) {
-        case MYSQL_TYPE_VAR_STRING:
         case MYSQL_TYPE_STRING:
             return new StringField(createField);
+        case MYSQL_TYPE_VARSTRING:
         case MYSQL_TYPE_VARCHAR:
             return new VarCharField(createField);
         case MYSQL_TYPE_BLOB:
-        case MYSQL_TYPE_MEDIUM_BLOB:
-        case MYSQL_TYPE_TINY_BLOB:
-        case MYSQL_TYPE_LONG_BLOB:
-            createField.setDefaultValue(null);
+        case MYSQL_TYPE_MEDIUMBLOB:
+        case MYSQL_TYPE_TINYBLOB:
+        case MYSQL_TYPE_LONGBLOB:
             return new BlobField(createField);
         case MYSQL_TYPE_GEOMETRY:
-            createField.setDefaultValue(null);
             return new GeometryField(createField);
         case MYSQL_TYPE_JSON: {
-            createField.setDefaultValue(null);
             return new JsonField(createField);
         }
         case MYSQL_TYPE_ENUM:
@@ -61,7 +64,6 @@ public class MakeFieldFactory {
         case MYSQL_TYPE_SET:
             return new SetField(createField);
         case MYSQL_TYPE_DECIMAL:
-            //
         case MYSQL_TYPE_NEWDECIMAL:
             return new DecimalField(createField);
 
@@ -101,5 +103,4 @@ public class MakeFieldFactory {
         }
         return null;
     }
-
 }

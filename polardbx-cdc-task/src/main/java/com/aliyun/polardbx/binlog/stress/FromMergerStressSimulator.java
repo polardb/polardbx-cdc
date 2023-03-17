@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,11 +15,11 @@
 package com.aliyun.polardbx.binlog.stress;
 
 import com.aliyun.polardbx.binlog.TaskBootStrap;
-import com.aliyun.polardbx.binlog.TaskInfoProvider;
+import com.aliyun.polardbx.binlog.TaskConfigProvider;
 import com.aliyun.polardbx.binlog.domain.MergeSourceInfo;
 import com.aliyun.polardbx.binlog.domain.MergeSourceType;
 import com.aliyun.polardbx.binlog.domain.MockParameter;
-import com.aliyun.polardbx.binlog.domain.TaskInfo;
+import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import org.apache.commons.lang3.StringUtils;
 
@@ -53,18 +53,18 @@ public class FromMergerStressSimulator extends BaseStressSimulator {
         boolean useBuffer = Boolean.parseBoolean(getValue("stress.merge.useBuffer", DEFAULT_USE_BUFFER));
 
         TaskBootStrap bootStrap = new TaskBootStrap();
-        bootStrap.setTaskInfoProvider(new TaskInfoProvider("Final") {
+        bootStrap.setTaskConfigProvider(new TaskConfigProvider("Final") {
 
             @Override
-            public TaskInfo get() {
-                TaskInfo info = new TaskInfo();
-                info.setId(3L);
-                info.setName("Final");
-                info.setType(TaskType.Final);
-                info.setStartTSO("");
-                info.setServerPort(9999);
-                info.setMergeSourceInfos(buildMergeSources());
-                return info;
+            public TaskRuntimeConfig getTaskRuntimeConfig() {
+                TaskRuntimeConfig taskRuntimeConfig = new TaskRuntimeConfig();
+                taskRuntimeConfig.setId(3L);
+                taskRuntimeConfig.setName("Final");
+                taskRuntimeConfig.setType(TaskType.Final);
+                taskRuntimeConfig.setStartTSO("");
+                taskRuntimeConfig.setServerPort(9999);
+                taskRuntimeConfig.setMergeSourceInfos(buildMergeSources());
+                return taskRuntimeConfig;
             }
 
             private List<MergeSourceInfo> buildMergeSources() {
@@ -73,7 +73,6 @@ public class FromMergerStressSimulator extends BaseStressSimulator {
                 for (int i = 0; i < sourceCount; i++) {
                     MergeSourceInfo info = new MergeSourceInfo();
                     info.setId(String.valueOf(i));
-                    info.setTaskName("source-" + i);
                     info.setType(MergeSourceType.MOCK);
                     info.setQueueSize(sourceQueueSize);
                     MockParameter parameter = new MockParameter();

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -51,12 +51,14 @@ import java.util.Optional;
 import java.util.Set;
 
 import static com.aliyun.polardbx.binlog.CommonUtils.getTsoTimestamp;
+import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.POLARX_INST_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_SEARCH_TSO_CHECK_PRE_STORAGE_CHANGE;
 import static com.aliyun.polardbx.binlog.canal.system.SystemDB.LOGIC_SCHEMA;
 import static com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandDynamicSqlSupport.cmdId;
+import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.clusterId;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.tso;
-import static com.aliyun.polardbx.binlog.scheduler.model.TaskConfig.ORIGIN_TSO;
+import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 import static com.aliyun.polardbx.binlog.util.StorageUtil.buildExpectedStorageTso;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
@@ -396,7 +398,8 @@ public class SearchTsoEventHandleV1 implements ISearchTsoEventHandle {
             StorageHistoryInfoMapper storageHistoryMapper =
                 SpringContextHolder.getObject(StorageHistoryInfoMapper.class);
             Optional<StorageHistoryInfo> optional =
-                storageHistoryMapper.selectOne(s -> s.where(tso, isEqualTo(requestTso)));
+                storageHistoryMapper.selectOne(s -> s.where(tso, isEqualTo(requestTso)).and(
+                    clusterId, isEqualTo(DynamicApplicationConfig.getString(CLUSTER_ID))));
             if (optional.isPresent()) {
                 logger.warn("request tso is a tso for marking storage change, " + requestTso);
                 return true;
@@ -410,7 +413,8 @@ public class SearchTsoEventHandleV1 implements ISearchTsoEventHandle {
             StorageHistoryInfoMapper storageHistoryMapper =
                 SpringContextHolder.getObject(StorageHistoryInfoMapper.class);
             Optional<StorageHistoryInfo> optional1 =
-                storageHistoryMapper.selectOne(s -> s.where(tso, isEqualTo(requestTso)));
+                storageHistoryMapper.selectOne(s -> s.where(tso, isEqualTo(requestTso))
+                    .and(clusterId, isEqualTo(DynamicApplicationConfig.getString(CLUSTER_ID))));
 
             if (optional1.isPresent()) {
                 BinlogPolarxCommandMapper commandMapper =
@@ -489,6 +493,11 @@ public class SearchTsoEventHandleV1 implements ISearchTsoEventHandle {
     @Override
     public String getTopologyContext() {
         return commandTransaction != null ? commandTransaction.getContent() : null;
+    }
+
+    @Override
+    public String getCommandId() {
+        return commandTransaction != null ? commandTransaction.getCommandId() : null;
     }
 
     @Override

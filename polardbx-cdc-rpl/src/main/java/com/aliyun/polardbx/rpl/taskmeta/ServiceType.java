@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,9 +19,11 @@ package com.aliyun.polardbx.rpl.taskmeta;
  * @since 5.0.0.0
  */
 public enum ServiceType {
-    INC_COPY(101),
+    REPLICA_FULL(2),
 
-    REPLICA(3),
+    REPLICA_INC(3),
+
+    INC_COPY(101),
 
     FULL_COPY(100),
 
@@ -56,5 +58,9 @@ public enum ServiceType {
 
     public int getValue() {
         return value;
+    }
+
+    public static boolean supportRunningCheck(int typeValue) {
+        return typeValue != REPLICA_FULL.value && typeValue != REPLICA_INC.getValue();
     }
 }

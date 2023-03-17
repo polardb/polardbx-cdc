@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,7 +30,7 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.repository.CdcSchemaStoreProvider;
-import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicDbTopology;
+import com.aliyun.polardbx.binlog.cdc.topology.LogicBasicInfo;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyTableTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport;
@@ -119,23 +119,25 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
         }
 
         // 根据逻辑MetaSnapshot构建物理
+        topologyManager.initPhyLogicMapping(storageInstId);
         List<PhyTableTopology> phyTables =
             topologyManager.getPhyTables(storageInstId, Sets.newHashSet(), Sets.newHashSet());
         for (PhyTableTopology phyTable : phyTables) {
             final List<String> tables = phyTable.getPhyTables();
             if (tables != null) {
                 for (String table : tables) {
-                    LogicDbTopology logicSchema = topologyManager.getLogicSchema(phyTable.getSchema(), table);
-                    checkSchema(logicSchema, phyTable, table);
-                    String tableName = logicSchema.getLogicTableMetas().get(0).getTableName();
+                    LogicBasicInfo logicBasicInfo = topologyManager.getLogicBasicInfo(phyTable.getSchema(), table);
+                    checkLogicBasicInfo(logicBasicInfo, phyTable, table);
+                    String tableName = logicBasicInfo.getTableName();
                     String createTableSql = "create table `" + CommonUtils.escape(table) + "` like `" +
-                        CommonUtils.escape(logicSchema.getSchema()) + "`.`" + CommonUtils.escape(tableName) + "`";
+                        CommonUtils.escape(logicBasicInfo.getSchemaName()) + "`.`" + CommonUtils.escape(tableName)
+                        + "`";
                     super.apply(null, phyTable.getSchema(), createTableSql, null);
                     applyCount++;
 
                     if (logger.isDebugEnabled()) {
                         logger.debug("apply from logic table, phy:{}.{}, logic:{}.{} [{}] ...", phyTable.getSchema(),
-                            table, logicSchema.getSchema(), tableName, createTableSql);
+                            table, logicBasicInfo.getSchemaName(), tableName, createTableSql);
                     }
                 }
             }
@@ -169,6 +171,8 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
                 s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.storageInstId, SqlBuilder.isEqualTo(storageInstId))
                     .and(BinlogPhyDdlHistoryDynamicSqlSupport.tso, SqlBuilder.isGreaterThan(snapshotTsoCondition))
                     .and(BinlogPhyDdlHistoryDynamicSqlSupport.tso, SqlBuilder.isLessThanOrEqualTo(rollbackTso))
+                    .and(BinlogPhyDdlHistoryDynamicSqlSupport.clusterId,
+                        SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
                     .orderBy(BinlogPhyDdlHistoryDynamicSqlSupport.tso).limit(PAGE_SIZE)
             );
             queryDdlHistoryCostTime += (System.currentTimeMillis() - queryStartTime);
@@ -229,13 +233,13 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
         return super.apply(null, schema, ddl, null);
     }
 
-    private void checkSchema(LogicDbTopology logicSchema, PhyTableTopology phyTable, String table) {
-        Preconditions.checkNotNull(logicSchema,
-            "phyTable " + phyTable.getSchema() + "." + table + "'s logicSchema should not be null!");
-        Preconditions.checkNotNull(logicSchema.getLogicTableMetas(),
-            "phyTable " + phyTable.getSchema() + "." + table + "'s logicTables should not be null!");
-        Preconditions.checkNotNull(logicSchema.getLogicTableMetas().get(0),
-            "phyTable " + phyTable.getSchema() + "." + table + "'s logicTable should not be null!");
+    private void checkLogicBasicInfo(LogicBasicInfo logicBasicInfo, PhyTableTopology phyTable, String table) {
+        Preconditions.checkNotNull(logicBasicInfo,
+            "phyTable " + phyTable.getSchema() + "." + table + "'s logicBasicInfo should not be null!");
+        Preconditions.checkNotNull(logicBasicInfo.getSchemaName(),
+            "phyTable " + phyTable.getSchema() + "." + table + "'s logicSchemaName should not be null!");
+        Preconditions.checkNotNull(logicBasicInfo.getTableName(),
+            "phyTable " + phyTable.getSchema() + "." + table + "'s logicTableName should not be null!");
     }
 
     private void applyHistoryToDb(BinlogPosition position, String schema, String ddl, String extra) {
@@ -249,6 +253,7 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
                 .tso(position.getRtso())
                 .dbName(schema)
                 .ddl(ddl)
+                .clusterId(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID))
                 .extra(extra).build());
         } catch (DuplicateKeyException e) {
             if (logger.isDebugEnabled()) {

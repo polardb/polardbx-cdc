@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -90,11 +90,13 @@ public final class CharsetConversion {
         putEntry(53, "macroman", "macroman_bin", "MacRoman");
         putEntry(54, "utf16", "utf16_general_ci", "UTF-16");
         putEntry(55, "utf16", "utf16_bin", "UTF-16");
+        putEntry(56, "utf16le", "utf16le_general_ci", "UTF-16LE");
         putEntry(57, "cp1256", "cp1256_general_ci", "Cp1256");
         putEntry(58, "cp1257", "cp1257_bin", "Cp1257");
         putEntry(59, "cp1257", "cp1257_general_ci", "Cp1257");
         putEntry(60, "utf32", "utf32_general_ci", "UTF-32");
         putEntry(61, "utf32", "utf32_bin", "UTF-32");
+        putEntry(62, "utf16le", "utf16le_bin", "UTF-16LE");
         putEntry(63, "binary", "binary", "US-ASCII");
         putEntry(64, "armscii8", "armscii8_bin", "ISO8859_2");
         putEntry(65, "ascii", "ascii_bin", "US-ASCII");

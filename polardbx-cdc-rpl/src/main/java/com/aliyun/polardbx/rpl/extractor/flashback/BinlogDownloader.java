@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,7 +16,7 @@ package com.aliyun.polardbx.rpl.extractor.flashback;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.RemoteBinlogProxy;
+import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 
@@ -38,20 +38,13 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 public class BinlogDownloader {
 
     private final LinkedBlockingQueue<String> downloadFileQueue = new LinkedBlockingQueue<>();
-
-    private ExecutorService executorService;
-
     private final int maxLocalFileNumber;
-
     private final AtomicInteger nLocalFile = new AtomicInteger(0);
-
-    private boolean running = false;
-
     private final AtomicInteger nDownloadedFile = new AtomicInteger(0);
-
     private final int nDownloadThread;
-
     private final String localDirectory;
+    private ExecutorService executorService;
+    private boolean running = false;
 
     public BinlogDownloader() {
         maxLocalFileNumber = DynamicApplicationConfig.getInt(ConfigKeys.FLASHBACK_BINLOG_MAX_DOWNLOAD_FILE_COUNT);

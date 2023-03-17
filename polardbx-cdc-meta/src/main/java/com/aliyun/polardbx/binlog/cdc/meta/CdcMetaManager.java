@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,8 +16,8 @@ package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.TableCompatibilityProcessor;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.flywaydb.core.Flyway;
@@ -27,6 +27,14 @@ import org.flywaydb.core.Flyway;
  */
 @Slf4j
 public class CdcMetaManager {
+    private final String clusterId;
+    private final String clusterType;
+
+    public CdcMetaManager(String clusterId, String clusterType) {
+        this.clusterId = clusterId;
+        this.clusterType = clusterType;
+    }
+
     public void init() {
         log.info("init cdc meta tables...");
         // Create the Flyway instance and point it to the database
@@ -40,13 +48,11 @@ public class CdcMetaManager {
 
         // Start the migration
         flyway.migrate();
-        log.info("cdc meta tables init done!");
-    }
 
-    public static void main(String[] args) {
-        final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-        new CdcMetaManager().init();
+        // try process compatibility
+        TableCompatibilityProcessor.process();
+
+        log.info("cdc meta tables init done!");
     }
 
     private String tryDecryptPassword(String password) {

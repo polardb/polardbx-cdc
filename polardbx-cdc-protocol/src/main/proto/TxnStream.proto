@@ -13,6 +13,9 @@ service TxnService{
 
 message DumpRequest{
   string tso = 1;
+  string dumperName = 2;
+  int32 streamSeq = 3;
+  int64 version = 4;
 }
 
 message DumpReply{
@@ -130,6 +133,7 @@ message TxnToken{
     使用Wrapper类型，解决兼容性问题，因为serverId可以设置为0
    */
   google.protobuf.Int64Value serverId = 14;
+  string          ddl = 15;
 }
 
 message TxnMergedToken{
@@ -168,6 +172,14 @@ message TxnItem{
    对应的表名
    */
   string          table = 6;
+  /**
+    参与dispatcher 分发的hashKey
+   */
+  int32           hashKey = 7;
+  /**
+    主键信息
+   */
+  repeated bytes  primaryKey = 8;
 }
 
 message EventData{

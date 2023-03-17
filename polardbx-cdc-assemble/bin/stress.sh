@@ -38,9 +38,6 @@ logback_configurationFile=$BASE_DIR/conf/logback.xml
 export LD_LIBRARY_PATH=${BASE_DIR}/lib:${LD_LIBRARY_PATH}
 export NLS_LANG=AMERICAN_AMERICA.ZHS16GBK
 
-if [ -f /home/admin/bin/jdk8.sh ]; then
-    sudo sh /home/admin/bin/jdk8.sh
-fi
 
 JAVA_OPTS="${JAVA_OPTS} -server -Xms${MEMORY}m -Xmx${MEMORY}m -Xss1m -Djute.maxbuffer=10240000 -DtaskName=$TASK_NAME -Dlogback.configurationFile=$logback_configurationFile"
 JAVA_OPTS="${JAVA_OPTS} -XX:+UseParallelGC"
@@ -48,10 +45,8 @@ JAVA_OPTS="${JAVA_OPTS} -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRa
 JAVA_OPTS="${JAVA_OPTS} -XX:-OmitStackTraceInFastThrow"
 
 JAVA_OPTS="${JAVA_OPTS} -Djava.net.preferIPv4Stack=true"
-JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDetails"
-JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDateStamps"
 JAVA_OPTS="${JAVA_OPTS} -XX:+DisableExplicitGC"
-JAVA_OPTS="${JAVA_OPTS} -Xloggc:${BASE_DIR}/../logs/gc-${TASK_NAME}.log"
+JAVA_OPTS="${JAVA_OPTS} -Xlog:gc*:${BASE_DIR}/../logs/gc-${TASK_NAME}.log:time"
 JAVA_OPTS="${JAVA_OPTS} -Dmemory=${MEMORY}"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs -Dfile.encoding=UTF-8"
 JAVA_OPTS="${JAVA_OPTS} -Dcdc.home.dir=${BASE_HOME}"

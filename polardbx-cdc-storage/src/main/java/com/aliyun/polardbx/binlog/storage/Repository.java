@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -76,7 +76,7 @@ public class Repository {
                 FileUtils.cleanDirectory(new File(basePath));
 
                 for (int i = 0; i < repoUnitCount; i++) {
-                    RepoUnit unit = new RepoUnit(basePath + "/" + UUID.randomUUID().toString(), true, true);
+                    RepoUnit unit = new RepoUnit(basePath + "/" + UUID.randomUUID().toString(), true, true, true);
                     repoUnits.add(unit);
                     unit.open();
                 }
@@ -129,9 +129,9 @@ public class Repository {
         return txnItemPersistThreshold;
     }
 
-    public boolean isReachPersistThreshold() {
+    public boolean isReachPersistThreshold(boolean instantCheck) {
         int checkInterval = DynamicApplicationConfig.getInt(STORAGE_PERSIST_CHECK_INTERVAL_MILLS);
-        if (System.currentTimeMillis() - persistCheckResult.checkTime >= checkInterval) {
+        if (instantCheck || System.currentTimeMillis() - persistCheckResult.checkTime >= checkInterval) {
             double totalRatio = JvmUtils.getTotalUsedRatio();
             double oldRatio = JvmUtils.getOldUsedRatio();
             boolean result = (totalRatio >= persistNewThreshold) || (oldRatio >= persistNewThreshold);
@@ -157,7 +157,7 @@ public class Repository {
         if (repoUnits.size() == 1) {
             return repoUnits.get(0);
         } else {
-            int index = Math.abs(Arrays.hashCode(key)) % repoUnits.size();
+            int index = Math.abs(Arrays.hashCode(key) % repoUnits.size());
             return repoUnits.get(index);
         }
     }

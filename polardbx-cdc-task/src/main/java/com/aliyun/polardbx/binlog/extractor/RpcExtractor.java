@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.extractor;
 
 import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
@@ -50,6 +51,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_TXN_STREAM_CLIENT_RECEIVE_QUEUE_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_TXN_STREAM_FLOW_CONTROL_WINDOW_SIZE;
+
 /**
  * Created by ziyang.lb
  **/
@@ -58,15 +62,13 @@ public class RpcExtractor implements Extractor {
 
     private static final Logger logger = LoggerFactory.getLogger(RpcExtractor.class);
 
-    private final String upstreamTaskName;                                    // 即：上游的taskName
     private final MergeSource mergeSource;
     private final Storage storage;
     private ExecutorService executor;
     private RpcParameter rpcParameter;
     private volatile boolean running;
 
-    public RpcExtractor(String upstreamTaskName, MergeSource mergeSource, Storage storage) {
-        this.upstreamTaskName = upstreamTaskName;
+    public RpcExtractor(MergeSource mergeSource, Storage storage) {
         this.mergeSource = mergeSource;
         this.storage = storage;
     }
@@ -78,7 +80,8 @@ public class RpcExtractor implements Extractor {
         }
         running = true;
 
-        executor = Executors.newFixedThreadPool(1, new ThreadFactoryBuilder().setNameFormat("rpc-dump-%d").build());
+        executor =
+            Executors.newFixedThreadPool(1, new ThreadFactoryBuilder().setNameFormat("rpc-extractor-%d").build());
         executor.execute(() -> {
             final AtomicReference<String> latestCommitTso = new AtomicReference<>("");
             TxnStreamRpcClient rpcClient = null;
@@ -88,13 +91,13 @@ public class RpcExtractor implements Extractor {
                     final AtomicReference<TxnBuffer> txnBuffer = new AtomicReference<>();
                     final AtomicReference<TxnToken> txnToken = new AtomicReference<>();
                     final AtomicReference<TxnKey> txnKey = new AtomicReference<>();
-                    final String initTSO = StringUtils.isNotBlank(latestCommitTso.get()) ? latestCommitTso
-                        .get() : startTSO;
+                    final String initTso = StringUtils.isNotBlank(latestCommitTso.get()) ?
+                        latestCommitTso.get() : startTSO;
 
                     buildRpcParameter();
                     String target = rpcParameter.getAddress() + ":" + rpcParameter.getPort();
                     NettyChannelBuilder channelBuilder =
-                        (NettyChannelBuilder) ManagedChannelBuilder.forTarget(target).usePlaintext();// TODO,参数需要进一步丰富
+                        (NettyChannelBuilder) ManagedChannelBuilder.forTarget(target).usePlaintext();
                     rpcClient = new TxnStreamRpcClient(channelBuilder, new TxnMessageReceiver() {
 
                         @Override
@@ -114,8 +117,8 @@ public class RpcExtractor implements Extractor {
                             }
                         }
 
-                        public void processMessage(TxnMessage message,
-                                                   MessageType processType) throws InterruptedException {
+                        public void processMessage(TxnMessage message, MessageType processType)
+                            throws InterruptedException {
                             try {
                                 if (processType == MessageType.BEGIN) {
                                     assert txnToken.get() == null;
@@ -123,17 +126,20 @@ public class RpcExtractor implements Extractor {
                                     assert txnKey.get() == null;
 
                                     // 只有type为BEGIN的时候，TxnMessage的TxnToken才有值，其它type情况下，token为空
-                                    txnToken.set(message.getTxnBegin().getTxnToken());
+                                    txnToken.set(processToken(message.getTxnBegin().getTxnToken()));
                                     txnKey.set(new TxnKey(txnToken.get().getTxnId(), txnToken.get().getPartitionId()));
                                     txnBuffer.set(storage.create(txnKey.get()));
-                                    checkTso(txnToken.get(), initTSO);
+                                    checkTso(txnToken.get(), initTso, startTSO);
                                 } else if (processType == MessageType.DATA) {
                                     txnBuffer.get().push(
                                         message.getTxnData().getTxnItemsList().stream()
-                                            .map(i -> TxnBufferItem.builder().eventType(i.getEventType())
+                                            .map(i -> TxnBufferItem.builder()
+                                                .eventType(i.getEventType())
                                                 .traceId(i.getTraceId())
                                                 .payload(DirectByteOutput.unsafeFetch(i.getPayload()))
-                                                .rowsQuery(i.getRowsQuery()).schema(i.getSchema()).table(i.getTable())
+                                                .rowsQuery(i.getRowsQuery())
+                                                .schema(i.getSchema())
+                                                .table(i.getTable())
                                                 .build())
                                             .collect(Collectors.toList())
                                     );
@@ -145,8 +151,8 @@ public class RpcExtractor implements Extractor {
                                     txnKey.set(null);
                                     txnToken.set(null);
                                 } else if (processType == MessageType.TAG) {
-                                    TxnToken tagToken = message.getTxnTag().getTxnToken();
-                                    checkTso(tagToken, initTSO);
+                                    TxnToken tagToken = processToken(message.getTxnTag().getTxnToken());
+                                    checkTso(tagToken, initTso, startTSO);
                                     mergeSource.push(tagToken, false);
                                 } else {
                                     throw new PolardbxException("invalid txn message type: " + processType);
@@ -159,21 +165,24 @@ public class RpcExtractor implements Extractor {
                                 throw new InterruptedException("interrupt for fatal error.");
                             } catch (Throwable t) {
                                 // Flag-2，出现异常，对storage中保存的数据进行回滚
+                                logger.error("fatal error", t);
                                 if (storage.exist(txnKey.get())) {
                                     storage.delete(txnKey.get());
                                 }
                                 throw t;
                             }
                         }
-                    });
+                    }, false,
+                        DynamicApplicationConfig.getInt(BINLOG_TXN_STREAM_CLIENT_RECEIVE_QUEUE_SIZE),
+                        DynamicApplicationConfig.getInt(BINLOG_TXN_STREAM_FLOW_CONTROL_WINDOW_SIZE));
 
-                    DumpRequest request = DumpRequest.newBuilder().setTso(initTSO).build();
+                    DumpRequest request = DumpRequest.newBuilder().setTso(initTso).build();
                     rpcClient.connect();
                     rpcClient.dump(request);
                 } catch (InterruptedException e) {
                     break;
                 } catch (Throwable t) {
-                    logger.error("rpc client dump error", t);
+                    logger.error("rpc extractor dump error", t);
                     try {
                         CommonUtils.sleep(1000);
                     } catch (InterruptedException e) {
@@ -213,7 +222,6 @@ public class RpcExtractor implements Extractor {
     }
 
     private void buildRpcParameter() {
-        assert rpcParameter != null;
         if (!rpcParameter.isDynamic()) {
             assert StringUtils.isNotBlank(rpcParameter.getAddress());
             assert rpcParameter.getPort() != null;
@@ -227,21 +235,24 @@ public class RpcExtractor implements Extractor {
         }
     }
 
-    private void checkTso(TxnToken txnToken, String initTSO) {
-        /*
-         * Flag-1：tso合法性验证
-         * 按照设计方案的约定，上游推送过来的事件的tso，必须大于DumpRequest中指定的startTso，如果发现小于等于startTSO的事件
-         * 说明出现了bug，直接抛异常。FORMAT_DESC是一种特殊的Token，其tso没有实际意义，直接透传给下游即可，不做校验。
-         */
-        if (txnToken.getTso().compareTo(initTSO) <= 0 && txnToken.getType() != TxnType.FORMAT_DESC) {
+    private TxnToken processToken(TxnToken token) {
+        return token.toBuilder().clearAllParties().build();
+    }
+
+    private void checkTso(TxnToken txnToken, String initTso, String startTso) {
+        int compare = txnToken.getTso().compareTo(initTso);
+        if (compare <= 0 && txnToken.getType() != TxnType.FORMAT_DESC) {
+            if (StringUtils.equals(initTso, startTso) && compare == 0) {
+                return;
+            }
             logger.error(
                 "Received illegal message with tso {}，reason: the tso can`t be equal to or less than startTSO {}.",
                 txnToken.getTso(),
-                initTSO);
+                initTso);
             throw new PolardbxException(String.format(
                 "Received illegal message with tso %s，reason: the tso can`t be equal to or less than startTSO %s.",
                 txnToken.getTso(),
-                initTSO));
+                initTso));
         }
     }
 

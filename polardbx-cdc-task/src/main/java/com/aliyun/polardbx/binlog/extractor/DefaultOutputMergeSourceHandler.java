@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,12 +28,15 @@ import com.aliyun.polardbx.binlog.merge.MergeSource;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.storage.Storage;
+import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.google.gson.Gson;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Int64Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Iterator;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGER_DRYRUN;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGER_DRYRUN_MODE;
@@ -66,32 +69,30 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
         }
 
         pushToken(transaction);
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACTOR_RECORD_TRANSLOG)) {
-            transactionLogger.info(transaction.getVirtualTSO() + ":" + getTransactionType(transaction) + ":"
-                + transaction.getTransactionId() + ":pos[" + transaction.getBinlogFileName() + ":"
-                + transaction.getStartLogPos() + "]" + ":size[" + transaction.getSize() + "]");
-        }
+        logTransAudit(transaction);
     }
 
-    private String getTransactionType(Transaction transaction) {
-        if (transaction.isDDL()) {
-            return "ddl";
+    private void logTransAudit(Transaction transaction) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACTOR_RECORD_TRANSLOG)) {
+            transactionLogger.info(transaction.toString());
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACTOR_RECORD_TRANSLOG_DETAIL)) {
+                Iterator<TxnItemRef> iterator = transaction.iterator();
+                if (iterator != null) {
+                    logger.info("================== Detail Info Begin ================== ");
+                    while (iterator.hasNext()) {
+                        TxnItemRef ref = iterator.next();
+                        transactionLogger.info("traceId = " + ref.getTraceId() + ", eventType = " + ref.getEventType()
+                            + ", rowsQuery = " + ref.getEventData().getRowsQuery());
+                    }
+                    logger.info("================== Detail Info End   ================== ");
+                }
+            }
         }
-        if (transaction.isStorageChangeCommand()) {
-            return "storageChangeCommand";
-        }
-        if (transaction.isHeartbeat()) {
-            return "heartbeat";
-        }
-        if (transaction.isDescriptionEvent()) {
-            return "description";
-        }
-        return "data";
     }
 
     private void pushToken(Transaction transaction) throws Exception {
         TxnKey tk = transaction.getBufferKey();
-        String txnId = null;
+        String txnId;
         if (tk != null) {
             txnId = tk.getTxnId();
         } else {
@@ -126,8 +127,9 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             String table = transaction.getDdlEvent().getDdlRecord().getTableName();
             txnTokenBuilder.setSchema(schema == null ? "" : schema);
             txnTokenBuilder.setTable(table == null ? "" : table);
-            logger.info("output logic ddl : " + transaction.getDdlEvent().getDdlRecord().getDdlSql() + " for : "
-                + transaction.getVirtualTSO());
+            txnTokenBuilder.setDdl(transaction.getDdlEvent().getDdlRecord().getDdlSql());
+            logger.info("output logic ddl : " + transaction.getDdlEvent().getDdlRecord().getDdlSql() +
+                " for : " + transaction.getVirtualTSO());
         }
 
         if (transaction.isCDCStartCommand()) {

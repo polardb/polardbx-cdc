@@ -1,2 +1,2 @@
 #!/bin/bash
-java -jar target/binlog-transfer-1.0.0-SNAPSHOT.jar
+java -jar target/binlog-transfer-5.4.15-SNAPSHOT.jar

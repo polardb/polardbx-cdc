@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,12 +24,13 @@ import lombok.Data;
 public class PipelineConfig {
 
     private int consumerParallelCount = 32;
-    private int bufferSize = 1024;
+    private int bufferSize = 2048;
     private boolean supportXa = false;
     private int fixedTpsLimit = -1;
     private boolean useIncValidation = false;
-    // 需要即时感知的配置，后续考虑放到applierconfig里去
     private boolean skipException = false;
-    private boolean safeMode = true;
+    private boolean safeMode = false;
     private PersistConfig persistConfig = new PersistConfig();
+    private int applyRetryMaxTime = 5;
+    private long retryIntervalMs = 1000;
 }

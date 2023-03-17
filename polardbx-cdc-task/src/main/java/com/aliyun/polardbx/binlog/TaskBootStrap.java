@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,7 +23,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
-import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TYPE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTERVAL;
 
@@ -33,11 +32,11 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTE
 public class TaskBootStrap {
 
     private static final Logger logger = LoggerFactory.getLogger(TaskBootStrap.class);
-    private TaskInfoProvider taskInfoProvider;
+    private TaskConfigProvider taskConfigProvider;
 
     public static void main(String[] args) {
         TaskBootStrap bootStrap = new TaskBootStrap();
-        bootStrap.setTaskInfoProvider(new TaskInfoProvider(handleArgs(args[0]).get(TASK_NAME)));
+        bootStrap.setTaskConfigProvider(new TaskConfigProvider(handleArgs(args[0]).get(TASK_NAME)));
         bootStrap.boot(args);
     }
 
@@ -67,18 +66,20 @@ public class TaskBootStrap {
             final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
             appContextBootStrap.boot();
 
+            // try process compatibility
+            TableCompatibilityProcessor.process();
+
             // do start
             logger.info("## starting the task, with name {}.", taskName);
             final TaskController controller =
-                new TaskController(DynamicApplicationConfig.getString(CLUSTER_ID), taskInfoProvider);
-            controller.start();
-
+                new TaskController(DynamicApplicationConfig.getString(CLUSTER_ID), taskConfigProvider);
             final TaskHeartbeat taskHeartbeat =
                 new TaskHeartbeat(DynamicApplicationConfig.getString(CLUSTER_ID),
-                    DynamicApplicationConfig.getString(CLUSTER_TYPE), taskName,
+                    DynamicApplicationConfig.getClusterType(), taskName,
                     DynamicApplicationConfig.getInt(TOPOLOGY_TASK_HEARTBEAT_INTERVAL),
-                    taskInfoProvider.get().getBinlogTaskConfig());
+                    taskConfigProvider.getTaskRuntimeConfig().getBinlogTaskConfig());
             taskHeartbeat.start();
+            controller.start();
 
             logger.info("## the task is running now ......");
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -99,8 +100,8 @@ public class TaskBootStrap {
         }
     }
 
-    public void setTaskInfoProvider(TaskInfoProvider taskInfoProvider) {
-        this.taskInfoProvider = taskInfoProvider;
+    public void setTaskConfigProvider(TaskConfigProvider taskConfigProvider) {
+        this.taskConfigProvider = taskConfigProvider;
     }
 
 }

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -43,7 +43,8 @@ import com.aliyun.polardbx.rpl.extractor.flashback.RecoveryExtractor;
 import com.aliyun.polardbx.rpl.extractor.full.MysqlFullExtractor;
 import com.aliyun.polardbx.rpl.filter.BaseFilter;
 import com.aliyun.polardbx.rpl.filter.DataImportFilter;
-import com.aliyun.polardbx.rpl.filter.ReplicateFilter;
+import com.aliyun.polardbx.rpl.filter.FlashBackFilter;
+import com.aliyun.polardbx.rpl.filter.ReplicaFilter;
 import com.aliyun.polardbx.rpl.pipeline.BasePipeline;
 import com.aliyun.polardbx.rpl.pipeline.SerialPipeline;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
@@ -61,7 +62,8 @@ import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
 import com.aliyun.polardbx.rpl.taskmeta.RdsExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryExtractorConfig;
-import com.aliyun.polardbx.rpl.taskmeta.ReplicateMeta;
+import com.aliyun.polardbx.rpl.taskmeta.RecoveryMeta;
+import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import com.aliyun.polardbx.rpl.taskmeta.ReconExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.ValidationExtractorConfig;
 import lombok.Data;
@@ -103,7 +105,7 @@ public class RplTaskRunner {
             log.info("RplTaskEngine initializing");
             if (!init()) {
                 log.error("RplTaskRunner init failed");
-                Runtime.getRuntime().halt(1);
+                System.exit(-1);
                 return;
             }
             log.info("RplTaskEngine initialized");
@@ -122,7 +124,7 @@ public class RplTaskRunner {
             log.info("RplTaskRunner done");
         } catch (Throwable e) {
             log.error("RplTaskRunner exited", e);
-            Runtime.getRuntime().halt(1);
+            System.exit(-1);
         }
     }
 
@@ -151,13 +153,14 @@ public class RplTaskRunner {
             context.setWorker(AddressUtil.getHostAddress().getHostAddress());
             context.setStateMachine(stateMachine);
             context.setConfig(config);
-            context.setPhysicalId(0);
-            // TODO : Configuration PENDING OPTIMIZING
+            context.setPhysicalNum(0);
             ExtractorConfig extractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(), ExtractorConfig.class);
-            if (extractorConfig.getFilterType() == FilterType.NORMAL_FILTER.getValue()) {
+            if (extractorConfig.getFilterType() == FilterType.IMPORT_FILTER.getValue()) {
                 DataImportMeta.PhysicalMeta importMeta = JSON.parseObject(
                     extractorConfig.getSourceToTargetConfig(), DataImportMeta.PhysicalMeta.class);
                 context.setPhysicalMeta(importMeta);
+                DataImportMeta meta = JSON.parseObject(config, DataImportMeta.class);
+                context.setPhysicalNum(meta.getMetaList().size());
             }
 
             log.info("RplTaskRunner prepare filter");
@@ -179,12 +182,21 @@ public class RplTaskRunner {
         }
     }
 
-    private void initFullExtractor() {
+    private void initFullExtractor(int extractorType) throws Exception {
         FullExtractorConfig taskExtractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(),
             FullExtractorConfig.class);
-        // extractor = new MysqlFullExtractor(taskExtractorConfig, createExtractorHostInfo(), (DataImportFilter) filter);
-        extractor =
-            new MysqlFullExtractor(taskExtractorConfig, taskExtractorConfig.getHostInfo(), (DataImportFilter) filter);
+        switch (ExtractorType.from(extractorType)) {
+        case DATA_IMPORT_FULL:
+            extractor =
+                new MysqlFullExtractor(taskExtractorConfig, taskExtractorConfig.getHostInfo(), (DataImportFilter) filter);
+            break;
+        case RPL_FULL:
+            extractor =
+                new MysqlFullExtractor(taskExtractorConfig, taskExtractorConfig.getHostInfo(), (ReplicaFilter) filter);
+            break;
+        default:
+            break;
+        }
     }
 
     private void initFullValidationExtractor() {
@@ -230,7 +242,7 @@ public class RplTaskRunner {
                 binlogPosition,
                 filter);
             break;
-        case MYSQL_INC:
+        case DATA_IMPORT_INC:
             RdsExtractorConfig rdsExtractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(), RdsExtractorConfig.class);
             extractor = new RdsBinlogExtractor(rdsExtractorConfig,
                 rdsExtractorConfig.getHostInfo(),
@@ -260,8 +272,6 @@ public class RplTaskRunner {
             extractorConfig.getHostInfo(),
             filter,
             binlogPosition);
-        // if applier enabled transaction, the extractor should NOT filter
-        // TransactionEnd
     }
 
     private void initRecoveryExtractor() {
@@ -270,13 +280,14 @@ public class RplTaskRunner {
         extractor = new RecoveryExtractor(extractorConfig, filter);
     }
 
-    private void initExtractor() {
+    private void initExtractor() throws Exception {
         ExtractorConfig config = JSON.parseObject(taskConfig.getExtractorConfig(), ExtractorConfig.class);
         switch (ExtractorType.from(config.getExtractorType())) {
-        case MYSQL_FULL:
-            initFullExtractor();
+        case DATA_IMPORT_FULL:
+        case RPL_FULL:
+            initFullExtractor(config.getExtractorType());
             break;
-        case MYSQL_INC:
+        case DATA_IMPORT_INC:
         case RPL_INC:
             initIncExtractor(config.getExtractorType());
             break;
@@ -363,17 +374,21 @@ public class RplTaskRunner {
         ExtractorConfig extractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(), ExtractorConfig.class);
         switch (FilterType.from(extractorConfig.getFilterType())) {
         case RPL_FILTER:
-            ReplicateMeta replicateMeta = JSON.parseObject(
-                extractorConfig.getSourceToTargetConfig(), ReplicateMeta.class);
-            filter = new ReplicateFilter(replicateMeta);
+            ReplicaMeta replicaMeta = JSON.parseObject(
+                extractorConfig.getSourceToTargetConfig(), ReplicaMeta.class);
+            filter = new ReplicaFilter(replicaMeta);
             break;
-        case NORMAL_FILTER:
+        case IMPORT_FILTER:
             DataImportMeta.PhysicalMeta importMeta = JSON.parseObject(
                 extractorConfig.getSourceToTargetConfig(), DataImportMeta.PhysicalMeta.class);
             filter = new DataImportFilter(importMeta);
             break;
         case NO_FILTER:
             filter = new BaseFilter();
+            break;
+        case FLASHBACK_FILTER:
+            RecoveryMeta recoveryMeta = JSON.parseObject(config, RecoveryMeta.class);
+            filter = new FlashBackFilter(recoveryMeta);
             break;
         default:
             break;

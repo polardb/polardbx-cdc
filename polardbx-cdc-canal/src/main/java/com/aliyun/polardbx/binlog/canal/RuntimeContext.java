@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -33,20 +33,18 @@ public class RuntimeContext {
     public static final int DEBUG_MODE = 0;
     public static final int ATTRIBUTE_TABLE_META_MANAGER = 1;
     public static final AtomicReference<String> initTopology = new AtomicReference<>("");
-
+    private static ThreadLocal<String> instructionIdLocal = new ThreadLocal<>();
     private final ThreadRecorder threadRecorder;
+
     /**
-     * 最大事务ID 序号生成
-     * 用来为 no XA事务生成事务ID，要求seq必须大于前一个事务ID
+     * 物理binlog被tso分成几段，tso之间自己排序， 两个tso内部以物理顺序为主，
+     * 且内部tso都以当前已收到的最大tso为 基准tso，
+     * 同时保障txnId 始终大于等于当前最大tso 对应的txnId。
      */
-    private final AutoSequence maxTxnIdSequence = new AutoSequence();
+    private final TsoSegment tsoSegment = new TsoSegment();
     private final Map<Integer, Object> attributeMap = new HashMap<>();
     private AuthenticationInfo authenticationInfo;
-    /**
-     * 当前收到的最大TSO
-     * no TSO事务，全部使用maxTSO
-     */
-    private Long maxTSO = 0L;
+
     private String binlogFile;
     private long logPos;
     private String hostAddress;
@@ -60,6 +58,7 @@ public class RuntimeContext {
     private int lowerCaseTableNames;
     private ServerCharactorSet serverCharactorSet;
     private String storageHashCode;
+    private Long dnTransferMaxTSOBarrier;
 
     public RuntimeContext(ThreadRecorder threadRecorder) {
         this.threadRecorder = threadRecorder;
@@ -73,6 +72,14 @@ public class RuntimeContext {
         initTopology.compareAndSet("", topology);
     }
 
+    public static String getInstructionId() {
+        return instructionIdLocal.get();
+    }
+
+    public static void setInstructionId(String instructionId) {
+        instructionIdLocal.set(instructionId);
+    }
+
     public AuthenticationInfo getAuthenticationInfo() {
         return authenticationInfo;
     }
@@ -80,6 +87,18 @@ public class RuntimeContext {
     public void setAuthenticationInfo(AuthenticationInfo authenticationInfo) {
         this.authenticationInfo = authenticationInfo;
         this.storageHashCode = Objects.hashCode(this.authenticationInfo.getStorageInstId()) + "";
+    }
+
+    public void markBindDnTransferMaxTSOBarrier() {
+        this.dnTransferMaxTSOBarrier = getMaxTSO();
+    }
+
+    public void cleanDnTransferTSOBarrier() {
+        this.dnTransferMaxTSOBarrier = null;
+    }
+
+    public Long getDnTransferMaxTSOBarrier() {
+        return dnTransferMaxTSOBarrier;
     }
 
     public void putAttribute(Integer id, Object attribute) {
@@ -111,27 +130,19 @@ public class RuntimeContext {
     }
 
     public int nextMaxTxnIdSequence(long txnId) {
-        return this.maxTxnIdSequence.nextSeq(txnId);
+        return this.tsoSegment.nextSeq(txnId);
     }
 
     public long getMaxTxnId() {
-        return maxTxnIdSequence.maxValue();
-    }
-
-    public void setMaxTxnId(long txnId) {
-        this.maxTxnIdSequence.setMaxValue(txnId);
+        return tsoSegment.getTxnId();
     }
 
     public Long getMaxTSO() {
-        return maxTSO;
+        return this.tsoSegment.getTso();
     }
 
-    public void setMaxTSO(Long maxTSO) {
-        if (this.maxTSO == null) {
-            this.maxTSO = maxTSO;
-        } else {
-            this.maxTSO = Math.max(maxTSO, this.maxTSO);
-        }
+    public void setMaxTSO(Long newTSO, Long newTxnId) {
+        this.tsoSegment.trySet(newTSO, newTxnId);
     }
 
     public boolean isRecovery() {
@@ -151,7 +162,7 @@ public class RuntimeContext {
     }
 
     public boolean hasTSO() {
-        return maxTSO != null;
+        return this.tsoSegment.isTsoAvaliable();
     }
 
     public String getBinlogFile() {

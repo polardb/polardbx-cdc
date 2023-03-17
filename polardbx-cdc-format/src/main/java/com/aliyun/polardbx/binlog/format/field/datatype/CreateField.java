@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,10 +14,12 @@
  */
 package com.aliyun.polardbx.binlog.format.field.datatype;
 
+import com.alibaba.druid.util.StringUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
 import lombok.Data;
 
+import java.io.Serializable;
 import java.nio.charset.Charset;
 
 @Data
@@ -28,7 +30,7 @@ public class CreateField {
     private int codepoint;
     private String[] parameters;
 
-    private String defaultValue;
+    private Serializable defaultValue;
 
     private Charset charset = CollationCharset.defaultJavaCharset;
 
@@ -38,13 +40,18 @@ public class CreateField {
 
     private SqlTypeConvert convertType;
 
-    public static CreateField parse(String dataType, String defaultValue, String charset, boolean nullable) {
+    private boolean unsigned;
+
+    public static CreateField parse(String dataType, Serializable defaultValue, String charset, boolean nullable,
+                                    boolean unsigned) {
         CreateField type = new CreateField();
+        dataType = dataType.trim();
         int k = dataType.indexOf("(");
         String convertType;
         if (k > 0) {
             String sqlType = dataType.substring(0, k);
             int e = dataType.indexOf(")");
+            dataType = dataType.substring(0, e + 1);
             String parametsrStr = dataType.substring(k + 1, e);
             convertType = sqlType.toUpperCase();
             String[] pps = parametsrStr.split(",");
@@ -59,7 +66,7 @@ public class CreateField {
                 }
             }
         } else {
-            convertType = dataType.trim().toUpperCase();
+            convertType = dataType.split(" ")[0].toUpperCase();
         }
         SqlTypeConvert needConvert = SqlTypeConvert.findConverter(convertType);
         if (needConvert != null) {
@@ -68,7 +75,7 @@ public class CreateField {
         }
         type.dataType = convertType;
         type.dataType = "MYSQL_TYPE_" + type.dataType;
-        if (defaultValue == null || defaultValue.equalsIgnoreCase("null")) {
+        if (defaultValue == null || StringUtils.equalsIgnoreCase(defaultValue.toString(), "null")) {
             type.defaultValue = null;
         } else {
             type.defaultValue = defaultValue;
@@ -77,21 +84,49 @@ public class CreateField {
         type.mysqlCharset = charset;
         type.charset = Charset.forName(javaCharset);
         type.nullable = nullable;
+        type.unsigned = unsigned;
 
         return type;
     }
 
     public static enum SqlTypeConvert {
-        TINYINT("TINY"), SMALLINT("SHORT"), MEDIUM("INT24"), MEDIUMINT("INT24"), INT("LONG"), INTEGER("LONG"), BIGINT(
-            "LONGLONG"), TEXT("BLOB"), LONGTEXT("BLOB"), MEDIUMTEXT("BLOB"), TINYTEXT("BLOB"), CHAR("STRING"),
+        TINYINT("TINY"),
+        SMALLINT("SHORT"),
+        MEDIUM("INT24"),
+        MEDIUMINT("INT24"),
+        INT("LONG"),
+        INTEGER("LONG"),
+        BIGINT("LONGLONG"),
+        TEXT("BLOB"),
+        LONGTEXT("LONGBLOB"),
+        MEDIUMTEXT("MEDIUMBLOB"),
+        TINYTEXT("TINYBLOB"),
+        CHAR("STRING"),
         BINARY("STRING"),
-        VARBINARY("VARCHAR"), DATE("NEWDATE"), POINT(
-            "GEOMETRY"), CURVE("GEOMETRY"), LINESTRING("GEOMETRY"), LINE("GEOMETRY"), LINEARRING("GEOMETRY"), SURFACE(
-            "GEOMETRY"), POLYGON("GEOMETRY"), GEOMETRYCOLLECTION("GEOMETRY"), MULTIPOINT("GEOMETRY"), MULTICURVE(
-            "GEOMETRY"), MULTILINESTRING("GEOMETRY"), MULTISURFACE("GEOMETRY"), MULTIPOLYGON("GEOMETRY"), NUMERIC(
-            "NEWDECIMAL"), DEC("NEWDECIMAL"), BOOLEAN("TINY"), BOOL("TINY"),
-        ;
-        private String innerType;
+        VARBINARY("VARCHAR"),
+        DATE("NEWDATE"),
+        POINT("GEOMETRY"),
+        CURVE("GEOMETRY"),
+        LINESTRING("GEOMETRY"),
+        LINE("GEOMETRY"),
+        LINEARRING("GEOMETRY"),
+        SURFACE("GEOMETRY"),
+        POLYGON("GEOMETRY"),
+        GEOMETRYCOLLECTION("GEOMETRY"),
+        MULTIPOINT("GEOMETRY"),
+        MULTICURVE("GEOMETRY"),
+        MULTILINESTRING("GEOMETRY"),
+        MULTISURFACE("GEOMETRY"),
+        MULTIPOLYGON("GEOMETRY"),
+        NUMERIC("NEWDECIMAL"),
+        DEC("NEWDECIMAL"),
+        BOOLEAN("TINY"),
+        BOOL("TINY"),
+        DATETIME("DATETIME2"),
+        TIMESTAMP("TIMESTAMP2"),
+        TIME("TIME2");
+
+        private final String innerType;
 
         SqlTypeConvert(String innerType) {
             this.innerType = innerType;

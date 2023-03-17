@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog;
 
-import com.aliyun.polardbx.binlog.base.BaseTest;
 import org.apache.commons.lang3.time.DateFormatUtils;
 import org.junit.Assert;
 import org.junit.Ignore;
@@ -23,12 +22,11 @@ import org.junit.Test;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
-import static com.aliyun.polardbx.binlog.CommonUtils.getActualTso;
 import static com.aliyun.polardbx.binlog.CommonUtils.getTsoPhysicalTime;
 import static com.aliyun.polardbx.binlog.CommonUtils.getTsoTimestamp;
 import static com.aliyun.polardbx.binlog.CommonUtils.tso2physicalTime;
 
-public class CommonUtilsTest extends BaseTest {
+public class CommonUtilsTest {
 
     @Test
     @Ignore
@@ -41,13 +39,14 @@ public class CommonUtilsTest extends BaseTest {
     @Test
     @Ignore
     public void testGetTsoDatetime() {
-        long seconds = getTsoPhysicalTime("690153487492710406414326000904841543680000000000000000", TimeUnit.SECONDS);
+        long seconds = getTsoPhysicalTime("703394672213701465615650119374759608330000000000127207", TimeUnit.SECONDS);
         System.out.println("seconds is :" + DateFormatUtils.format(seconds * 1000, "yyyy-MM-dd HH:mm:ss"));
     }
 
     @Test
     public void testGetActualTso() {
-        String actualTso = getActualTso("683055286485568716813616180804085473290000000000048688");
+        Long actualTso = getTsoTimestamp("700984129973806700815409065152909189120000000000000000");
+        System.out.println(actualTso);
         Assert.assertEquals("68305528648556871681361618080408547329", actualTso);
     }
 
@@ -55,5 +54,13 @@ public class CommonUtilsTest extends BaseTest {
     public void testGetTsoTimestamp() {
         long tsoTimestamp = getTsoTimestamp("683872748963535353613697927051770675200000000000282415");
         Assert.assertEquals(6838727489635353536L, tsoTimestamp);
+    }
+
+    @Test
+    public void testIsRealTsoTrans() {
+        String s1 = "683872748963535353613697927051770675200000000000282415";
+        String s2 = "683872748963535353613697927051770675200000000001282415";
+        Assert.assertTrue(CommonUtils.isTsoPolicyTrans(s1));
+        Assert.assertFalse(CommonUtils.isTsoPolicyTrans(s2));
     }
 }

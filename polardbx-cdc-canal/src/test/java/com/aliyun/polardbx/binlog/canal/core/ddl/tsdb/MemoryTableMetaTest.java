@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -670,6 +670,34 @@ public class MemoryTableMetaTest {
         System.out.println(sb);
 //        TableMeta t1 = memoryTableMeta.find("andor_qatest_polarx1", "v");
 //        Assert.assertNotNull(t1);
+    }
+
+    @Test
+    public void testRemovePK() {
+        String ddl = " create table t(id bigint primary key , content text)";
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, true);
+        memoryTableMeta.apply(null, "d1", ddl, null);
+        TableMeta meta = memoryTableMeta.find("d1", "t");
+        Assert.assertEquals(1, meta.getPrimaryFields().size());
+        String dropPk = "alter table t drop primary key";
+        memoryTableMeta.apply(null, "d1", dropPk, null);
+
+        meta = memoryTableMeta.find("d1", "t");
+        Assert.assertTrue(meta.getPrimaryFields().isEmpty());
+
+    }
+
+    @Test
+    public void testImplicitKey() {
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, true);
+        String sql = "CREATE TABLE `tiny_int_one_db_multi_tb` (\n"
+            + "\t`tinyintr` tinyint(4) NOT NULL,\n"
+            + "\t`tinyintr_1` tinyint(1) DEFAULT NULL,\n"
+            + "\t`tinyintr_3` tinyint(3) DEFAULT NULL,\n"
+            + "\tPRIMARY KEY (`_drds_implicit_id_`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = gbk";
+        String sql2 = memoryTableMeta.tryRepairSql(sql);
+        System.out.println(sql2);
     }
 
     private void gc() throws InterruptedException {

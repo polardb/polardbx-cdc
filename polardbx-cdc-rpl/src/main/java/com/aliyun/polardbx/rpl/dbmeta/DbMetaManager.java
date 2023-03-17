@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.rpl.dbmeta;
 
+import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
@@ -72,7 +73,7 @@ public class DbMetaManager {
         return tableInfo;
     }
 
-    public static List<String> getDatabases(DataSource dataSource) throws Throwable {
+    public static List<String> getDatabases(DataSource dataSource) throws Exception {
         List<String> dbs = new ArrayList<>();
         Connection conn = null;
         PreparedStatement stmt = null;
@@ -85,7 +86,7 @@ public class DbMetaManager {
             while (rs.next()) {
                 dbs.add(rs.getString(1));
             }
-        } catch (Throwable e) {
+        } catch (Exception e) {
             log.error("failed in getDatabases", e);
             throw e;
         } finally {
@@ -94,7 +95,7 @@ public class DbMetaManager {
         return dbs;
     }
 
-    public static List<String> getTables(DataSource dataSource) throws Throwable {
+    public static List<String> getTables(DataSource dataSource) throws Exception {
         List<String> tables = new ArrayList<>();
         Connection conn = null;
         PreparedStatement stmt = null;
@@ -107,7 +108,7 @@ public class DbMetaManager {
             while (rs.next()) {
                 tables.add(rs.getString(1));
             }
-        } catch (Throwable e) {
+        } catch (Exception e) {
             log.error("failed in getTables", e);
             throw e;
         } finally {
@@ -116,18 +117,21 @@ public class DbMetaManager {
         return tables;
     }
 
-    public static String getCreateTable(DataSource dataSource, String schema, String tbName) throws Throwable {
+    public static String getCreateTable(DataSource dataSource, String schema, String tbName) throws Exception {
         Connection conn = null;
         PreparedStatement stmt = null;
         ResultSet rs = null;
 
         try {
-            String sql = String.format(SHOW_CREATE_TABLE, schema, tbName);
+            String sql = String.format(SHOW_CREATE_TABLE, CommonUtils.escape(schema), CommonUtils.escape(tbName));
             conn = dataSource.getConnection();
             stmt = conn.prepareStatement(sql);
             rs = stmt.executeQuery(sql);
-            return rs.getString(2);
-        } catch (Throwable e) {
+            if (rs.next()) {
+                return rs.getString(2);
+            }
+            return null;
+        } catch (Exception e) {
             log.error("failed in getCreateTable", e);
             throw e;
         } finally {
@@ -149,7 +153,7 @@ public class DbMetaManager {
             DatabaseMetaData metaData = conn.getMetaData();
             schema = getIdentifierName(schema, metaData);
             tbName = getIdentifierName(tbName, metaData);
-            rs = metaData.getColumns("", schema, tbName, null);
+            rs = metaData.getColumns("", wrapEscape(schema), wrapEscape(tbName), null);
 
             while (rs.next()) {
                 String columnName = rs.getString(4);
@@ -272,7 +276,7 @@ public class DbMetaManager {
         Connection conn = null;
         PreparedStatement stmt = null;
         ResultSet rs = null;
-        String sql = String.format(SHOW_RULE, tbName);
+        String sql = String.format(SHOW_RULE, CommonUtils.escape(tbName));
 
         try {
             conn = dataSource.getConnection();
@@ -309,7 +313,7 @@ public class DbMetaManager {
         Connection conn = null;
         PreparedStatement stmt = null;
         ResultSet res = null;
-        String sql = String.format(SHOW_INDEXES, schema, tbName);
+        String sql = String.format(SHOW_INDEXES, CommonUtils.escape(schema), CommonUtils.escape(tbName));
 
         try {
             conn = dataSource.getConnection();
@@ -363,5 +367,9 @@ public class DbMetaManager {
         }
 
         return name;
+    }
+
+    private static String wrapEscape(String name) {
+        return '`' + CommonUtils.escape(name) + '`';
     }
 }

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -27,17 +27,20 @@ public class StringField extends Field {
     }
 
     @Override
-    public byte[] encode() {
-        if (data == null) {
-            return EMPTY;
+    public byte[] encodeInternal() {
+        byte[] data;
+        if (this.data instanceof byte[]) {
+            data = (byte[]) this.data;
+        } else {
+            data = String.valueOf(this.data).getBytes(charset);
         }
-        byte[] data = this.data.getBytes(charset);
+        
         int length_bytes = (fieldLength > 255) ? 2 : 1;
         int length = data.length;
         if (fieldLength < length_bytes) {
             length = 0;
-        } else if (length > fieldLength - length_bytes) {
-            length = (int) (fieldLength - length_bytes);
+        } else if (length > fieldLength) {
+            length = (int) (fieldLength);
         }
 
         byte[] output = new byte[length + length_bytes];

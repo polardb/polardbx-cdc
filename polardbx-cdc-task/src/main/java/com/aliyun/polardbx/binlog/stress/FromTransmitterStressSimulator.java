@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -53,9 +53,6 @@ public class FromTransmitterStressSimulator extends BaseStressSimulator {
 
     private static final List<String> ALL_PARTIES =
         Lists.newArrayList("111111111111111", "222222222222222", "333333333333333", "444444444444444");
-
-    private static List<TxnBufferItem> TxnBufferItems;
-
     private static final byte[] FORMAT_DESC_DATA = new byte[] {
         -103, -107, 113, 95, 15, 1, 0, 0, 0, -71, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 4, 0, 53, 46, 54, 46, 50, 57, 45, 84, 68, 68, 76, 45, 53,
@@ -67,6 +64,7 @@ public class FromTransmitterStressSimulator extends BaseStressSimulator {
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 10, 0, 0, 0, 0, 1, 60, -27, 100, 74};
+    private static List<TxnBufferItem> TxnBufferItems;
 
     //sh stress.sh TransmitterSimulator "stress.trans.messageItemSize=10 stress.trans.reuseTxnBufferItems=false"
     public static void main(String[] args) throws InterruptedException, IOException {

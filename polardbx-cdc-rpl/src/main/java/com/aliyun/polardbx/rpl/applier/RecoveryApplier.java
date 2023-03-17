@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,8 +16,6 @@ package com.aliyun.polardbx.rpl.applier;
 
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.RemoteBinlogProxy;
-import com.aliyun.polardbx.binlog.action.Appender;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
@@ -28,6 +26,8 @@ import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.remote.Appender;
+import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
@@ -50,7 +50,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.FLASHBACK_BINLOG_WRITE_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.FLASHBACK_BINLOG_WRITE_BUFFER_BYTE_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.FLASHBACK_BINLOG_WRITE_BUFFER_SQL_SIZE;
 import static com.aliyun.polardbx.rpl.common.RplConstants.FLASH_BACK_PARTIAL_PREFIX;
 import static com.aliyun.polardbx.rpl.common.RplConstants.FLASH_BACK_PARTIAL_RESULT_FILE;
 
@@ -61,30 +62,27 @@ import static com.aliyun.polardbx.rpl.common.RplConstants.FLASH_BACK_PARTIAL_RES
 public class RecoveryApplier extends BaseApplier {
 
     private final RecoveryFilter filter;
-
-    private BaseExtractor extractor;
-
-    private boolean isFuzzy = false;
-
     private final boolean isMirror;
-
     private final String schema;
 
-    private final int sqlBufferSize;
+    private final long bufferSqlSize;
+
+    private final long bufferByteSize;
 
     private final String filePrefix;
-
     private final String sequence;
-
     private final List<TransactionBucket> transactionBucketList = Lists.newArrayList();
-
+    private BaseExtractor extractor;
+    private boolean isFuzzy = false;
     private Map<String, Long> fileSizeMap;
 
     private Map<String, String> fileMd5Map;
 
-    private int sqlCounter = 0;
+    private long sqlCounter = 0;
 
-    private int alreadyFlushCounter = 0;
+    private long sqlByteOfThisBatch = 0;
+
+    private long alreadyFlushSqlCounter = 0;
 
     private long taskId;
 
@@ -101,7 +99,8 @@ public class RecoveryApplier extends BaseApplier {
         this.sequence = buildFixedLengthNumber(applierConfig.getSequence());
         this.filePrefix = MessageFormat.format(FLASH_BACK_PARTIAL_PREFIX, applierConfig.getRandomUUID(), sequence);
         this.filter = new RecoveryFilter(applierConfig);
-        this.sqlBufferSize = DynamicApplicationConfig.getInt(FLASHBACK_BINLOG_WRITE_BUFFER_SIZE);
+        this.bufferSqlSize = DynamicApplicationConfig.getInt(FLASHBACK_BINLOG_WRITE_BUFFER_SQL_SIZE);
+        this.bufferByteSize = DynamicApplicationConfig.getInt(FLASHBACK_BINLOG_WRITE_BUFFER_BYTE_SIZE);
         this.fileSizeMap = new HashMap<>();
         this.fileMd5Map = new HashMap<>();
         this.buildNextResultFileName();
@@ -125,51 +124,6 @@ public class RecoveryApplier extends BaseApplier {
             throw new PolardbxException("found dirty files for task " + taskId + " with prefix " + filePrefix);
         }
         return true;
-    }
-
-    private static class TransactionBucket {
-        private final String tid;
-        private final String startQueryLog;
-        private final List<String> sqlList = Lists.newArrayList();
-
-        public TransactionBucket(String tid, String startQueryLog) {
-            this.tid = tid;
-            this.startQueryLog = startQueryLog;
-        }
-
-        public boolean isCurrentTid(String newTid) {
-            return tid.equalsIgnoreCase(newTid);
-        }
-
-        public void addSql(String newSql) {
-            this.sqlList.add(newSql);
-        }
-
-        public void appendBuffer(StringBuilder sb) {
-            String startTransaction = String.format("\n-- Transaction start, threadId %s;\n", tid);
-            if (StringUtils.isNotEmpty(startQueryLog)) {
-                startTransaction += String.format("-- %s\n", startQueryLog);
-            }
-
-            sb.append(startTransaction);
-            for (String s : sqlList) {
-                sb.append(s).append("\n");
-            }
-            sb.append(RplConstants.TRANSACTION_END_COMMENT);
-        }
-
-        public void reverseBuffer(StringBuilder sb) {
-            String startTransaction = String.format("\n-- Transaction start, threadId %s;\n", tid);
-            if (StringUtils.isNotEmpty(startQueryLog)) {
-                startTransaction += String.format("-- %s\n", startQueryLog);
-            }
-
-            sb.append(startTransaction);
-            for (int i = sqlList.size() - 1; i >= 0; i--) {
-                sb.append(sqlList.get(i)).append("\n");
-            }
-            sb.append(RplConstants.TRANSACTION_END_COMMENT);
-        }
     }
 
     @Override
@@ -219,6 +173,8 @@ public class RecoveryApplier extends BaseApplier {
 
                 if (StringUtils.isNotEmpty(sql)) {
                     currentTransaction.addSql(sql);
+                    // 粗略计算下字节数
+                    sqlByteOfThisBatch += sql.length() * 2L;
                     sqlCounter++;
                 }
 
@@ -226,14 +182,13 @@ public class RecoveryApplier extends BaseApplier {
                 log.warn("receive stop flag!");
                 try {
                     flush();
-                    dbmsEvents.clear();
                     recordTaskExecuteInfo();
 
                     //注入故障
                     tryInjectTrouble();
 
-                    //直接退出，虽然不够优雅，但免去了很多判断逻辑
                     FSMMetaManager.setTaskFinish(taskId);
+                    // todo by yudong 上传日志至oss
                     System.exit(0);
                 } catch (Throwable e) {
                     log.error("flush data occur exception", e);
@@ -248,12 +203,16 @@ public class RecoveryApplier extends BaseApplier {
         }
 
         try {
-            if (sqlCounter - alreadyFlushCounter > sqlBufferSize) {
-                alreadyFlushCounter = sqlCounter;
+            if (sqlCounter - alreadyFlushSqlCounter > bufferSqlSize
+                || sqlByteOfThisBatch > bufferByteSize) {
+                alreadyFlushSqlCounter = sqlCounter;
+                sqlByteOfThisBatch = 0;
                 flush();
             }
         } catch (Throwable e) {
             log.error("flush data occur exception ", e);
+            MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
+                TaskContext.getInstance().getTaskId(), "flush data occur exception: " + e.getMessage());
             throw e;
         }
 
@@ -280,7 +239,7 @@ public class RecoveryApplier extends BaseApplier {
 
         transactionBucketList.clear();
 
-        final int size = sqlCounter;
+        final long size = sqlCounter;
         if (stringBuilder.length() > 0) {
             log.info("start flush sql size: " + size);
             long nextPosition = 0;
@@ -511,5 +470,50 @@ public class RecoveryApplier extends BaseApplier {
         resultMeta.setInjectTroubleCount(previousResultMeta != null ?
             previousResultMeta.getInjectTroubleCount() + 1 : 0);
         DbTaskMetaManager.updateExtra(taskId, JSONObject.toJSONString(resultMeta));
+    }
+
+    private static class TransactionBucket {
+        private final String tid;
+        private final String startQueryLog;
+        private final List<String> sqlList = Lists.newArrayList();
+
+        public TransactionBucket(String tid, String startQueryLog) {
+            this.tid = tid;
+            this.startQueryLog = startQueryLog;
+        }
+
+        public boolean isCurrentTid(String newTid) {
+            return tid.equalsIgnoreCase(newTid);
+        }
+
+        public void addSql(String newSql) {
+            this.sqlList.add(newSql);
+        }
+
+        public void appendBuffer(StringBuilder sb) {
+            String startTransaction = String.format("\n-- Transaction start, threadId %s;\n", tid);
+            if (StringUtils.isNotEmpty(startQueryLog)) {
+                startTransaction += String.format("-- %s\n", startQueryLog);
+            }
+
+            sb.append(startTransaction);
+            for (String s : sqlList) {
+                sb.append(s).append("\n");
+            }
+            sb.append(RplConstants.TRANSACTION_END_COMMENT);
+        }
+
+        public void reverseBuffer(StringBuilder sb) {
+            String startTransaction = String.format("\n-- Transaction start, threadId %s;\n", tid);
+            if (StringUtils.isNotEmpty(startQueryLog)) {
+                startTransaction += String.format("-- %s\n", startQueryLog);
+            }
+
+            sb.append(startTransaction);
+            for (int i = sqlList.size() - 1; i >= 0; i--) {
+                sb.append(sqlList.get(i)).append("\n");
+            }
+            sb.append(RplConstants.TRANSACTION_END_COMMENT);
+        }
     }
 }

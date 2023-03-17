@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -35,8 +35,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_RECALLDAYS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_FORCE_CONSUME_BACKUP;
@@ -46,24 +48,23 @@ public class CanalBootstrap {
     private static final Logger logger = LoggerFactory.getLogger(CanalBootstrap.class);
     private static final Logger searchLogger = LoggerFactory.getLogger("searchLogger");
 
-    private BinlogEventProcessor processor;
-
-    private AuthenticationInfo authenticationInfo;
+    private final BinlogEventProcessor processor;
+    private final AuthenticationInfo authenticationInfo;
+    private final String startCmdTSO;
+    private final String polarxServerVersion;
+    private final String localBinlogDir;
+    private final List<LogEventFilter<?>> filterList = new ArrayList<>();
+    private final LinkedList<String> searchQueue = new LinkedList<>();
+    private final AtomicBoolean running = new AtomicBoolean(false);
 
     private MySqlInfo mySqlInfo;
-
-    private String polarxServerVersion;
-
-    private String localBinlogDir;
-
-    private List<LogEventFilter> filterList = new ArrayList<>();
-    private LogEventHandler handler;
+    private DefaultBinlogEventHandle handle;
+    private LogEventHandler<?> handler;
     private Thread runnableThread;
-    private Long preferHostId;
-    private String startCmdTSO;
+    private final Long preferHostId;
 
-    public CanalBootstrap(AuthenticationInfo authenticationInfo, String polarxServerVersion, String localBinlogDir,
-                          Long preferHostId, String startCmdTSO) {
+    public CanalBootstrap(AuthenticationInfo authenticationInfo, String polarxServerVersion,
+                          String localBinlogDir, Long preferHostId, String startCmdTSO) {
         this.authenticationInfo = authenticationInfo;
         this.localBinlogDir = localBinlogDir;
         this.polarxServerVersion = polarxServerVersion;
@@ -72,47 +73,53 @@ public class CanalBootstrap {
         this.startCmdTSO = startCmdTSO;
     }
 
-    public void setHandler(LogEventHandler handler) {
+    public void setHandler(LogEventHandler<?> handler) {
         this.handler = handler;
     }
 
-    public void addLogFilter(LogEventFilter filter) {
+    public void addLogFilter(LogEventFilter<?> filter) {
         filterList.add(filter);
     }
 
-    public void start(final String requestTso) throws Exception {
-        runnableThread = new Thread(() -> {
-            try {
-                doStart(requestTso);
-                logger.warn("maybe rds master slave ha switch, will stop and restart task!");
-                stop();
-                Runtime.getRuntime().halt(1);
-            } catch (ConsumeOSSBinlogEndException e) {
-                logger.warn("oss consume end! will wait 30s!");
-                // 等待30s
+    public void start(final String requestTso) {
+        if (running.compareAndSet(false, true)) {
+            runnableThread = new Thread(() -> {
                 try {
-                    Thread.sleep(TimeUnit.SECONDS.toMillis(30));
-                } catch (InterruptedException interruptedException) {
-
+                    doStart(requestTso);
+                    logger.warn("maybe rds master slave ha switch, will stop and restart task!");
+                    if (running.get()) {
+                        stop();
+                        Runtime.getRuntime().halt(1);
+                    }
+                } catch (ConsumeOSSBinlogEndException e) {
+                    logger.warn("oss consume end! will wait 30s!");
+                    // 等待30s
+                    try {
+                        Thread.sleep(TimeUnit.SECONDS.toMillis(30));
+                    } catch (InterruptedException interruptedException) {
+                        //do nothing
+                    }
+                    logger.warn("oss consume end!");
+                    Runtime.getRuntime().halt(1);
+                } catch (Throwable e) {
+                    logger.error("do start dumper failed!", e);
+                    Runtime.getRuntime().halt(1);
                 }
-                logger.warn("oss consume end!");
-                Runtime.getRuntime().halt(1);
-            } catch (Throwable e) {
-                logger.error("do start dumper failed!", e);
-                Runtime.getRuntime().halt(1);
-            }
-        }, "canal-dumper-" + authenticationInfo.getStorageInstId());
-        runnableThread.setDaemon(true);
-        runnableThread.start();
+            }, "canal-dumper-" + authenticationInfo.getStorageInstId());
+            runnableThread.setDaemon(true);
+            runnableThread.start();
+        }
     }
 
     public void stop() {
-        logger.warn("stop canal bootstrap");
-        if (runnableThread != null) {
-            runnableThread.interrupt();
+        if (running.compareAndSet(true, false)) {
+            logger.warn("stop canal bootstrap");
+            if (runnableThread != null) {
+                runnableThread.interrupt();
+            }
+            processor.stop();
+            logger.warn("success stop canal bootstrap");
         }
-        processor.stop();
-        logger.warn("success stop canal bootstrap");
     }
 
     private void doStart(String requestTso) throws Exception {
@@ -151,6 +158,17 @@ public class CanalBootstrap {
         try {
             consumeOss(requestTso);
         } catch (ConsumeOSSBinlogEndException e) {
+            int curFileIdx = searchQueue.indexOf(processor.currentFileName());
+            if (curFileIdx != -1 && curFileIdx < searchQueue.size()) {
+                String nextFile = searchQueue.get(curFileIdx + 1);
+                if (nextFile != null && Integer.parseInt(StringUtils.substringAfter(nextFile, ".")) == 1) {
+                    logger.info("detect rds transfer and , continue consume after oss finished! + " + nextFile);
+                    processor.resetNextLogPosition(nextFile);
+                    handle.markDnTransferBarrier();
+                    processor.restore(connection);
+                    return;
+                }
+            }
             if (processor.isServerIdMatch()) {
                 // 尝试继续消费
                 logger.info("continue consume after oss finished!");
@@ -200,11 +218,11 @@ public class CanalBootstrap {
         throws Exception {
         logger.info("start consume with tso " + requestTso + " from " + startPosition);
         BinlogDumpContext.setDumpStage(BinlogDumpContext.DumpStage.STAGE_DUMP);
-        DefaultBinlogEventHandle handle =
+        handle =
             new DefaultBinlogEventHandle(authenticationInfo, polarxServerVersion, startPosition, requestTso,
                 mySqlInfo.getServerCharactorSet(), mySqlInfo.getLowerCaseTableNames());
 
-        for (LogEventFilter filter : filterList) {
+        for (LogEventFilter<?> filter : filterList) {
             handle.addFilter(filter);
         }
 
@@ -242,8 +260,9 @@ public class CanalBootstrap {
                 searchTsoEventHandle =
                     new SearchTsoEventHandleV1(authenticationInfo, requestTso, searchTso, startCmdTSO);
             } else {
+                boolean quickMode = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_QUICKMODE);
                 searchTsoEventHandle =
-                    new SearchTsoEventHandleV2(authenticationInfo, searchTso, startCmdTSO);
+                    new SearchTsoEventHandleV2(authenticationInfo, searchTso, startCmdTSO, quickMode);
             }
             processor.setHandle(searchTsoEventHandle);
         } else {
@@ -261,11 +280,13 @@ public class CanalBootstrap {
         while (true) {
             processor.init(connection.fork(), searchFile, 0, true, mySqlInfo.getServerCharactorSet(),
                 null, mySqlInfo.getBinlogChecksum());
+            searchFile = processor.currentFileName();
             long binlogFileSize = connection.binlogFileSize(searchFile);
             if (binlogFileSize == -1) {
                 //找不到这个文件，直接break
                 break;
             }
+            searchQueue.addFirst(searchFile);
             searchLogger.info("start search " + searchTso + " in " + searchFile);
             searchTsoEventHandle
                 .setEndPosition(new BinlogPosition(searchFile, binlogFileSize, -1, -1));
@@ -276,6 +297,7 @@ public class CanalBootstrap {
             String topologyContext = searchTsoEventHandle.getTopologyContext();
             if (StringUtils.isNotBlank(topologyContext)) {
                 RuntimeContext.setInitTopology(topologyContext);
+                RuntimeContext.setInstructionId(searchTsoEventHandle.getCommandId());
             }
             if (startPosition != null) {
                 return startPosition;

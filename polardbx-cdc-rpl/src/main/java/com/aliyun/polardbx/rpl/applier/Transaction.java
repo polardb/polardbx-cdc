@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,11 +14,14 @@
  */
 package com.aliyun.polardbx.rpl.applier;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.aliyun.polardbx.binlog.storage.RepoUnit;
+import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.taskmeta.PersistConfig;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +38,9 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -60,6 +66,12 @@ public class Transaction {
     private List<Range> rangeList;
     private boolean alreadyIteration;
     private PersistConfig persistConfig;
+    private static final int DESERIALIZE_PARALLELISM = DynamicApplicationConfig
+        .getInt(ConfigKeys.RPL_ROCKSDB_DESERIALIZE_PARALLELISM);
+    private static final ExecutorService executorForDeserialize = ThreadPoolUtil
+        .createExecutorWithFixedNum(DESERIALIZE_PARALLELISM, "deserializer");
+    private static final ExecutorService executorForCompact = ThreadPoolUtil
+        .createExecutorWithFixedNum(1, "compactor");
 
     public Transaction() {
     }
@@ -246,24 +258,38 @@ public class Transaction {
         }
 
         private void restore() {
-            if (!isPersisted) {
-                return;
-            }
-
-            String beginKey = persistKeyPrefix + "_" + StringUtils.leftPad(start + "", 19, "0");
-            String endKey = persistKeyPrefix + "_" + StringUtils.leftPad(start + count.intValue() + "", 19, "0");
-            byte[] beginKeyBytes = ByteUtil.bytes(beginKey);
-            byte[] endKeyBytes = ByteUtil.bytes(endKey);
-            List<Pair<byte[], byte[]>> pairList = repoUnit.getRange(beginKeyBytes, endKeyBytes, count.intValue());
-
-            events = new LinkedList<>();
-            pairList.forEach(p -> events.add(SerializationUtils.deserialize(p.getValue())));
-
             try {
+                if (!isPersisted) {
+                    return;
+                }
+
+                String beginKey = persistKeyPrefix + "_" + StringUtils.leftPad(start + "", 19, "0");
+                String endKey = persistKeyPrefix + "_" + StringUtils.leftPad(start + count.intValue() + "", 19, "0");
+                byte[] beginKeyBytes = ByteUtil.bytes(beginKey);
+                byte[] endKeyBytes = ByteUtil.bytes(endKey);
+                List<Pair<byte[], byte[]>> pairList = repoUnit.getRange(beginKeyBytes, endKeyBytes, count.intValue());
+
+                events = new LinkedList<>();
+                ArrayList<Future<DBMSEvent>> futures = new ArrayList<>(2000);
+                for (Pair<byte[], byte[]> one: pairList) {
+                    futures.add(executorForDeserialize.submit(() -> SerializationUtils.deserialize(one.getValue())));
+                }
+                for (Future<DBMSEvent> future: futures) {
+                    events.add(future.get());
+                }
                 repoUnit.deleteRange(beginKeyBytes, endKeyBytes);
-                repoUnit.compactRange(beginKeyBytes, endKeyBytes);
-            } catch (RocksDBException e) {
-                throw new PolardbxException("delete range data failed !", e);
+                // todo by jiyue 能否合并compactRange
+                executorForCompact.submit(() -> {
+                    try {
+                        repoUnit.compactRange(beginKeyBytes, endKeyBytes);
+                    } catch (RocksDBException e) {
+                        throw new PolardbxException("compact range failed !", e);
+                    }
+                }
+                );
+
+            } catch (InterruptedException | ExecutionException | RocksDBException e) {
+                throw new PolardbxException("restore range data failed !", e);
             }
         }
     }

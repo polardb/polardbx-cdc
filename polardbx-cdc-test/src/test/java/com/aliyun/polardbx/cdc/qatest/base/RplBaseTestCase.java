@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,7 @@ package com.aliyun.polardbx.cdc.qatest.base;
 
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.relay.HashLevel;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -29,11 +30,20 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.cdc.qatest.base.ConfigConstant.CDC_WAIT_TOKEN_TIMEOUT_MINUTES;
+import static com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil.configProp;
+import static com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil.getCompareDetailParallelism;
 import static com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil.usingBinlogX;
 
 /**
@@ -52,11 +62,18 @@ public class RplBaseTestCase extends BaseTestCase {
 
     protected Connection polardbxConnection;
     protected Connection cdcSyncDbConnection;
+    protected Connection cdcSyncDbConnectionFirst;
     protected Connection cdcSyncDbConnectionSecond;
+    protected Connection cdcSyncDbConnectionThird;
 
     protected JdbcTemplate polardbxJdbcTemplate;
     protected JdbcTemplate cdcSyncDbJdbcTemplate;
+    protected JdbcTemplate cdcSyncDbFirstJdbcTemplate;
     protected JdbcTemplate cdcSyncDbSecondJdbcTemplate;
+    protected JdbcTemplate cdcSyncDbThirdJdbcTemplate;
+
+    protected ExecutorService compareDetailExecutorService =
+        Executors.newFixedThreadPool(getCompareDetailParallelism());
 
     @BeforeClass
     public static void beforeClass() throws SQLException {
@@ -64,17 +81,22 @@ public class RplBaseTestCase extends BaseTestCase {
     }
 
     @Before
-    public void before() {
+    public void before() throws SQLException {
         this.polardbxConnection = getPolardbxConnection();
         this.polardbxJdbcTemplate = new JdbcTemplate(ConnectionManager.getInstance().getPolardbxDataSource());
-
-        this.cdcSyncDbConnection = getCdcSyncDbConnection();
-        this.cdcSyncDbJdbcTemplate = new JdbcTemplate(ConnectionManager.getInstance().getCdcSyncDbDataSource());
-
         if (usingBinlogX) {
+            this.cdcSyncDbConnectionFirst = getCdcSyncDbConnectionFirst();
             this.cdcSyncDbConnectionSecond = getCdcSyncDbConnectionSecond();
+            this.cdcSyncDbConnectionThird = getCdcSyncDbConnectionThird();
+            this.cdcSyncDbFirstJdbcTemplate =
+                new JdbcTemplate(ConnectionManager.getInstance().getCdcSyncDbDataSourceFirst());
             this.cdcSyncDbSecondJdbcTemplate =
                 new JdbcTemplate(ConnectionManager.getInstance().getCdcSyncDbDataSourceSecond());
+            this.cdcSyncDbThirdJdbcTemplate =
+                new JdbcTemplate(ConnectionManager.getInstance().getCdcSyncDbDataSourceThird());
+        } else {
+            this.cdcSyncDbConnection = getCdcSyncDbConnection();
+            this.cdcSyncDbJdbcTemplate = new JdbcTemplate(ConnectionManager.getInstance().getCdcSyncDbDataSource());
         }
     }
 
@@ -95,22 +117,35 @@ public class RplBaseTestCase extends BaseTestCase {
     }
 
     public void waitAndCheck(CheckParameter checkParameter) {
+        //wait
+        sendTokenAndWait(checkParameter);
+
+        //execute callback
+        check(checkParameter);
+    }
+
+    public void sendTokenAndWait(CheckParameter checkParameter) {
         //send token
         String uuid = UUID.randomUUID().toString();
         String tableName = TOKEN_TABLE_PREFIX + uuid;
         JdbcUtil.executeSuccess(polardbxConnection, String.format(TOKEN_TABLE_CREATE_SQL, tableName));
 
         //wait token
-        loopWait(tableName, cdcSyncDbConnection);
         if (usingBinlogX) {
-            loopWait(tableName, cdcSyncDbConnectionSecond);
+            loopWait(tableName, cdcSyncDbConnectionFirst, checkParameter.getLoopWaitTimeoutMs());
+            loopWait(tableName, cdcSyncDbConnectionSecond, checkParameter.getLoopWaitTimeoutMs());
+            loopWait(tableName, cdcSyncDbConnectionThird, checkParameter.getLoopWaitTimeoutMs());
+        } else {
+            loopWait(tableName, cdcSyncDbConnection, checkParameter.getLoopWaitTimeoutMs());
         }
-
-        //execute callback
-        check(checkParameter);
     }
 
-    public void loopWait(String token, Connection connection) {
+    public void loopWait(String token, Connection connection, long timeout) {
+        if (timeout <= 0) {
+            int waitTimeMinute = Integer.parseInt(configProp.getProperty(CDC_WAIT_TOKEN_TIMEOUT_MINUTES, "20"));
+            timeout = waitTimeMinute * 60 * 1000;
+        }
+
         long startTime = System.currentTimeMillis();
         while (true) {
             try {
@@ -119,7 +154,7 @@ public class RplBaseTestCase extends BaseTestCase {
                 break;
             } catch (Throwable ignored) {
             }
-            if (System.currentTimeMillis() - startTime > 1000 * 120) {
+            if (System.currentTimeMillis() - startTime > timeout) {
                 throw new PolardbxException("loop wait timeout for table  " + token);
             } else {
                 try {
@@ -132,25 +167,108 @@ public class RplBaseTestCase extends BaseTestCase {
 
     public void check(CheckParameter parameter) {
         if (usingBinlogX) {
-            //TODO
-        } else {
-            if (parameter.isDirectCompareDetail()) {
-                compareDetail(parameter.getDbName(), parameter.getTbName(), cdcSyncDbJdbcTemplate);
-            } else {
-                try {
-                    compareChecksum(parameter.getDbName(), parameter.getTbName(), cdcSyncDbConnection);
-                } catch (Throwable t) {
-                    compareDetail(parameter.getDbName(), parameter.getTbName(), cdcSyncDbJdbcTemplate);
+            HashLevel hashLevel = StreamHashUtil.getHashLevel(parameter.getDbName(), parameter.getTbName());
+            if (parameter.getExpectHashLevel() != null) {
+                Assert.assertEquals(parameter.getExpectHashLevel(), hashLevel);
+            }
+            if (hashLevel != HashLevel.RECORD) {
+                int streamSeq = StreamHashUtil.getHashStreamSeq(parameter.getDbName(), parameter.getTbName());
+                if (streamSeq == 0) {
+                    compareOnce(parameter, cdcSyncDbFirstJdbcTemplate, cdcSyncDbConnectionFirst,
+                        parameter.getContextInfoSupplier());
+                } else if (streamSeq == 1) {
+                    compareOnce(parameter, cdcSyncDbSecondJdbcTemplate, cdcSyncDbConnectionSecond,
+                        parameter.getContextInfoSupplier());
+                } else if (streamSeq == 2) {
+                    compareOnce(parameter, cdcSyncDbThirdJdbcTemplate, cdcSyncDbConnectionThird,
+                        parameter.getContextInfoSupplier());
+                } else {
+                    throw new PolardbxException("invalid stream seq " + streamSeq);
                 }
+            } else {
+                //行级hash，放到链路复检阶段进行检测
+            }
+        } else {
+            compareOnce(parameter, cdcSyncDbJdbcTemplate, cdcSyncDbConnection, parameter.getContextInfoSupplier());
+        }
+    }
+
+    public void compareOnce(CheckParameter parameter, JdbcTemplate jdbcTemplate, Connection connection,
+                            Supplier<String> contextSupplier) {
+        if (parameter.isDirectCompareDetail()) {
+            compareDetail(parameter.getDbName(), parameter.getTbName(), jdbcTemplate,
+                parameter.isCompareDetailOneByOne(), contextSupplier);
+        } else {
+            try {
+                compareChecksum(parameter.getDbName(), parameter.getTbName(), connection);
+            } catch (Throwable t) {
+                compareDetail(parameter.getDbName(), parameter.getTbName(), jdbcTemplate,
+                    parameter.isCompareDetailOneByOne(), contextSupplier);
             }
         }
     }
 
-    public void compareDetail(String dbName, String tableName, JdbcTemplate dstJdbcTemplate) {
+    public void compareDetail(String dbName, String tableName, JdbcTemplate dstJdbcTemplate,
+                              boolean compareOneByOne, Supplier<String> contextSupplier) {
+        if (compareOneByOne) {
+            compareDetailOneByOne(dbName, tableName, dstJdbcTemplate, contextSupplier);
+        } else {
+            compareDetailBatch(dbName, tableName, dstJdbcTemplate);
+        }
+    }
+
+    public void compareDetailBatch(String dbName, String tableName, JdbcTemplate dstJdbcTemplate) {
         Pair<List<Map<String, Object>>, List<Map<String, Object>>> pair =
-            getTableDetail(dbName, tableName, dstJdbcTemplate);
+            getTableDetail(dbName, tableName, dstJdbcTemplate, null);
         Assert.assertEquals("src<" + pair.getLeft() + "> and dst<" + pair.getRight() + "> data show equals",
             0, new ResultSetComparator().compare(pair.getLeft(), pair.getRight()));
+    }
+
+    public void compareDetailOneByOne(String dbName, String tableName, JdbcTemplate dstJdbcTemplate,
+                                      Supplier<String> contextSupplier) {
+        String sql = String.format("select id from `%s`.`%s`", dbName, tableName);
+        List<Map<String, Object>> ids = polardbxJdbcTemplate.queryForList(sql);
+
+        final ConcurrentHashMap<Object, String> successIds = new ConcurrentHashMap<>();
+        final ConcurrentHashMap<Object, String> failIds = new ConcurrentHashMap<>();
+        log.info("prepare to compare detail one by one, total record size for check is " + ids.size());
+
+        List<Future<?>> futures = new ArrayList<>();
+        for (Map<String, Object> map : ids) {
+            Future<?> future = compareDetailExecutorService.submit(() -> {
+                Object id = map.get("id");
+                try {
+                    Pair<List<Map<String, Object>>, List<Map<String, Object>>> pair =
+                        getTableDetail(dbName, tableName, dstJdbcTemplate, id);
+                    ResultSetComparator comparator = new ResultSetComparator();
+                    int result = comparator.compare(pair.getLeft(), pair.getRight());
+                    Assert.assertEquals("id <" + id + ">, diff data is " + comparator.getDiffColumns() +
+                        ", diff data types is " + comparator.getDiffColumnTypes(), 0, result);
+                    successIds.put(id, "1");
+                } catch (Throwable t) {
+                    failIds.put(id, "1");
+                    log.error("compare one record error , " + t.getMessage(), t);
+                    if (contextSupplier != null) {
+                        log.error("context info is " + contextSupplier.get());
+                    }
+                }
+            });
+            futures.add(future);
+        }
+
+        futures.forEach(i -> {
+            try {
+                i.get();
+            } catch (Throwable t) {
+                log.error("wait future error!", t);
+            }
+        });
+
+        if (!failIds.isEmpty()) {
+            log.error("failed ids set is " + failIds.keys());
+        }
+        Assert.assertEquals("success ids size : " + successIds.size() + ", fail ids size : " + failIds.size(),
+            ids.size(), successIds.size());
     }
 
     public void compareChecksum(String dbName, String tableName, Connection cdcSyncDbConnection) {
@@ -202,15 +320,21 @@ public class RplBaseTestCase extends BaseTestCase {
     }
 
     public Pair<List<Map<String, Object>>, List<Map<String, Object>>> getTableDetail(String dbName, String tableName,
-                                                                                     JdbcTemplate dstJdbcTemplate) {
+                                                                                     JdbcTemplate dstJdbcTemplate,
+                                                                                     Object key) {
         StringBuilder builder = new StringBuilder();
 
         builder.append("select * from `" + dbName + "`")
             .append(".")
-            .append("`").append(tableName).append("`")
-            .append("order by id asc");
+            .append("`").append(tableName).append("`");
+        if (key != null) {
+            builder.append(" where id = '").append(key).append("'");
+        }
+        builder.append(" order by id asc");
 
-        log.info("check sql {}", builder.toString());
+        if (key == null) {
+            log.info("check sql {}", builder.toString());
+        }
         List<Map<String, Object>> s = polardbxJdbcTemplate.queryForList(
             builder.toString());
         s.forEach(m -> {

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author yanfenglin
@@ -24,12 +27,11 @@ public class ThreadRecorder {
     private String tname;
     private volatile boolean complete;
     private volatile long rt;
-    private String position;
     private STATE state;
     private String binlogFile;
     private long logPos;
     private long when;
-    private String queuedTransSizeInSorter;
+    private long queuedTransSizeInSorter;
     private String firstTransInSorter;
     private String firstTransXidInSorter;
     private String storageInstanceId;
@@ -37,6 +39,23 @@ public class ThreadRecorder {
     private long mergeSourcePassCount;
     private long mergeSourcePollCount;
     private volatile long netIn = 0;
+
+    private static final Map<Long, ThreadRecorder> ALL = new ConcurrentHashMap<>();
+
+    public static void registerRecorder(ThreadRecorder threadRecorder) {
+        ALL.put(threadRecorder.getTid(), threadRecorder);
+    }
+
+    public static Map<Long, ThreadRecorder> getRecorderMap() {
+        return ALL;
+    }
+
+    public static void removeRecord(ThreadRecorder threadRecorder) {
+        if (threadRecorder == null || threadRecorder.getTname() == null) {
+            return;
+        }
+        ALL.remove(threadRecorder.getTid());
+    }
 
     public ThreadRecorder(String storageInstanceId) {
         this.state = STATE.SEARCH;
@@ -134,15 +153,11 @@ public class ThreadRecorder {
         this.netIn += netIn;
     }
 
-    public void resetNetIn() {
-        this.netIn = 0;
-    }
-
-    public String getQueuedTransSizeInSorter() {
+    public long getQueuedTransSizeInSorter() {
         return queuedTransSizeInSorter;
     }
 
-    public void setQueuedTransSizeInSorter(String queuedTransSizeInSorter) {
+    public void setQueuedTransSizeInSorter(long queuedTransSizeInSorter) {
         this.queuedTransSizeInSorter = queuedTransSizeInSorter;
     }
 
@@ -206,13 +221,13 @@ public class ThreadRecorder {
         return "unknow error!";
     }
 
-    private static enum STATE {
+    private enum STATE {
         SEARCH, DUMP, STOP
     }
 
     public interface CallbackFunction {
 
-        public void call() throws Exception;
+        void call() throws Exception;
     }
 
 }

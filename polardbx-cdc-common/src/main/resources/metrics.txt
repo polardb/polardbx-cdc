@@ -1,24 +1,10 @@
 |polardbx_cdc_dumper_m_delay|dumper_m_delay|平均值|latestDelayTimeOnCommit|dumper master延迟时间|
-|polardbx_cdc_dumper_m_eps|dumper_m_eps|平均值|avgEventWriteTps|dumper master每秒处理Event的个数(含Begin和Commit)|
-|polardbx_cdc_dumper_m_dml_eps|dumper_m_dml_eps|平均值|avgRevEventWriteTps|dumper master每秒处理Event的个数(不包含Begin和Commit)|
-|polardbx_cdc_dumper_m_tps|dumper_m_tps|平均值|avgTxnWriteTps|dumper master每秒处理事务的个数|
-|polardbx_cdc_dumper_m_bps|dumper_m_bps|平均值|avgWriteBytesTps|dumper master每秒处理的数据量|
+|polardbx_cdc_dumper_m_eps|dumper_m_eps|平均值|avgWriteEps|dumper master每秒处理Event的个数(含Begin和Commit)|
+|polardbx_cdc_dumper_m_dml_eps|dumper_m_dml_eps|平均值|avgRevEps|dumper master每秒处理Event的个数(不包含Begin和Commit)|
+|polardbx_cdc_dumper_m_tps|dumper_m_tps|平均值|avgWriteTps|dumper master每秒处理事务的个数|
+|polardbx_cdc_dumper_m_bps|dumper_m_bps|平均值|avgWriteBps|dumper master每秒处理的数据量|
 |polardbx_cdc_dumper_m_event_rt|dumper_m_event_rt|平均值|avgWriteTimePerEvent|dumper master每条事件的处理时间|
 |polardbx_cdc_dumper_m_txn_rt|dumper_m_txn_rt|平均值|avgWriteTimePerTxn|dumper master每个事务的处理时间|
-|polardbx_cdc_dumper_s_delay|dumper_s_delay|平均值|latestDelayTimeOnCommit|dumper slave延迟时间|
-|polardbx_cdc_dumper_s_eps|dumper_s_eps|平均值|avgEventWriteTps|dumper slave每秒处理Event的个数|
-|polardbx_cdc_dumper_s_tps|dumper_s_tps|平均值|avgTxnWriteTps|dumper slave每秒处理事务的个数|
-|polardbx_cdc_dumper_s_bps|dumper_s_bps|平均值|avgWriteBytesTps|dumper slave每秒处理的数据量|
-|polardbx_cdc_dumper_s_event_rt|dumper_s_event_rt|平均值|avgWriteTimePerEvent|dumper slave每条事件的处理时间|
-|polardbx_cdc_dumper_s_txn_rt|dumper_s_txn_rt|平均值|avgWriteTimePerTxn|dumper slave每个事务的处理时间|
-|polardbx_cdc_task_merge_txn_count|merge_txn_count|累加值|totalMergePassCount|task合并的总事务数|
-|polardbx_cdc_task_merge_txn_2pc_count|merge_2pctxn_count|累加值|totalMergePass2PCCount|task合并的总事务数(2pc)|
-|polardbx_cdc_task_merge_buf_size|merge_buf_size|平均值|ringBufferQueuedSize|merge缓冲队列占使用量|
-|polardbx_cdc_task_transmit_buf_size|trans_buf_size|平均值|transmitQueuedSize|Transmitter缓冲队列占使用量|
-|polardbx_task_e_network_in_bytes_total_naive|net_in|瞬时值|netIn|入口流量|
-|polardbx_task_e_in_tps|tran_per_second|瞬时值|tranTotalCount|事务tps|
-|polardbx_task_e_in_eps|event_per_second|瞬时值|eventTotalCount|eps|
-|polardbx_task_e_in_max_delay|in_delay|瞬时值|delay|输入延迟|
 |polardbx_cdc_dumper_m_youngUsed|dumper_m_youngUsed|瞬时值|-|dumper master年轻代使用量|
 |polardbx_cdc_dumper_m_youngMax|dumper_m_youngMax|瞬时值|-|dumper master年轻代大小|
 |polardbx_cdc_dumper_m_oldUsed|dumper_m_oldUsed|瞬时值|-|dumper master老年代使用量|
@@ -29,6 +15,12 @@
 |polardbx_cdc_dumper_m_youngCollectionTime|dumper_m_youngCollectionTime|累计值|-|dumper master年轻代GC时间|
 |polardbx_cdc_dumper_m_oldCollectionTime|dumper_m_oldCollectionTime|累计值|-|dumper master老年代GC时间|
 |polardbx_cdc_dumper_m_currentThreadCount|dumper_m_currentThreadCount|瞬时值|-|dumper master线程数|
+|polardbx_cdc_dumper_s_delay|dumper_s_delay|平均值|latestDelayTimeOnCommit|dumper slave延迟时间|
+|polardbx_cdc_dumper_s_eps|dumper_s_eps|平均值|avgWriteEps|dumper slave每秒处理Event的个数|
+|polardbx_cdc_dumper_s_tps|dumper_s_tps|平均值|avgWriteTps|dumper slave每秒处理事务的个数|
+|polardbx_cdc_dumper_s_bps|dumper_s_bps|平均值|avgWriteBps|dumper slave每秒处理的数据量|
+|polardbx_cdc_dumper_s_event_rt|dumper_s_event_rt|平均值|avgWriteTimePerEvent|dumper slave每条事件的处理时间|
+|polardbx_cdc_dumper_s_txn_rt|dumper_s_txn_rt|平均值|avgWriteTimePerTxn|dumper slave每个事务的处理时间|
 |polardbx_cdc_dumper_s_youngUsed|dumper_s_youngUsed|瞬时值|-|dumper slave年轻带使用量|
 |polardbx_cdc_dumper_s_youngMax|dumper_s_youngMax|瞬时值|-|dumper slave年轻代大小|
 |polardbx_cdc_dumper_s_oldUsed|dumper_s_oldUsed|瞬时值|-|dumper slave老年代使用量|
@@ -39,6 +31,25 @@
 |polardbx_cdc_dumper_s_youngCollectionTime|dumper_s_youngCollectionTime|累计值|-|dumper slave年轻代GC时间|
 |polardbx_cdc_dumper_s_oldCollectionTime|dumper_s_oldCollectionTime|累计值|-|dumper slave老年代GC时间|
 |polardbx_cdc_dumper_s_currentThreadCount|dumper_s_currentThreadCount|瞬时值|-|dumper slave当前线程数|
+|polardbx_cdc_dumper_upload_bps|dumper_upload_bps|平均值|avgUploadBps|dumper每秒上传的字节数|
+|polardbx_cdc_dumper_dump_bps|dumper_dump_bps|平均值|avgDumpBps|dumper每秒通过dump协议发送的字节数|
+|polardbx_cdc_dumper_rev_buf_size|dumper_rev_buf_size|平均值|receiveQueueSize|dumper数据接收缓冲队列大小|
+|polardbx_cdc_dumper_write_buf_size|dumper_write_buf_size|平均值|writeQueueSize|dumper数据写入缓冲队列大小|
+
+|polardbx_cdc_task_merge_txn_count|merge_txn_count|累加值|mergeTxnTotal|task合并的总事务数|
+|polardbx_cdc_task_merge_txn_1pc_count|merge_1pctxn_count|累加值|merge1PcTxnTotal|task合并的总事务数(1pc)|
+|polardbx_cdc_task_merge_txn_2pc_count|merge_2pctxn_count|累加值|merge2PcTxnTotal|task合并的总事务数(2pc)|
+|polardbx_cdc_task_merge_tps|merge_tps|瞬时值|mergeTps|事务归并排序的tps|
+|polardbx_cdc_task_merge_1pc_tps|merge_1pc_tps|瞬时值|merge1pcTps|1pc事务归并排序的tps|
+|polardbx_cdc_task_merge_2pc_tps|merge_2pc_tps|瞬时值|merge2pcTps|2pc事务归并排序的tps|
+|polardbx_cdc_task_merge_buf_size|merge_buf_size|平均值|collectQueuedSize|merge缓冲队列占使用量|
+|polardbx_cdc_task_transmit_buf_size|trans_buf_size|平均值|transmitQueuedSize|Transmitter缓冲队列占使用量|
+|polardbx_cdc_task_dumping_buf_size|dumping_buf_size|平均值|dumpingQueueSize|Dumping缓冲队列占使用量|
+|polardbx_task_e_network_in_bytes_total_naive|net_in|瞬时值|netInBps|入口流量|
+|polardbx_task_e_in_tps|tran_per_second|瞬时值|inTps|事务tps|
+|polardbx_task_e_in_eps|event_per_second|瞬时值|inEps|eps|
+|polardbx_task_e_in_max_delay|in_delay|瞬时值|inDelay|输入延迟|
+|polardbx_cdc_task_max_sorter_queued_size|max_sorter_queued_size|瞬时值|maxSorterQueuedSize|一级排序队列中正在排队的事务个数(取所有extractor的最大值)|
 |polardbx_cdc_task_youngUsed|task_youngUsed|瞬时值|-|cdc task年轻代使用量|
 |polardbx_cdc_task_youngMax|task_youngMax|瞬时值|-|cdc task年轻代大小|
 |polardbx_cdc_task_oldUsed|task_oldUsed|瞬时值|-|cdc task老年代使用量|
@@ -49,3 +60,74 @@
 |polardbx_cdc_task_youngCollectionTime|task_youngCollectionTime|累计值|-|cdc task年轻代GC时间|
 |polardbx_cdc_task_oldCollectionTime|task_oldCollectionTime|累计值|-|cdc task老年代GC时间|
 |polardbx_cdc_task_currentThreadCount|task_currentThreadCount|瞬时值|-|cdc task当前线程数|
+|polardbx_cdc_task_meta_logic_db_count|meta_logic_db_count|瞬时值|logicDbCount|元数据中逻辑DB的个数|
+|polardbx_cdc_task_meta_logic_table_count|meta_logic_table_count|瞬时值|logicTableCount|元数据中逻辑Table的个数|
+|polardbx_cdc_task_meta_phy_db_count|meta_phy_db_count|瞬时值|phyDbCount|元数据中物理DB的个数|
+|polardbx_cdc_task_meta_phy_table_count|meta_phy_table_count|瞬时值|phyTableCount|元数据中物理Table的个数|
+|polardbx_cdc_task_meta_logic_history_count|meta_logic_history_count|瞬时值|logicDdlHistoryCount|逻辑DDL记录总数|
+|polardbx_cdc_task_meta_phy_history_count|meta_phy_history_count|瞬时值|phyDdlHistoryCount|物理DDL记录总数|
+|polardbx_cdc_task_store_txn_count|store_txn_count|瞬时值|storeTxnCount|KVStore中保存的事务的个数|
+|polardbx_cdc_task_store_persisted_txn_count|store_persisted_txn_count|瞬时值|storePersistedTxnCount|KVStore中保存的持久化到磁盘的事务的个数|
+|polardbx_cdc_task_store_txnitem_count|store_txnitem_count|瞬时值|storeTxnItemCount|KVStore中保存的TxnItem个数|
+|polardbx_cdc_task_store_persisted_txnitem_count|store_persisted_txnitem_count|瞬时值|storePersistedTxnItemCount|KVStore中保存的持久化到磁盘的TxnItem个数|
+|polardbx_cdc_task_store_to_clean_txn_size|store_to_clean_txn_size|瞬时值|storeToCleanTxnSize|KVStore中待清理的Txn的个数|
+
+|polardbx_cdc_dumper_x_avg_delay|dumper_x_avg_delay|瞬时值|avgDelayTime|dumperx上所有流的平均延迟时间|
+|polardbx_cdc_dumper_x_max_delay|dumper_x_max_delay|瞬时值|maxDelayTime|dumperx上所有流的最大延迟时间|
+|polardbx_cdc_dumper_x_min_delay|dumper_x_min_delay|瞬时值|minDelayTime|dumperx上所有流的最小延迟时间|
+|polardbx_cdc_dumper_x_avg_eps|dumper_x_avg_eps|瞬时值|avgWriteEps|dumperx上所有流的平均EPS|
+|polardbx_cdc_dumper_x_max_eps|dumper_x_max_eps|瞬时值|maxWriteEps|dumperx上所有流的最大EPS|
+|polardbx_cdc_dumper_x_min_eps|dumper_x_min_eps|瞬时值|minWriteEps|dumperx上所有流的最小EPS|
+|polardbx_cdc_dumper_x_sum_eps|dumper_x_sum_eps|瞬时值|sumWriteEps|dumperx上所有流的EPS求和|
+|polardbx_cdc_dumper_x_avg_dml_eps|dumper_x_avg_dml_eps|瞬时值|avgRevEps|dumperx上所有流的平均DML EPS|
+|polardbx_cdc_dumper_x_max_dml_eps|dumper_x_max_dml_eps|瞬时值|maxRevEps|dumperx上所有流的最大DML EPS|
+|polardbx_cdc_dumper_x_min_dml_eps|dumper_x_min_dml_eps|瞬时值|minRevEps|dumperx上所有流的最小DML EPS|
+|polardbx_cdc_dumper_x_sum_dml_eps|dumper_x_sum_dml_eps|瞬时值|sumRevEps|dumperx上所有流的DML EPS求和|
+|polardbx_cdc_dumper_x_avg_tps|dumper_x_avg_tps|瞬时值|avgWriteTps|dumperx上所有流的平均TPS|
+|polardbx_cdc_dumper_x_max_tps|dumper_x_max_tps|瞬时值|maxWriteTps|dumperx上所有流的最大TPS|
+|polardbx_cdc_dumper_x_min_tps|dumper_x_min_tps|瞬时值|minWriteTps|dumperx上所有流的最小TPS|
+|polardbx_cdc_dumper_x_sum_tps|dumper_x_sum_tps|瞬时值|sumWriteTps|dumperx上所有流的TPS求和|
+|polardbx_cdc_dumper_x_avg_bps|dumper_x_avg_bps|瞬时值|avgWriteBps|dumperx上所有流的平均BPS|
+|polardbx_cdc_dumper_x_max_bps|dumper_x_max_bps|瞬时值|maxWriteBps|dumperx上所有流的最大BPS|
+|polardbx_cdc_dumper_x_min_bps|dumper_x_min_bps|瞬时值|minWriteBps|dumperx上所有流的最小BPS|
+|polardbx_cdc_dumper_x_sum_bps|dumper_x_sum_bps|瞬时值|sumWriteBps|dumperx上所有流的BPS求和|
+|polardbx_cdc_dumper_x_avg_event_rt|dumper_x_avg_event_rt|瞬时值|avgWriteTimePerEvent|dumperx上所有流的平均event write rt|
+|polardbx_cdc_dumper_x_max_event_rt|dumper_x_max_event_rt|瞬时值|maxWriteTimePerEvent|dumperx上所有流的最大event write rt|
+|polardbx_cdc_dumper_x_min_event_rt|dumper_x_min_event_rt|瞬时值|minWriteTimePerEvent|dumperx上所有流的最小event write rt|
+|polardbx_cdc_dumper_x_avg_txn_rt|dumper_x_avg_txn_rt|瞬时值|avgWriteTimePerTxn|dumperx上所有流的平均txn write rt|
+|polardbx_cdc_dumper_x_max_txn_rt|dumper_x_max_txn_rt|瞬时值|maxWriteTimePerTxn|dumperx上所有流的最大txn write rt|
+|polardbx_cdc_dumper_x_min_txn_rt|dumper_x_min_txn_rt|瞬时值|minWriteTimePerTxn|dumperx上所有流的最大txn write rt|
+|polardbx_cdc_dumper_x_avg_upload_bps|dumper_x_avg_upload_bps|瞬时值|avgUploadBps|dumperx上所有流的平均upload bps|
+|polardbx_cdc_dumper_x_max_upload_bps|dumper_x_max_upload_bps|瞬时值|maxUploadBps|dumperx上所有流的最大upload bps|
+|polardbx_cdc_dumper_x_min_upload_bps|dumper_x_min_upload_bps|瞬时值|minUploadBps|dumperx上所有流的最小upload bps|
+|polardbx_cdc_dumper_x_sum_upload_bps|dumper_x_sum_upload_bps|瞬时值|sumUploadBps|dumperx上所有流的upload bps求和|
+|polardbx_cdc_dumper_x_avg_dump_bps|dumper_x_avg_dump_bps|瞬时值|avgDumpBps|dumperx上所有流的平均dump bps|
+|polardbx_cdc_dumper_x_max_dump_bps|dumper_x_max_dump_bps|瞬时值|maxDumpBps|dumperx上所有流的最大dump bps|
+|polardbx_cdc_dumper_x_min_dump_bps|dumper_x_min_dump_bps|瞬时值|minDumpBps|dumperx上所有流的最小dump bps|
+|polardbx_cdc_dumper_x_sum_dump_bps|dumper_x_sum_dump_bps|瞬时值|sumDumpBps|dumperx上所有流的dump bps求和|
+|polardbx_cdc_dumper_x_avg_write_buf_size|dumper_x_avg_write_buf_size|瞬时值|avgWriteQueueSize|dumperx上所有流的平均write_buf_size|
+|polardbx_cdc_dumper_x_max_write_buf_size|dumper_x_max_write_buf_size|瞬时值|maxWriteQueueSize|dumperx上所有流的最大write_buf_size|
+|polardbx_cdc_dumper_x_min_write_buf_size|dumper_x_min_write_buf_size|瞬时值|minWriteQueueSize|dumperx上所有流的最小write_buf_size|
+|polardbx_cdc_dumper_x_sum_write_buf_size|dumper_x_sum_write_buf_size|瞬时值|sumWriteQueueSize|dumperx上所有流的write_buf_size求和|
+|polardbx_cdc_dumper_x_youngUsed|dumper_x_youngUsed|瞬时值|-|dumperX 年轻代使用量|
+|polardbx_cdc_dumper_x_youngMax|dumper_x_youngMax|瞬时值|-|dumperX 年轻代大小|
+|polardbx_cdc_dumper_x_oldUsed|dumper_x_oldUsed|瞬时值|-|dumperX 老年代使用量|
+|polardbx_cdc_dumper_x_oldMax|dumper_x_oldMax|瞬时值|-|dumperX 老年代大小|
+|polardbx_cdc_dumper_x_heapUsage|dumper_x_heapUsage|瞬时值|-|dumperX 内存使用率|
+|polardbx_cdc_dumper_x_youngCollectionCount|dumper_x_youngCollectionCount|累计值|-|dumperX 年轻代GC次数|
+|polardbx_cdc_dumper_x_oldCollectionCount|dumper_x_oldCollectionCount|累计值|-|dumperX 老年代GC次数|
+|polardbx_cdc_dumper_x_youngCollectionTime|dumper_x_youngCollectionTime|累计值|-|dumperX 年轻代GC时间|
+|polardbx_cdc_dumper_x_oldCollectionTime|dumper_x_oldCollectionTime|累计值|-|dumperX 老年代GC时间|
+|polardbx_cdc_dumper_x_currentThreadCount|dumper_x_currentThreadCount|瞬时值|-|dumperX 线程数|
+
+|polardbx_cdc_daemon_youngUsed|daemon_youngUsed|瞬时值|-|Daemon年轻代使用量|
+|polardbx_cdc_daemon_youngMax|daemon_youngMax|瞬时值|-|Daemon年轻代大小|
+|polardbx_cdc_daemon_oldUsed|daemon_oldUsed|瞬时值|-|Daemon老年代使用量|
+|polardbx_cdc_daemon_oldMax|daemon_oldMax|瞬时值|-| Daemon老年代大小|
+|polardbx_cdc_daemon_heapUsage|daemon_heapUsage|瞬时值|-|Daemon内存使用率|
+|polardbx_cdc_daemon_youngCollectionCount|daemon_youngCollectionCount|累计值|-|Daemon年轻代GC次数|
+|polardbx_cdc_daemon_oldCollectionCount|daemon_oldCollectionCount|累计值|-|Daemon老年代GC次数|
+|polardbx_cdc_daemon_youngCollectionTime|daemon_youngCollectionTime|累计值|-|Daemon年轻代GC时间|
+|polardbx_cdc_daemon_oldCollectionTime|daemon_oldCollectionTime|累计值|-|Daemon老年代GC时间|
+|polardbx_cdc_daemon_currentThreadCount|daemon_currentThreadCount|瞬时值|-|Daemon线程数|
+|polardbx_cdc_daemon_tso_heartbeat_delay|daemon_tso_heartbeat_delay|瞬时值|-|最新的TSO心跳时间和当前时间的差值(单位:ms)|

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,8 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.handle;
 
-import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.core.handle.processor.GcnEventProcessor;
@@ -28,6 +26,7 @@ import com.aliyun.polardbx.binlog.canal.core.handle.processor.XARollbackEventPro
 import com.aliyun.polardbx.binlog.canal.core.handle.processor.XAStartEventProcessor;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.canal.core.model.TranPosition;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +36,13 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * 位点的搜索要求：
+ * 1、 如果是search command， 则返回的 位点 tso必须是command的tso， position必须是command 空洞排序的开始位点
+ * 2、 如果是search tso , 返回的位点 tso 最小 且 position 最小 ，同时 tso 必须大于等于 command 的tso。
+ * <p>
+ * 消费端 会使用tso rollback 或者 apply tableMeta信息，
+ */
 public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
     private static final Logger logger = LoggerFactory.getLogger("searchLogger");
 
@@ -53,11 +59,12 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
     private long endTSO = -1;
     private long startCmdTSO;
 
-    public SearchTsoEventHandleV2(AuthenticationInfo authenticationInfo, long searchTSO, long startCmdTSO) {
+    public SearchTsoEventHandleV2(AuthenticationInfo authenticationInfo, long searchTSO, long startCmdTSO,
+                                  boolean quickMode) {
         this.searchTSO = searchTSO;
         this.startCmdTSO = startCmdTSO;
-        this.quickMode = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_QUICKMODE);
-        this.context = new ProcessorContext(authenticationInfo);
+        this.quickMode = quickMode;
+        this.context = new ProcessorContext(authenticationInfo, searchTSO, startCmdTSO);
         this.context.setInQuickMode(quickMode);
         logger.info("search position in quickMode mode : " + quickMode);
     }
@@ -135,12 +142,23 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
     @Override
     public void handle(LogEvent event, LogPosition logPosition) {
         if (endOfFile(logPosition)) {
+            // 如果当前文件找到了pos， 则遇到文件尾，可以退出
+            if (context.isPreSelected()) {
+                context.setFind();
+            }
             logger.info(
-                " finish search binlog : " + context.getCurrentFile() + " result : " + context.printDetial());
+                " finish search binlog : " + context.getCurrentFile() + " result : " + context.printDetail());
             context.setInterrupt(true);
             return;
         }
         context.setLogPosition(logPosition);
+
+        if (context.isFind()) {
+            if (context.getPosition() != null) {
+                context.setInterrupt(true);
+                return;
+            }
+        }
 
         ILogEventProcessor processor = processorMap.get(event.getHeader().getType());
         if (processor == null) {
@@ -209,8 +227,26 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
 
     @Override
     public String getTopologyContext() {
-        return context.getCommandTran() != null && context.getCommandTran().isCdcStartCmd() ?
-            context.getCommandTran().getContent() : null;
+        TranPosition commandTran = context.getCommandTran();
+        if (commandTran == null) {
+            return null;
+        }
+        if (commandTran.isCdcStartCmd()) {
+            return commandTran.getContent();
+        }
+        return null;
+    }
+
+    @Override
+    public String getCommandId() {
+        TranPosition commandTran = context.getCommandTran();
+        if (commandTran == null) {
+            return null;
+        }
+        if (commandTran.isCdcStartCmd()) {
+            return commandTran.getCommandId();
+        }
+        return null;
     }
 
     @Override

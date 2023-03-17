@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,10 +15,11 @@
 package com.aliyun.polardbx.binlog;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoMapper;
-import com.aliyun.polardbx.binlog.domain.TaskInfo;
-import com.aliyun.polardbx.binlog.domain.po.RelayFinalTaskInfo;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
+import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
+import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
 import com.aliyun.polardbx.binlog.metrics.MetricsManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.rpc.TxnStreamRpcServer;
@@ -32,6 +33,8 @@ import java.io.IOException;
 import java.util.Date;
 import java.util.Optional;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_ENGINE_AUTO_START;
+
 /**
  * Created by ziyang.lb
  **/
@@ -40,17 +43,20 @@ public class TaskController {
     private static final Logger logger = LoggerFactory.getLogger(TaskController.class);
 
     private final String cluster;
-    private final TaskInfoProvider taskInfoProvider;
+    private final TaskConfigProvider taskConfigProvider;
+    private final TaskRuntimeConfig taskRuntimeConfig;
     private final MetricsManager metricsManager;
 
     private TaskEngine taskEngine;
     private TxnStreamRpcServer rpcServer;
     private volatile boolean running;
 
-    public TaskController(String cluster, TaskInfoProvider taskInfoProvider) {
+    public TaskController(String cluster, TaskConfigProvider taskConfigProvider) {
         this.cluster = cluster;
-        this.taskInfoProvider = taskInfoProvider;
+        this.taskConfigProvider = taskConfigProvider;
+        this.taskRuntimeConfig = taskConfigProvider.getTaskRuntimeConfig();
         this.metricsManager = new MetricsManager();
+        this.build();
     }
 
     public void start() throws IOException {
@@ -59,59 +65,22 @@ public class TaskController {
         }
         running = true;
 
-        TaskInfo taskInfo = taskInfoProvider.get();
-        logger.info("starting task controller with {}...", taskInfo);
+        logger.info("starting task controller with {}...", taskRuntimeConfig);
 
         // 系统启动时不需要知道startTSO，但为了测试方便，此处允许从TaskInfo获取；如果startTSO为空，则不启动TaskEngine
-        taskEngine = new TaskEngine(taskInfoProvider, taskInfo);
-        if (StringUtils.isNotBlank(taskInfo.getStartTSO())
-            || DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_ENGINE_AUTO_START)) {
-            taskEngine.start(taskInfo.getStartTSO());
+        taskEngine = new TaskEngine(taskConfigProvider, taskRuntimeConfig);
+        if (StringUtils.isNotBlank(taskRuntimeConfig.getStartTSO())
+            || DynamicApplicationConfig.getBoolean(TASK_ENGINE_AUTO_START)
+            || taskRuntimeConfig.getType() == TaskType.Dispatcher) {
+            taskEngine.start(taskRuntimeConfig.getStartTSO());
         }
 
-        rpcServer = new TxnStreamRpcServer(taskInfo.getServerPort(), taskEngine);
+        rpcServer = new TxnStreamRpcServer(taskRuntimeConfig.getServerPort(), taskEngine, taskRuntimeConfig.getType());
+        rpcServer.setVersion(taskRuntimeConfig.getBinlogTaskConfig().getVersion());
         rpcServer.start();
 
         metricsManager.start();
         MonitorManager.getInstance().startup();
-
-        RelayFinalTaskInfoMapper relayFinalTaskInfoMapper = SpringContextHolder.getObject(
-            RelayFinalTaskInfoMapper.class);
-        RelayFinalTaskInfo relayFinalTaskInfo = new RelayFinalTaskInfo();
-        relayFinalTaskInfo.setClusterId(cluster);
-        relayFinalTaskInfo.setTaskName(taskInfo.getName());
-        relayFinalTaskInfo.setIp(DynamicApplicationConfig.getString(ConfigKeys.INST_IP));
-        relayFinalTaskInfo.setPort(taskInfo.getServerPort());
-        relayFinalTaskInfo.setRole(taskInfo.getType().name());
-        relayFinalTaskInfo.setContainerId(DynamicApplicationConfig.getString(ConfigKeys.INST_ID));
-        relayFinalTaskInfo.setVersion(taskInfo.getBinlogTaskConfig().getVersion());
-        relayFinalTaskInfo.setStatus(0);
-        Date now = new Date();
-        relayFinalTaskInfo.setGmtHeartbeat(now);
-        relayFinalTaskInfo.setGmtCreated(now);
-        relayFinalTaskInfo.setGmtModified(now);
-
-        Optional<RelayFinalTaskInfo> info = relayFinalTaskInfoMapper.selectOne(
-            s -> s.where(RelayFinalTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(cluster))
-                .and(RelayFinalTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(taskInfo.getName())));
-        if (info.isPresent()) {
-            // 兼容一下老版调度引擎的逻辑，如果version为0，进行更新
-            RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
-            if (info.get().getVersion() == 0 || runtimeMode == RuntimeMode.LOCAL) {
-                relayFinalTaskInfo.setId(info.get().getId());
-                relayFinalTaskInfoMapper.updateByPrimaryKey(relayFinalTaskInfo);
-            } else {
-                logger.info("Duplicate Task info in database : {}", JSONObject.toJSONString(info));
-                Runtime.getRuntime().halt(1);
-            }
-        } else {
-            try {
-                relayFinalTaskInfoMapper.insert(relayFinalTaskInfo);
-            } catch (DuplicateKeyException e) {
-                logger.info("Duplicate dumper info in database, insert failed.");
-                Runtime.getRuntime().halt(1);
-            }
-        }
 
         logger.info("task controller started.");
     }
@@ -140,4 +109,43 @@ public class TaskController {
         logger.info("task controller stopped.");
     }
 
+    private void build() {
+        BinlogTaskInfoMapper taskInfoMapper = SpringContextHolder.getObject(
+            BinlogTaskInfoMapper.class);
+        BinlogTaskInfo binlogTaskInfo = new BinlogTaskInfo();
+        binlogTaskInfo.setClusterId(cluster);
+        binlogTaskInfo.setTaskName(taskRuntimeConfig.getName());
+        binlogTaskInfo.setIp(DynamicApplicationConfig.getString(ConfigKeys.INST_IP));
+        binlogTaskInfo.setPort(taskRuntimeConfig.getServerPort());
+        binlogTaskInfo.setRole(taskRuntimeConfig.getType().name());
+        binlogTaskInfo.setContainerId(DynamicApplicationConfig.getString(ConfigKeys.INST_ID));
+        binlogTaskInfo.setVersion(taskRuntimeConfig.getBinlogTaskConfig().getVersion());
+        binlogTaskInfo.setStatus(0);
+        Date now = new Date();
+        binlogTaskInfo.setGmtHeartbeat(now);
+        binlogTaskInfo.setGmtCreated(now);
+        binlogTaskInfo.setGmtModified(now);
+
+        Optional<BinlogTaskInfo> info = taskInfoMapper.selectOne(
+            s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(cluster))
+                .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(taskRuntimeConfig.getName())));
+        if (info.isPresent()) {
+            // 兼容一下老版调度引擎的逻辑，如果version为0，进行更新
+            RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
+            if (info.get().getVersion() == 0 || runtimeMode == RuntimeMode.LOCAL) {
+                binlogTaskInfo.setId(info.get().getId());
+                taskInfoMapper.updateByPrimaryKey(binlogTaskInfo);
+            } else {
+                logger.info("Duplicate Task info in database : {}", JSONObject.toJSONString(info));
+                Runtime.getRuntime().halt(1);
+            }
+        } else {
+            try {
+                taskInfoMapper.insert(binlogTaskInfo);
+            } catch (DuplicateKeyException e) {
+                logger.info("Duplicate task info in database, insert failed.");
+                Runtime.getRuntime().halt(1);
+            }
+        }
+    }
 }

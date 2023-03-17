@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,6 +24,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.dump.ErosaConnection;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
+import com.aliyun.polardbx.binlog.canal.core.dump.OssConnection;
 import com.aliyun.polardbx.binlog.canal.core.handle.EventHandle;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import org.slf4j.Logger;
@@ -71,6 +72,9 @@ public class BinlogEventProcessor {
         }
         this.serverId = serverId;
         this.fetcher = connection.providerFetcher(binlogFileName, position, search);
+        if (connection instanceof OssConnection) {
+            this.binlogFileName = ((OssConnection) connection).getLastConnectFile();
+        }
         this.binlogChecksum = binlogChecksum;
         this.binlogFileName = binlogFileName;
         this.serverCharactorSet = serverCharactorSet;
@@ -85,10 +89,18 @@ public class BinlogEventProcessor {
         doStart();
     }
 
+    public String currentFileName() {
+        return binlogFileName;
+    }
+
+    public void resetNextLogPosition(String fileName) {
+        this.lastLogPosition = new LogPosition(fileName, 0);
+    }
+
     public void restore(ErosaConnection connection) throws IOException {
         logger.info("restore connect with : " + lastLogPosition);
         connection.reconnect();
-        binlogChecksum = ((MysqlConnection)connection).loadBinlogChecksum();
+        binlogChecksum = ((MysqlConnection) connection).loadBinlogChecksum();
         connection.reconnect();
         fetcher = connection.providerFetcher(lastLogPosition.getFileName(), lastLogPosition.getPosition(), false);
         if (binlogFileSizeFetcher != null) {
@@ -123,6 +135,7 @@ public class BinlogEventProcessor {
             }
             if (event.getHeader().getType() == LogEvent.FORMAT_DESCRIPTION_EVENT && serverId != null) {
                 this.serverIdMatch = serverId == event.getHeader().getServerId();
+                this.binlogFileName = logPosition.getFileName();
             }
             handle.handle(event, context.getLogPosition());
             lastLogPosition = context.getLogPosition();

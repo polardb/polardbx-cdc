@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,7 +21,6 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyTableTopolog
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.gson.Gson;
 import lombok.extern.slf4j.Slf4j;
@@ -59,7 +58,7 @@ public class TopologyManager {
     public static final Map<String, TopologyRecord> TOPOLOGY_RECORD_CACHE = new ConcurrentHashMap<>();
 
     private LogicMetaTopology topology;
-    private final Map<Pair<String, String>, LogicDbTopology> cache = Maps.newHashMap();
+    private final Map<Pair<String, String>, LogicBasicInfo> cache = Maps.newHashMap();
 
     public TopologyManager() {
     }
@@ -155,14 +154,12 @@ public class TopologyManager {
         return Pair.of(topology, null);
     }
 
-    public LogicDbTopology getLogicSchema(String phySchema) {
+    public String getLogicSchema(String phySchema) {
         Preconditions.checkNotNull(phySchema);
         for (LogicDbTopology logicSchema : topology.getLogicDbMetas()) {
             for (PhyDbTopology schemaPhy : logicSchema.getPhySchemas()) {
                 if (phySchema.equals(schemaPhy.getSchema())) {
-                    LogicDbTopology dbTopology = new LogicDbTopology();
-                    dbTopology.setSchema(logicSchema.getSchema());
-                    return dbTopology;
+                    return logicSchema.getSchema();
                 }
             }
         }
@@ -182,13 +179,13 @@ public class TopologyManager {
         return "";
     }
 
-    public LogicDbTopology getLogicSchema(String phySchema, String phyTable) {
+    public LogicBasicInfo getLogicBasicInfo(String phySchema, String phyTable) {
         Preconditions.checkNotNull(phySchema);
         Preconditions.checkNotNull(phyTable);
 
-        LogicDbTopology logicDbTopology = cache.get(Pair.of(phySchema, phyTable));
-        if (logicDbTopology != null) {
-            return logicDbTopology;
+        LogicBasicInfo logicBasicInfo = cache.get(Pair.of(phySchema, phyTable));
+        if (logicBasicInfo != null) {
+            return logicBasicInfo;
         }
 
         for (LogicDbTopology logicSchema : topology.getLogicDbMetas()) {
@@ -196,14 +193,11 @@ public class TopologyManager {
                 for (PhyTableTopology phyTableTopology : logicTableMetaTopology.getPhySchemas()) {
                     if (phyTableTopology.getSchema().equals(phySchema) && phyTableTopology.getPhyTables().contains(
                         phyTable)) {
-                        LogicDbTopology dbTopology = new LogicDbTopology();
-                        dbTopology.setSchema(logicSchema.getSchema());
-                        LogicTableMetaTopology topology = new LogicTableMetaTopology();
-                        topology.setTableName(logicTableMetaTopology.getTableName());
-                        topology.setTableType(logicTableMetaTopology.getTableType());
-                        dbTopology.setLogicTableMetas(Lists.newArrayList(topology));
-                        cache.put(Pair.of(phySchema, phyTable), dbTopology);
-                        return dbTopology;
+                        LogicBasicInfo basicInfo = new LogicBasicInfo();
+                        basicInfo.setSchemaName(logicSchema.getSchema());
+                        basicInfo.setTableName(logicTableMetaTopology.getTableName());
+                        cache.put(Pair.of(phySchema, phyTable), basicInfo);
+                        return basicInfo;
                     }
                 }
             }
@@ -211,17 +205,28 @@ public class TopologyManager {
         return null;
     }
 
-    public List<PhyTableTopology> getPhyTables(String storageInstId, Set<String> excludeLogicDbs,
+    public List<PhyTableTopology> getPhyTables(String storageInstId,
+                                               Set<String> excludeLogicDbs,
                                                Set<String> excludeLogicTables) {
         Preconditions.checkNotNull(storageInstId);
-        List<PhyTableTopology> result = topology.getLogicDbMetas().stream().flatMap(
+        return topology.getLogicDbMetas().stream().flatMap(
             l -> l.getLogicTableMetas().stream()
                 .filter(d -> !excludeLogicDbs.contains(l.getSchema()))
                 .filter(t -> !excludeLogicTables.contains(l.getSchema() + "." + t.getTableName()))
                 .flatMap(p -> p.getPhySchemas().stream())
-                .filter(s -> s.getStorageInstId().equals(storageInstId))).collect(
-            Collectors.toList());
-        return result;
+                .filter(s -> s.getStorageInstId().equals(storageInstId)))
+            .collect(Collectors.toList());
+    }
+
+    public void initPhyLogicMapping(String storageInstId) {
+        topology.getLogicDbMetas().forEach(d -> d.getLogicTableMetas().forEach(t -> {
+            t.getPhySchemas().forEach(phy -> {
+                if (phy.getStorageInstId().equals(storageInstId)) {
+                    phy.getPhyTables().forEach(pt -> cache.putIfAbsent(Pair.of(phy.getSchema(), pt),
+                        new LogicBasicInfo(d.getSchema(), t.getTableName())));
+                }
+            });
+        }));
     }
 
     public LogicMetaTopology getTopology() {
@@ -229,12 +234,11 @@ public class TopologyManager {
     }
 
     private void invalidCache(String tso, String schema, String table) {
-        Iterator<Entry<Pair<String, String>, LogicDbTopology>> iterator = cache.entrySet().iterator();
+        Iterator<Entry<Pair<String, String>, LogicBasicInfo>> iterator = cache.entrySet().iterator();
         while (iterator.hasNext()) {
-            Entry<Pair<String, String>, LogicDbTopology> c = iterator.next();
-            LogicDbTopology t = c.getValue();
-            if (t.getSchema().equals(schema) && (StringUtils.isEmpty(table) || t.getLogicTableMetas().get(0)
-                .getTableName().equals(table))) {
+            Entry<Pair<String, String>, LogicBasicInfo> c = iterator.next();
+            LogicBasicInfo t = c.getValue();
+            if (t.getSchemaName().equals(schema) && (StringUtils.isEmpty(table) || t.getTableName().equals(table))) {
                 log.warn("TSO {}: remove topology of {}.{}", tso, schema, table);
                 iterator.remove();
             }

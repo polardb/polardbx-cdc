@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -55,6 +55,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidListLogEve
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.StartEncryptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
+import com.aliyun.polardbx.binlog.BinlogFileUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,7 +63,6 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.BitSet;
 
-import static com.aliyun.polardbx.binlog.CommonUtils.nextBinlogFileName;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL;
 
 /**
@@ -95,6 +95,8 @@ public final class LogDecoder {
     protected IBinlogFileInfoFetcher binlogFileSizeFetcher;
 
     protected boolean needRecordData = true;
+
+    protected boolean needFixRotate = true;
 
     public LogDecoder() {
     }
@@ -180,7 +182,9 @@ public final class LogDecoder {
         }
         case LogEvent.ROTATE_EVENT: {
             RotateLogEvent event = new RotateLogEvent(header, buffer, descriptionEvent);
-            event = tryFixRotateEvent(event, logPosition);
+            if (needFixRotate) {
+                event = tryFixRotateEvent(event, logPosition);
+            }
             /* updating position in context */
             logPosition = new LogPosition(event.getFilename(), event.getPosition());
             context.setLogPosition(logPosition);
@@ -526,7 +530,7 @@ public final class LogDecoder {
         } else {
             //如果下一个binlog文件已经存在，则当前文件肯定不会再有增量写入，可以直接返回获取到的fileSize
             //如果下一个binlog文件还不存在，则等待若干个心跳时间看是否有数据写入，尽最大可能进行判断
-            String nextFileName = nextBinlogFileName(fileName);
+            String nextFileName = BinlogFileUtil.getNextBinlogFileName(fileName);
             boolean isNextFileExisting = binlogFileSizeFetcher.isFileExisting(nextFileName);
             if (!isNextFileExisting) {
                 logger.info("prepare to wait for newly binlog data , {}:{}", fileName, expectFileSize);
@@ -555,4 +559,9 @@ public final class LogDecoder {
     public void setBinlogFileSizeFetcher(IBinlogFileInfoFetcher binlogFileSizeFetcher) {
         this.binlogFileSizeFetcher = binlogFileSizeFetcher;
     }
+
+    public void setNeedFixRotate(boolean needFixRotate) {
+        this.needFixRotate = needFixRotate;
+    }
+
 }

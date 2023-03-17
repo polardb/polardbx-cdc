@@ -35,13 +35,12 @@ JAVA_OPTS="${JAVA_OPTS} -XX:+UseParallelGC"
 JAVA_OPTS="${JAVA_OPTS} -XX:ParallelGCThreads=2"
 JAVA_OPTS="${JAVA_OPTS} -XX:+HeapDumpOnOutOfMemoryError"
 JAVA_OPTS="${JAVA_OPTS} -XX:HeapDumpPath=${HOME}/logs"
-JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDetails"
-JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDateStamps"
 JAVA_OPTS="${JAVA_OPTS} -XX:+DisableExplicitGC"
-JAVA_OPTS="${JAVA_OPTS} -Xloggc:${HOME}/logs/polardbx-binlog/Daemon/gc.log"
+JAVA_OPTS="${JAVA_OPTS} -Xlog:gc*:${HOME}/logs/polardbx-binlog/Daemon/gc.log:time"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs"
 JAVA_OPTS="${JAVA_OPTS} -Dcdc.home.dir=${BASE_DIR}"
 JAVA_OPTS="${JAVA_OPTS} -DtaskName=Daemon"
+JAVA_OPTS="${JAVA_OPTS} --add-exports java.base/jdk.internal.ref=ALL-UNNAMED"
 
 if [ -f ${HOME}/bin/env.sh ]; then
     source ${HOME}/bin/env.sh
@@ -72,9 +71,6 @@ start()
 			exit 1;
 		fi
 
-    if [ -f ${HOME}/bin/jdk8.sh ]; then
-      sudo sh ${HOME}/bin/jdk8.sh
-    fi
 
 		LOG_PATH=${HOME}/logs
 		DAEMON_LOG_PATH=${LOG_PATH}/polardbx-binlog/Daemon

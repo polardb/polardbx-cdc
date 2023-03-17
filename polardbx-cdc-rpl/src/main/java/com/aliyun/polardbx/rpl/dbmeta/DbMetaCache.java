@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -44,6 +44,7 @@ public class DbMetaCache {
     private int maxPoolSize = 30;
     private final static String POLARX_DEFAULT_SCHEMA = "polardbx";
     private final static String SET_POLARX_SERVER_ID = "set polardbx_server_id=%d";
+    private final static String SET_MYSQL_SERVER_ID = "set global server_id=%d";
 
     public DbMetaCache(HostInfo hostInfo, int maxPoolSize) {
         this.hostInfo = hostInfo;
@@ -55,10 +56,18 @@ public class DbMetaCache {
             if (!dataSources.containsKey(schema)) {
                 List<String> connectionInitSQLs = new ArrayList<>();
                 log.warn("set server id: {}", Math.abs(new Long(hostInfo.getServerId()).intValue()));
-
-                String setServerIdSql =
-                    String.format(SET_POLARX_SERVER_ID, Math.abs(new Long(hostInfo.getServerId()).intValue()));
-                connectionInitSQLs.add(setServerIdSql);
+                String setServerIdSql;
+                if (hostInfo.getType() == HostType.POLARX2 || hostInfo.getType() == HostType.POLARX1) {
+                    setServerIdSql = String.format(SET_POLARX_SERVER_ID,
+                        Math.abs(new Long(hostInfo.getServerId()).intValue()));
+                    connectionInitSQLs.add(setServerIdSql);
+                }
+                // 可能没有set global 权限，不考虑实现环状复制，因此不需要set server id
+//                else {
+//                    setServerIdSql = String.format(SET_MYSQL_SERVER_ID,
+//                        Math.abs(new Long(hostInfo.getServerId()).intValue()));
+//                }
+//                connectionInitSQLs.add(setServerIdSql);
                 DataSource dataSource = DataSourceUtil.createDruidMySqlDataSource(hostInfo.isUsePolarxPoolCN(),
                     hostInfo.getHost(),
                     hostInfo.getPort(),
@@ -94,11 +103,11 @@ public class DbMetaCache {
         return getDataSource(defaultSchema);
     }
 
-    public List<String> getDatabases() throws Throwable {
+    public List<String> getDatabases() throws Exception {
         try {
             DataSource dataSource = getDefaultDataSource();
             return DbMetaManager.getDatabases(dataSource);
-        } catch (Throwable e) {
+        } catch (Exception e) {
             log.error("failed in getDatabases, host: {}, port: {}", hostInfo.getHost(), hostInfo.getPort());
             throw e;
         }
@@ -126,15 +135,28 @@ public class DbMetaCache {
         return tableInfos.get(key);
     }
 
-    public List<String> getTables(String schema) throws Throwable {
+    public List<String> getTables(String schema) throws Exception {
         try {
             DataSource dataSource = getDataSource(schema);
             return DbMetaManager.getTables(dataSource);
-        } catch (Throwable e) {
+        } catch (Exception e) {
             log.error("failed in getTables, host: {}, port: {}, schema: {}",
                 hostInfo.getHost(),
                 hostInfo.getPort(),
                 schema);
+            throw e;
+        }
+    }
+
+    public String getCreateTable(String schema, String table) throws Exception {
+        try {
+            DataSource dataSource = getDataSource(schema);
+            return DbMetaManager.getCreateTable(dataSource, schema, table);
+        } catch (Exception e) {
+            log.error("failed in getCreateTable, host: {}, port: {}, schema: {}, table: {}",
+                hostInfo.getHost(),
+                hostInfo.getPort(),
+                schema, table);
             throw e;
         }
     }

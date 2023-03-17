@@ -187,6 +187,69 @@
         </encoder>
     </appender>
 
+    <appender name="transmitWriteAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator>
+            <Key>stream_seq</Key>
+            <DefaultValue>default</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="transmitWriteAppender-${stream_seq}"
+                      class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${HOME}/logs/polardbx-binlog/${taskName}/transmit_write_${stream_seq}.log</file>
+                <append>true</append>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <fileNamePattern>
+                        ${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/transmit_write_${stream_seq}.%i.log.gz
+                    </fileNamePattern>
+                    <timeBasedFileNamingAndTriggeringPolicy
+                            class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                        <maxFileSize>200MB</maxFileSize>
+                    </timeBasedFileNamingAndTriggeringPolicy>
+                    <maxHistory>5</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>
+                        <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] - %msg%n
+						]]>
+                    </pattern>
+                    <charset class="java.nio.charset.Charset">UTF-8</charset>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+
+    <appender name="transmitReadAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator>
+            <Key>stream_seq</Key>
+            <DefaultValue>default</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="transmitReadAppender-${stream_seq}" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${HOME}/logs/polardbx-binlog/${taskName}/transmit_read_${stream_seq}.log</file>
+                <append>true</append>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <fileNamePattern>
+                        ${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/transmit_read_${stream_seq}.%i.log.gz
+                    </fileNamePattern>
+                    <timeBasedFileNamingAndTriggeringPolicy
+                            class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                        <maxFileSize>200MB</maxFileSize>
+                    </timeBasedFileNamingAndTriggeringPolicy>
+                    <maxHistory>5</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>
+                        <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] - %msg%n
+						]]>
+                    </pattern>
+                    <charset class="java.nio.charset.Charset">UTF-8</charset>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+
     <appender name="file.async.commit" class="ch.qos.logback.classic.AsyncAppender">
         <!-- 不丢失日志.默认的,如果队列的80%已满,则会丢弃TRACT、DEBUG、INFO级别的日志 -->
         <discardingThreshold>0</discardingThreshold>
@@ -349,9 +412,16 @@
         <appender-ref ref="file.async.commit"/>
     </logger>
 
-
     <logger name="com.aliyun.polardbx.binlog.extractor.transaction" level="INFO" additivity="false">
         <appender-ref ref="file.async.transaction"/>
+    </logger>
+
+    <logger name="transmitWriteLogger" level="INFO" additivity="false">
+        <appender-ref ref="transmitWriteAppender"/>
+    </logger>
+
+    <logger name="transmitReadLogger" level="INFO" additivity="false">
+        <appender-ref ref="transmitReadAppender"/>
     </logger>
 
     <logger name="com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileGenerator" level="INFO" additivity="false">
@@ -366,7 +436,7 @@
         <appender-ref ref="fileAppender"/>
     </logger>
 
-    <logger name="com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator" level="INFO" additivity="false">
+    <logger name="com.aliyun.polardbx.binlog.format.utils.EventGenerator" level="INFO" additivity="false">
         <appender-ref ref="fileAppender"/>
     </logger>
 

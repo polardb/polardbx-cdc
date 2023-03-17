@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,6 +32,8 @@ private static final long serialVersionUID = 0L;
   private DumpRequest() {
     fileName_ = "";
     splitMode_ = 0;
+    ext_ = "";
+    streamName_ = "";
   }
 
   @java.lang.Override
@@ -79,6 +81,23 @@ private static final long serialVersionUID = 0L;
             int rawValue = input.readEnum();
 
             splitMode_ = rawValue;
+            break;
+          }
+          case 32: {
+
+            registered_ = input.readBool();
+            break;
+          }
+          case 42: {
+            java.lang.String s = input.readStringRequireUtf8();
+
+            ext_ = s;
+            break;
+          }
+          case 50: {
+            java.lang.String s = input.readStringRequireUtf8();
+
+            streamName_ = s;
             break;
           }
           default: {
@@ -181,6 +200,93 @@ private static final long serialVersionUID = 0L;
     return result == null ? com.aliyun.polardbx.rpc.cdc.EventSplitMode.UNRECOGNIZED : result;
   }
 
+  public static final int REGISTERED_FIELD_NUMBER = 4;
+  private boolean registered_;
+  /**
+   * <code>bool registered = 4;</code>
+   * @return The registered.
+   */
+  @java.lang.Override
+  public boolean getRegistered() {
+    return registered_;
+  }
+
+  public static final int EXT_FIELD_NUMBER = 5;
+  private volatile java.lang.Object ext_;
+  /**
+   * <code>string ext = 5;</code>
+   * @return The ext.
+   */
+  @java.lang.Override
+  public java.lang.String getExt() {
+    java.lang.Object ref = ext_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      ext_ = s;
+      return s;
+    }
+  }
+  /**
+   * <code>string ext = 5;</code>
+   * @return The bytes for ext.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getExtBytes() {
+    java.lang.Object ref = ext_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      ext_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
+  public static final int STREAMNAME_FIELD_NUMBER = 6;
+  private volatile java.lang.Object streamName_;
+  /**
+   * <code>string streamName = 6;</code>
+   * @return The streamName.
+   */
+  @java.lang.Override
+  public java.lang.String getStreamName() {
+    java.lang.Object ref = streamName_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      streamName_ = s;
+      return s;
+    }
+  }
+  /**
+   * <code>string streamName = 6;</code>
+   * @return The bytes for streamName.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getStreamNameBytes() {
+    java.lang.Object ref = streamName_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      streamName_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -204,6 +310,15 @@ private static final long serialVersionUID = 0L;
     if (splitMode_ != com.aliyun.polardbx.rpc.cdc.EventSplitMode.SERVER.getNumber()) {
       output.writeEnum(3, splitMode_);
     }
+    if (registered_ != false) {
+      output.writeBool(4, registered_);
+    }
+    if (!getExtBytes().isEmpty()) {
+      com.google.protobuf.GeneratedMessageV3.writeString(output, 5, ext_);
+    }
+    if (!getStreamNameBytes().isEmpty()) {
+      com.google.protobuf.GeneratedMessageV3.writeString(output, 6, streamName_);
+    }
     unknownFields.writeTo(output);
   }
 
@@ -223,6 +338,16 @@ private static final long serialVersionUID = 0L;
     if (splitMode_ != com.aliyun.polardbx.rpc.cdc.EventSplitMode.SERVER.getNumber()) {
       size += com.google.protobuf.CodedOutputStream
         .computeEnumSize(3, splitMode_);
+    }
+    if (registered_ != false) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeBoolSize(4, registered_);
+    }
+    if (!getExtBytes().isEmpty()) {
+      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(5, ext_);
+    }
+    if (!getStreamNameBytes().isEmpty()) {
+      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(6, streamName_);
     }
     size += unknownFields.getSerializedSize();
     memoizedSize = size;
@@ -244,6 +369,12 @@ private static final long serialVersionUID = 0L;
     if (getPosition()
         != other.getPosition()) return false;
     if (splitMode_ != other.splitMode_) return false;
+    if (getRegistered()
+        != other.getRegistered()) return false;
+    if (!getExt()
+        .equals(other.getExt())) return false;
+    if (!getStreamName()
+        .equals(other.getStreamName())) return false;
     if (!unknownFields.equals(other.unknownFields)) return false;
     return true;
   }
@@ -262,6 +393,13 @@ private static final long serialVersionUID = 0L;
         getPosition());
     hash = (37 * hash) + SPLITMODE_FIELD_NUMBER;
     hash = (53 * hash) + splitMode_;
+    hash = (37 * hash) + REGISTERED_FIELD_NUMBER;
+    hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+        getRegistered());
+    hash = (37 * hash) + EXT_FIELD_NUMBER;
+    hash = (53 * hash) + getExt().hashCode();
+    hash = (37 * hash) + STREAMNAME_FIELD_NUMBER;
+    hash = (53 * hash) + getStreamName().hashCode();
     hash = (29 * hash) + unknownFields.hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -401,6 +539,12 @@ private static final long serialVersionUID = 0L;
 
       splitMode_ = 0;
 
+      registered_ = false;
+
+      ext_ = "";
+
+      streamName_ = "";
+
       return this;
     }
 
@@ -430,6 +574,9 @@ private static final long serialVersionUID = 0L;
       result.fileName_ = fileName_;
       result.position_ = position_;
       result.splitMode_ = splitMode_;
+      result.registered_ = registered_;
+      result.ext_ = ext_;
+      result.streamName_ = streamName_;
       onBuilt();
       return result;
     }
@@ -487,6 +634,17 @@ private static final long serialVersionUID = 0L;
       }
       if (other.splitMode_ != 0) {
         setSplitModeValue(other.getSplitModeValue());
+      }
+      if (other.getRegistered() != false) {
+        setRegistered(other.getRegistered());
+      }
+      if (!other.getExt().isEmpty()) {
+        ext_ = other.ext_;
+        onChanged();
+      }
+      if (!other.getStreamName().isEmpty()) {
+        streamName_ = other.streamName_;
+        onChanged();
       }
       this.mergeUnknownFields(other.unknownFields);
       onChanged();
@@ -674,6 +832,189 @@ private static final long serialVersionUID = 0L;
     public Builder clearSplitMode() {
       
       splitMode_ = 0;
+      onChanged();
+      return this;
+    }
+
+    private boolean registered_ ;
+    /**
+     * <code>bool registered = 4;</code>
+     * @return The registered.
+     */
+    @java.lang.Override
+    public boolean getRegistered() {
+      return registered_;
+    }
+    /**
+     * <code>bool registered = 4;</code>
+     * @param value The registered to set.
+     * @return This builder for chaining.
+     */
+    public Builder setRegistered(boolean value) {
+      
+      registered_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>bool registered = 4;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearRegistered() {
+      
+      registered_ = false;
+      onChanged();
+      return this;
+    }
+
+    private java.lang.Object ext_ = "";
+    /**
+     * <code>string ext = 5;</code>
+     * @return The ext.
+     */
+    public java.lang.String getExt() {
+      java.lang.Object ref = ext_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        ext_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <code>string ext = 5;</code>
+     * @return The bytes for ext.
+     */
+    public com.google.protobuf.ByteString
+        getExtBytes() {
+      java.lang.Object ref = ext_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        ext_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <code>string ext = 5;</code>
+     * @param value The ext to set.
+     * @return This builder for chaining.
+     */
+    public Builder setExt(
+        java.lang.String value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  
+      ext_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string ext = 5;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearExt() {
+      
+      ext_ = getDefaultInstance().getExt();
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string ext = 5;</code>
+     * @param value The bytes for ext to set.
+     * @return This builder for chaining.
+     */
+    public Builder setExtBytes(
+        com.google.protobuf.ByteString value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  checkByteStringIsUtf8(value);
+      
+      ext_ = value;
+      onChanged();
+      return this;
+    }
+
+    private java.lang.Object streamName_ = "";
+    /**
+     * <code>string streamName = 6;</code>
+     * @return The streamName.
+     */
+    public java.lang.String getStreamName() {
+      java.lang.Object ref = streamName_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        streamName_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <code>string streamName = 6;</code>
+     * @return The bytes for streamName.
+     */
+    public com.google.protobuf.ByteString
+        getStreamNameBytes() {
+      java.lang.Object ref = streamName_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        streamName_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <code>string streamName = 6;</code>
+     * @param value The streamName to set.
+     * @return This builder for chaining.
+     */
+    public Builder setStreamName(
+        java.lang.String value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  
+      streamName_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string streamName = 6;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearStreamName() {
+      
+      streamName_ = getDefaultInstance().getStreamName();
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string streamName = 6;</code>
+     * @param value The bytes for streamName to set.
+     * @return This builder for chaining.
+     */
+    public Builder setStreamNameBytes(
+        com.google.protobuf.ByteString value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  checkByteStringIsUtf8(value);
+      
+      streamName_ = value;
       onChanged();
       return this;
     }

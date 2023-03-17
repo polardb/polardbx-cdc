@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,7 @@ package com.aliyun.polardbx.rpl.extractor;
 
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.MySqlInfo;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
@@ -180,7 +181,11 @@ public class CdcExtractor extends BaseExtractor {
         mySqlInfo.init(connection);
     }
 
-    private void modifyHeartbeatFlushInterval(int sec) {
+    private void modifyHeartbeatFlushIntervalIfNeed(int sec) {
+        Long interval = DynamicApplicationVersionConfig.getLong(ConfigKeys.HEARTBEAT_FLUSH_INTERVAL);
+        if (interval.intValue() == sec) {
+            return;
+        }
         logger.info("modify dumper heartbeat flush interval with : " + sec);
         NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
         NodeInfo nodeInfo =
@@ -204,7 +209,7 @@ public class CdcExtractor extends BaseExtractor {
         super.start();
         this.run = true;
         logger.info("start cdc extractor " + cdcServerIp + " :" + cdcPort);
-        modifyHeartbeatFlushInterval(TASK_HEARTBEAT);
+        modifyHeartbeatFlushIntervalIfNeed(TASK_HEARTBEAT);
         ManagedChannel channel = ManagedChannelBuilder
             .forAddress(cdcServerIp, cdcPort)
             .usePlaintext()
@@ -220,6 +225,15 @@ public class CdcExtractor extends BaseExtractor {
         cdcServiceStub.dump(DumpRequest.newBuilder()
             .setFileName(position.getFileName())
             .setPosition(position.getPosition()).build(), logBuffer);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                logBuffer.close();
+                channel.shutdownNow();
+            } catch (IOException ioException) {
+
+            }
+        }));
 
         ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
         List<ServerInfo> serverInfoList = serverInfoMapper.select(c ->
@@ -237,17 +251,17 @@ public class CdcExtractor extends BaseExtractor {
 
         handle.onStart();
         LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
+        decoder.setNeedFixRotate(false);
         LogContext context = new LogContext();
         context.setServerCharactorSet(mySqlInfo.getServerCharactorSet());
-        LogFetcher fetcher = logBuffer;
         LogPosition logPosition = new LogPosition(position.getFileName(), position.getPosition());
         context.setLogPosition(logPosition);
         parseThread = new Thread(() -> {
             try {
                 logger.info("parser thread started!");
-                while (run && fetcher.fetch()) {
+                while (run && logBuffer.fetch()) {
 
-                    LogEvent event = decoder.decode(fetcher, context);
+                    LogEvent event = decoder.decode(logBuffer, context);
 
                     if (event == null) {
                         continue;
@@ -263,12 +277,8 @@ public class CdcExtractor extends BaseExtractor {
             } catch (Throwable e) {
                 ex = e;
             } finally {
-                try {
-                    fetcher.close();
-                } catch (IOException ioException) {
-
-                }
                 handle.onEnd();
+                System.exit(-1);
             }
 
         }, "parser-thread");
@@ -305,7 +315,7 @@ public class CdcExtractor extends BaseExtractor {
     @Override
     public void stop() {
         super.stop();
-        modifyHeartbeatFlushInterval(NORMAL_HEARTBEAT);
+        modifyHeartbeatFlushIntervalIfNeed(NORMAL_HEARTBEAT);
         this.run = false;
     }
 

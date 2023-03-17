@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,20 +14,21 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.aliyun.polardbx.binlog.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.domain.Cursor;
-import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
-import com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.filesys.CdcFile;
+import com.aliyun.polardbx.binlog.format.utils.ByteArray;
+import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.UnsafeByteOperations;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 
 /**
  * Created by ShuGuang
@@ -51,27 +52,34 @@ public class BinlogDumpReader {
     String fileName;
     long pos;
     long fp;
-    FileInputStream inputStream;
-    FileChannel channel;
+    BinlogFileReadChannel channel;
     ByteBuffer buffer;
     LogFileManager logFileManager;
     int left = 0;
     private byte seq = 1;
+    private boolean rotateNext = true;
 
     public BinlogDumpReader(LogFileManager logFileManager, String fileName, long pos, int maxPacketSize,
-                            int readBufferSize)
-        throws IOException {
+                            int readBufferSize) throws IOException {
         if (pos == 0) {
             pos = 4;
         }
         this.logFileManager = logFileManager;
         this.fileName = fileName;
         this.pos = pos;
-        this.inputStream = new FileInputStream(logFileManager.getFullName(fileName));
-        this.channel = inputStream.getChannel();
         this.maxPacketSize = maxPacketSize;
         this.readBufferSize = readBufferSize;
         this.buffer = ByteBuffer.allocate(readBufferSize);
+        this.initChannel();
+    }
+
+    private void initChannel() throws IOException {
+        CdcFile cdcFile = logFileManager.getBinlogFileByName(fileName);
+        if (cdcFile == null) {
+            throw new PolardbxException("invalid log file");
+        } else {
+            channel = cdcFile.getReadChannel();
+        }
     }
 
     public void valid() throws IOException {
@@ -100,21 +108,17 @@ public class BinlogDumpReader {
         long endPos = ba.readLong(4);
 
         if (timestamp < 0) {
-            throw new PolardbxException("invalid event");
+            throw new PolardbxException("invalid event timestamp");
         }
         if (eventType < 0 || eventType > 0x23) {
             throw new PolardbxException("invalid event type");
         }
         if (eventSize != endPos - pos) {
             throw new PolardbxException(
-                "Found invalid event in binary log [" + fileName + "@" + pos + "#" + endPos + ", timestamp=" + timestamp
+                "invalid event size [" + fileName + "@" + pos + "#" + endPos + ", timestamp=" + timestamp
                     + ", eventType=" + eventType + ", eventSize=" + eventSize + "]");
         }
         channel.position(0);
-    }
-
-    public ByteString prepareFakeEvents() throws IOException {
-        return fakeRotateEvent().concat(fakeFormatEvent());
     }
 
     public ByteString fakeRotateEvent() {
@@ -178,6 +182,17 @@ public class BinlogDumpReader {
         return rotateEventPack;
     }
 
+    public ByteString eofEvent() {
+        ByteArray ba = new ByteArray(new byte[9]);
+        ba.writeLong(5, 3);
+        ba.write(seq++);
+        ba.write((byte) 0xfe);
+        ba.writeLong(0, 2);
+        ba.writeLong(0x0002, 2);
+        ByteString eofEventPack = ByteString.copyFrom(ba.getData());
+        return eofEventPack;
+    }
+
     public void start() throws IOException {
         final long position = channel.position();
         if (pos > position) {
@@ -213,8 +228,8 @@ public class BinlogDumpReader {
                 this.read();
             }
             if (buffer.remaining() == 0 && hasNext() && fp == channel.size()) {
-                log.info("transfer, buffer={}, {}, {}<->{}", buffer, hasNext(), channel.position(), channel.size());
-                transfer();
+                log.info("rotate, buffer={}, {}, {}<->{}", buffer, hasNext(), channel.position(), channel.size());
+                rotate();
                 return fakeRotateEvent();
             }
             int cur = buffer.position();
@@ -249,6 +264,9 @@ public class BinlogDumpReader {
                 buffer.compact();
                 cur = 0;
                 this.read();
+                while (buffer.remaining() < length) {
+                    this.read();
+                }
             }
             //2do > 16M 包处理 https://dev.mysql.com/doc/internals/en/sending-more-than-16mbyte.html
             //packet #n:   3 bytes length + sequence + status + [event_header + (event data - 1)]
@@ -324,31 +342,40 @@ public class BinlogDumpReader {
     }
 
     public boolean hasNext() {
-        Cursor cursor = logFileManager.getLatestFileCursor();
-        int ret = cursor.getFileName().compareTo(fileName);
-        if (ret == 0) {
-            long latestCursor = cursor.getFilePosition();
-            return fp < latestCursor;
-        } else if (ret > 0) {
-            int seq1 = logFileManager.parseFileNumber(fileName);
-            int seq2 = logFileManager.parseFileNumber(cursor.getFileName());
-            if (seq2 - seq1 == 1) {
-                return cursor.getFilePosition() > 4;
+        if (rotateNext) {
+            Cursor cursor = logFileManager.getLatestFileCursor();
+            int ret = cursor.getFileName().compareTo(fileName);
+            if (ret == 0) {
+                long latestCursor = cursor.getFilePosition();
+                return fp < latestCursor;
+            } else if (ret > 0) {
+                int seq1 = logFileManager.parseFileNumber(fileName);
+                int seq2 = logFileManager.parseFileNumber(cursor.getFileName());
+                if (seq2 - seq1 == 1) {
+                    return cursor.getFilePosition() > 4;
+                } else {
+                    return true;
+                }
             } else {
-                return true;
+                return false;
             }
         } else {
-            return false;
+            try {
+                return fp < channel.size();
+            } catch (Exception e) {
+                log.error("hasNext read fail", e);
+                return false;
+            }
         }
     }
 
-    void transfer() throws IOException {
+    void rotate() throws IOException {
         this.close();
-        this.fileName = logFileManager.nextBinlogFileName(fileName);
+        this.fileName = BinlogFileUtil.getNextBinlogFileName(fileName);
         this.pos = 4;
-        this.inputStream = new FileInputStream(logFileManager.getFullName(fileName));
-        this.channel = inputStream.getChannel();
-        log.info("transfer to next file {}", this.fileName);
+        CdcFile cdcFile = logFileManager.getBinlogFileByName(fileName);
+        this.channel = cdcFile.getReadChannel();
+        log.info("rotate to next file {}", this.fileName);
         this.read();
     }
 
@@ -360,10 +387,13 @@ public class BinlogDumpReader {
         try {
             buffer.clear();
             channel.close();
-            inputStream.close();
-        } catch (IOException e) {
+        } catch (Exception e) {
             log.warn("{} close fail ", fileName, e);
         }
+    }
+
+    public void setRotateNext(boolean rotateNext) {
+        this.rotateNext = rotateNext;
     }
 
 }

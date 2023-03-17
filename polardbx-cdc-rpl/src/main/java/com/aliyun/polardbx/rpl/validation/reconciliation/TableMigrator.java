@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -90,12 +90,9 @@ public class TableMigrator implements Migrator {
     @Override
     public void migrate(TableInfo srcTable) throws Exception {
         List<ValidationDiff> diffList = ctx.getRepository().getValDiffList(srcTable);
-
-        log.info("Start fixing inconsistent records. smid: {}, Src phy db: {}, Table: {}, Records number: {}",
-                 ctx.getStateMachineId(), ctx.getSrcPhyDB(), srcTable.getName(), diffList.size());
         List<Record> recordList = new ArrayList<>();
         int startIndex = 0;
-        int step = 200;
+        int step = 1;
         for (int i = 0, len = diffList.size(); i < len; i++) {
             ValidationDiff diff = diffList.get(i);
             TableInfo dstTable = ctx.getMappingTable().get(srcTable.getName());
@@ -129,9 +126,7 @@ public class TableMigrator implements Migrator {
                     persistToDstTable(diff, recordList);
                     recordList = new ArrayList<>();
                     for (int j = startIndex; j <= i; j++) {
-                        // TODO : use a separate thread to delete?
-                        ValidationDiff d = diffList.get(j);
-                        validationDiffMapper.deleteByPrimaryKey(d.getId());
+                        logicalDeleteDiff(diffList.get(j));
                     }
                     log.info("Remaining records: {}", diffList.size() - (i - startIndex + 1));
                     startIndex = i + 1;
@@ -147,19 +142,26 @@ public class TableMigrator implements Migrator {
         }
     }
 
+    private void logicalDeleteDiff(ValidationDiff d) {
+        ValidationDiff diff = new ValidationDiff();
+        diff.setId(d.getId());
+        diff.setDeleted(true);
+        validationDiffMapper.updateByPrimaryKeySelective(diff);
+    }
+
     private void persistToDstTable(ValidationDiff diff, List<Record> recordList)
     throws Exception {
         Connection conn = null;
         PreparedStatement stmt = null;
         ValidationTask task = ctx.getRepository().getValTaskByRefId(diff.getValidationTaskId());
         TableInfo dstTable = dstTableCache.getUnchecked(task.getDstLogicalTable());
-        try {
-            conn = ctx.getDstDs().getConnection();
-            stmt = ctx.getValSQLGenerator().formatInsertStatement(conn, dstTable, recordList.stream().toArray(Record[]::new));
-            int ret = stmt.executeUpdate();
-            log.info("Insert into destination table. Ret: {}", ret);
-        } catch (Exception e) {
-            log.error("Bulk persist records to destination table exception. Try insert one by one.", e);
+//        try {
+//            conn = ctx.getDstDs().getConnection();
+//            stmt = ctx.getValSQLGenerator().formatInsertStatement(conn, dstTable, recordList.stream().toArray(Record[]::new));
+//            int ret = stmt.executeUpdate();
+//            log.info("Insert into destination table. Ret: {}", ret);
+//        } catch (Exception e) {
+//            log.error("Bulk persist records to destination table exception. Try insert one by one.", e);
             Connection newConn = null;
             PreparedStatement newStmt = null;
             try {
@@ -175,8 +177,9 @@ public class TableMigrator implements Migrator {
             } finally {
                 DataSourceUtil.closeQuery(null, newStmt, newConn);
             }
-        } finally {
-            DataSourceUtil.closeQuery(null, stmt, conn);
-        }
+//        }
+//        finally {
+//            DataSourceUtil.closeQuery(null, stmt, conn);
+//        }
     }
 }

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,7 +17,7 @@ package com.aliyun.polardbx.binlog.dumper.dump.logfile.parallel;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.message.MessageEventExceptionHandler;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileGenerator;
-import com.aliyun.polardbx.binlog.dumper.metrics.Metrics;
+import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.lmax.disruptor.BatchEventProcessor;
 import com.lmax.disruptor.BlockingWaitStrategy;
 import com.lmax.disruptor.ExceptionHandler;
@@ -58,6 +58,7 @@ public class ParallelWriter {
     private final boolean useBatch;
     private final int eventDataBufferSize;
     private final int eventDataMaxSize;
+    private final StreamMetrics metrics;
 
     private RingBuffer<EventData> disruptorMsgBuffer;
     private ExecutorService eventBuildExecutor;
@@ -67,7 +68,7 @@ public class ParallelWriter {
     private BatchEventToken currentBatchEventToken;
 
     public ParallelWriter(LogFileGenerator logFileGenerator, int ringBufferSize, int eventBuilderParallelism,
-                          boolean dryRun, int dryRunMode) {
+                          StreamMetrics metrics, boolean dryRun, int dryRunMode) {
         this.ringBufferSize = ringBufferSize;
         this.eventBuilderParallelism = eventBuilderParallelism;
         this.dryRun = dryRun;
@@ -80,6 +81,7 @@ public class ParallelWriter {
         this.useBatch = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_PARALLEL_USE_BATCH);
         this.eventDataBufferSize = DynamicApplicationConfig.getInt(BINLOG_WRITE_PARALLEL_EVENT_DATA_BUFFER_SIZE);
         this.eventDataMaxSize = DynamicApplicationConfig.getInt(BINLOG_WRITE_PARALLEL_EVENT_DATA_MAX_SIZE);
+        this.metrics = metrics;
     }
 
     public void push(SingleEventToken eventToken) {
@@ -127,7 +129,7 @@ public class ParallelWriter {
             }
         } while (running.get());
 
-        Metrics.get().setParallelBufferSize(
+        metrics.setWriteQueueSize(
             disruptorMsgBuffer.getBufferSize() - disruptorMsgBuffer.remainingCapacity());
     }
 

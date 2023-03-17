@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,7 +32,7 @@ public enum MonitorType {
         "Cdc Merger Thread已连续%s秒未收到数据，请尽快排查Extractor是否发生了Block.",
         1,
         5,
-        true),
+        false),
 
     DUMPER_STAGE_LEADER_NODATA_ERROR(
         "polarx_cdc_dumper_leader_nodata_error",
@@ -40,7 +40,7 @@ public enum MonitorType {
         "Cdc Dumper Leader已连续%s秒未收到数据，请尽快排查同步链路是否发生了Block",
         2,
         5,
-        false),
+        true),
 
     DUMPER_STAGE_FOLLOWER_NODATA_ERROR(
         "polarx_cdc_dumper_follower_nodata_error",
@@ -48,7 +48,7 @@ public enum MonitorType {
         "Cdc Dumper Follower已连续%s秒未收到数据，请尽快排查同步链路是否发生了Block",
         2,
         5,
-        false),
+        true),
 
     DUMPER_STAGE_LEADER_DELAY(
         "polarx_cdc_dumper_leader_delayed",
@@ -56,7 +56,7 @@ public enum MonitorType {
         "Cdc Dumper Leader出现延迟，延迟时间为%sms，请尽快排查Task到Dumper的同步链路",
         2,
         10,
-        true),
+        false),
 
     DUMPER_STAGE_FOLLOWER_DELAY(
         "polarx_cdc_dumper_follower_delayed",
@@ -64,7 +64,7 @@ public enum MonitorType {
         "Cdc Dumper Follower出现延迟，延迟时间为%sms，请尽快排查Task到Dumper，以及Dumper之间的同步链路.",
         2,
         10,
-        true),
+        false),
 
     EXTRACTOR_NOT_FOUND_POSITION_ERROR(
         "polarx_cdc_extractor_position_expired",
@@ -72,7 +72,7 @@ public enum MonitorType {
         "Cdc Extractor start位点过期，已退出工作，请尽快解决，异常信息：%s",
         1,
         10,
-        true),
+        false),
 
     EXTRACTOR_START_ERROR(
         "polarx_cdc_extractor_start_error",
@@ -80,7 +80,7 @@ public enum MonitorType {
         "Cdc Extractor start异常，错误信息：%s",
         1,
         10,
-        true),
+        false),
 
     EXTRACTOR_CONSUME_ERROR(
         "polarx_cdc_extractor_consume_error",
@@ -88,7 +88,7 @@ public enum MonitorType {
         "Cdc Extractor 消费异常，错误信息：%s",
         1,
         10,
-        true),
+        false),
 
     DUMPER_STAGE_LEADER_FILE_GENERATE_ERROR(
         "polarx_cdc_dumper_leader_file_generate_error",
@@ -96,7 +96,7 @@ public enum MonitorType {
         "Cdc Dumper Leader生产逻辑Binlog的主线程出现异常，请尽快排查，异常信息：%s",
         10,
         10,
-        true),
+        false),
 
     DUMPER_STAGE_FOLLOWER_FILE_SYNC_ERROR(
         "polarx_cdc_dumper_follower_file_sync_error",
@@ -104,7 +104,7 @@ public enum MonitorType {
         "Cdc Dumper Follower同步逻辑Binlog的主线程出现异常，请尽快排查，异常信息：%s",
         10,
         10,
-        true),
+        false),
 
     BINLOG_NUM_LARGE_THEN_WARRNING(
         "polarx_cdc_disk_usage_warning",
@@ -112,7 +112,7 @@ public enum MonitorType {
         "Cdc 本地binlog磁盘使用量超过%d,限制容量为%d,请及时关注",
         1,
         10,
-        true),
+        false),
 
     DAEMON_TASK_ALIVE_WATCHER_ERROR(
         "polarx_cdc_daemon_task_alive_watcher_error",
@@ -120,7 +120,7 @@ public enum MonitorType {
         "Daemon进程TaskAliveWatcher定时任务出现异常，请尽快排查，异常信息：%s",
         5,
         10,
-        true),
+        false),
 
     DAEMON_TOPOLOGY_WATCHER_ERROR(
         "polarx_cdc_daemon_topology_watcher_error",
@@ -128,7 +128,7 @@ public enum MonitorType {
         "Daemon进程TopologyWatcher定时任务出现异常，请尽快排查，异常信息：%s",
         3,
         10,
-        true),
+        false),
 
     DAEMON_POLARX_HEARTBEAT_ERROR(
         "polarx_cdc_daemon_polarx_heartbeat_error",
@@ -136,7 +136,7 @@ public enum MonitorType {
         "Daemon进程向PolarX执行Heartbeat的定时任务出现异常，请尽快排查，异常信息：%s",
         20,
         10,
-        true
+        false
     ),
 
     DAEMON_PROCESS_DEAD_ERROR(
@@ -145,7 +145,7 @@ public enum MonitorType {
         "Daemon进程探活异常，进程可能已退出，请尽快排查，所属容器ID：%s",
         5,
         10,
-        true
+        false
     ),
 
     REPOSITORY_SWITCH_TO_DISK_WARNING(
@@ -154,7 +154,7 @@ public enum MonitorType {
         "Task进程触发了数据落盘，请密切关注，触发落盘原因: %s",
         1,
         60,
-        true
+        false
     ),
 
     BINLOG_BACKUP_UPLOAD_ERROR(
@@ -163,7 +163,7 @@ public enum MonitorType {
         "Binlog文件备份上传出现异常，请尽快排查原因，文件名称： %s",
         1,
         10,
-        true
+        false
     ),
 
     BINLOG_BACKUP_DELETE_ERROR(
@@ -172,7 +172,7 @@ public enum MonitorType {
         "从备份存储删除Binlog文件出现异常，请尽快排查原因，文件名称： %s",
         5,
         10,
-        true
+        false
     ),
 
     PROCESS_HEARTBEAT_TIMEOUT_WARNING(
@@ -181,7 +181,7 @@ public enum MonitorType {
         "进程%s出现了心跳超时，触发了自动重启，请及时关注.",
         5,
         10,
-        true
+        false
     ),
     BINLOG_DOWNLOAD_FAILED_WARNING(
         "polarx_cdc_binlog_download_faile_warning",
@@ -189,7 +189,7 @@ public enum MonitorType {
         "从备份中恢复binlog文件%s失败，请及时关注.",
         5,
         10,
-        true
+        false
     ),
     BINLOG_OSS_BACKUP_BUCKET_NOT_FOUND_WARNING(
         "polarx_cdc_binlog_backup_bucket_warning",
@@ -197,7 +197,7 @@ public enum MonitorType {
         "查询oss上对应的bucket %s失败，请及时关注.",
         5,
         10,
-        true
+        false
     ),
     IMPORT_VALIDATION_ERROR(
         "polarx_cdc_import_validation_error",
@@ -205,7 +205,7 @@ public enum MonitorType {
         "评估升级全量校验和订正任务 %s 错误退出, 请及时关注, 异常： %s",
         1,
         30,
-        true
+        false
     ),
     IMPORT_FULL_ERROR(
         "polarx_cdc_import_full_error",
@@ -213,7 +213,7 @@ public enum MonitorType {
         "评估升级全量迁移任务 %s 错误退出, 请及时关注， 异常： %s",
         1,
         30,
-        true
+        false
     ),
     IMPORT_INC_ERROR(
         "polarx_cdc_import_inc_error",
@@ -221,7 +221,7 @@ public enum MonitorType {
         "评估升级增量迁移任务 %s 错误退出, 请及时关注， 异常： %s",
         1,
         30,
-        true
+        false
     ),
     RPL_PROCESS_ERROR(
         "polarx_cdc_rpl_process_error",
@@ -229,7 +229,7 @@ public enum MonitorType {
         "RPL任务 %s 错误退出, 请及时关注， 异常： %s",
         1,
         30,
-        true
+        false
     ),
     RPL_FLASHBACK_ERROR(
         "polarx_cdc_rpl_flashback_error",
@@ -237,7 +237,7 @@ public enum MonitorType {
         "RPL sql闪回任务 %s 失败，请及时关注, 异常： %s",
         1,
         30,
-        true
+        false
     ),
     RPL_HEARTBEAT_TIMEOUT_ERROR(
         "polarx_cdc_rpl_heartbeat_timeout_error",
@@ -245,7 +245,15 @@ public enum MonitorType {
         "RPL任务 %s 心跳超时，请及时关注, 异常： %s",
         1,
         30,
-        true
+        false
+    ),
+    BINLOG_FATAL_ERROR(
+        "polarx_cdc_binlog_fatal_error",
+        true,
+        "binlog链路异常，该实例存在下游binlog消费，请尽快排查, 原报警信息： %s",
+        1,
+        5,
+        false
     ),
     META_DATA_INCONSISTENT_WARNNIN(
         "polarx_cdc_meta_data_inconsistent_warnning",
@@ -253,7 +261,7 @@ public enum MonitorType {
         "当前已经没有执行中的DDL任务，CDC元数据仍然存在不一致，请及时关注，DeltaChangeData: %s",
         1,
         10,
-        true
+        false
     ),
     META_LOGIC_DDLRECORD_COUNT_WARNNIN(
         "polarx_cdc_meta_logic_ddlrecord_count_warnning",
@@ -261,7 +269,7 @@ public enum MonitorType {
         "逻辑元数据历史表，记录数超过报警阈值，请及时关注，当前数量: %s",
         1,
         10,
-        true
+        false
     ),
     META_PHY_DDLRECORD_COUNT_WARNNIN(
         "polarx_cdc_meta_phy_ddlrecord_count_warnning",
@@ -269,7 +277,15 @@ public enum MonitorType {
         "物理元数据历史表，记录数超过报警阈值，请及时关注，当前数量: %s",
         1,
         10,
-        true
+        false
+    ),
+    META_SNAP_REBUILD_ERROR_WARNNIN(
+        "polarx_cdc_meta_snapshot_rebuild_error_warnning",
+        true,
+        "元数据重建异常，请及时关注，报错信息: %s",
+        1,
+        10,
+        false
     );
 
     private String desc;
@@ -277,16 +293,16 @@ public enum MonitorType {
     private String msgTemplate;
     private int alarmThreshold;
     private int alarmInterval;
-    private boolean justDingding;
+    private boolean fatalAlarmIfExistsConsumer;
 
     MonitorType(String desc, boolean expirable, String msgTemplate, int alarmThreshold, int alarmInterval,
-                boolean justDingding) {
+                boolean fatalAlarmIfExistsConsumer) {
         this.desc = desc;
         this.expirable = expirable;
         this.msgTemplate = msgTemplate;
         this.alarmThreshold = alarmThreshold;
         this.alarmInterval = alarmInterval;
-        this.justDingding = justDingding;
+        this.fatalAlarmIfExistsConsumer = fatalAlarmIfExistsConsumer;
     }
 
     public String getDesc() {
@@ -329,11 +345,11 @@ public enum MonitorType {
         this.alarmInterval = alarmInterval;
     }
 
-    public boolean isJustDingding() {
-        return justDingding;
+    public boolean isFatalAlarmIfExistsConsumer() {
+        return fatalAlarmIfExistsConsumer;
     }
 
-    public void setJustDingding(boolean justDingding) {
-        this.justDingding = justDingding;
+    public void setFatalAlarmIfExistsConsumer(boolean fatalAlarmIfExistsConsumer) {
+        this.fatalAlarmIfExistsConsumer = fatalAlarmIfExistsConsumer;
     }
 }

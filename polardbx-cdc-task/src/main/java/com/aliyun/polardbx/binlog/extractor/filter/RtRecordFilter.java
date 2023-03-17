@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,7 +22,6 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.core.ddl.ThreadRecorder;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.extractor.MultiStreamStartTsoWindow;
-import com.aliyun.polardbx.binlog.metrics.ExtractorMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +45,6 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
         recorder.setBinlogFile(context.getRuntimeContext().getBinlogFile());
         recorder.setLogPos(event.getLogPos());
         recorder.setWhen(event.getWhen());
-        ExtractorMetrics.get().recordRt(recorder);
         if (c == null) {
             c = Thread.currentThread();
         }
@@ -60,7 +58,7 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
 
     @Override
     public void onStart(HandlerContext context) {
-        ExtractorMetrics.get().recordRt(context.getRuntimeContext().getThreadRecorder());
+        ThreadRecorder.registerRecorder(context.getRuntimeContext().getThreadRecorder());
         run = true;
         while (run) {
             BinlogPosition position = context.getRuntimeContext().getStartPosition();
@@ -83,7 +81,7 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
     public void onStop() {
         run = false;
         if (recorder != null) {
-            ExtractorMetrics.get().removeRecord(recorder);
+            ThreadRecorder.removeRecord(recorder);
         }
         if (c != null) {
             c.interrupt();

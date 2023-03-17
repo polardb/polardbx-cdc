@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,7 +16,6 @@ package com.aliyun.polardbx.binlog;
 
 import com.aliyun.polardbx.binlog.dao.SystemConfigMapperExtend;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Maps;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -24,6 +23,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.config.PropertyPlaceholderConfigurer;
+import org.springframework.context.ApplicationEvent;
+import org.springframework.context.ApplicationListener;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
@@ -37,21 +38,22 @@ import java.util.Properties;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlaceholderConfigurer
-    implements Runnable {
+    implements Runnable, ApplicationListener {
 
     private static final Logger logger = LoggerFactory.getLogger(CustomPropertySourcesPlaceholderConfigurer.class);
     private static final String SCAN_PERIOD = "scanPeriod";
     private static final String CHECKSUM = "Checksum";
+    private static final AtomicBoolean start = new AtomicBoolean(false);
     private static ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(
         r -> {
             Thread t = new Thread(r, "scan-period");
             t.setDaemon(true);
             return t;
         });
-
     private final Map<String, Long> fileModifedMap = Maps.newConcurrentMap();
     private Long lastCheckSum;
     private ResourceLoader resourceLoader;
@@ -77,11 +79,6 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
 
         super.processProperties(beanFactoryToProcess, props);
         printProps();
-        String scanPeriod = props.getProperty(SCAN_PERIOD);
-        if (StringUtils.isNotBlank(scanPeriod)) {
-            long period = Long.valueOf(scanPeriod);
-            scheduledExecutorService.scheduleAtFixedRate(this, period, period, TimeUnit.SECONDS);
-        }
     }
 
     private void printProps() {
@@ -89,7 +86,7 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
         while (enumeration.hasMoreElements()) {
             String placeholderName = enumeration.nextElement();
             String value = props.getProperty(placeholderName);
-            logger.warn("props : [ " + placeholderName + " : " + value + " ] ");
+//            logger.warn("props : [ " + placeholderName + " : " + value + " ] ");
         }
     }
 
@@ -137,7 +134,8 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
                 logger.info("detected config properties change");
                 reload(resource);
                 reload(envResource);
-                SystemDbConfig.invalidateCache();
+                DynamicApplicationConfig.invalidateCache();
+                DynamicApplicationConfig.firePropChange();
                 recordModify(resource);
                 recordModify(envResource);
                 printProps();
@@ -146,7 +144,8 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
 
             if (isSystemDbChange()) {
                 logger.info("init or detected db system config change");
-                SystemDbConfig.invalidateCache();
+                DynamicApplicationConfig.invalidateCache();
+                DynamicApplicationConfig.firePropChange();
             }
         } catch (Throwable e) {
             logger.error("scan config change error!", e);
@@ -164,5 +163,17 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
             return true;
         }
         return false;
+    }
+
+    @Override
+    public void onApplicationEvent(ApplicationEvent event) {
+        if (start.compareAndSet(false, true)) {
+            DynamicApplicationConfig.afterPropSet();
+            String scanPeriod = props.getProperty(SCAN_PERIOD);
+            if (StringUtils.isNotBlank(scanPeriod)) {
+                long period = Long.valueOf(scanPeriod);
+                scheduledExecutorService.scheduleAtFixedRate(this, period, period, TimeUnit.SECONDS);
+            }
+        }
     }
 }

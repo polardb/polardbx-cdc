@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl;
 
+import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.ConsoleTableMetaTSDB;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
@@ -40,6 +41,8 @@ public class TableMetaCache {
     private DataSource dataSource;
     private MysqlConnection connection;
     private MemoryTableMeta memoryTableMeta;
+    private static final String SHOW_CREATE_TABLE = "SHOW CREATE TABLE `%s`.`%s`";
+    private static final String DESC = "DESC `%s`.`%s`";
 
     private int MAX_RETRY = 3;
 
@@ -75,8 +78,7 @@ public class TableMetaCache {
     public TableMeta getTableMeta(String schema, String table) throws Throwable {
         TableMeta tableMeta = memoryTableMeta.find(schema, table);
         if (tableMeta == null) {
-            String fullName = getFullName(schema, table);
-            tableMeta = getTableMetaFromDb(fullName);
+            tableMeta = getTableMetaFromDb(schema, table);
         }
 
         if (StringUtils.isBlank(tableMeta.getCharset())) {
@@ -93,24 +95,22 @@ public class TableMetaCache {
     private String getFullName(String schema, String table) {
         StringBuilder builder = new StringBuilder();
         return builder.append('`')
-            .append(schema)
+            .append(CommonUtils.escape(schema))
             .append('`')
             .append('.')
             .append('`')
-            .append(table)
+            .append(CommonUtils.escape(table))
             .append('`')
             .toString();
     }
 
-    private TableMeta getTableMetaFromDb(final String fullname) throws Throwable {
+    private TableMeta getTableMetaFromDb(String schema, String table) throws Throwable {
         int retry = 0;
         while (true) {
             try {
                 // 优先使用show create table处理
-                TableMeta tableMeta = connection.query("show create table " + fullname, rs -> {
-                    String[] names = StringUtils.split(fullname, "`.`");
-                    String schema = names[0];
-                    String table = names[1];
+                TableMeta tableMeta = connection.query(
+                    String.format(SHOW_CREATE_TABLE, CommonUtils.escape(schema), CommonUtils.escape(table)), rs -> {
 
                     String createDDL = null;
                     while (rs.next()) {
@@ -126,7 +126,8 @@ public class TableMetaCache {
                 }
 
                 // fallback
-                return connection.query("desc " + fullname, rs -> {
+                return connection.query(String.format(DESC, CommonUtils.escape(schema), CommonUtils.escape(table)),
+                    rs -> {
                     List<FieldMeta> metas = new ArrayList<FieldMeta>();
                     while (rs.next()) {
                         FieldMeta meta = new FieldMeta();
@@ -139,10 +140,6 @@ public class TableMetaCache {
                         meta.setDefaultValue(rs.getString("Default"));
                         metas.add(meta);
                     }
-
-                    String[] names = StringUtils.split(fullname, "`.`");
-                    String schema = names[0];
-                    String table = names[1];
                     return new TableMeta(schema, table, metas);
                 });
             } catch (Throwable e) {

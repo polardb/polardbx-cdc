@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,6 +31,7 @@ private static final long serialVersionUID = 0L;
   }
   private DumpRequest() {
     tso_ = "";
+    dumperName_ = "";
   }
 
   @java.lang.Override
@@ -67,6 +68,22 @@ private static final long serialVersionUID = 0L;
             java.lang.String s = input.readStringRequireUtf8();
 
             tso_ = s;
+            break;
+          }
+          case 18: {
+            java.lang.String s = input.readStringRequireUtf8();
+
+            dumperName_ = s;
+            break;
+          }
+          case 24: {
+
+            streamSeq_ = input.readInt32();
+            break;
+          }
+          case 32: {
+
+            version_ = input.readInt64();
             break;
           }
           default: {
@@ -139,6 +156,66 @@ private static final long serialVersionUID = 0L;
     }
   }
 
+  public static final int DUMPERNAME_FIELD_NUMBER = 2;
+  private volatile java.lang.Object dumperName_;
+  /**
+   * <code>string dumperName = 2;</code>
+   * @return The dumperName.
+   */
+  @java.lang.Override
+  public java.lang.String getDumperName() {
+    java.lang.Object ref = dumperName_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      dumperName_ = s;
+      return s;
+    }
+  }
+  /**
+   * <code>string dumperName = 2;</code>
+   * @return The bytes for dumperName.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getDumperNameBytes() {
+    java.lang.Object ref = dumperName_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      dumperName_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
+  public static final int STREAMSEQ_FIELD_NUMBER = 3;
+  private int streamSeq_;
+  /**
+   * <code>int32 streamSeq = 3;</code>
+   * @return The streamSeq.
+   */
+  @java.lang.Override
+  public int getStreamSeq() {
+    return streamSeq_;
+  }
+
+  public static final int VERSION_FIELD_NUMBER = 4;
+  private long version_;
+  /**
+   * <code>int64 version = 4;</code>
+   * @return The version.
+   */
+  @java.lang.Override
+  public long getVersion() {
+    return version_;
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -156,6 +233,15 @@ private static final long serialVersionUID = 0L;
     if (!getTsoBytes().isEmpty()) {
       com.google.protobuf.GeneratedMessageV3.writeString(output, 1, tso_);
     }
+    if (!getDumperNameBytes().isEmpty()) {
+      com.google.protobuf.GeneratedMessageV3.writeString(output, 2, dumperName_);
+    }
+    if (streamSeq_ != 0) {
+      output.writeInt32(3, streamSeq_);
+    }
+    if (version_ != 0L) {
+      output.writeInt64(4, version_);
+    }
     unknownFields.writeTo(output);
   }
 
@@ -167,6 +253,17 @@ private static final long serialVersionUID = 0L;
     size = 0;
     if (!getTsoBytes().isEmpty()) {
       size += com.google.protobuf.GeneratedMessageV3.computeStringSize(1, tso_);
+    }
+    if (!getDumperNameBytes().isEmpty()) {
+      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(2, dumperName_);
+    }
+    if (streamSeq_ != 0) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeInt32Size(3, streamSeq_);
+    }
+    if (version_ != 0L) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeInt64Size(4, version_);
     }
     size += unknownFields.getSerializedSize();
     memoizedSize = size;
@@ -185,6 +282,12 @@ private static final long serialVersionUID = 0L;
 
     if (!getTso()
         .equals(other.getTso())) return false;
+    if (!getDumperName()
+        .equals(other.getDumperName())) return false;
+    if (getStreamSeq()
+        != other.getStreamSeq()) return false;
+    if (getVersion()
+        != other.getVersion()) return false;
     if (!unknownFields.equals(other.unknownFields)) return false;
     return true;
   }
@@ -198,6 +301,13 @@ private static final long serialVersionUID = 0L;
     hash = (19 * hash) + getDescriptor().hashCode();
     hash = (37 * hash) + TSO_FIELD_NUMBER;
     hash = (53 * hash) + getTso().hashCode();
+    hash = (37 * hash) + DUMPERNAME_FIELD_NUMBER;
+    hash = (53 * hash) + getDumperName().hashCode();
+    hash = (37 * hash) + STREAMSEQ_FIELD_NUMBER;
+    hash = (53 * hash) + getStreamSeq();
+    hash = (37 * hash) + VERSION_FIELD_NUMBER;
+    hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+        getVersion());
     hash = (29 * hash) + unknownFields.hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -333,6 +443,12 @@ private static final long serialVersionUID = 0L;
       super.clear();
       tso_ = "";
 
+      dumperName_ = "";
+
+      streamSeq_ = 0;
+
+      version_ = 0L;
+
       return this;
     }
 
@@ -360,6 +476,9 @@ private static final long serialVersionUID = 0L;
     public com.aliyun.polardbx.binlog.protocol.DumpRequest buildPartial() {
       com.aliyun.polardbx.binlog.protocol.DumpRequest result = new com.aliyun.polardbx.binlog.protocol.DumpRequest(this);
       result.tso_ = tso_;
+      result.dumperName_ = dumperName_;
+      result.streamSeq_ = streamSeq_;
+      result.version_ = version_;
       onBuilt();
       return result;
     }
@@ -411,6 +530,16 @@ private static final long serialVersionUID = 0L;
       if (!other.getTso().isEmpty()) {
         tso_ = other.tso_;
         onChanged();
+      }
+      if (!other.getDumperName().isEmpty()) {
+        dumperName_ = other.dumperName_;
+        onChanged();
+      }
+      if (other.getStreamSeq() != 0) {
+        setStreamSeq(other.getStreamSeq());
+      }
+      if (other.getVersion() != 0L) {
+        setVersion(other.getVersion());
       }
       this.mergeUnknownFields(other.unknownFields);
       onChanged();
@@ -513,6 +642,144 @@ private static final long serialVersionUID = 0L;
   checkByteStringIsUtf8(value);
       
       tso_ = value;
+      onChanged();
+      return this;
+    }
+
+    private java.lang.Object dumperName_ = "";
+    /**
+     * <code>string dumperName = 2;</code>
+     * @return The dumperName.
+     */
+    public java.lang.String getDumperName() {
+      java.lang.Object ref = dumperName_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        dumperName_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <code>string dumperName = 2;</code>
+     * @return The bytes for dumperName.
+     */
+    public com.google.protobuf.ByteString
+        getDumperNameBytes() {
+      java.lang.Object ref = dumperName_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        dumperName_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <code>string dumperName = 2;</code>
+     * @param value The dumperName to set.
+     * @return This builder for chaining.
+     */
+    public Builder setDumperName(
+        java.lang.String value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  
+      dumperName_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string dumperName = 2;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearDumperName() {
+      
+      dumperName_ = getDefaultInstance().getDumperName();
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>string dumperName = 2;</code>
+     * @param value The bytes for dumperName to set.
+     * @return This builder for chaining.
+     */
+    public Builder setDumperNameBytes(
+        com.google.protobuf.ByteString value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  checkByteStringIsUtf8(value);
+      
+      dumperName_ = value;
+      onChanged();
+      return this;
+    }
+
+    private int streamSeq_ ;
+    /**
+     * <code>int32 streamSeq = 3;</code>
+     * @return The streamSeq.
+     */
+    @java.lang.Override
+    public int getStreamSeq() {
+      return streamSeq_;
+    }
+    /**
+     * <code>int32 streamSeq = 3;</code>
+     * @param value The streamSeq to set.
+     * @return This builder for chaining.
+     */
+    public Builder setStreamSeq(int value) {
+      
+      streamSeq_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>int32 streamSeq = 3;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearStreamSeq() {
+      
+      streamSeq_ = 0;
+      onChanged();
+      return this;
+    }
+
+    private long version_ ;
+    /**
+     * <code>int64 version = 4;</code>
+     * @return The version.
+     */
+    @java.lang.Override
+    public long getVersion() {
+      return version_;
+    }
+    /**
+     * <code>int64 version = 4;</code>
+     * @param value The version to set.
+     * @return This builder for chaining.
+     */
+    public Builder setVersion(long value) {
+      
+      version_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>int64 version = 4;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearVersion() {
+      
+      version_ = 0L;
       onChanged();
       return this;
     }

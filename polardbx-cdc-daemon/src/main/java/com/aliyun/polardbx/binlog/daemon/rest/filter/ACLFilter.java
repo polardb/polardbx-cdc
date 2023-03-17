@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,25 +20,19 @@ import com.aliyun.polardbx.binlog.daemon.rest.ann.ACL;
 import com.aliyun.polardbx.binlog.daemon.rest.signature.Signature;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import org.apache.catalina.filters.RequestFilter;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.eclipse.jetty.server.Request;
-import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
 
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
-import javax.ws.rs.Path;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.lang.reflect.Method;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
@@ -47,49 +41,23 @@ import java.util.concurrent.TimeUnit;
 
 public class ACLFilter extends RequestFilter {
 
-    public static final String AK = "tQMxr3M71ha3hHLudXGc6e4Gd7CQ59l7JL5kdyfo";
-    private static final String SK = "tQMxr3M71ha3hHLudXGc6e4Gd7CQ59l7JL5kdyfo";
     private static final String ACCESS_KEY = "accessKey";
     private static final String SIGNATURE = "signature";
     private static final String TIMESTAMP = "timestamp";
     // 30s超时
     private static final long TIME_OUT = TimeUnit.SECONDS.toMillis(30);
     private static Map<String, String> akMap = new HashMap<>();
+    public final String AK;
+    private final String SK;
     private final Log log = LogFactory.getLog(ACLFilter.class);
-    private Set<URLMatcher> urlSets = Sets.newHashSet();
+    private final Set<URLMatcher> urlSets;
 
     public ACLFilter(String basePackage) {
-        try {
-            ClassPathScanningCandidateComponentProvider scanningCandidateComponentProvider =
-                new ClassPathScanningCandidateComponentProvider(false);
-            scanningCandidateComponentProvider.addIncludeFilter(new AnnotationTypeFilter(ACL.class));
-            Set<BeanDefinition> definitionSet = scanningCandidateComponentProvider.findCandidateComponents(basePackage);
-            for (BeanDefinition definition : definitionSet) {
-                log.info("init " + definition.getBeanClassName());
-                Class cls = Class.forName(definition.getBeanClassName());
-                Path path = (Path) cls.getAnnotation(Path.class);
-                String parentPath;
-                if (path != null) {
-                    parentPath = path.value();
-                } else {
-                    parentPath = "";
-                }
-                Method[] methods = cls.getDeclaredMethods();
-                for (Method m : methods) {
-                    Path subPath = m.getAnnotation(Path.class);
-                    if (subPath == null) {
-                        continue;
-                    }
-                    String urlPath = parentPath + subPath.value();
-                    urlSets.add(new URLMatcher(urlPath));
-                }
-            }
-
-        } catch (Exception e) {
-            throw new PolardbxException(e);
-        }
-
-        System.out.println(urlSets);
+        this.AK = DynamicApplicationConfig.getString(ConfigKeys.DEAMON_REST_API_ACL_AK);
+        this.SK = DynamicApplicationConfig.getString(ConfigKeys.DEAMON_REST_API_ACL_SK);
+        URLScanner scanner = new URLScanner(ACL.class, basePackage);
+        urlSets = scanner.scan();
+        log.info("url sets for acl control is " + urlSets);
     }
 
     private Map<String, String> getRequestParams(ServletRequest request) {
@@ -127,7 +95,7 @@ public class ACLFilter extends RequestFilter {
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain)
         throws IOException, ServletException {
-        String requestUrl = ((Request) request).getHttpURI().toString();
+        String requestUrl = ((Request) request).getRequestURI();
 
         if (!isACL(requestUrl)) {
             filterChain.doFilter(request, response);

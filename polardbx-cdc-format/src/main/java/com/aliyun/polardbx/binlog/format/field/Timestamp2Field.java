@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,11 @@
 package com.aliyun.polardbx.binlog.format.field;
 
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
+import com.aliyun.polardbx.binlog.format.field.domain.MDate;
+import org.apache.commons.lang3.StringUtils;
 
+import java.nio.ByteBuffer;
+import java.util.Calendar;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -23,62 +27,57 @@ import java.util.concurrent.TimeUnit;
  */
 public class Timestamp2Field extends Field {
 
-    private static final int MAX_DATETIME_WIDTH = 19;           /* YYYY-MM-DD HH:MM:SS */
-
-    private int desc;
+    private final int desc;
 
     public Timestamp2Field(CreateField createField) {
         super(createField);
-        desc = fieldLength > MAX_DATETIME_WIDTH ? (int) (fieldLength - 1 - MAX_DATETIME_WIDTH) : 0;
+        desc = createField.getCodepoint();
     }
 
     @Override
-    public byte[] encode() {
-        if (data == null) {
-            return EMPTY;
-        }
-        long date = Long.valueOf(data);
-        byte[] binary;
-        long sec = TimeUnit.MILLISECONDS.toSeconds(date);
-        long mill = date - TimeUnit.SECONDS.toMillis(sec);
+    public boolean isNull() {
+        return super.isNull() || StringUtils.equalsIgnoreCase(buildDataStr(), "CURRENT_TIMESTAMP")
+            || StringUtils.equalsIgnoreCase(buildDataStr(), "0000-00-00 00:00:00");
+    }
+
+    @Override
+    public byte[] encodeInternal() {
+        String data = buildDataStr();
+        MDate mDate = new MDate();
+        mDate.parse(data);
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(mDate.getYear(), mDate.getMonth() - 1, mDate.getDay(), mDate.getHours(),
+            mDate.getMinutes(), mDate.getSeconds());
+
+        ByteBuffer byteBuffer;
+        long sec = TimeUnit.MILLISECONDS.toSeconds(calendar.getTimeInMillis());
+        long mill = mDate.getMillsecond();
         switch (desc) {
-        case 0:
-            byte[] secByte = toBEByte(sec, 4);
-            binary = new byte[4];
-            System.arraycopy(secByte, 0, binary, 0, 4);
-            break;
         case 1:
         case 2:
-            binary = new byte[5];
-            secByte = toBEByte(sec, 4);
-            System.arraycopy(secByte, 0, binary, 0, 4);
-            binary[4] = (byte) (mill / 10000);
+            byteBuffer = ByteBuffer.allocate(5);
+            toBEByte(byteBuffer, sec, 4);
+            byteBuffer.put((byte) (mill / 10000));
             break;
         case 3:
         case 4:
-            binary = new byte[6];
-            secByte = toBEByte(sec, 4);
-            System.arraycopy(secByte, 0, binary, 0, 4);
-            mill = mill / 100;
-            binary[4] = (byte) ((mill >> 8) & 0xFF);
-            binary[5] = (byte) (mill & 0xFF);
+            byteBuffer = ByteBuffer.allocate(6);
+            toBEByte(byteBuffer, sec, 4);
+            toBEByte(byteBuffer, mill / 100, 2);
             break;
         case 5:
         case 6:
-            binary = new byte[7];
-            secByte = toBEByte(sec, 4);
-            System.arraycopy(secByte, 0, binary, 0, 4);
-            binary[4] = (byte) ((mill >> 16) & 0xFF);
-            binary[5] = (byte) ((mill >> 8) & 0xFF);
-            binary[6] = (byte) (mill & 0xFF);
+            byteBuffer = ByteBuffer.allocate(7);
+            toBEByte(byteBuffer, sec, 4);
+            toBEByte(byteBuffer, mill, 3);
             break;
         default:
-            secByte = toBEByte(sec, 4);
-            binary = new byte[4];
-            System.arraycopy(secByte, 0, binary, 0, 4);
+            byteBuffer = ByteBuffer.allocate(4);
+            toBEByte(byteBuffer, sec, 4);
             break;
         }
-        return binary;
+
+        return byteBuffer.array();
     }
 
     @Override

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -49,12 +49,24 @@ public class ConfigConstant {
     public static final String CDC_SYNC_DB_PORT = "cdcSyncDbPort";
     public static final String CDC_SYNC_DB_ADDRESS = "cdcSyncDbAddr";
 
+    public static final String CDC_SYNC_DB_USER_FIRST = "cdcSyncDbUserFirst";
+    public static final String CDC_SYNC_DB_PASSWORD_FIRST = "cdcSyncDbPasswdFirst";
+    public static final String CDC_SYNC_DB_PORT_FIRST = "cdcSyncDbPortFirst";
+    public static final String CDC_SYNC_DB_ADDRESS_FIRST = "cdcSyncDbAddrFirst";
+
     public static final String CDC_SYNC_DB_USER_SECOND = "cdcSyncDbUserSecond";
     public static final String CDC_SYNC_DB_PASSWORD_SECOND = "cdcSyncDbPasswdSecond";
     public static final String CDC_SYNC_DB_PORT_SECOND = "cdcSyncDbPortSecond";
     public static final String CDC_SYNC_DB_ADDRESS_SECOND = "cdcSyncDbAddrSecond";
 
+    public static final String CDC_SYNC_DB_USER_THIRD = "cdcSyncDbUserThird";
+    public static final String CDC_SYNC_DB_PASSWORD_THIRD = "cdcSyncDbPasswdThird";
+    public static final String CDC_SYNC_DB_PORT_THIRD = "cdcSyncDbPortThird";
+    public static final String CDC_SYNC_DB_ADDRESS_THIRD = "cdcSyncDbAddrThird";
+
     public static final String URL_PATTERN = "jdbc:mysql://%s:%s?";
     public static final String URL_PATTERN_WITH_DB = "jdbc:mysql://%s:%s/%s?";
+
+    public static final String CDC_WAIT_TOKEN_TIMEOUT_MINUTES = "cdcWaitTokenTimeOutMinute";
 
 }

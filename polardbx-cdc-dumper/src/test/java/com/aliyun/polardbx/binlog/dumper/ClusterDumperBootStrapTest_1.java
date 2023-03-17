@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.dumper;
 
-import com.aliyun.polardbx.binlog.TaskInfoProvider;
+import com.aliyun.polardbx.binlog.TaskConfigProvider;
 
 /**
  * Unit test for simple App.
@@ -24,7 +24,7 @@ public class ClusterDumperBootStrapTest_1 {
     //sh stress.sh Dumper-1 "taskName=Dumper-1 dumper.assignedTargetFinalTaskAddress=127.0.0.1:9999 binlog.write.dryrun=true"
     public static void main(String[] args) {
         DumperBootStrap bootStrap = new DumperBootStrap();
-        bootStrap.setTaskInfoProvider(new TaskInfoProvider("Dumper-1"));
+        bootStrap.setTaskConfigProvider(new TaskConfigProvider("Dumper-1"));
         String username = System.getenv("USER");
         bootStrap
             .boot(new String[] {

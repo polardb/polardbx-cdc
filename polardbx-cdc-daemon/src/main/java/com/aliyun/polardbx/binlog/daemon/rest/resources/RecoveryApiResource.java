@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,7 +18,6 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.rest.ann.ACL;
 import com.aliyun.polardbx.binlog.daemon.rest.resources.request.FlashBackCleanFileParameter;
@@ -29,6 +28,7 @@ import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
+import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.rpl.common.ResultCode;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
@@ -78,6 +78,12 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 public class RecoveryApiResource {
 
     private static final Logger logger = LoggerFactory.getLogger(RecoveryApiResource.class);
+
+    public static void main(String args[]) {
+        FlashBackCleanFileParameter parameter = new FlashBackCleanFileParameter();
+        parameter.setPathPrefix("SQL_FLASH_BACK/5c5332d7-4fbe-44f4-af14-3589d0224219/");
+        System.out.println(JSONObject.toJSONString(parameter));
+    }
 
     @POST
     @Path("/service/create")
@@ -243,11 +249,5 @@ public class RecoveryApiResource {
         BigDecimal decimal = new BigDecimal(finishedTaskCount.doubleValue() / totalTaskCount.doubleValue());
         double progress = decimal.setScale(1, BigDecimal.ROUND_HALF_UP).doubleValue();
         info.setProgress(progress);
-    }
-
-    public static void main(String args[]) {
-        FlashBackCleanFileParameter parameter = new FlashBackCleanFileParameter();
-        parameter.setPathPrefix("SQL_FLASH_BACK/5c5332d7-4fbe-44f4-af14-3589d0224219/");
-        System.out.println(JSONObject.toJSONString(parameter));
     }
 }

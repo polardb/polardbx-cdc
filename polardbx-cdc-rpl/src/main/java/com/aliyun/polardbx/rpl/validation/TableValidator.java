@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,10 +14,13 @@
  */
 package com.aliyun.polardbx.rpl.validation;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.po.ValidationTask;
 import com.aliyun.polardbx.rpl.applier.SqlContext;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
+import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.extractor.full.ExtractorUtil;
@@ -34,6 +37,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 /**
  * Table data validator
@@ -46,32 +51,48 @@ public class TableValidator implements Validator {
 
     private final ValidationContext ctx;
     private ValSQLGenerator valSQLGenerator;
+    private ExecutorService executorService;
+    private final static int perDbParallel = DynamicApplicationConfig
+        .getInt(ConfigKeys.RPL_VALIDATION_PER_DB_PARALLELISM);
 
     public TableValidator(final ValidationContext context) {
         this.ctx = context;
         this.valSQLGenerator = context.getValSQLGenerator();
+        this.executorService = ThreadPoolUtil.createExecutorWithFixedNum(perDbParallel, "validator");
     }
 
     @Override
     public void findDiffRows() throws Exception {
         List<TableInfo> tableList = ctx.getSrcPhyTableList();
+        List<Future<?>> futures = new ArrayList<>();
         for (TableInfo srcTable : tableList) {
-            try {
-                ValidationTask task = ctx.getRepository().getValTaskRecord(srcTable.getName());
-                if (task.getState() == ValidationStateEnum.DONE.getValue()) {
-                    log.info("skip done src table: {}", srcTable.getName());
-                    continue;
-                }
-                List<Record> diffRowList = findDiffRecords(srcTable);
-                // persist diff row list
-                ctx.getRepository().persistDiffRows(srcTable, diffRowList);
-                ctx.getRepository().updateValTaskState(srcTable, ValidationStateEnum.DONE);
-                // task status heartbeat
-                StatisticalProxy.getInstance().heartbeat();
-            } catch (Exception e) {
-                log.error("Find diff rows exception. src table: {}", srcTable.getName(), e);
-                ctx.getRepository().updateValTaskState(srcTable, ValidationStateEnum.ERROR);
+            ValidationTask task = ctx.getRepository().getValTaskRecord(srcTable.getName());
+            if (task.getState() == ValidationStateEnum.DONE.getValue()) {
+                log.info("skip done src table: {}", srcTable.getName());
+                continue;
             }
+            Future<?> future = executorService.submit(() -> {
+                try {
+                    List<Record> diffRowList = findDiffRecords(srcTable);
+                    // persist diff row list
+                    ctx.getRepository().persistDiffRows(srcTable, diffRowList);
+                    ctx.getRepository().updateValTaskState(srcTable, ValidationStateEnum.DONE);
+                    // task status heartbeat
+                    StatisticalProxy.getInstance().heartbeat();
+                } catch (Exception e) {
+                    log.error("exception when find diff rows then persist. src table: {}", srcTable.getName(), e);
+                    try {
+                        ctx.getRepository().updateValTaskState(srcTable, ValidationStateEnum.ERROR);
+                    } catch (Exception e1) {
+                        log.error("error when update val task to error state. src table: {}", srcTable.getName(), e1);
+                    }
+                }
+                }
+            );
+            futures.add(future);
+        }
+        for(Future<?> future: futures) {
+            future.get();
         }
     }
 
@@ -119,6 +140,7 @@ public class TableValidator implements Validator {
                         log.info("Finding inconsistent rows one by one for db: {}, src phy table: {}", ctx.getSrcPhyDB(), srcTable.getName());
                         diffRecords.addAll(findDiffOneByOne(dstTable, keyValMap));
                     }
+                    StatisticalProxy.getInstance().addMessageCount(keyValMap.get(CHECKSUM).size());
                     keyValMap.put(CHECKSUM, new ArrayList<>(ctx.getChunkSize()));
                     keyList.forEach(k -> keyValMap.put(k, new ArrayList<>(ctx.getChunkSize())));
                 }
@@ -127,6 +149,7 @@ public class TableValidator implements Validator {
                 log.info("Last batch was inconsistent. Finding diff rows one by one for db: {}, phy src table: {}", ctx.getSrcPhyDB(), srcTable.getName());
                 diffRecords.addAll(findDiffOneByOne(dstTable, keyValMap));
             }
+            StatisticalProxy.getInstance().addMessageCount(keyValMap.get(CHECKSUM).size());
             log.info("finish validation for db: {}, phy src table: {}", ctx.getSrcPhyDB(), srcTable.getName());
 
         } catch (Exception e) {

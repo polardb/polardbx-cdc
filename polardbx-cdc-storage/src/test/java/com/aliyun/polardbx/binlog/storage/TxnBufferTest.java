@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,6 +22,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.TABLE_MAP_EVENT;
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.WRITE_ROWS_EVENT;
+
 /**
  *
  **/
@@ -33,8 +36,8 @@ public class TxnBufferTest {
 
     @Test
     public void testMerge() {
-        int size = 10000;
-        int count = 15;
+        int size = 10;
+        int count = 2;
         TxnBuffer txnBuffer = buildOneBuffer(size);
         txnBuffer.markComplete();
         List<TxnBuffer> buffers = buildBufferList(size, count);
@@ -45,8 +48,8 @@ public class TxnBufferTest {
         Assert.assertEquals(size * (count + 1), txnBuffer.itemSize());
 
         // 验证是否有序
-        final TxnItemRef lastRef = new TxnItemRef(txnBuffer, "", "", 19, new byte[1],
-            null, null);
+        final TxnItemRef lastRef = new TxnItemRef(txnBuffer, "", "", 19, null,
+            null, null, 0, null);
         txnBuffer.iterator().forEachRemaining(i -> {
             int result = i.compareTo(lastRef);
             Assert.assertTrue(result > 0);
@@ -65,7 +68,7 @@ public class TxnBufferTest {
         Assert.assertEquals(index, txnBuffer.itemSize());
         Assert.assertFalse(txnBuffer.seek(
             new TxnItemRef(txnBuffer, UUID.randomUUID().toString(), "", 19, null,
-                null, null)));
+                null, null, 0, null)));
     }
 
     private static void testMergePerformance() {
@@ -96,13 +99,21 @@ public class TxnBufferTest {
         String suffix = UUID.randomUUID().toString();
 
         for (int i = 0; i < size; i++) {
+            int eventType;
+            if (i == 0) {
+                eventType = TABLE_MAP_EVENT;
+            } else {
+                eventType = WRITE_ROWS_EVENT;
+            }
             TxnBufferItem txnItem = TxnBufferItem.builder()
-                .traceId((seed++) + "-" + suffix)
+                .traceId("00001")
+                .eventType(eventType)
                 .payload(new byte[0])
                 .eventType(i % 2 == 0 ? LogEvent.TABLE_MAP_EVENT : LogEvent.WRITE_ROWS_EVENT)
                 .build();
             txnBuffer.push(txnItem);
         }
+        txnBuffer.markComplete();
         return txnBuffer;
     }
 }

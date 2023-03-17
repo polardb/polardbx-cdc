@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,8 @@ package com.aliyun.polardbx.binlog.canal;
 
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * @author chengjin.lyf on 2020/7/15 5:51 下午
@@ -23,12 +25,15 @@ import java.lang.reflect.Type;
  */
 public class HandlerContext {
 
+    public static final String REBUILD_TX_BUFFER_ITERATOR = "REBUILD_TX_BUFFER_ITERATOR";
+
     private final boolean isInitalFilter;
     private final Class<? extends HandlerEvent> TClass;
     private final LogEventFilter logEventFilter;
     private HandlerContext next;
     private RuntimeContext runtimeContext;
     private boolean ignore = false;
+    private Map<String, Object> objectMap = new HashMap<>();
 
     public HandlerContext(LogEventFilter logEventFilter) {
         this.logEventFilter = logEventFilter;
@@ -54,12 +59,32 @@ public class HandlerContext {
         return (Class) params[index];
     }
 
+    public void put(String key, Object obj) {
+        this.objectMap.put(key, obj);
+    }
+
+    public Object get(String key) {
+        return objectMap.get(key);
+    }
+
     public RuntimeContext getRuntimeContext() {
         return runtimeContext;
     }
 
     public void setRuntimeContext(RuntimeContext runtimeContext) {
         this.runtimeContext = runtimeContext;
+    }
+
+    public boolean canIgnore(Long tso) {
+        Long barrier = runtimeContext.getDnTransferMaxTSOBarrier();
+        if (barrier == null) {
+            return false;
+        }
+        if (tso <= barrier) {
+            return true;
+        }
+        runtimeContext.cleanDnTransferTSOBarrier();
+        return false;
     }
 
     public void doNext(HandlerEvent event) throws Exception {

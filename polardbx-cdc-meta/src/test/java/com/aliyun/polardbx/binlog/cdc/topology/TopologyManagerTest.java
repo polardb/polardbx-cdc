@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,6 @@
 package com.aliyun.polardbx.binlog.cdc.topology;
 
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
-import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicDbTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.google.common.collect.Sets;
 import com.google.gson.Gson;
@@ -91,12 +90,12 @@ public class TopologyManagerTest {
         TopologyRecord r5 = gson.fromJson(MockData.MOVE_D1_0001_1, TopologyRecord.class);
 
         manager.apply(null, "d1", null, r1);//create db
-        Assert.assertEquals("d1", manager.getLogicSchema("d1_000001").getSchema());
+        Assert.assertEquals("d1", manager.getLogicSchema("d1_000001"));
         manager.apply(null, "d1", "t1", r2);//create table d1.t1
-        LogicDbTopology schema = manager.getLogicSchema("d1_000001", "t1_TRwG_02");
-        manager.getLogicSchema("d1_000001", "t1_TRwG_02");
-        Assert.assertEquals("d1", schema.getSchema());
-        Assert.assertEquals("t1", schema.getLogicTableMetas().get(0).getTableName());
+        LogicBasicInfo schema = manager.getLogicBasicInfo("d1_000001", "t1_TRwG_02");
+        manager.getLogicBasicInfo("d1_000001", "t1_TRwG_02");
+        Assert.assertEquals("d1", schema.getSchemaName());
+        Assert.assertEquals("t1", schema.getTableName());
 
         List<String> tables =
             manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet()).stream()
@@ -111,9 +110,9 @@ public class TopologyManagerTest {
         Assert.assertThat(tables, CoreMatchers.not(CoreMatchers.hasItems("t1_TRwG_02", "t1_TRwG_03")));
 
         manager.apply(null, "d1", "t2", r4);//create table d1.t2
-        schema = manager.getLogicSchema("d1_000001", "t2_N6ql_02");
-        Assert.assertEquals("d1", schema.getSchema());
-        Assert.assertEquals("t2", schema.getLogicTableMetas().get(0).getTableName());
+        schema = manager.getLogicBasicInfo("d1_000001", "t2_N6ql_02");
+        Assert.assertEquals("d1", schema.getSchemaName());
+        Assert.assertEquals("t2", schema.getTableName());
 
         tables = manager.getPhyTables("polardbx-storage-0-master", Sets.newHashSet(), Sets.newHashSet()).stream()
             .flatMap(p -> p.getPhyTables().stream()).collect(

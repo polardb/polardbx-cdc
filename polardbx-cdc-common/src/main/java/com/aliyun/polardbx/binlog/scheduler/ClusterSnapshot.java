@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,7 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.scheduler;
 
+import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import lombok.ToString;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.util.CollectionUtils;
 
@@ -23,6 +25,7 @@ import java.util.Set;
 /**
  * Created by ziyang.lb
  **/
+@ToString
 public class ClusterSnapshot {
     private long version;
     private Long timestamp;
@@ -36,7 +39,7 @@ public class ClusterSnapshot {
     }
 
     public ClusterSnapshot(long version, Long timestamp, Set<String> containers, Set<String> storages,
-                           String dumperMasterNode, String dumperMaster, String storageHistoryTso) {
+                           String dumperMasterNode, String dumperMaster, String storageHistoryTso, String clusterType) {
         if (version != 1L && timestamp == null) {
             throw new PolardbxException("timestamp can not be null.");
         }
@@ -46,10 +49,12 @@ public class ClusterSnapshot {
         if (version != 1L && CollectionUtils.isEmpty(storages)) {
             throw new PolardbxException("storages can not be null or empty.");
         }
-        if (version != 1L && StringUtils.isBlank(dumperMaster)) {
+        if (version != 1L && StringUtils.isBlank(dumperMaster) && StringUtils
+            .equals(clusterType, ClusterTypeEnum.BINLOG.name())) {
             throw new PolardbxException("dumperMaster can not be null or empty.");
         }
-        if (version != 1L && StringUtils.isBlank(dumperMasterNode)) {
+        if (version != 1L && StringUtils.isBlank(dumperMasterNode) && StringUtils
+            .equals(clusterType, ClusterTypeEnum.BINLOG.name())) {
             throw new PolardbxException("dumperNode can not be null or empty.");
         }
         if (version != 1L && StringUtils.isBlank(storageHistoryTso)) {

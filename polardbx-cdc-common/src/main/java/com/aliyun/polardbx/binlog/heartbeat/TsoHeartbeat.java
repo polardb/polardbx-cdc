@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,7 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -54,6 +54,7 @@ public class TsoHeartbeat implements Runnable {
 
     private static final Logger logger = LoggerFactory.getLogger(TsoHeartbeat.class);
 
+    private static final String TSO_HEARTBEAT_LEADER_LOCK = "TSO_HEARTBEAT_LEADER_LOCK";
     private static final String TRANSACTION_POLICY = "set drds_transaction_policy='TSO'";
     private static final String CREATE_HEARTBEAT_TABLE_SQL =
         "CREATE TABLE IF NOT EXISTS `__cdc__`.`__cdc_heartbeat__` "
@@ -67,7 +68,6 @@ public class TsoHeartbeat implements Runnable {
 
     private final ExecutorService executorService = Executors.newSingleThreadExecutor(
         r -> new Thread(r, "cdc_heartbeat"));
-    private Future<?> future;
     private final AtomicBoolean heartbeatTableInitFlag = new AtomicBoolean(false);
     private final JdbcTemplate template;
     private final TransactionTemplate transactionTemplate;
@@ -90,20 +90,18 @@ public class TsoHeartbeat implements Runnable {
         if (!running.compareAndSet(false, true)) {
             return;
         }
-        logger.info("start heartbeat now!");
-        future = executorService.submit(this);
-        Runtime.getRuntime().addShutdownHook(new Thread(TsoHeartbeat.this::stop));
+        logger.info("start tso heartbeat now!");
+        executorService.submit(this);
     }
 
+    @SneakyThrows
     public void stop() {
         if (!running.compareAndSet(true, false)) {
             return;
         }
-        if (future != null) {
-            logger.info("stop heartbeat");
-            future.cancel(true);
-            future = null;
-        }
+        executorService.shutdownNow();
+        executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+        logger.info("tso heartbeat stopped!");
     }
 
     @SneakyThrows
@@ -145,7 +143,7 @@ public class TsoHeartbeat implements Runnable {
     }
 
     private void heartbeat() {
-        if (RuntimeLeaderElector.isDaemonLeader()) {
+        if (RuntimeLeaderElector.isLeader(TSO_HEARTBEAT_LEADER_LOCK)) {
             try {
                 if (heartbeatTableInitFlag.compareAndSet(false, true)) {
                     template.execute(CREATE_HEARTBEAT_TABLE_SQL);

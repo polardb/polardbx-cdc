@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,14 +19,14 @@ import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.BinlogBackupTypeEnum;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.RemoteBinlogProxy;
-import com.aliyun.polardbx.binlog.action.Appender;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.remote.Appender;
+import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.util.LoopRetry;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.TaskContext;

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,11 +15,14 @@
 package com.aliyun.polardbx.binlog.canal.core.ddl.parser;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
+import lombok.Data;
 
 /**
  * @author agapple 2017年8月1日 下午7:30:42
  * @since 3.2.5
  */
+
+@Data
 public class DdlResult {
 
     private String schemaName;
@@ -28,6 +31,7 @@ public class DdlResult {
     private String oriTableName; // rename ddl中的目标表
     private DBMSAction type;
     private DdlResult renameTableResult; // 多个rename table的存储
+    private Boolean hasIfExistsOrNotExists = false;
 
     /*
      * RENAME TABLE tbl_name TO new_tbl_name [, tbl_name2 TO new_tbl_name2] ...
@@ -52,53 +56,9 @@ public class DdlResult {
         this.oriTableName = oriTableName;
     }
 
-    public String getSchemaName() {
-        return schemaName;
-    }
 
-    public void setSchemaName(String schemaName) {
-        this.schemaName = schemaName;
-    }
 
-    public String getTableName() {
-        return tableName;
-    }
 
-    public void setTableName(String tableName) {
-        this.tableName = tableName;
-    }
-
-    public DBMSAction getType() {
-        return type;
-    }
-
-    public void setType(DBMSAction type) {
-        this.type = type;
-    }
-
-    public String getOriSchemaName() {
-        return oriSchemaName;
-    }
-
-    public void setOriSchemaName(String oriSchemaName) {
-        this.oriSchemaName = oriSchemaName;
-    }
-
-    public String getOriTableName() {
-        return oriTableName;
-    }
-
-    public void setOriTableName(String oriTableName) {
-        this.oriTableName = oriTableName;
-    }
-
-    public DdlResult getRenameTableResult() {
-        return renameTableResult;
-    }
-
-    public void setRenameTableResult(DdlResult renameTableResult) {
-        this.renameTableResult = renameTableResult;
-    }
 
     public DdlResult clone() {
         DdlResult result = new DdlResult();

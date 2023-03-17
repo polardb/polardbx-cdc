@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,41 +14,46 @@
  */
 package com.aliyun.polardbx.binlog.scheduler;
 
+import org.apache.commons.lang.StringUtils;
+
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * Created by ziyang.lb
  **/
 public class ExecutionSnapshot {
-    private boolean isOK;
-    private Map<String, ProcessMeta> processMeta = new HashMap<>();
+    private boolean isAllRunningOk;
+    private final Map<String, ProcessMeta> processMeta = new HashMap<>();
 
-    public Set<String> downProcessContainers() {
-        return processMeta.values().stream().filter(m -> m.getStatus() == Status.DOWN).map(ProcessMeta::getContainer)
-            .collect(Collectors.toSet());
+    public boolean isAllRunningOk() {
+        return isAllRunningOk;
     }
 
-    public boolean isOK() {
-        return isOK;
-    }
-
-    public void setOK(boolean OK) {
-        isOK = OK;
+    public void setAllRunningOk(boolean allRunningOk) {
+        isAllRunningOk = allRunningOk;
     }
 
     public Map<String, ProcessMeta> getProcessMeta() {
         return processMeta;
     }
 
-    public void setProcessMeta(Map<String, ProcessMeta> processMeta) {
-        this.processMeta = processMeta;
+    public boolean isRunningOk4Container(String containerId) {
+        return processMeta.values().stream()
+            .filter(p -> StringUtils.equals(containerId, p.getContainer()) && p.getStatus() != Status.OK).collect(
+                Collectors.toSet()).isEmpty();
     }
 
-    public static enum Status {
-        OK, DOWN
+    public enum Status {
+        /**
+         * 运行正常
+         */
+        OK,
+        /**
+         * 运行异常
+         */
+        DOWN
     }
 
     public static class ProcessMeta {

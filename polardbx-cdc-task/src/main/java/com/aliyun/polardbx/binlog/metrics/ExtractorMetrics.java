@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,9 +17,6 @@ package com.aliyun.polardbx.binlog.metrics;
 import com.aliyun.polardbx.binlog.canal.core.ddl.ThreadRecorder;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -29,14 +26,14 @@ public class ExtractorMetrics {
 
     private static final ExtractorMetrics INSTANCE = new ExtractorMetrics();
 
-    private final AtomicLong tsoCount = new AtomicLong(0);
+    private final AtomicLong tsoTranCount = new AtomicLong(0);
+    private final AtomicLong noTsoTranCount = new AtomicLong(0);
+    private final AtomicLong totalTranCount = new AtomicLong(0);
     private final AtomicLong heartbeatCount = new AtomicLong(0);
-    private final AtomicLong noTsoCount = new AtomicLong(0);
-    private final AtomicLong netIn = new AtomicLong(0);
-    private final AtomicLong tranTotalCount = new AtomicLong(0);
     private final AtomicLong eventTotalCount = new AtomicLong(0);
-    private final AtomicLong delay = new AtomicLong(0);
-    private final Map<Long, ThreadRecorder> recorderMap = new ConcurrentHashMap<>();
+    private final AtomicLong netIn = new AtomicLong(0);
+    private final AtomicLong maxDelay = new AtomicLong(0);
+    private final AtomicLong maxSorterQueuedSize = new AtomicLong(0);
 
     private ExtractorMetrics() {
     }
@@ -45,81 +42,69 @@ public class ExtractorMetrics {
         return INSTANCE;
     }
 
-    public void restart() {
-        tsoCount.set(0);
-        noTsoCount.set(0);
-        heartbeatCount.set(0);
-        tranTotalCount.set(0);
-        eventTotalCount.set(0);
-        netIn.set(0);
-        recorderMap.clear();
-    }
-
-    public void removeRecord(ThreadRecorder threadRecorder) {
-        if (threadRecorder == null || threadRecorder.getTname() == null) {
-            return;
-        }
-        this.recorderMap.remove(threadRecorder.getTid());
-    }
-
     public ExtractorMetrics snapshot() {
+        ExtractorMetrics snapshot = new ExtractorMetrics();
+        snapshot.tsoTranCount.set(this.tsoTranCount.get());
+        snapshot.noTsoTranCount.set(this.noTsoTranCount.get());
+        snapshot.totalTranCount.set(this.totalTranCount.get());
+        snapshot.heartbeatCount.set(this.heartbeatCount.get());
+        snapshot.eventTotalCount.set(this.eventTotalCount.get());
 
-        long minWhen = Long.MAX_VALUE;
-        for (ThreadRecorder recorder : recorderMap.values()) {
-            minWhen = Math.min(minWhen, recorder.getWhen());
-            netIn.addAndGet(recorder.getNetIn());
-            recorder.resetNetIn();
+        long maxSorterQueuedSize = 0;
+        long minWhen = System.currentTimeMillis();
+        for (ThreadRecorder recorder : ThreadRecorder.getRecorderMap().values()) {
+            maxSorterQueuedSize = Math.max(maxSorterQueuedSize, recorder.getQueuedTransSizeInSorter());
+            minWhen = Math.min(minWhen, recorder.getWhen() <= 0 ?
+                System.currentTimeMillis() : recorder.getWhen() * 1000);
+            snapshot.netIn.addAndGet(recorder.getNetIn());
         }
-        delay.set(TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) - minWhen);
-
-        return this;
+        snapshot.maxSorterQueuedSize.set(maxSorterQueuedSize);
+        snapshot.maxDelay.set(System.currentTimeMillis() - minWhen);
+        return snapshot;
     }
 
-    public void metricEvent(Transaction transaction) {
+    public void metricsEvent(Transaction transaction) {
         if (transaction.isHeartbeat()) {
             heartbeatCount.addAndGet(1);
         } else if (transaction.isTsoTransaction()) {
-            tsoCount.addAndGet(1);
+            tsoTranCount.addAndGet(1);
         } else {
-            noTsoCount.addAndGet(1);
+            noTsoTranCount.addAndGet(1);
         }
-        tranTotalCount.addAndGet(1);
+        totalTranCount.addAndGet(1);
         eventTotalCount.addAndGet(transaction.getEventCount());
     }
 
-    public void recordRt(ThreadRecorder threadRecorder) {
-        this.recorderMap.put(threadRecorder.getTid(), threadRecorder);
+    //----------------------------------------------------- getters -------------------------------------------------
+    public long getTsoTranCount() {
+        return tsoTranCount.get();
     }
 
-    public AtomicLong getTsoCount() {
-        return tsoCount;
+    public long getHeartbeatCount() {
+        return heartbeatCount.get();
     }
 
-    public AtomicLong getHeartbeatCount() {
-        return heartbeatCount;
+    public long getNoTsoTranCount() {
+        return noTsoTranCount.get();
     }
 
-    public AtomicLong getNoTsoCount() {
-        return noTsoCount;
+    public long getTotalTranCount() {
+        return totalTranCount.get();
     }
 
-    public AtomicLong getTranTotalCount() {
-        return tranTotalCount;
+    public long getEventTotalCount() {
+        return eventTotalCount.longValue();
     }
 
-    public AtomicLong getEventTotalCount() {
-        return eventTotalCount;
+    public long getNetIn() {
+        return netIn.get();
     }
 
-    public AtomicLong getNetIn() {
-        return netIn;
+    public long getMaxDelay() {
+        return maxDelay.get();
     }
 
-    public AtomicLong getDelay() {
-        return delay;
-    }
-
-    public Map<Long, ThreadRecorder> getRecorderMap() {
-        return recorderMap;
+    public long getMaxSorterQueuedSize() {
+        return maxSorterQueuedSize.get();
     }
 }

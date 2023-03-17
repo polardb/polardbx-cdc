@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,38 +14,55 @@
  */
 package com.aliyun.polardbx.binlog.domain;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 /**
  * Created by ziyang.lb
  **/
 public class Cursor implements Comparable<Cursor> {
 
-    private String fileName;
-    private Long filePosition;
+    private final String fileName;
+    private final Long filePosition;
+    private final String group;
+    private final String stream;
+    private final String tso;
+    private final Long version;
 
-    public Cursor(String fileName, Long filePosition) {
+    public Cursor(String fileName, Long filePosition, String group, String stream, String tso, Long version) {
         this.fileName = fileName;
         this.filePosition = filePosition;
+        this.group = group;
+        this.stream = stream;
+        this.tso = tso;
+        this.version = version;
+    }
+
+    public Cursor(String fileName, Long filePosition) {
+        this(fileName, filePosition, null, null, null, null);
     }
 
     public String getFileName() {
         return fileName;
     }
 
-    public void setFileName(String fileName) {
-        this.fileName = fileName;
-    }
-
     public Long getFilePosition() {
         return filePosition;
     }
 
-    public void setFilePosition(Long filePosition) {
-        this.filePosition = filePosition;
+    public String getGroup() {
+        return group;
+    }
+
+    public String getStream() {
+        return stream;
+    }
+
+    public String getTso() {
+        return tso;
+    }
+
+    public Long getVersion() {
+        return version;
     }
 
     @Override
@@ -82,19 +99,13 @@ public class Cursor implements Comparable<Cursor> {
 
     @Override
     public String toString() {
-        return "Cursor{" + "fileName='" + fileName + '\'' + ", filePosition=" + filePosition + '}';
-    }
-
-    public static void main(String args[]) {
-        List<Cursor> list = new ArrayList<>();
-        list.add(new Cursor("binlog.000003", 500L));
-        list.add(new Cursor("binlog.000001", 100L));
-        list.add(new Cursor("binlog.000002", 600L));
-        list.add(new Cursor("binlog.000001", 200L));
-        list.add(new Cursor("binlog.000002", 100L));
-        list.add(new Cursor("binlog.000001", 100L));
-
-        list = list.stream().sorted().collect(Collectors.toList());
-        list.forEach(System.out::println);
+        return "Cursor{" +
+            "fileName='" + fileName + '\'' +
+            ", filePosition=" + filePosition +
+            ", group='" + group + '\'' +
+            ", stream='" + stream + '\'' +
+            ", tso='" + tso + '\'' +
+            ", version=" + version +
+            '}';
     }
 }

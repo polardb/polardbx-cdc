@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,7 +26,7 @@ public class RebuildEventLogFilterTest {
     @Test
     public void testIsMoveDatabase() {
         String sql = "move database group1 to 'storage_xxx'";
-        RebuildEventLogFilter filter = new RebuildEventLogFilter(0, null, null);
+        RebuildEventLogFilter filter = new RebuildEventLogFilter(0, null, false, null);
         boolean result = filter.isMoveDataBaseSql(sql);
         Assert.assertTrue(result);
 
@@ -37,7 +37,7 @@ public class RebuildEventLogFilterTest {
 
     @Test
     public void testTryRewriteSql() {
-        RebuildEventLogFilter filter = new RebuildEventLogFilter(0, null, null);
+        RebuildEventLogFilter filter = new RebuildEventLogFilter(0, null, false, null);
         String s1 = filter.tryRewriteDropTableSql("aa", "bb", "drop table aa.bb");
         String s2 = filter.tryRewriteDropTableSql("aa", "bb", "drop table aa.bb,aa.zz,xx.bb");
         String s3 = filter.tryRewriteDropTableSql("a`a", "b`b", "drop table `a``a`.`b``b`,`vv`.`b``b`,`a``a`.cc");
@@ -56,5 +56,19 @@ public class RebuildEventLogFilterTest {
         Assert.assertTrue(StringUtils.equalsIgnoreCase("drop table bb", s4));
         Assert.assertTrue(StringUtils.equalsIgnoreCase("drop table bb", s5));
         Assert.assertTrue(StringUtils.equalsIgnoreCase("drop table aa.bb", s6));
+    }
+
+    @Test
+    public void testTryRewriteDropTableSql() {
+        String sql = " /* //1/ *//*+tddl:cmd_extra(truncate_table_with_gsi=true)*/truncate table truncate_gsi_test_7";
+        RebuildEventLogFilter filter = new RebuildEventLogFilter(0, null, false, null);
+
+        String rewriteSql = filter.tryRewriteTruncateSql("__test_truncate_gsi_test_7", sql);
+        Assert.assertEquals(
+            "/* //1/ */ /*+tddl:cmd_extra(truncate_table_with_gsi=true)*/ TRUNCATE TABLE __test_truncate_gsi_test_7",
+            rewriteSql);
+
+        rewriteSql = filter.tryRewriteTruncateSql("xxx", sql);
+        Assert.assertEquals(sql, rewriteSql);
     }
 }

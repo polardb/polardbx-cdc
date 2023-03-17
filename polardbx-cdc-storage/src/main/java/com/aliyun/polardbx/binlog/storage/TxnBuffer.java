@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,10 +15,12 @@
 package com.aliyun.polardbx.binlog.storage;
 
 import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import lombok.SneakyThrows;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.rocksdb.RocksDBException;
@@ -31,6 +33,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -51,11 +54,12 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRACEID_DISORDER_IGNORE
  * Created by ziyang.lb
  **/
 public class TxnBuffer {
-    public static final AtomicLong TOTAL_TXN_COUNT = new AtomicLong(0);
-    public static final AtomicLong TOTAL_TXN_PERSISTED_COUNT = new AtomicLong(0);
+    public static final AtomicLong CURRENT_TXN_COUNT = new AtomicLong(0);
+    public static final AtomicLong CURRENT_TXN_PERSISTED_COUNT = new AtomicLong(0);
 
     private static final Logger logger = LoggerFactory.getLogger(TxnBuffer.class);
     private static final Logger traceIdLogger = LoggerFactory.getLogger("traceIdDisorderLogger");
+    private static final String clusterType = DynamicApplicationConfig.getClusterType();
     private static final AtomicLong sequenceGenerator = new AtomicLong(0L);
     private static final int beginKeySubSequence = 1;
 
@@ -67,6 +71,7 @@ public class TxnBuffer {
     private final AtomicInteger subSequenceGenerator;
 
     private LinkedList<TxnItemRef> refList;
+    private Iterator<TxnItemRef> iterator;
     private long memSize;
     private int itemSizeBeforeMerge;
     private String lastTraceId;
@@ -85,7 +90,7 @@ public class TxnBuffer {
         this.txnBufferId = nextSequence();
         this.subSequenceGenerator = new AtomicInteger(beginKeySubSequence - 1);
         StorageMemoryLeakDectectorManager.getInstance().watch(this);
-        TOTAL_TXN_COUNT.incrementAndGet();
+        CURRENT_TXN_COUNT.incrementAndGet();
     }
 
     /**
@@ -109,7 +114,7 @@ public class TxnBuffer {
         if (!shouldPersist) {
             persistPreviousItems();
             shouldPersist = true;
-            TOTAL_TXN_PERSISTED_COUNT.incrementAndGet();
+            CURRENT_TXN_PERSISTED_COUNT.incrementAndGet();
             return true;
         }
         return false;
@@ -156,9 +161,9 @@ public class TxnBuffer {
             });
         }
 
-        TOTAL_TXN_COUNT.decrementAndGet();
+        CURRENT_TXN_COUNT.decrementAndGet();
         if (shouldPersist) {
-            TOTAL_TXN_PERSISTED_COUNT.decrementAndGet();
+            CURRENT_TXN_PERSISTED_COUNT.decrementAndGet();
         }
     }
 
@@ -205,7 +210,8 @@ public class TxnBuffer {
     private void doAdd(TxnBufferItem txnItem) {
         //add to list && try persist
         TxnItemRef ref = new TxnItemRef(this, txnItem.getTraceId(), txnItem.getRowsQuery(),
-            txnItem.getEventType(), txnItem.getPayload(), txnItem.getSchema(), txnItem.getTable());
+            txnItem.getEventType(), txnItem.getPayload(), txnItem.getSchema(), txnItem.getTable(),
+            txnItem.getHashKey(), txnItem.getPrimaryKey());
 
         memSize += txnItem.size();
         lastTraceId = txnItem.getTraceId();
@@ -215,6 +221,20 @@ public class TxnBuffer {
         if (logger.isDebugEnabled()) {
             logger.debug("accept an item for txn buffer " + txnKey);
         }
+    }
+
+    private TxnItemRef makeRef(TxnBufferItem txnItem) {
+        return new TxnItemRef(this, txnItem.getTraceId(), txnItem.getRowsQuery(),
+            txnItem.getEventType(), txnItem.getPayload(), txnItem.getSchema(), txnItem.getTable(),
+            txnItem.getHashKey(), txnItem.getPrimaryKey());
+    }
+
+    private TxnItemRef doAddBefore(TxnBufferItem txnItem) {
+        memSize += txnItem.size();
+        lastTraceId = txnItem.getTraceId();
+        TxnItemRef ref = makeRef(txnItem);
+        tryPersist(ref, txnItem.size());
+        return ref;
     }
 
     /**
@@ -242,6 +262,23 @@ public class TxnBuffer {
 
         this.refList = mergeTwoSortList(refList, other.refList);
         this.memSize += other.memSize;
+    }
+
+    public void compressDuplicateTraceId() {
+        String lastTraceId = "";
+        for (TxnItemRef ref : refList) {
+            if (ref.getEventType() == LogEvent.TABLE_MAP_EVENT) {
+                if (StringUtils.equals(lastTraceId, ref.getTraceId())) {
+                    ref.clearRowsQuery();
+                } else {
+                    lastTraceId = ref.getTraceId();
+                }
+            }
+        }
+    }
+
+    public boolean isLargeTrans() {
+        return memSize >= Math.min(repository.getTxnItemPersistThreshold(), repository.getTxnPersistThreshold());
     }
 
     public void restore() {
@@ -361,7 +398,7 @@ public class TxnBuffer {
                 && bItem.getEventType() == LogEvent.TABLE_MAP_EVENT) {
                 if (aItem.compareTo(bItem) > 0) {
                     if (bItem.getTraceId().equals(lastTraceId)) {
-                        bItem.clearRowsQuery();
+                        tryClearRowsQuery(bItem);
                     } else {
                         lastTraceId = bItem.getTraceId();
                     }
@@ -369,7 +406,7 @@ public class TxnBuffer {
                     bItem = null;
                 } else {
                     if (aItem.getTraceId().equals(lastTraceId)) {
-                        aItem.clearRowsQuery();
+                        tryClearRowsQuery(aItem);
                     } else {
                         lastTraceId = aItem.getTraceId();
                     }
@@ -392,20 +429,26 @@ public class TxnBuffer {
         // blist元素已排好序， alist还有剩余元素
         if (aItem != null || ai.hasNext()) {
             if (aItem != null) {
+                lastTraceId = processRowsQuery(aItem, lastTraceId);
                 mergeList.add(aItem);
             }
             while (ai.hasNext()) {
-                mergeList.add(ai.next());
+                TxnItemRef ref = ai.next();
+                lastTraceId = processRowsQuery(ref, lastTraceId);
+                mergeList.add(ref);
             }
         }
 
         // alist元素已排好序， blist还有剩余元素
         if (bItem != null || bi.hasNext()) {
             if (bItem != null) {
+                lastTraceId = processRowsQuery(bItem, lastTraceId);
                 mergeList.add(bItem);
             }
             while (bi.hasNext()) {
-                mergeList.add(bi.next());
+                TxnItemRef ref = bi.next();
+                lastTraceId = processRowsQuery(ref, lastTraceId);
+                mergeList.add(ref);
             }
         }
 
@@ -415,6 +458,23 @@ public class TxnBuffer {
                     + aSize + ", input second list size is " + bSize);
         }
         return mergeList;
+    }
+
+    private void tryClearRowsQuery(TxnItemRef txnItemRef) {
+        if (!ClusterTypeEnum.BINLOG_X.name().equals(clusterType)) {
+            txnItemRef.clearRowsQuery();
+        }
+    }
+
+    private String processRowsQuery(TxnItemRef ref, String lastTraceId) {
+        if (ref.getEventType() == LogEvent.TABLE_MAP_EVENT) {
+            if (ref.getTraceId().equals(lastTraceId)) {
+                tryClearRowsQuery(ref);
+            } else {
+                return ref.getTraceId();
+            }
+        }
+        return lastTraceId;
     }
 
     private long nextSequence() {
@@ -446,25 +506,25 @@ public class TxnBuffer {
             if (!shouldPersist) {
                 persistPreviousItems();
                 shouldPersist = true;
-                TOTAL_TXN_PERSISTED_COUNT.incrementAndGet();
+                CURRENT_TXN_PERSISTED_COUNT.incrementAndGet();
             }
         } else if (!shouldPersist) {
-            if (payloadSize >= repository.getTxnItemPersistThreshold()) {
-                // 单个Event大小如果超过了指定阈值，则强制走KV存储
+            if (payloadSize >= repository.getTxnItemPersistThreshold() && repository.isReachPersistThreshold(true)) {
+                // 单个Event大小如果超过了指定阈值，立刻进行内存使用率的校验，如果超过阈值，则触发落盘
                 shouldPersist = true;
                 logger.info("Txn Item size is greater than txnItemPersistThreshold,"
                         + " txnKey is {},txnItemSize is {},txnItemPersistThreshold is {}.",
                     txnKey, memSize, repository.getTxnItemPersistThreshold());
 
-            } else if (memSize >= repository.getTxnPersistThreshold()) {
-                // 单个事务大小如果超过了指定阈值，则强制走KV存储
+            } else if (memSize >= repository.getTxnPersistThreshold() && repository.isReachPersistThreshold(true)) {
+                // 单个事务大小如果超过了指定阈值，立刻进行内存使用率的校验，如果超过阈值，则触发落盘
                 shouldPersist = true;
                 logger.info("Txn Buffer size is greater than txnPersistThreshold,"
                         + " txnKey is {},txnBuffSize is {},txnPersisThreshold is {}.",
                     txnKey, memSize, repository.getTxnPersistThreshold());
 
             } else {
-                shouldPersist = repository.isReachPersistThreshold();
+                shouldPersist = repository.isReachPersistThreshold(false);
                 if (shouldPersist) {
                     logger.info("Persisting mode is open for txn buffer : " + txnKey + ",caused by memory ratio.");
                 }
@@ -472,7 +532,7 @@ public class TxnBuffer {
 
             if (shouldPersist) {
                 persistPreviousItems();
-                TOTAL_TXN_PERSISTED_COUNT.incrementAndGet();
+                CURRENT_TXN_PERSISTED_COUNT.incrementAndGet();
             }
         }
 
@@ -511,12 +571,53 @@ public class TxnBuffer {
     }
 
     public Iterator<TxnItemRef> parallelRestoreIterator() {
-        boolean enableParallelRestore = DynamicApplicationConfig.getBoolean(STORAGE_PARALLEL_RESTORE_ENABLE);
-        if (enableParallelRestore) {
-            return new ParallelRestoreIterator(refList);
-        } else {
-            return iterator();
+        if (iterator == null) {
+            boolean enableParallelRestore = DynamicApplicationConfig.getBoolean(STORAGE_PARALLEL_RESTORE_ENABLE);
+            if (enableParallelRestore) {
+                this.iterator = new ParallelRestoreIterator(refList);
+            } else {
+                this.iterator = iterator();
+            }
         }
+        return iterator;
+    }
+
+    public IteratorBuffer iteratorWrapper() {
+        return new IteratorBuffer() {
+
+            private ListIterator<TxnItemRef> llIt = refList.listIterator();
+            private TxnItemRef curRef;
+
+            @Override
+            public boolean hasNext() {
+                return llIt.hasNext();
+            }
+
+            @Override
+            public TxnItemRef next() {
+                curRef = llIt.next();
+                return curRef;
+            }
+
+            @SneakyThrows
+            @Override
+            public void remove() {
+                try {
+                    curRef.delete();
+                    llIt.remove();
+                } catch (RocksDBException e) {
+                    throw new PolardbxException("remove txn item ref failed!", e);
+                }
+
+            }
+
+            @Override
+            public void appendAfter(TxnBufferItem txnItem) {
+                TxnItemRef ref = doAddBefore(txnItem);
+                llIt.add(ref);
+            }
+
+        };
     }
 
     public TxnItemRef getItemRef(int index) {

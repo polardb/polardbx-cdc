@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -37,8 +37,6 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLNotNullConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLNullConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLSelectOrderByItem;
@@ -47,18 +45,15 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlUnique;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.expr.MySqlOrderingExpr;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
-import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.alibaba.polardbx.druid.sql.repository.Schema;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObject;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObjectStoreProvider;
 import com.alibaba.polardbx.druid.sql.repository.SchemaRepository;
-import com.alibaba.polardbx.druid.util.FnvHash;
 import com.alibaba.polardbx.druid.util.JdbcConstants;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
-import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DruidDdlParser;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.FastSQLConstant;
@@ -72,6 +67,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -128,6 +124,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
             return true;
         }
         ddl = ddl.toLowerCase();
+        ddl = tryRepairSql(ddl);
         tableMetas.invalidateAll();
         synchronized (this) {
             if (StringUtils.isNotEmpty(schema)) {
@@ -283,24 +280,16 @@ public class MemoryTableMeta implements TableMetaTSDB {
             FieldMeta fieldMeta = new FieldMeta();
             SQLColumnDefinition column = (SQLColumnDefinition) element;
             String name = getSqlName(column.getName());
-            // String charset = getSqlName(column.getCharsetExpr());
             SQLDataType dataType = column.getDataType();
-            String dataTypStr = dataType.getName();
-            if (dataType.getArguments().size() > 0) {
-                dataTypStr += "(";
-                for (int i = 0; i < column.getDataType().getArguments().size(); i++) {
-                    if (i != 0) {
-                        dataTypStr += ",";
-                    }
-                    SQLExpr arg = column.getDataType().getArguments().get(i);
-                    dataTypStr += arg.toString();
-                }
-                dataTypStr += ")";
-            }
+            String dataTypStr = buildDataTypeStr(dataType.getName());
+            dataTypStr = contactPrecision(dataTypStr, column);
+            dataTypStr = convertDataTypeStr(dataType, dataTypStr);
 
             if (dataType instanceof SQLDataTypeImpl) {
                 SQLDataTypeImpl dataTypeImpl = (SQLDataTypeImpl) dataType;
-                if (dataTypeImpl.isUnsigned()) {
+
+                //当使用zerofill 时，MySQL默认会自动加unsigned(无符号)属性，如果通过sql解析出来没有的话，做补齐处理
+                if (dataTypeImpl.isUnsigned() || (!dataTypeImpl.isUnsigned() && dataTypeImpl.isZerofill())) {
                     dataTypStr += " unsigned";
                 }
 
@@ -313,7 +302,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 fieldMeta.setDefaultValue(null);
             } else {
                 // 处理一下default value中特殊的引号
-                fieldMeta.setDefaultValue(DruidDdlParser.unescapeQuotaName(getSqlName(column.getDefaultExpr())));
+                fieldMeta.setDefaultValue(SQLUtils.normalize(getSqlName(column.getDefaultExpr())));
             }
             if (dataType instanceof SQLCharacterDataType) {
                 final String charSetName = ((SQLCharacterDataType) dataType).getCharSetName();
@@ -378,14 +367,15 @@ public class MemoryTableMeta implements TableMetaTSDB {
 
         if (sqlName instanceof SQLPropertyExpr) {
             SQLIdentifierExpr owner = (SQLIdentifierExpr) ((SQLPropertyExpr) sqlName).getOwner();
-            return DruidDdlParser.unescapeName(owner.getName()) + "."
-                + DruidDdlParser.unescapeName(((SQLPropertyExpr) sqlName).getName());
+            return SQLUtils
+                .normalize(owner.getName()) + "."
+                + SQLUtils.normalize(((SQLPropertyExpr) sqlName).getName());
         } else if (sqlName instanceof SQLIdentifierExpr) {
-            return DruidDdlParser.unescapeName(((SQLIdentifierExpr) sqlName).getName());
+            return SQLUtils.normalize(((SQLIdentifierExpr) sqlName).getName());
         } else if (sqlName instanceof SQLCharExpr) {
             return ((SQLCharExpr) sqlName).getText();
         } else if (sqlName instanceof SQLMethodInvokeExpr) {
-            return DruidDdlParser.unescapeName(((SQLMethodInvokeExpr) sqlName).getMethodName());
+            return SQLUtils.normalize(((SQLMethodInvokeExpr) sqlName).getMethodName());
         } else if (sqlName instanceof MySqlOrderingExpr) {
             return getSqlName(((MySqlOrderingExpr) sqlName).getExpr());
         } else {
@@ -423,6 +413,16 @@ public class MemoryTableMeta implements TableMetaTSDB {
                     SQLConstraint sqlConstraint = (SQLConstraint) e;
                     if (sqlConstraint.getName() != null) {
                         result.add(SQLUtils.normalize(sqlConstraint.getName().getSimpleName()));
+                    }
+                } else if (e instanceof SQLColumnDefinition) {
+                    SQLColumnDefinition columnDefinition = (SQLColumnDefinition) e;
+                    List<SQLColumnConstraint> constraints = columnDefinition.getConstraints();
+                    if (constraints != null) {
+                        for (SQLColumnConstraint constraint : constraints) {
+                            if (constraint instanceof SQLColumnUniqueKey) {
+                                result.add(SQLUtils.normalize(columnDefinition.getName().getSimpleName()));
+                            }
+                        }
                     }
                 }
             });
@@ -474,54 +474,212 @@ public class MemoryTableMeta implements TableMetaTSDB {
         }
     }
 
-    @Deprecated
-    private void tryRemoveTable(BinlogPosition position, String ddlSql, String schema) throws IllegalAccessException {
-        SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(ddlSql, DbType.mysql, FastSQLConstant.FEATURES);
-        SQLStatement stmt = parser.parseStatementList().get(0);
+    private String contactPrecision(String dataTypStr, SQLColumnDefinition column) {
+        if (column.getDataType().getArguments().size() > 0) {
+            String origin = dataTypStr;
+            dataTypStr += "(";
+            for (int i = 0; i < column.getDataType().getArguments().size(); i++) {
+                if (i != 0) {
+                    dataTypStr += ",";
+                }
+                SQLExpr arg = column.getDataType().getArguments().get(i);
+                dataTypStr += arg.toString().trim();
+            }
+            if (StringUtils.equalsIgnoreCase(origin, "decimal") && column.getDataType().getArguments().size() == 1) {
+                dataTypStr += ",0";
+            }
+            dataTypStr += ")";
+        }
+        return dataTypStr;
+    }
 
-        // SchemaRepository的acceptDropTable、renameTable方法，在对带反引号的表进行处理时有问题，导致执行完drop sql后，table信息并未从objects中移除
-        // 这里进行一下补偿操作，待bug修复后，可以移除，issue id：39638018
-        if (stmt instanceof SQLDropTableStatement) {
-            SQLDropTableStatement dropStmt = (SQLDropTableStatement) stmt;
-            for (SQLExprTableSource tableSource : dropStmt.getTableSources()) {
-                String table = tableSource.getTableName(true);
-                doRemove(position == null ? "" : position.getRtso(), schema, table, ddlSql);
-            }
-        } else if (stmt instanceof MySqlRenameTableStatement) {
-            MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) stmt;
-            for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
-                String tableNameFrom = SQLUtils.normalize(item.getName().getSimpleName());
-                doRemove(position == null ? "" : position.getRtso(), schema, tableNameFrom, ddlSql);
-            }
+    private String convertDataTypeStr(SQLDataType dataType, String dataTypeStr) {
+        boolean unsigned = false;
+        if (dataType instanceof SQLDataTypeImpl) {
+            //当使用zerofill 时，MySQL默认会自动加unsigned(无符号)属性
+            SQLDataTypeImpl dataTypeImpl = (SQLDataTypeImpl) dataType;
+            unsigned = dataTypeImpl.isUnsigned() || dataTypeImpl.isZerofill();
+        }
+
+        if ("tinyint".equalsIgnoreCase(dataTypeStr) || "tinyint(0)".equalsIgnoreCase(dataTypeStr)) {
+            return convertTinyInt(unsigned);
+
+        } else if ("smallint".equalsIgnoreCase(dataTypeStr) || "smallint(0)".equalsIgnoreCase(dataTypeStr)) {
+            return convertSmallint(unsigned);
+
+        } else if ("mediumint".equalsIgnoreCase(dataTypeStr) || "mediumint(0)".equalsIgnoreCase(dataTypeStr)) {
+            return convertMediumInt(unsigned);
+
+        } else if ("int".equalsIgnoreCase(dataTypeStr) || "int(0)".equalsIgnoreCase(dataTypeStr)) {
+            return convertInt(unsigned);
+
+        } else if ("bigint".equalsIgnoreCase(dataTypeStr) || "bigint(0)".equalsIgnoreCase(dataTypeStr)) {
+            return "bigint(20)";
+
+        } else if ("decimal".equalsIgnoreCase(dataTypeStr) || "decimal(0)".equalsIgnoreCase(dataTypeStr)
+            || "decimal(0,0)".equalsIgnoreCase(dataTypeStr)) {
+            return "decimal(10,0)";
+
+        } else if ("bit".equalsIgnoreCase(dataTypeStr)) {
+            return "bit(1)";
+
+        } else if ("boolean".equalsIgnoreCase(dataTypeStr)) {
+            return "tinyint(1)";
+
+        } else if ("year".equalsIgnoreCase(dataTypeStr)) {
+            return "year(4)";
+
+        } else if ("binary".equalsIgnoreCase(dataTypeStr)) {
+            return "binary(1)";
+
+        } else if ("char".equalsIgnoreCase(dataTypeStr)) {
+            return "char(1)";
+
+        } else if ("datetime(0)".equalsIgnoreCase(dataTypeStr)) {
+            return "datetime";
+
+        } else if ("timestamp(0)".equalsIgnoreCase(dataTypeStr)) {
+            return "timestamp";
+
+        } else if ("time(0)".equalsIgnoreCase(dataTypeStr)) {
+            return "time";
+
+        } else if ("geomcollection".equalsIgnoreCase(dataTypeStr)) {
+            return "geometrycollection";
+
+        } else if (StringUtils.startsWithIgnoreCase(dataTypeStr, "blob(")) {
+            return convertBlob(dataTypeStr);
+
+        } else if (StringUtils.startsWithIgnoreCase(dataTypeStr, "text(")) {
+            return convertText(dataTypeStr);
+
+        } else {
+            return dataTypeStr;
         }
     }
 
-    private void doRemove(String tso, String schema, String table, String ddlSql) throws IllegalAccessException {
-        Schema schemaRep = repository.findSchema(schema);
-        if (schemaRep == null) {
-            return;
+    private String buildDataTypeStr(String dataTypeStr) {
+        if (StringUtils.equalsIgnoreCase(dataTypeStr, "dec")
+            || StringUtils.equalsIgnoreCase(dataTypeStr, "numeric")) {
+            return "decimal";
+        } else if (StringUtils.equalsIgnoreCase(dataTypeStr, "integer")) {
+            return "int";
+        } else {
+            return dataTypeStr;
         }
-        SchemaObject data = schemaRep.findTable(table);
-        if (data == null) {
-            return;
+    }
+
+    private String convertTinyInt(boolean unsigned) {
+        if (unsigned) {
+            return "tinyint(3)";
+        } else {
+            return "tinyint(4)";
+        }
+    }
+
+    private String convertSmallint(boolean unsigned) {
+        if (unsigned) {
+            return "smallint(5)";
+        } else {
+            return "smallint(6)";
+        }
+    }
+
+    private String convertMediumInt(boolean unsigned) {
+        if (unsigned) {
+            return "mediumint(8)";
+        } else {
+            return "mediumint(9)";
+        }
+    }
+
+    private String convertInt(boolean unsigned) {
+        if (unsigned) {
+            return "int(10)";
+        } else {
+            return "int(11)";
+        }
+    }
+
+    private String convertBlob(String str) {
+        str = StringUtils.substringAfter(str, "(");
+        str = StringUtils.substringBefore(str, ")");
+        long length = Long.parseLong(str);
+        if (length <= 255) {
+            return "tinyblob";
+        } else if (length <= 65535) {
+            return "blob";
+        } else if (length <= 16777215) {
+            return "mediumblob";
+        } else {
+            return "longblob";
+        }
+    }
+
+    private String convertText(String str) {
+        str = StringUtils.substringAfter(str, "(");
+        str = StringUtils.substringBefore(str, ")");
+        long length = Long.parseLong(str.trim());
+        if (length == 0L) {
+            return "text";
         }
 
-        Class<?> clazz = schemaRep.getClass();
-        Field[] fields = clazz.getDeclaredFields();
-        for (Field field : fields) {
-            String name = field.getName();
-            if ("objects".equalsIgnoreCase(name)) {
-                field.setAccessible(true);
-                Map objects = (Map) field.get(schemaRep);
-                long nameHashCode64 = FnvHash.hashCode64(table);
-                objects.remove(nameHashCode64);
-                logger.warn("table is removed from schema repository, tso {}, schema {},tableName {} ddl sql {}.",
-                    tso, schema, table, ddlSql);
-                break;
+        if (length <= 63) {
+            return "tinytext";
+        } else if (length <= 16383) {
+            return "text";
+        } else if (length <= 4194303) {
+            return "mediumtext";
+        } else {
+            return "longtext";
+        }
+    }
+
+    // see aone : 46916964
+    String tryRepairSql(String sql) {
+        if (StringUtils.containsIgnoreCase(sql, "_drds_implicit_id_")) {
+            SQLStatementParser parser =
+                SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FastSQLConstant.FEATURES);
+            List<SQLStatement> statementList = parser.parseStatementList();
+            SQLStatement sqlStatement = statementList.get(0);
+
+            if (sqlStatement instanceof MySqlCreateTableStatement) {
+                MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) sqlStatement;
+                List<SQLTableElement> sqlTableElementList = createTableStatement.getTableElementList();
+                Iterator<SQLTableElement> iterator = sqlTableElementList.iterator();
+
+                boolean containsImplicitCol = false;
+                boolean containsImplicitPrimary = false;
+                while (iterator.hasNext()) {
+                    SQLTableElement element = iterator.next();
+                    if (element instanceof SQLColumnDefinition) {
+                        SQLColumnDefinition columnDefinition = (SQLColumnDefinition) element;
+                        String columnName = SQLUtils.normalize(columnDefinition.getColumnName());
+                        if (StringUtils.equalsIgnoreCase(columnName, "_drds_implicit_id_")) {
+                            containsImplicitCol = true;
+                        }
+                    } else if (element instanceof MySqlPrimaryKey) {
+                        MySqlPrimaryKey column = (MySqlPrimaryKey) element;
+                        List<SQLSelectOrderByItem> pks = column.getColumns();
+                        for (SQLSelectOrderByItem pk : pks) {
+                            String columnName = SQLUtils.normalize(getSqlName(pk.getExpr()));
+                            if (StringUtils.equalsIgnoreCase(columnName, "_drds_implicit_id_")) {
+                                containsImplicitPrimary = true;
+                            }
+                        }
+                    }
+                }
+                if (containsImplicitPrimary && !containsImplicitCol) {
+                    SQLColumnDefinition columnDefinition = new SQLColumnDefinition();
+                    columnDefinition.setName("_drds_implicit_id_");
+                    columnDefinition.setDataType(new SQLDataTypeImpl("bigint(20)"));
+                    columnDefinition.setAutoIncrement(true);
+                    sqlTableElementList.add(columnDefinition);
+                    return sqlStatement.toLowerCaseString();
+                }
             }
         }
-
+        return sql;
     }
 
     public SchemaRepository getRepository() {

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,6 +18,10 @@ import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.api.BinlogProcessor;
+import com.aliyun.polardbx.binlog.api.DescribeBinlogFilesResult;
+import com.aliyun.polardbx.binlog.api.RdsApi;
+import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.canal.binlog.ContinuesFileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.ContinuesURLLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.FileLogFetcher;
@@ -26,15 +30,10 @@ import com.aliyun.polardbx.binlog.canal.binlog.URLLogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.gtid.GTIDSet;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.exception.PositionNotFoundException;
-import com.aliyun.polardbx.binlog.download.BinlogProcessor;
-import com.aliyun.polardbx.binlog.download.DescribeBinlogFilesResult;
-import com.aliyun.polardbx.binlog.download.RdsApi;
-import com.aliyun.polardbx.binlog.download.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.HttpHelper;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.time.DateFormatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,7 +41,6 @@ import java.io.File;
 import java.io.IOException;
 import java.text.MessageFormat;
 import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -50,7 +48,6 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
-import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
 public class OssConnection implements ErosaConnection {
@@ -69,6 +66,7 @@ public class OssConnection implements ErosaConnection {
     protected Long serverId;
     protected long requestTSO;
     protected String localBinlogDir;
+    private String lastConnectFile = null;
 
     public OssConnection(String storageInstanceId, String uid, String bid, String localBinlogDir,
                          Long preferHostId, int recallInterval, Long serverId,
@@ -88,16 +86,6 @@ public class OssConnection implements ErosaConnection {
         int suffix = downloadLink.indexOf("?");
         String fileName = downloadLink.substring(prefix + 1, suffix);
         return fileName;
-    }
-
-    public static void main(String[] args) {
-        long now = System.currentTimeMillis();
-        long before = now - TimeUnit.DAYS.toMillis(10);
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
-        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
-        System.out.println("before : " + sdf.format(new Date(before)));
-        System.out.println("before : " + DateFormatUtils.format(before, "yyyy-MM-dd HH:mm:ss"));
-        System.out.println("now : " + sdf.format(new Date(now)));
     }
 
     public void setTest(boolean test) {
@@ -229,17 +217,27 @@ public class OssConnection implements ErosaConnection {
 
     @Override
     public LogFetcher providerFetcher(String binlogfilename, long binlogPosition, boolean search) throws IOException {
+        if (binlogfilename == null && lastConnectFile == null) {
+            // 可能是发生了实例迁移
+            binlogfilename = binlogFileQueue.getLast().getLogname();
+            logger.warn("may be dn transfer to new binlog sequence, will use max oss file continue :" + binlogfilename);
+        }
         BinlogFile ossBinlogFile = ossBinlogFileMap.get(binlogfilename);
         if (ossBinlogFile == null) {
             logger.error("can not find binlog file : " + binlogfilename + " from oss!");
             throw new PositionNotFoundException();
         }
+        lastConnectFile = binlogfilename;
 
         if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_OLDMODE)) {
             return providerLocalFetcher(ossBinlogFile, binlogPosition, search);
         } else {
             return providerRemoteUrlFetcher(ossBinlogFile, binlogPosition);
         }
+    }
+
+    public String getLastConnectFile() {
+        return lastConnectFile;
     }
 
     private LogFetcher providerLocalFetcher(BinlogFile ossBinlogFile, long binlogPosition, boolean search)

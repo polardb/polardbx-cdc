@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,6 +19,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -93,8 +94,9 @@ public class MysqlFullProcessor {
                 }
             }
             if (orderKey == null) {
-                // 暂不支持不含主键或非空uk的表
+                // 暂不支持不含主键或非空uk的表，会直接忽略并标识成功
                 log.error("can't find orderKey for schema:{}, tbName:{}", schema, tbName);
+                updateDbFullPosition(fullTableName, 0, null,  RplConstants.FINISH);
                 return;
             }
 
@@ -163,7 +165,7 @@ public class MysqlFullProcessor {
     }
 
     private void fetchData() throws Throwable {
-        log.info("starting fetching Data, tbName:{}", tbName);
+        log.info("starting fetching Data, tbName:{}", fullTableName);
 
         PreparedStatement stmt = null;
         Connection conn = null;
@@ -176,7 +178,7 @@ public class MysqlFullProcessor {
             // 为了设置fetchSize,必须设置为false
             conn.setAutoCommit(false);
             RowChangeBuilder builder = ExtractorUtil.buildRowChangeMeta(tableInfo, schema, tbName, DBMSAction.INSERT);
-            List<DBMSEvent> events = new ArrayList<>();
+            // List<DBMSEvent> events = new ArrayList<>();
             // prepared statement
             stmt = conn.prepareStatement(fetchSql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
             stmt.setFetchSize(Integer.MIN_VALUE);
@@ -188,23 +190,22 @@ public class MysqlFullProcessor {
             rs = stmt.executeQuery();
             log.info("fetching data, tbName:{}, orderKeyStart:{}", tbName, orderKeyStart);
 
-            // create DBMSRowChange message
             while (rs.next()) {
-                events.add(ExtractorUtil.buildMessageEvent(builder, tableInfo, rs));
-                if (extractorConfig.getFetchBatchSize() == events.size()) {
-                    transfer(events);
-                    DBMSRowChange rowChange = (DBMSRowChange) events.get(events.size() - 1);
-                    orderKeyStart = rowChange.getRowValue(1, orderKey);
+                ExtractorUtil.addRowData(builder, tableInfo, rs);
+                if (extractorConfig.getFetchBatchSize() == builder.getRowDatas().size()) {
+                    DBMSRowChange rowChange = builder.build();
+                    transfer(Collections.singletonList(rowChange));
+                    orderKeyStart = rowChange.getRowValue(extractorConfig.getFetchBatchSize(), orderKey);
                     String position = StringUtils2.safeToString(orderKeyStart);
                     updateDbFullPosition(fullTableName, extractorConfig.getFetchBatchSize(), position,
                         RplConstants.NOT_FINISH);
                     StatisticalProxy.getInstance().heartbeat();
-                    events = new ArrayList<>(extractorConfig.getFetchBatchSize());
+                    builder.getRowDatas().clear();
                 }
             }
-            int resiSize = events.size();
+            int resiSize = builder.getRowDatas().size();
             if (resiSize > 0) {
-                transfer(events);
+                transfer(Collections.singletonList(builder.build()));
             }
             updateDbFullPosition(fullTableName, resiSize, null, RplConstants.FINISH);
             log.info("fetching data done, dbName:{} tbName:{}, last orderKeyValue:{}", schema, tbName, orderKeyStart);
@@ -220,12 +221,6 @@ public class MysqlFullProcessor {
     private void transfer(List<DBMSEvent> events) {
         physicalToLogical(events);
         pipeline.directApply(events);
-
-        // update position
-        if (events.size() > 0) {
-            DBMSRowChange rowChange = (DBMSRowChange) events.get(events.size() - 1);
-            orderKeyStart = rowChange.getRowValue(1, orderKey);
-        }
     }
 
     private void physicalToLogical(List<DBMSEvent> events) {

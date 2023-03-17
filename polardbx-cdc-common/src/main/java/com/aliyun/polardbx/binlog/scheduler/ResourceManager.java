@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,17 +20,17 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
-import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoMapper;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
+import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
-import com.aliyun.polardbx.binlog.domain.po.RelayFinalTaskInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.Resource;
@@ -57,7 +57,7 @@ public class ResourceManager {
 
     private final String clusterId;
     private final NodeInfoMapper nodeInfoMapper;
-    private final RelayFinalTaskInfoMapper taskInfoMapper;
+    private final BinlogTaskInfoMapper taskInfoMapper;
     private final DumperInfoMapper dumperInfoMapper;
     private final BinlogTaskConfigMapper taskConfigMapper;
     private Set<String> topologyExcludeNodes;
@@ -65,7 +65,7 @@ public class ResourceManager {
     public ResourceManager(String clusterId) {
         this.clusterId = clusterId;
         this.nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
-        this.taskInfoMapper = SpringContextHolder.getObject(RelayFinalTaskInfoMapper.class);
+        this.taskInfoMapper = SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
         this.dumperInfoMapper = SpringContextHolder.getObject(DumperInfoMapper.class);
         this.taskConfigMapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
     }
@@ -95,9 +95,8 @@ public class ResourceManager {
         return getAliveNodes().stream().map(NodeInfo::getContainerId).collect(Collectors.toSet());
     }
 
-    public boolean isContainersOk(Set<String> containers) {
-        Set<String> alive = getAliveNodes().stream().map(NodeInfo::getContainerId).collect(Collectors.toSet());
-        return alive.containsAll(containers);
+    public boolean isAllContainerExist(Set<String> containers) {
+        return allContainers().containsAll(containers);
     }
 
     /**
@@ -114,10 +113,8 @@ public class ResourceManager {
 
             Container container = Container.builder().containerId(nodeInfo.getContainerId())
                 .nodeHttpAddress(nodeInfo.getIp()).daemonPort(nodeInfo.getDaemonPort()).availablePorts(ports)
-                .capability(
-                    Resource.builder().cpu(nodeInfo.getCore().intValue())
-                        .memory_mb(nodeInfo.getMem().intValue()).build())
-                .build();
+                .capability(Resource.builder().cpu(nodeInfo.getCore().intValue())
+                    .memory_mb(nodeInfo.getMem().intValue()).build()).build();
             result.add(container);
         }
         return result;
@@ -129,13 +126,14 @@ public class ResourceManager {
         List<BinlogTaskConfig> allConfig = taskConfigMapper
             .select(s -> s.where(BinlogTaskConfigDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
 
-        boolean isOK = true;
+        boolean isOk = true;
         for (BinlogTaskConfig config : allConfig) {
-            if (TaskType.Final.name().equals(config.getRole()) || TaskType.Relay.name().equals(config.getRole())) {
-                RelayFinalTaskInfo taskInfo = getTaskInfo(config.getTaskName());
+            if (TaskType.Final.name().equals(config.getRole()) || TaskType.Relay.name().equals(config.getRole())
+                || TaskType.Dispatcher.name().equals(config.getRole())) {
+                BinlogTaskInfo taskInfo = getTaskInfo(config.getTaskName());
                 boolean valid = checkValid(config.getGmtModified().getTime(),
                     taskInfo == null ? -1L : taskInfo.getGmtHeartbeat().getTime(), taskInfo == null);
-                isOK &= valid;
+                isOk &= valid;
 
                 snapshot.getProcessMeta().put(config.getTaskName(), new ExecutionSnapshot.ProcessMeta(
                     valid ? ExecutionSnapshot.Status.OK : ExecutionSnapshot.Status.DOWN,
@@ -143,11 +141,12 @@ public class ResourceManager {
                     taskInfo == null ?
                         String.format("The task [%s] was not started at the specified time.", config.getTaskName()) :
                         String.format("The task [%s] heartbeat is timeout.", config.getTaskName())));
-            } else if (TaskType.Dumper.name().equals(config.getRole())) {
+            } else if (TaskType.Dumper.name().equals(config.getRole())
+                || TaskType.DumperX.name().equals(config.getRole())) {
                 DumperInfo dumperInfo = getDumperInfo(config.getTaskName());
                 boolean valid = checkValid(config.getGmtModified().getTime(),
                     dumperInfo == null ? -1L : dumperInfo.getGmtHeartbeat().getTime(), dumperInfo == null);
-                isOK &= valid;
+                isOk &= valid;
 
                 snapshot.getProcessMeta().put(config.getTaskName(), new ExecutionSnapshot.ProcessMeta(
                     valid ? ExecutionSnapshot.Status.OK : ExecutionSnapshot.Status.DOWN,
@@ -161,7 +160,7 @@ public class ResourceManager {
                 throw new PolardbxException("unknown task type " + config.getRole());
             }
         }
-        snapshot.setOK(isOK);
+        snapshot.setAllRunningOk(isOk);
         return snapshot;
     }
 
@@ -172,10 +171,10 @@ public class ResourceManager {
         return list.isEmpty() ? null : list.get(0);
     }
 
-    public RelayFinalTaskInfo getTaskInfo(String name) {
-        List<RelayFinalTaskInfo> list = taskInfoMapper.select(
-            s -> s.where(RelayFinalTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                .and(RelayFinalTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
+    public BinlogTaskInfo getTaskInfo(String name) {
+        List<BinlogTaskInfo> list = taskInfoMapper.select(
+            s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
+                .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
         return list.isEmpty() ? null : list.get(0);
     }
 

@@ -2,7 +2,7 @@ FROM centos:7
 
 # Install essential utils
 RUN yum update -y && \
-    yum install sudo hostname telnet net-tools vim tree less file wget java-1.8.0-openjdk java-1.8.0-openjdk-devel crontabs -y && \
+    yum install sudo hostname telnet net-tools vim tree less file wget java-11-openjdk java-11-openjdk-devel crontabs -y && \
     yum clean all && rm -rf /var/cache/yum && rm -rf /var/tmp/yum-* && \
     wget https://repo.mysql.com//mysql80-community-release-el7-1.noarch.rpm && \
     rpm -ivh mysql80-community-release-el7-1.noarch.rpm && \

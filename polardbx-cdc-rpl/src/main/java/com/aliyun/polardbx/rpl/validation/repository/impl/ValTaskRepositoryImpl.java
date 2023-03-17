@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -113,8 +113,6 @@ public class ValTaskRepositoryImpl implements ValTaskRepository {
 
     @Override
     public void createValTasks(ValidationTypeEnum type) {
-        TaskContext taskContext = TaskContext.getInstance();
-        DataImportMeta.PhysicalMeta meta = taskContext.getPhysicalMeta();
         TaskContext context = TaskContext.getInstance();
         for (TableInfo table : ctx.getSrcPhyTableList()) {
             log.warn(
@@ -141,9 +139,7 @@ public class ValTaskRepositoryImpl implements ValTaskRepository {
             task.setSrcPhyDb(ctx.getSrcPhyDB());
             task.setSrcLogicalTable(ctx.getMappingTable().get(table.getName()).getName());
             task.setSrcPhyTable(table.getName());
-            // add key list as json string
-            // task.setSrcPhyKeyCol(JSONObject.toJSONString(table.getKeyList()));
-            task.setDstLogicalDb(meta.getDstDb());
+            task.setDstLogicalDb(ctx.getDstLogicalDB());
             task.setDstLogicalTable(ctx.getMappingTable().get(table.getName()).getName());
             valTaskMapper.insertSelective(task);
         }
@@ -182,7 +178,11 @@ public class ValTaskRepositoryImpl implements ValTaskRepository {
                 }
             } catch (Exception e) {
                 log.error("Bulk insert into validation_diff table exception. Try insert records one by one", e);
-                diffList.forEach(diffRecord -> diffMapper.insertSelective(diffRecord));
+                diffList.forEach(diffRecord -> {
+                    log.info("insert one by one for diff record: {}", diffRecord.getSrcPhyDb() + "."
+                        + diffRecord.getSrcPhyTable() + " " + diffRecord.getSrcKeyColVal());
+                    diffMapper.insertSelective(diffRecord);
+                });
                 diffList = new ArrayList<>();
             }
         }

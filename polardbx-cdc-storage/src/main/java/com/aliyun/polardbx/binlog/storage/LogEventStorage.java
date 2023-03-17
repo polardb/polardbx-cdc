@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.storage;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -42,13 +43,15 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_CLEAN_BUFFER_SIZE;
+
 /**
  * Created by ziyang.lb
  **/
 public class LogEventStorage implements Storage {
 
     private static final Logger logger = LoggerFactory.getLogger(LogEventStorage.class);
-    private static final int BUFFER_SIZE = 10000;
+    private static final int BUFFER_SIZE = DynamicApplicationConfig.getInt(STORAGE_CLEAN_BUFFER_SIZE);
     private static final int DEFAULT_WORKER_COUNT = 4;
     private static final int FLUSH_INTERVAL = 2000;//毫秒
 
@@ -187,6 +190,7 @@ public class LogEventStorage implements Storage {
                 flushDeleteBuffer();
             }
         }
+        StorageMetrics.get().getCleanerQueuedSize().set(getCleanerQueuedSize());
     }
 
     @Override
@@ -227,7 +231,7 @@ public class LogEventStorage implements Storage {
             try {
                 List<TxnKey> list = Arrays.asList(array);
                 list.stream().collect(Collectors.groupingBy(TxnKey::getPartitionGroupId)).entrySet().forEach(entry -> {
-                    int index = Math.abs(entry.getKey().hashCode()) % DEFAULT_WORKER_COUNT;
+                    int index = Math.abs(entry.getKey().hashCode() % DEFAULT_WORKER_COUNT);
                     try {
                         cleanWorkers[index].put(entry);
                     } catch (InterruptedException e) {

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,7 +32,6 @@ public class TranPosition implements IXaTransaction<TranPosition> {
 
     private static final Logger logger = LoggerFactory.getLogger(TranPosition.class);
     private BinlogPosition begin;
-    private BinlogPosition end;
     private Long tso = -1L;
 
     private String xid;
@@ -40,6 +39,8 @@ public class TranPosition implements IXaTransaction<TranPosition> {
     private long transId;
 
     private InstructionCommand command;
+
+    private BinlogPosition end;
 
     private List<ITranStatChangeListener> listenerList = new ArrayList<>();
 
@@ -68,7 +69,7 @@ public class TranPosition implements IXaTransaction<TranPosition> {
             TableMapLogEvent tm = wr.getTable();
             if (SystemDB.isInstruction(tm.getDbName(), tm.getTableName())) {
                 command = SystemDB.getInstance().parseInstructionCommand(wr);
-                logger.warn("find cdc instruction type : " + command);
+                logger.warn("tranPosition find cdc instruction type : " + command);
             }
             if (SystemDB.isGlobalTxTable(tm.getTableName())) {
                 // 这里编码写死，因为没有字符串解析，所以用不到
@@ -105,19 +106,12 @@ public class TranPosition implements IXaTransaction<TranPosition> {
     }
 
     public BinlogPosition getPosition() {
-        if (begin == null) {
-            return null;
-        }
         begin.setTso(tso);
         begin.setRtso(CommonUtils.generateTSO(tso, StringUtils.rightPad(transId + "", 29, "0"), null));
         return begin;
     }
 
-    public BinlogPosition getEnd() {
-        return end;
-    }
-
-    public void setEnd(BinlogPosition end) {
+    public void complete(BinlogPosition end) {
         if (this.end != null) {
             throw new RuntimeException("duplicate commit event pos  " + end);
         }
@@ -127,6 +121,10 @@ public class TranPosition implements IXaTransaction<TranPosition> {
 
     public boolean isCdcStartCmd() {
         return command != null && command.isCdcStart();
+    }
+
+    public boolean isMetaSnapCmd() {
+        return command != null && command.isMetaSnapshotCmd();
     }
 
     public boolean isStorageChangeCmd() {
@@ -143,11 +141,19 @@ public class TranPosition implements IXaTransaction<TranPosition> {
 
     @Override
     public boolean isComplete() {
-        return begin != null && end != null;
+        return end != null;
+    }
+
+    public void setEnd(BinlogPosition end) {
+        this.end = end;
     }
 
     public String getContent() {
         return command != null ? command.getContent() : null;
+    }
+
+    public String getCommandId() {
+        return command.getInstructionId();
     }
 
     public void setCommand(InstructionCommand command) {

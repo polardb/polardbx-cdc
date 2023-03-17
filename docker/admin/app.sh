@@ -3,7 +3,6 @@
 source /etc/profile
 
 function start_app() {
-    sh /home/admin/bin/jdk8.sh
     chmod 755 /home/admin/polardbx-binlog.standalone/bin/*
     sudo /usr/sbin/crond -i
     sudo -E su admin -c 'sh /home/admin/polardbx-binlog.standalone/bin/daemon.sh start'

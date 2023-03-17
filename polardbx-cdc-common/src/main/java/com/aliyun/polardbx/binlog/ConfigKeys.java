@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -77,6 +77,10 @@ public abstract class ConfigKeys {
      */
     public static final String RUNTIME_MODE = "runtime.mode";
     /**
+     * 运行环境 ONLINE/DEV/LITE/PRIVATE/TEST
+     */
+    public static final String RUNTIME_ENV = "runtime.env";
+    /**
      * 当前CDC实例所属用户的的uid
      */
     public static final String RDS_UID = "rdsUid";
@@ -105,6 +109,11 @@ public abstract class ConfigKeys {
      */
     public static final String ENABLE_INTERFACE_ACL = "enableInterfaceACL";
     /**
+     * deamon接口acl aksk
+     */
+    public static final String DEAMON_REST_API_ACL_AK = "deamon_rest_api_acl_ak";
+    public static final String DEAMON_REST_API_ACL_SK = "deamon_rest_api_acl_sk";
+    /**
      * 当前cdc集群类型
      */
     public static final String CLUSTER_TYPE = "cluster_type";
@@ -120,6 +129,13 @@ public abstract class ConfigKeys {
      * 显示指定DN的ip，特殊情况下使用
      */
     public static final String ASSIGNED_DN_IP = "assignedDnIp";
+
+    /**
+     * meta db 连接串
+     */
+    public static final String METADB_URL = "metaDb_url";
+    public static final String METADB_USERNAME = "metaDb_username";
+    public static final String METADB_PASSWORD = "metaDb_password";
     /**
      * 检测连接是否可用的超时时间
      */
@@ -159,9 +175,17 @@ public abstract class ConfigKeys {
      */
     public static final String BINLOG_FILE_SIZE = "binlog.file.size";
     /**
+     * 如果本地和远端文件系统中都存在该binlog文件，为了测试，随机返回远端存储或本地存储上的文件进行读取
+     */
+    public static final String BINLOG_DUMP_REMOTE_CHANNEL_TEST_MODE = "binlog.dump.remote.channel.test.mode";
+    /**
      * 对逻辑Binlog进行seek操作时的缓冲区大小，单位：M
      */
     public static final String BINLOG_FILE_SEEK_BUFFER_SIZE = "binlog.file.seek.bufferSize";
+    /**
+     * 对逻辑Binlog进行seek操作时，获取lastTso的模式，0-获取文件中的最后一个cts，1-获取文件中的最后一个事务策略为TSO的cts，默认0
+     */
+    public static final String BINLOG_FILE_SEEK_LAST_TSO_MODE = "binlog.file.seek.lastTsoMode";
     /**
      * 写binlog文件时是否开启dry run
      */
@@ -174,6 +198,14 @@ public abstract class ConfigKeys {
      * 写binlog文件时是否支持记录RowQueryLogEvent
      */
     public static final String BINLOG_WRITE_SUPPORT_ROWS_QUERY_LOG = "binlog.write.supportRowsQueryLog";
+    /**
+     * 写binlog文件时是否支持对rowsQuery的合法性进行校验
+     */
+    public static final String BINLOG_WRITE_CHECK_ROWS_QUERY = "binlog.write.checkRowsQuery";
+    /**
+     * 写binlog文件时是否支持校验tso的顺序和重复行
+     */
+    public static final String BINLOG_WRITE_CHECK_TSO = "binlog.write.checkTso";
     /**
      * 逻辑binlog写缓冲区的大小，单位字节，建议为2的倍数
      */
@@ -253,6 +285,12 @@ public abstract class ConfigKeys {
     public static final String BINLOG_SYNC_EVENT_SPLIT_MODE = "binlog.sync.event.split.mode";
 
     public static final String BINLOG_SYNC_INJECT_TROUBLE = "binlog.sync.injectTrouble";
+
+    /**
+     * dumper slave启动模式
+     */
+    public static final String BINLOG_DUMPER_SLAVE_START_MODE = "binlog.dumper.slave.start.mode";
+
     /**
      * dumper对下游消费订阅，进行数据推送单个packet的最大大小，单位：字节
      */
@@ -262,13 +300,33 @@ public abstract class ConfigKeys {
      */
     public static final String BINLOG_DUMP_READ_BUFFER_SIZE = "binlog.dump.read.buffer.size";
     /**
+     * dumper对现有消费订阅，当长时间没有数据时，发送heartbeat的频率，默认1s
+     */
+    public static final String BINLOG_DUMP_HEARTBEAT_INTERVAL_MS = "binlog.dump.heartbeat.interval.ms";
+    /**
+     * dumper 启动后等待 cursor ready重试间隔
+     */
+    public static final String BINLOG_DUMP_WAIT_CURSOR_READY_RETRY_INTERVAL_SECOND =
+        "binlog.dump.wait.cursor.ready.retry.interval.second";
+
+    /**
+     * dumper 启动后得替代 cursor ready重试次数配置
+     */
+    public static final String BINLOG_DUMP_WAIT_CURSOR_READY_TIMES_LIMIT =
+        "binlog.dump.wait.cursor.ready.times.limit";
+
+    /**
      * 逻辑Binlog文件的备份方式，OSS or Lindorm or NULL
      */
     public static final String BINLOG_BACKUP_TYPE = "binlog.backup.type";
     /**
      * 逻辑Binlog文件在OSS 或 Lindorm 的过期时间，单位：天
      */
-    public static final String BINLOG_BACKUP_EXPIRE_DAYS = "binlog.backup.expire.days";
+    public static final String BINLOG_BACKUP_FILE_EXPIRE_DAYS = "binlog.backup.fileExpireTime.days";
+    /**
+     * binlog_oss_record表中purge_status状态为COMPLETE的记录的保存时间，单位：天
+     */
+    public static final String BINLOG_BACKUP_RECORD_EXPIRE_DAYS = "binlog.backup.recordExpireTime.days";
     /**
      * 逻辑Binlog文件进行备份上传时，缓冲区的大小
      */
@@ -278,25 +336,25 @@ public abstract class ConfigKeys {
      */
     public static final String BINLOG_BACKUP_UPLOAD_MAX_THREAD_NUM = "binlog.backup.upload.maxThreadNum";
     /**
-     * 从OSS下载Binlog文件的线程数
-     */
-    public static final String BINLOG_BACKUP_DOWNLOAD_PARALLELISM = "binlog.backup.download.parallelism";
-    /**
-     * 从备份存储下载Binlog文件到本地，可以占用CDC最大磁盘量的比例
-     */
-    public static final String BINLOG_BACKUP_DOWNLOAD_SIZE_RATIO = "binlog.backup.download.size.ratio";
-    /**
-     * 等待文件上传成功的时间阈值，单位:s
-     */
-    public static final String BINLOG_BACKUP_DOWNLOAD_WAIT_UPLOAD_TIMEOUT = "binlog.backup.download.waitUpload.timeout";
-    /**
-     * 当待下载的文件列表，有部分文件未上传成功，且已经等待超时，是否采取Best Effort模式，尽量下载，默认：true
-     */
-    public static final String BINLOG_BACKUP_DOWNLOAD_BEST_EFFORT_WITH_GAP = "binlog.backup.download.bestEffortWithGap";
-    /**
      * 上传Binlog文件到OSS或Lindorm的模式，默认为APPEND，Lindorm不支持Mutiple
      */
     public static final String BINLOG_BACKUP_UPLOAD_MODE = "binlog.backup.uploadMode";
+    /**
+     * 恢复时从远端存储下载文件的方式，见BinlogDownload.DownloadMode，OSS有分片并行下载和单个文件串行下载两种方式
+     */
+    public static final String BINLOG_DOWNLOAD_MODE = "binlog.backup.downloadMode";
+    /**
+     * 分片并行下载时每个分片的大小，单位：字节
+     */
+    public static final String BINLOG_DOWNLOAD_PART_SIZE = "binlog.backup.download.partSize";
+    /**
+     * 分片并行下载时下载线程的数目
+     */
+    public static final String BINLOG_DOWNLOAD_MAX_THREAD_NUM = "binlog.backup.download.maxThreadNum";
+    /**
+     * 本地binlog为空时从远端下载的文件的个数
+     */
+    public static final String BINLOG_DOWNLOAD_LAST_NUM = "binlog.backup.downloadLastNum";
     /**
      * Binlog文件上传到备份存储的模式为APPEND时，最大可Append的FileSize，超过该Size将转化为Multiple模式，如果支持Multiple的话，单位：G
      */
@@ -325,10 +383,6 @@ public abstract class ConfigKeys {
      * 是否支持对本地binlog进行清理
      */
     public static final String BINLOG_CLEANER_CLEAN_ENABLE = "binlog.cleaner.clean.enable";
-    /**
-     * 保存下载文件目录
-     */
-    public static final String BINLOG_DOWNLOAD_DATA_FILE_DIR = "binlog.download.data.dir";
     /**
      * 通过该配置，可以对binlog文件中的last tso进行overwrite，格式 [old tso, overwritten tso]
      */
@@ -366,13 +420,13 @@ public abstract class ConfigKeys {
      */
     public static final String LINDORM_ENDPOINT = "lindorm.endpoint";
     /**
-     * 逻辑Binlog文件上传到Lindorm的端口
+     * lindorm的thrift服务端口
      */
-    public static final String LINDORM_PORT = "lindorm.port";
+    public static final String LINDORM_THRIFT_PORT = "lindorm.thriftPort";
     /**
-     * 从Lindorm下载逻辑文件的端口
+     * lindorm的aws s3服务端口
      */
-    public static final String LINDORM_DOWNLOAD_PORT = "lindorm.downloadPort";
+    public static final String LINDORM_S3_PORT = "lindorm.s3Port";
 
     //******************************************************************************************************************
     //***************************************************Task运行时相关的配置**********************************************
@@ -383,9 +437,13 @@ public abstract class ConfigKeys {
      */
     public static final String TASK_ENGINE_AUTO_START = "task.engine.autoStart";
     /**
-     * extractor是否记录每个事务的信息，用于数据审计，默认true
+     * extractor是否记录每个事务的信息，用于数据审计，默认false
      */
     public static final String TASK_EXTRACTOR_RECORD_TRANSLOG = "task.extractor.recordTransLog";
+    /**
+     * extractor是否记录每个事务的详细信息，用于数据审计，默认false
+     */
+    public static final String TASK_EXTRACTOR_RECORD_TRANSLOG_DETAIL = "task.extractor.recordTransLogDetail";
     /**
      * 逻辑表黑名单，黑名单中的表会被过滤掉，格式：dbname1.tbname1,dbname1.tbname2,dbname2.tbname1,...
      */
@@ -443,9 +501,17 @@ public abstract class ConfigKeys {
      */
     public static final String TASK_MERGER_MERGE_NOTSO_XA = "task.merger.mergeNoTsoXa";
     /**
-     * 事务归并排序的方式，SINGLE or BATCH
+     * merge group unit size
      */
-    public static final String TASK_MERGER_MERGE_TYPE = "task.merger.mergeType";
+    public static final String TASK_MERGER_GROUP_UNIT_SIZE = "task.merger.group.unit.size";
+    /**
+     * merge group queue size
+     */
+    public static final String TASK_MERGER_GROUP_QUEUE_SIZE = "task.merger.group.queue.size";
+    /**
+     * merge group max level size
+     */
+    public static final String TASK_MERGER_GROUP_MAX_LEVEL = "task.merger.group.maxLevel";
     /**
      * 心跳窗口被强制force complete的阈值
      */
@@ -532,6 +598,12 @@ public abstract class ConfigKeys {
     public static final String TASK_DDL_REMOVEHINTS_SUPPORT = "task.ddl.removeHints";
 
     /**
+     * ddl event默认使用该mode：MODE_STRICT_TRANS_TABLES，配置到此名单中的database，会关闭该mode
+     */
+    public static final String TASK_DDL_STRICT_TRANS_TABLES_MODE_BLACKLIST_DB =
+        "task.ddl.strictTransTablesMode.blacklist.db";
+
+    /**
      * oss快速搜索模式， 正常搜索倒序每个文件都搜一把，快速模式忽略跨文件事务
      */
     public static final String TASK_SEARCHTSO_QUICKMODE = "task.searchTso.quickMode";
@@ -573,6 +645,21 @@ public abstract class ConfigKeys {
      * 私有DDL开关
      */
     public static final String TASK_DDL_PRIVATEDDL_SUPPORT = "task.ddl.privateDdl.support";
+
+    /**
+     * 强制整形开关
+     */
+    public static final String TASK_META_FORCE_REBUILD_EVENT_SUPPORT = "task.meta.rebuild.force.support";
+
+    /**
+     * 忽略掉元数据与物理数据列不相等异常
+     */
+    public static final String TASK_META_IGNORE_COLUMN_COMPARE_ERROR = "task.meta.ignore.column.compare.error";
+
+    /**
+     * 库表黑名单，可以过滤掉某些不需要的表,在加入到buffer（整形）之前, 示例: test_db_.my_table, 支持正则
+     */
+    public static final String TASK_META_REBUILD_BLACKLIST = "task.meta.rebuild.blacklist";
     //******************************************************************************************************************
     //***********************************************Daemon和调度相关参数*************************************************
     //******************************************************************************************************************
@@ -642,6 +729,10 @@ public abstract class ConfigKeys {
      */
     public static final String TOPOLOGY_TASK_HEARTBEAT_INTERVAL = "topology.task.heartbeat.interval.ms";
     /**
+     * 触发使用relay task的阈值，即DN数量达到多少之后，构建拓扑时会考虑relay task
+     */
+    public static final String TOPOLOGY_TASK_RELAY_DATANODE_THRESHOLD = "topology.task.relay.datanode.threshold";
+    /**
      * 构建拓扑时，可以使用该机器上内存资源的比率
      */
     public static final String TOPOLOGY_RESOURCE_USE_RATIO = "topology.resource.useRatio";
@@ -661,6 +752,35 @@ public abstract class ConfigKeys {
      * 兼容性开关，收到scaleout或者scalein打标信息时，是否对storage list进行修复
      */
     public static final String TOPOLOGY_SCALE_REPAIR_STORAGE_ENABLE = "topology.scale.repairStorage.enable";
+    /**
+     * recover tso的来源，binlog_oss_record表或者latest_cursor
+     */
+    public static final String TOPOLOGY_RECOVER_TSO_TYPE = "topology.recoverTso.type";
+    /**
+     * 使用recover tso功能的最早恢复时间，单位：小时
+     */
+    public static final String TOPOLOGY_RECOVER_TSO_TIME_LIMIT = "topology.recoverTso.timeLimit";
+    /**
+     * 使用recover tso最多可以恢复的binlog个数
+     */
+    public static final String TOPOLOGY_RECOVER_TSO_BINLOG_NUM_LIMIT = "topology.recoverTso.binlogNumLimit";
+    /**
+     * 是否测试recover tso功能
+     */
+    public static final String TOPOLOGY_RECOVER_TSO_TESTING_ENABLE = "topology.recoverTso.testing.enable";
+    /**
+     * 是否测试binlog下载功能
+     */
+    public static final String TOPOLOGY_FORCE_DOWNLOAD_TESTING_ENABLE = "binlog.backup.download.testing.enable";
+
+    /**
+     * RecoverTsoTestTimeTask强制刷新拓扑的时间间隔，如果需要定时重刷，设置为0
+     */
+    public static final String TOPOLOGY_FORCE_REFRESH_INTERVAL_MINUTE = "topology.forceRefresh.interval.minute";
+    /**
+     * 当只有daemon进程不可用，但daemon所在容器上的Task或Dumper进程运行正常时，是否需要进行拓扑重建，默认false
+     */
+    public static final String TOPOLOGY_SUPPORT_REBUILD_ONLY_DAEMON_DOWN = "topology.support.rebuild.only.daemon.down";
 
     //******************************************************************************************************************
     //***********************************************报警 &报警事件相关参数*************************************************
@@ -677,6 +797,18 @@ public abstract class ConfigKeys {
      * 是否上报异常事件
      */
     public static final String ALARM_REPORT_ALARM_EVENT = "alarm.reportAlarmEvent";
+    /**
+     * 最近一次消费时间，单位为ms
+     */
+    public static final String ALARM_LATEST_CONSUME_TIME_MS = "alarm.latestConsumeTime.ms";
+    /**
+     * 消费情况检查间隔，单位为ms
+     */
+    public static final String ALARM_CHECK_CONSUMER_INTERVAL_MS = "alarm.checkConsumer.interval.ms";
+    /**
+     * 根据消费情况，升级报警的时间阈值，单位为ms
+     */
+    public static final String ALARM_FATAL_THRESHOLD_MS = "alarm.fatal.threshold.ms";
 
     //******************************************************************************************************************
     //***********************************************KV 存储相关参数******************************************************
@@ -695,7 +827,7 @@ public abstract class ConfigKeys {
      */
     public static final String STORAGE_PERSIST_PATH = "storage.persistBasePath";
     /**
-     * 通过检测内存阈值决定是否需要触发落盘的频率，单位：ms，默认5s一次
+     * 通过检测内存阈值决定是否需要触发落盘的频率，单位：ms，默认10ms一次
      */
     public static final String STORAGE_PERSIST_CHECK_INTERVAL_MILLS = "storage.persistCheckInterval.mills";
     /**
@@ -734,6 +866,10 @@ public abstract class ConfigKeys {
      * 清理存储资源的线程个数
      */
     public static final String STORAGE_CLEAN_WORKER_COUNT = "storage.cleanWorker.count";
+    /**
+     * 清理存储资源的缓冲区大小
+     */
+    public static final String STORAGE_CLEAN_BUFFER_SIZE = "storage.clean.buffer.size";
     /**
      * 对数据进行restore时是否支持并行操作，默认true
      */
@@ -817,6 +953,11 @@ public abstract class ConfigKeys {
     public static final String META_DDL_RECORD_PERSIST_SQL_WITH_EXISTS =
         "meta.ddlrecord.persistSqlWithExist.switch";
     /**
+     * 逻辑ddl 软删除支持
+     */
+    public static final String META_DDL_RECORD_LOGIC_SOFTDELETE_ENABLE =
+        "meta.ddlrecord.logic.softDelete.enable";
+    /**
      * binlog_logic_meta_history表数据量报警阈值
      */
     public static final String META_DDL_RECORD_LOGIC_COUNT_ALARM_THRESHOD =
@@ -868,6 +1009,22 @@ public abstract class ConfigKeys {
     public static final String META_DDL_IGNORE_APPLY_ERROR = "meta.ddl.ignoreApplyError";
     public static final String META_TABLE_MAX_CACHE_SIZE = "meta.table.maxCacheSize";
     public static final String META_TABLE_CACHE_EXPIRE_TIME_MINUTES = "meta.table.cacheExpireTime.minutes";
+    /**
+     * table meta 检测周期
+     */
+    public static final String META_DDL_RECORD_TABLE_META_CHECK_INTERVAL =
+        "meta.ddlrecord.tableMeta.count.check.interval";
+
+    /**
+     * CDC 是否支持snapshot能力
+     */
+    public static final String ENABLE_CDC_META_BUILD_SNAPSHOT = "ENABLE_CDC_META_BUILD_SNAPSHOT";
+    /**
+     * 恢复模式是否强制使用精确snapshot
+     */
+    public static final String META_ROLLBACK_MODE_FORCE_USE_SNAPSHOT_EXACTLY =
+        "meta.rollback.mode.forceUseSnapshotExactly";
+
     //******************************************************************************************************************
     //***********************************************SQL闪回功能相关参数***************************************************
     //******************************************************************************************************************
@@ -879,7 +1036,11 @@ public abstract class ConfigKeys {
     /**
      * RecoveryApplier写入缓冲区大小(sql的个数)
      */
-    public static final String FLASHBACK_BINLOG_WRITE_BUFFER_SIZE = "flashback.binlog.write.bufferSize";
+    public static final String FLASHBACK_BINLOG_WRITE_BUFFER_SQL_SIZE = "flashback.binlog.write.bufferSqlSize";
+    /**
+     * RecoveryApplier写入缓冲区大小(字节数)
+     */
+    public static final String FLASHBACK_BINLOG_WRITE_BUFFER_BYTE_SIZE = "flashback.binlog.write.bufferByteSize";
     /**
      * 从OSS下载binlog文件在本地保存路径
      */
@@ -902,10 +1063,105 @@ public abstract class ConfigKeys {
     public static final String FLASHBACK_UPLOAD_MULTI_MODE_THRESHOLD = "flashback.upload.multiMode.threshold";
 
     //******************************************************************************************************************
+    //**************************************************Binlog-X 相关的配置***********************************************
+    //******************************************************************************************************************
+    public static final String BINLOG_X_ROCKS_BASE_PATH = "binlogx.rocksdb.bashPath";
+    public static final String BINLOG_X_AUTO_INIT = "binlogx.autoInit";
+    public static final String BINLOG_X_DIR_PATH_PREFIX = "binlogx.dir.path.prefix";
+    public static final String BINLOG_X_STREAM_GROUP_NAME = "binlogx_stream_group_name";
+    public static final String BINLOG_X_STREAM_COUNT = "binlogx_stream_count";
+    public static final String BINLOG_X_WAIT_LATEST_TSO_TIMEOUT = "binlogx.waitLatestTso.timeout";
+    public static final String BINLOG_X_TRANSMIT_RELAY_ENGINE_TYPE = "binlogx.transmit.relay.engine.type";
+    public static final String BINLOG_X_TRANSMIT_RELAY_FILE_MAX_SIZE = "binlogx.transmit.relay.file.maxSize";
+    public static final String BINLOG_X_TRANSMIT_READ_BATCH_ITEM_SIZE = "binlogx.transmit.read.batch.item.size";
+    public static final String BINLOG_X_TRANSMIT_READ_BATCH_BYTE_SIZE = "binlogx.transmit.read.batch.byte.size";
+    public static final String BINLOG_X_TRANSMIT_READ_FILE_BUFFER_SIZE = "binlogx.transmit.read.file.buffer.size";
+    public static final String BINLOG_X_TRANSMIT_READ_LOG_DETAIL_ENABLE = "binlogx.transmit.read.logDetail.enable";
+    public static final String BINLOG_X_TRANSMIT_WRITE_BATCH_SIZE = "binlogx.transmit.write.batchSize";
+    public static final String BINLOG_X_TRANSMIT_WRITE_PARALLELISM = "binlogx.transmit.write.parallelism";
+    public static final String BINLOG_X_TRANSMIT_WRITE_QUEUE_SIZE = "binlogx.transmit.write.queue.size";
+    public static final String BINLOG_X_TRANSMIT_WRITE_FILE_BUFFER_SIZE = "binlogx.transmit.write.file.buffer.size";
+    public static final String BINLOG_X_TRANSMIT_WRITE_FILE_BUFFER_DIRECT = "binlogx.transmit.write.file.buffer.direct";
+    public static final String BINLOG_X_TRANSMIT_WRITE_FILE_FLUSH_INTERVAL =
+        "binlogx.transmit.write.file.flush.interval";
+    public static final String BINLOG_X_TRANSMIT_WRITE_SLOWDOWN_THRESHOLD = "binlogx.transmit.write.slowdown.threshold";
+    public static final String BINLOG_X_TRANSMIT_WRITE_SLOWDOWN_SPEED = "binlogx.transmit.write.slowdown.speed";
+    public static final String BINLOG_X_TRANSMIT_WRITE_STOP_THRESHOLD = "binlogx.transmit.write.stop.threshold";
+    public static final String BINLOG_X_TRANSMIT_WRITE_LOG_DETAIL_ENABLE = "binlogx.transmit.write.logDetail.enable";
+    public static final String BINLOG_X_TRANSMIT_HASH_LEVEL = "binlogx_transmit_hashLevel";
+    public static final String BINLOG_X_USE_RECORD_LEVEL_HASH_DB_LIST = "binlogx.useRecordLevelHash.dbList";
+    public static final String BINLOG_X_USE_RECORD_LEVEL_HASH_TABLE_LIST = "binlogx.useRecordLevelHash.tableList";
+    public static final String BINLOG_X_USE_DB_LEVEL_HASH_DB_LIST = "binlogx.useDbLevelHash.dbList";
+    public static final String BINLOG_X_USE_DB_LEVEL_HASH_TABLE_LIST = "binlogx.useDbLevelHash.tableList";
+    public static final String BINLOG_X_USE_TABLE_LEVEL_HASH_DB_LIST = "binlogx.useTableLevelHash.dbList";
+    public static final String BINLOG_X_USE_TABLE_LEVEL_HASH_TABLE_LIST = "binlogx.useTableLevelHash.tableList";
+    /**
+     * 分配给Dispatcher内存，预留给rocksdb使用的内存大小
+     */
+    public static final String BINLOG_X_SCHEDULE_DISPATCHER_ROCKSDB_RATIO = "binlogx.schedule.dispatcher.rocksdb.ratio";
+    /**
+     * 构建运行时拓扑时，每个container分配的Dispatcher的个数，如果count小于1，则按照memory模式进行构建
+     */
+    public static final String BINLOG_X_SCHEDULE_DISPATCHER_COUNT_UNIT = "binlogx.schedule.dispatcher.count.unit";
+    /**
+     * 构建运行时拓扑时，对Dispatcher进行内存分配的参考值
+     * 1. 当Container可用内存大于Dispatcher最小可用内存，但小于memory unit的两倍时，该Container上只分配一个Dispatcher进程
+     * 2. 当Container可用内存大于等于memory unit的两倍时，调度程序根据DN节点的数量情况，会考虑在该Container上拆分运行多个Task进程
+     */
+    public static final String BINLOG_X_SCHEDULE_DISPATCHER_MEMORY_UNIT = "binlogx.schedule.dispatcher.memory.unit";
+    /**
+     * Dispatcher进程所需的最小内存，当Container进程所剩内存小于该值时，调度程序不会给该Container分配Dispatcher进程
+     */
+    public static final String BINLOG_X_SCHEDULE_DISPATCHER_MEMORY_MIN = "binlogx.schedule.dispatcher.memory.min";
+    /**
+     * 是否支持清理旧版本的逻辑Binlog，默认true，一般测试环境排查问题时，可设置为false
+     */
+    public static final String BINLOG_X_CLEAN_OLD_VERSION_BINLOG_ENABLE = "binlogx.clean.oldVersionBinlog.enable";
+    /**
+     * 是否支持清理Dispatcher中的relay data, relay data是针对多流进行Hash后的log event，保存在rocksDb中，默认值：true
+     */
+    public static final String BINLOG_X_CLEAN_RELAY_DATA_ENABLE = "binlogx.clean.relayData.enable";
+    /**
+     * 对relay data进行清理的频率，单位：分钟，默认值：1min
+     */
+    public static final String BINLOG_X_CLEAN_RELAY_DATA_INTERVAL = "binlogx.clean.relayData.interval";
+    /**
+     * 多流场景下，所有Grpc client的flow control window size的总和，即每个client的 window-size = total-window-size / client-count
+     * 如果不加控制的话，会导致直接内存out of memory
+     */
+    public static final String BINLOG_X_TXN_STREAM_FLOW_CONTROL_WINDOW_MAX_SIZE =
+        "binlogx.txn.stream.flowControl.window.maxSize";
+    /**
+     * 多流场景下，所有流的seek buffer的总和的最大值
+     */
+    public static final String BINLOG_X_FILE_SEEK_BUFFER_MAX_SIZE = "binlogx.file.seek.buffer.maxSize";
+    /**
+     * kway多路归并，merge source queue size
+     */
+    public static final String BINLOG_X_KWAY_SOURCE_QUEUE_SIZE = "binlogx.kway.source.queue.size";
+
+    /**
+     * logic TableMeta count
+     */
+    public static final String META_DDL_RECORD_TABLE_META_COUNT_LIMIT = "meta.ddlrecord.tableMeta.count.limit";
+    //******************************************************************************************************************
     //*********************************************** Replica相关参数 ***************************************************
     //******************************************************************************************************************
 
     public static final String RPL_PERSIST_BASE_PATH = "rpl.persist.basePath";
+
+    /**
+     * rpl相关的任务，是否支持根据rplTask.gmt_modified探活
+     */
+    public static final String RPL_SUPPORT_RUNNING_CHECK = "rpl.task.supportRunningCheck";
+
+    public static final String RPL_VALIDATION_PER_DB_PARALLELISM = "rpl.validation.perDb.parallelism";
+
+    public static final String RPL_VALIDATION_CHUNK_SIZE = "rpl.validation.chunk.size";
+
+    public static final String RPL_ROCKSDB_DESERIALIZE_PARALLELISM = "rpl.rocksDB.deserialize.parallelism";
+
+    public static final String RPL_DEFAULT_IGNORE_DB_LIST = "rpl_default_ignore_db_list";
 
     //******************************************************************************************************************
     //*********************************Binlog_System_Config表中有，但config文件中没有的一些配置******************************
@@ -926,4 +1182,6 @@ public abstract class ConfigKeys {
     public static final String CLUSTER_SUSPEND_TOPOLOGY_REBUILDING =
         String.format("%s:cluster_suspend_topology_rebuilding",
             SpringContextHolder.getPropertiesValue(ConfigKeys.CLUSTER_ID));
+    public static final String GLOBAL_BINLOG_LATEST_CURSOR =
+        String.format("%s:global_latest_cursor", SpringContextHolder.getPropertiesValue(ConfigKeys.CLUSTER_ID));
 }

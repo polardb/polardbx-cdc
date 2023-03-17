@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,10 +18,11 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class URLMatcher {
-    private String path;
-    private List<KeyWorld> keyWorldsList;
+    private final String path;
+    private List<KeyWord> keyWordsList;
 
     public URLMatcher(String path) {
         this.path = path;
@@ -36,41 +37,58 @@ public class URLMatcher {
             if (StringUtils.isBlank(kw)) {
                 continue;
             }
-            if (keyWorldsList.size() < index) {
+            if (keyWordsList.size() < index) {
                 return false;
             }
-            if (!keyWorldsList.get(index++).match(kw)) {
+            if (!keyWordsList.get(index++).match(kw)) {
                 return false;
             }
         }
-        return keyWorldsList.size() == index;
+        return keyWordsList.size() == index;
     }
 
     private void init() {
-        String[] keyWorlds = path.split("/");
-        keyWorldsList = new ArrayList(keyWorlds.length);
-        for (String kw : keyWorlds) {
+        String[] keyWords = path.split("/");
+        keyWordsList = new ArrayList<>(keyWords.length);
+        for (String kw : keyWords) {
             if (StringUtils.isBlank(kw)) {
                 continue;
             }
             if (kw.startsWith("{") || kw.endsWith("}")) {
-                keyWorldsList.add(new KeyWorld(kw, true));
+                keyWordsList.add(new KeyWord(kw, true));
             } else {
-                keyWorldsList.add(new KeyWorld(kw));
+                keyWordsList.add(new KeyWord(kw));
             }
         }
     }
 
-    static class KeyWorld {
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        URLMatcher that = (URLMatcher) o;
+        return path.equals(that.path);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(path);
+    }
+
+    static class KeyWord {
         String pattern;
         boolean ignore = false;
 
-        public KeyWorld(String pattern, boolean ignore) {
+        public KeyWord(String pattern, boolean ignore) {
             this.pattern = pattern;
             this.ignore = ignore;
         }
 
-        public KeyWorld(String pattern) {
+        public KeyWord(String pattern) {
             this.pattern = pattern;
         }
 

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -35,7 +35,10 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -1794,4 +1797,135 @@ public class JdbcUtil {
                 String.format("Failed to create connection to [%s], err is %s", url, ex.getMessage()), ex);
         }
     }
+
+    /**
+     * 替换str中的所有单个`为``
+     * 为了防止库名或者表名或者列名是被``包裹的，通过format(如DESC `%s`.`%s`)后，库名或者列名或者表名会
+     * 变成被两对``包裹，从而出现SQL出错
+     */
+    public static String escape(String str) {
+        String regex = "(?<!`)`(?!`)";
+        return str.replaceAll(regex, "``");
+    }
+
+    /**
+     * 获得表中所有列的列名
+     */
+    public static List<String> getColumnNamesByDesc(Connection conn, String dbName, String tbName) throws SQLException {
+        List<String> columns = new ArrayList<>();
+        String sql = String.format("DESC `%s`.`%s`", escape(dbName), escape(tbName));
+        try (ResultSet rs = executeQuerySuccess(conn, sql)) {
+            while (rs.next()) {
+                String column = rs.getString(1);
+                columns.add(column);
+            }
+        }
+        return columns;
+    }
+
+    /**
+     * 获得表中各列的列名到类型的映射
+     */
+    public static Map<String, String> getColumnTypesByDesc(Connection conn, String dbName, String tbName)
+        throws SQLException {
+        Map<String, String> name2Type = new HashMap<>();
+        String sql = String.format("DESC `%s`.`%s`", escape(dbName), escape(tbName));
+        try (ResultSet rs = executeQuerySuccess(conn, sql)) {
+            while (rs.next()) {
+                String columnName = rs.getString(1);
+                String type = rs.getString(2);
+                name2Type.put(columnName, type);
+            }
+        }
+        return name2Type;
+    }
+
+    public static Map<String, String> getColumnCharsetMap(Connection conn, String db, String tb) throws SQLException {
+        Map<String, String> charsetMap = new HashMap<>();
+        String sql = String.format("SELECT column_name, character_set_name FROM `INFORMATION_SCHEMA`.`COLUMNS`" +
+            "WHERE table_schema='%s' AND table_name='%s'", db, tb);
+        try (ResultSet rs = executeQuerySuccess(conn, sql)) {
+            while (rs.next()) {
+                String column = rs.getString(1);
+                String type = rs.getString(2);
+                charsetMap.put(column, type);
+            }
+        }
+        return charsetMap;
+    }
+
+    public static String getTableCharset(Connection conn, String db, String table) throws SQLException {
+        String sql = String.format("SELECT TABLE_COLLATION " +
+            "FROM `INFORMATION_SCHEMA`.`TABLES` " +
+            "WHERE table_schema = '%s' " +
+            "AND table_name = '%s'", db, table);
+        String charset = null;
+        try (ResultSet rs = executeQuerySuccess(conn, sql)) {
+            while (rs.next()) {
+                String tableCollation = rs.getString(1);
+                int pos = tableCollation.indexOf('_');
+                charset = tableCollation.substring(0, pos);
+            }
+        }
+        return charset;
+    }
+
+    public static String getDatabaseCharset(Connection conn, String db) throws SQLException {
+        String sql = String.format("SELECT default_character_set_name FROM `INFORMATION_SCHEMA`.`SCHEMATA` " +
+            "WHERE schema_name = '%s'", db);
+        String charset = null;
+        try (ResultSet rs = executeQuerySuccess(conn, sql)) {
+            while (rs.next()) {
+                charset = rs.getString(1);
+            }
+        }
+        return charset;
+    }
+
+    /**
+     * 获得表的主键名
+     * 如果是联合主键，主键的顺序按照它们表中的左右顺序有序
+     */
+    public static List<String> getPrimaryKeyNames(Connection conn, String dbName, String tbName) throws SQLException {
+        Set<String> keys = new HashSet<>();
+        String sql = String.format("SELECT column_name FROM `INFORMATION_SCHEMA`.`KEY_COLUMN_USAGE`" +
+            "WHERE table_schema='%s' AND table_name='%s' AND constraint_name='PRIMARY'", dbName, tbName);
+        try (ResultSet rs = executeQuerySuccess(conn, sql)) {
+            while (rs.next()) {
+                String name = rs.getString(1);
+                keys.add(name);
+            }
+        }
+        List<String> res = new ArrayList<>();
+        List<String> columns = getColumnNamesByDesc(conn, dbName, tbName);
+        for (String c : columns) {
+            if (keys.contains(c)) {
+                res.add(c);
+            }
+        }
+        return res;
+    }
+
+    public static List<String> showTables(Connection conn, String database) throws SQLException {
+        List<String> tables = new ArrayList<>();
+        try (ResultSet rs = executeQuery("show tables from " + database, conn)) {
+            while (rs.next()) {
+                String table = rs.getString(1);
+                tables.add(table);
+            }
+        }
+        return tables;
+    }
+
+    public static List<String> showDatabases(Connection conn) throws SQLException {
+        List<String> databases = new ArrayList<>();
+        try (ResultSet rs = executeQuery("show databases", conn)) {
+            while (rs.next()) {
+                String database = rs.getString(1);
+                databases.add(database);
+            }
+        }
+        return databases;
+    }
+
 }

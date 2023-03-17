@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -150,6 +150,11 @@ public class RplConstants {
     public final static String SOURCE_HOST_TYPE = "SOURCE_HOST_TYPE";
 
     public final static String CHANNEL = "CHANNEL";
+
+    public final static String MODE = "MODE";
+
+    public final static String IMAGE_MODE = "IMAGE";
+    public final static String INCREMENTAL_MODE = "INCREMENTAL";
 
     public final static String REPLICATE_DO_DB = "REPLICATE_DO_DB";
 

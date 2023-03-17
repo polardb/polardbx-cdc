@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,8 +31,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_GROUP_NAME;
+import static com.aliyun.polardbx.binlog.Constants.GROUP_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.Constants.STREAM_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.util.StorageSequence.getFixedLengthStorageSeq;
+
 /**
- * Created by ziyang.lb
+ * @author ziyang.lb
  **/
 public class CommonUtils {
     public static final String RDS_HIDDEN_PK_NAME = "__#alibaba_rds_row_id#__";
@@ -46,6 +51,12 @@ public class CommonUtils {
     private static final AtomicLong localClock = new AtomicLong();
     private static final ThreadLocal<Long> lastEpochLocal = new ThreadLocal<>();
     private static final ThreadLocal<Long> lastEpochSequenceLocal = new ThreadLocal<>();
+    private static final String BINLOG_FILE_PREFIX = "binlog.";
+
+    public static String parsePureTso(String extTso) {
+        String[] array = extTso.split("_");
+        return array[0];
+    }
 
     public static void sleep(long mills) throws InterruptedException {
         Thread.sleep(mills);
@@ -70,7 +81,7 @@ public class CommonUtils {
     }
 
     /**
-     * 返回Tso的高位（即：真实Tso）
+     * 返回Tso的高位（即：真实Tso + 事务ID）
      */
     public static String getActualTso(String tso) {
         return tso.substring(0, 38);
@@ -119,23 +130,9 @@ public class CommonUtils {
      * 4、 接着按照 storageInstanceId 排序
      */
     public static String generateTSO(long currentTso, String transactionId, String storageInstanceId) {
-
-        long storageHashValue = 0;
-        // 有些场景下需要获取 RDS 无关的虚拟TSO
-        if (StringUtils.isNotBlank(storageInstanceId)) {
-            storageHashValue = Math.abs(Objects.hash(storageInstanceId));
-        }
-        String storageHash = String.valueOf(storageHashValue);
-        if (storageHash.length() > 6) {
-            storageHash = storageHash.substring(0, 6);
-        }
-
-        StringBuilder builder = new StringBuilder();
-        builder.append(StringUtils.leftPad(currentTso + "", 19, "0")).
-            append(transactionId).
-            append(StringUtils.leftPad(storageHash + "", 6, "0"));
-
-        return builder.toString();
+        return StringUtils.leftPad(currentTso + "", 19, "0")
+            + transactionId
+            + getFixedLengthStorageSeq(storageInstanceId);
     }
 
     public static String unwrap(String table) {
@@ -244,16 +241,6 @@ public class CommonUtils {
         return sdf.parse(date);
     }
 
-    public static String nextBinlogFileName(String fileName) {
-        String[] array = fileName.split("\\.");
-        String prefix = array[0];
-        String suffix = array[1];
-        int suffixLength = suffix.length();
-        int suffixNbr = Integer.parseInt(suffix);
-        String newSuffix = String.format("%0" + suffixLength + "d", ++suffixNbr);
-        return prefix + "." + newSuffix;
-    }
-
     /**
      * 根据指定概率随机true值
      * rate取值为 0~100
@@ -262,5 +249,47 @@ public class CommonUtils {
      */
     public static boolean randomBoolean(int rate) {
         return random.nextInt(100) < rate;
+    }
+
+    /**
+     * 根据group name和stream name判断当前流是否是全局binlog
+     */
+    public static boolean isGlobalBinlog(String group, String stream) {
+        return group.equals(GROUP_NAME_GLOBAL) && stream.equals(STREAM_NAME_GLOBAL);
+    }
+
+    public static boolean isCdcStartCommandIdMatch(String commandId) {
+        String clusterType = DynamicApplicationConfig.getClusterType();
+        if (Objects.equals(clusterType, ClusterTypeEnum.BINLOG_X.name())) {
+            return Objects.equals(commandId, buildStartCmd());
+        } else {
+            // 单流需要兼容一下cn老版本的情况，老版本commandId会固定写入0
+            return Objects.equals(commandId, buildStartCmd()) || Objects.equals(commandId, "0");
+        }
+    }
+
+    public static String buildStartCmd() {
+        String clusterType = DynamicApplicationConfig.getClusterType();
+        String group = DynamicApplicationConfig.getString(BINLOG_X_STREAM_GROUP_NAME);
+        return clusterType + "_" + group + "_0";
+    }
+
+    public static String min(String tso1, String tso2) {
+        if (StringUtils.isBlank(tso1)) {
+            return tso2;
+        }
+        if (StringUtils.isBlank(tso2)) {
+            return tso1;
+        }
+        return tso1.compareTo(tso2) > 0 ? tso2 : tso1;
+    }
+
+    public static int parseStreamSeq(String streamName) {
+        return Integer.parseInt(StringUtils.substringAfterLast(streamName, "_"));
+    }
+
+    public static boolean isTsoPolicyTrans(String tso) {
+        String seq = StringUtils.substring(tso, 38, 48);
+        return "0000000000".equals(seq);
     }
 }

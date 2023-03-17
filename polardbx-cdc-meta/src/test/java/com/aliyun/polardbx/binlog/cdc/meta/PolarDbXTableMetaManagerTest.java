@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -88,7 +88,7 @@ public class PolarDbXTableMetaManagerTest {
 
         metaManager.applyPhysical(new BinlogPosition(null, "2"), "d2", create, null);
 
-        metaManager.applyLogic(new BinlogPosition(null, "2"), record, "");
+        metaManager.applyLogic(new BinlogPosition(null, "2"), record, "", "000");
         System.out.println(metaManager.findLogicTable("d1", "t1"));
 
     }
@@ -100,7 +100,7 @@ public class PolarDbXTableMetaManagerTest {
         PolarDbXTableMetaManager metaManager1 = new PolarDbXTableMetaManager("polardbx-storage-0-master", null);
 
         metaManager1.init();
-        metaManager1.applyBase(new BinlogPosition(null, "1"), x);
+        metaManager1.applyBase(new BinlogPosition(null, "1"), x, "000");
 
         System.out
             .println(metaManager1.getPhyTables("polardbx-storage-0-master", Sets.newHashSet(), Sets.newHashSet()));
@@ -108,7 +108,7 @@ public class PolarDbXTableMetaManagerTest {
         PolarDbXTableMetaManager metaManager2 = new PolarDbXTableMetaManager("polardbx-storage-1-master", null);
 
         metaManager2.init();
-        metaManager2.applyBase(new BinlogPosition(null, "2"), x);
+        metaManager2.applyBase(new BinlogPosition(null, "2"), x, "000");
 
         System.out
             .println(metaManager2.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet()));

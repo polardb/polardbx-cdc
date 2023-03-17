@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,6 +19,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
@@ -91,19 +92,26 @@ public class ExtractorUtil {
         return builder;
     }
 
-    public static DBMSRowChange buildMessageEvent(RowChangeBuilder builder, TableInfo tableInfo,
-                                                  ResultSet resultSet) throws Exception {
+//    public static DBMSRowChange buildMessageEvent(RowChangeBuilder builder, TableInfo tableInfo,
+//                                                  ResultSet resultSet) throws Exception {
+//        Map<String, Serializable> fieldValueMap = new HashMap<>(tableInfo.getColumns().size());
+//        for (ColumnInfo column : tableInfo.getColumns()) {
+//            Object value = ExtractorUtil.getColumnValue(resultSet, column.getName(), column.getType());
+//            fieldValueMap.put(column.getName(), (Serializable)value);
+//        }
+//
+//        builder.getRowDatas().clear();
+//        builder.addRowData(fieldValueMap);
+//        return builder.build();
+//    }
+
+    public static void addRowData(RowChangeBuilder builder, TableInfo tableInfo, ResultSet resultSet) throws Exception {
         Map<String, Serializable> fieldValueMap = new HashMap<>(tableInfo.getColumns().size());
         for (ColumnInfo column : tableInfo.getColumns()) {
             Object value = ExtractorUtil.getColumnValue(resultSet, column.getName(), column.getType());
             fieldValueMap.put(column.getName(), (Serializable)value);
         }
-
-        builder.getRowDatas().clear();
         builder.addRowData(fieldValueMap);
-        return builder.build();
-        // DBMSRowChange rowChange = builder.build();
-        // return new MessageEvent(rowChange, null, null, null);
     }
 
 }

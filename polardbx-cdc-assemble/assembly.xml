@@ -31,6 +31,10 @@
             <outputDirectory>polardbx-binlog.standalone/conf</outputDirectory>
         </file>
         <file>
+            <source>../polardbx-cdc-common/target/classes/configmap.properties</source>
+            <outputDirectory>polardbx-binlog.standalone/conf</outputDirectory>
+        </file>
+        <file>
             <source>../polardbx-cdc-common/target/classes/rocksdb.ini</source>
             <outputDirectory>polardbx-binlog.standalone/conf</outputDirectory>
         </file>

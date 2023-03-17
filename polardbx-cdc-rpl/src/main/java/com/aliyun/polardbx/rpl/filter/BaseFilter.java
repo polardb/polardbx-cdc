@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -45,15 +45,11 @@ public class BaseFilter {
 
     protected Set<String> initFilterSet(String filterStr) {
         Set<String> filters = new HashSet<>();
-
-        if (StringUtils.isBlank(filterStr)) {
-            return filters;
+        if (StringUtils.isNotBlank(filterStr)) {
+            for (String token : filterStr.trim().toLowerCase().split(RplConstants.COMMA)) {
+                filters.add(token.trim());
+            }
         }
-
-        for (String token : filterStr.trim().toLowerCase().split(RplConstants.COMMA)) {
-            filters.add(token.trim());
-        }
-
         return filters;
     }
 

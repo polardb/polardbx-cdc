@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -54,7 +54,7 @@ public class MergeTransactionApplier extends MysqlApplier {
         Map<String, Map<RowKey, DefaultRowChange>> insertRowChanges = new HashMap<>();
         Map<String, Map<RowKey, DefaultRowChange>> deleteRowChanges = new HashMap<>();
         Map<String, DefaultRowChange> lastRowChanes = new HashMap<>();
-        mergeByTable(dbmsEvents, insertRowChanges, deleteRowChanges, lastRowChanes, null);
+        mergeByTable(dbmsEvents, insertRowChanges, deleteRowChanges, lastRowChanes);
 
         // execute delete
         return parallelExecSqlContexts(insertRowChanges, deleteRowChanges, lastRowChanes);
@@ -63,8 +63,7 @@ public class MergeTransactionApplier extends MysqlApplier {
     protected void mergeByTable(List<DBMSEvent> dbmsEvents,
                                 Map<String, Map<RowKey, DefaultRowChange>> insertRowChanges,
                                 Map<String, Map<RowKey, DefaultRowChange>> deleteRowChanges,
-                                Map<String, DefaultRowChange> lastRowChanges,
-                                Set<String> changedWhereColumnTables) throws Throwable {
+                                Map<String, DefaultRowChange> lastRowChanges) throws Throwable {
         Map<String, List<Integer>> allTbWhereColumns = new HashMap<>();
 
         for (DBMSEvent event : dbmsEvents) {
@@ -72,12 +71,7 @@ public class MergeTransactionApplier extends MysqlApplier {
             String fullTbName = rowChange.getSchema() + "." + rowChange.getTable();
             if (rowChange.getRowSize() > 1) {
                 log.error("unexpected: row change has multiply row values: {}", rowChange);
-                Runtime.getRuntime().halt(1);
-            }
-
-            // filter
-            if (filterCommitedEvent(fullTbName, rowChange)) {
-                continue;
+                System.exit(-1);
             }
 
             // get identify columns
@@ -92,18 +86,6 @@ public class MergeTransactionApplier extends MysqlApplier {
                 deleteRowChanges.get(fullTbName));
 
             lastRowChanges.put(fullTbName, rowChange);
-
-            // find out events which changed where columns of a table
-            if (changedWhereColumnTables != null
-                && !changedWhereColumnTables.contains(fullTbName)
-                && rowChange.getAction() == DBMSAction.UPDATE) {
-                for (Integer column : whereColumns) {
-                    if (rowChange.hasChangeColumn(column)) {
-                        changedWhereColumnTables.add(fullTbName);
-                        break;
-                    }
-                }
-            }
         }
     }
 
@@ -113,6 +95,15 @@ public class MergeTransactionApplier extends MysqlApplier {
         RowKey key = new RowKey(rowChange, whereColumns);
         switch (rowChange.getAction()) {
         case INSERT:
+            if (!safeMode) {
+                DefaultRowChange deleteRowChange = new DefaultRowChange();
+                deleteRowChange.setDataSet(rowChange.getDataSet());
+                deleteRowChange.setAction(DBMSAction.DELETE);
+                deleteRowChange.setSchema(rowChange.getSchema());
+                deleteRowChange.setTable(rowChange.getTable());
+                deleteRowChange.setColumnSet(rowChange.getColumnSet());
+                deleteRowChanges.put(key, deleteRowChange);
+            }
             insertRowChanges.put(key, rowChange);
             break;
         case UPDATE:
@@ -135,6 +126,16 @@ public class MergeTransactionApplier extends MysqlApplier {
 
             RowKey afterKey = new RowKey(afterRowChange, whereColumns);
             insertRowChanges.put(afterKey, afterRowChange);
+
+            if (!safeMode) {
+                DefaultRowChange deleteRowChange = new DefaultRowChange();
+                deleteRowChange.setDataSet(rowChange.getChangeDataSet());
+                deleteRowChange.setAction(DBMSAction.DELETE);
+                deleteRowChange.setSchema(rowChange.getSchema());
+                deleteRowChange.setTable(rowChange.getTable());
+                deleteRowChange.setColumnSet(rowChange.getColumnSet());
+                deleteRowChanges.put(afterKey, deleteRowChange);
+            }
             break;
         case DELETE:
             insertRowChanges.remove(key);
@@ -185,9 +186,6 @@ public class MergeTransactionApplier extends MysqlApplier {
                 List<SqlContext> sqlContexts = new ArrayList<>(mergeDmlSqlContexts);
 
                 boolean succeed = tranExecSqlContexts(sqlContexts);
-                if (succeed) {
-                    recordTablePosition(tbName, lastRowChanes.get(tbName));
-                }
                 mergeDmlSqlContexts.get(0).setSucceed(succeed);
                 return succeed;
             };
@@ -233,7 +231,6 @@ public class MergeTransactionApplier extends MysqlApplier {
             final Callable<Boolean> task = () -> {
                 // execute
                 if (tranExecSqlContexts(tbSqlContexts)) {
-                    recordTablePosition(tbName, lastRowChanes.get(tbName));
                     return true;
                 }
                 return false;

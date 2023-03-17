@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,12 +14,14 @@
  */
 package com.aliyun.polardbx.rpl.validation;
 
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.applier.SqlContext;
 import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.validation.common.Record;
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.Serializable;
 import java.sql.Connection;
@@ -28,6 +30,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -150,37 +153,40 @@ public class ValSQLGenerator {
         concatWsSb.append(concatSb);
         // CONCAT_WS(',', `id`, `name`, `order_od`, CONCAT(ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`))))
         String concatWs = String.format("CONCAT_WS(%s)", concatWsSb);
-//        List<String> predicate = new ArrayList<>();
-//        for (String key : table.getKeyList()) {
-//            // [1, 2, 2, 3] -> '1','2','3'
-//            String valList = keyValMap.get(key).stream().map(Object::toString).distinct().collect(Collectors.joining("','", "'", "'"));
-//            predicate.add(String.format("`%s` IN (%s)", key, valList));
-//        }
-//        String where = predicate.stream().collect(Collectors.joining(" AND "));
-
-        List<String> predicate = new ArrayList<>(ctx.getChunkSize());
-        List<String> oneRowKeyVal = new ArrayList<>(table.getKeyList().size());
-        int size = keyValMap.get(CHECKSUM).size();
-        List<Serializable> params = new ArrayList<>(table.getKeyList().size() * ctx.getChunkSize());
-        // value of ith row (`a` = '1' and `b` = '2' and `c` = '3')
-        for (int i = 0; i < size; ++i) {
-            for (String key : table.getKeyList()) {
-                Serializable whereColumnValue = keyValMap.get(key).get(i);
-                if (whereColumnValue == null) {
-                    oneRowKeyVal.add(String.format("`%s` IS NULL", key));
-                } else {
-                    oneRowKeyVal.add(String.format("`%s` = ?", key));
-                    params.add(whereColumnValue);
+        List<String> predicate = new ArrayList<>();
+        List<Serializable> params = new ArrayList<>();
+        for (String key : table.getKeyList()) {
+            boolean hasNull = false;
+            boolean hasNotNull = false;
+            List<Serializable> values = keyValMap.get(key);
+            for (Serializable value : values) {
+                if (value == null) {
+                    hasNull = true;
+                    break;
                 }
             }
-            predicate.add(oneRowKeyVal.stream().collect(Collectors.joining(" and ", "(", ")")));
-            oneRowKeyVal = new ArrayList<>(table.getKeyList().size());
+            List<Serializable> thisKeyParams = values.stream().filter(Objects::nonNull)
+                .map(Object::toString).distinct().collect(Collectors.toList());
+            if (thisKeyParams.size() > 0) {
+                hasNotNull = true;
+                params.addAll(thisKeyParams);
+            }
+            if (hasNotNull && hasNull) {
+                predicate.add(String.format("(`%s` IN (%s) or `%s` IS NULL)", key,
+                    StringUtils.repeat("?",",",thisKeyParams.size()), key));
+            } else if (hasNotNull) {
+                predicate.add(String.format("(`%s` IN (%s))", key,
+                    StringUtils.repeat("?",",",thisKeyParams.size())));
+            } else if (hasNull) {
+                predicate.add(String.format("`%s` IS NULL", key));
+            } else {
+                throw new PolardbxException(String.format("where for `%s` must has null or has not null", key));
+            }
+            // String valList = keyValMap.get(key).stream().map(Object::toString).distinct().collect(Collectors.joining("','", "'", "'"));
         }
-        // where (() or () or ())
-        String where = String.join(" OR ", predicate);
-
-        String sql = String.format("/*+TDDL:IN_SUB_QUERY_THRESHOLD=2*/ SELECT BIT_XOR(CAST(CRC32(%s) AS UNSIGNED)) AS checksum FROM `%s`.`%s` WHERE (%s)",
-                concatWs, db, table.getName(), where);
+        String where = predicate.stream().collect(Collectors.joining(" AND "));
+        String sql = String.format("SELECT BIT_XOR(CAST(CRC32(%s) AS UNSIGNED)) AS checksum FROM `%s`.`%s` WHERE %s",
+            concatWs, db, table.getName(), where);
         return new SqlContext(sql, null, null, params);
     }
 

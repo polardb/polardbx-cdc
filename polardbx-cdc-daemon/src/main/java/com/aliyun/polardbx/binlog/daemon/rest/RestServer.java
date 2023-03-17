@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,6 +18,7 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.daemon.rest.filter.ACLFilter;
+import com.aliyun.polardbx.binlog.daemon.rest.filter.LeaderCheckFilter;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.sun.jersey.spi.container.servlet.ServletContainer;
 import org.eclipse.jetty.server.ConnectionFactory;
@@ -51,7 +52,7 @@ public class RestServer {
 
     private static final long GRACEFUL_SHUTDOWN_TIMEOUT_MS = 60 * 1000;
 
-    private Server jettyServer;
+    private final Server jettyServer;
 
     /**
      * Create a REST server for this keeper using the specified configs.
@@ -113,6 +114,7 @@ public class RestServer {
 
         context.addFilter(new FilterHolder(new ACLFilter("com.aliyun.polardbx.binlog.daemon.rest.resources")), "/*",
             EnumSet.of(DispatcherType.REQUEST));
+        context.addFilter(new FilterHolder(new LeaderCheckFilter()), "/*", EnumSet.of(DispatcherType.REQUEST));
 
         RequestLogHandler requestLogHandler = new RequestLogHandler();
         Slf4jRequestLog requestLog = new Slf4jRequestLog();

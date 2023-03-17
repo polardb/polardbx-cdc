@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -72,25 +72,9 @@ public class MergeApplier extends MergeTransactionApplier {
         Map<String, Map<RowKey, DefaultRowChange>> insertRowChanges = new HashMap<>();
         Map<String, Map<RowKey, DefaultRowChange>> deleteRowChanges = new HashMap<>();
         Map<String, DefaultRowChange> lastRowChanges = new HashMap<>();
-        Set<String> changedWhereColumnTables = new HashSet<>();
-        mergeByTable(dbmsEvents, insertRowChanges, deleteRowChanges, lastRowChanges, changedWhereColumnTables);
+        mergeByTable(dbmsEvents, insertRowChanges, deleteRowChanges, lastRowChanges);
 
-        // 考虑如下情况：
-        // 某表 a.a，既有 uk 又有 pk: create table a.a (f0 int, f1 int, f2 int, primary key(f0), unique key uk(f1));
-        // 在执行过程中，任务发生了重启。
-
-        // 已经记录的位点 A
-        // A.1 insert (1, 1, 1)，当前: (1, 1, 1)
-        // A.2 insert (2, 2, 2)，当前: (1, 1, 1), (2, 2, 2)
-        // A.3 update (1, 1, 1) to (1, 3, 1), 当前: (1, 3, 1), (2, 2, 2)
-        // A.4 update (2, 2, 2) to (2, 1, 2), 当前: (1, 3, 1), (2, 1, 2)
-        // 实际执行完的地方 B
-
-        // 任务重启后，从 A 开始接收数据，第一批收到数据可能为 A.1 而不是 A-B 之间所有数据。
-        // 此时生成 sql: insert (1, 1, 1) on duplicate key update，
-        // 则此 sql 无法写入目标表，会发生 uk(f1) 冲突。
-
-        // 如果任务发生故障重启，需将 A-B之间的任务采用safe mode写入
+        // 如果任务发生故障重启，需采取safe mode写入
         // 这里采用lazy处理，对于执行失败的采取safe mode写入
 
         return parallelExecSqlContexts(deleteRowChanges)

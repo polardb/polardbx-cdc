@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -33,7 +33,6 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
     private static final Logger logger = LoggerFactory.getLogger(MinTSOFilter.class);
     private VirtualTSO lastPushTso;
     private Transaction lastTransaction;
-    private String currentFile;
     private volatile boolean running = false;
     private volatile boolean processingEvent = false;
 
@@ -72,15 +71,14 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
         long cmp = transaction.getVirtualTSOModel().tso - lastPushTso.tso;
         if (cmp < 0) {
             // 已经正常执行了，就必须确保tso 递增
-            if (processingEvent) {
+            if (processingEvent && !context.canIgnore(transaction.getVirtualTSOModel().tso)) {
                 logger.error("detected disorderly transaction \r\n" + " current transaction info is " + transaction
                     + "\r\n" + " last transaction info is :" + lastTransaction);
                 throw new PolardbxException("detected disorderly transaction，current tso is: "
                     + transaction.getVirtualTSO() + ", last tso is :" + lastPushTso);
             }
-            logger.info(
-                "filter:TSO:" + transaction.getVirtualTSO() + ":pos:[" + transaction
-                    .getBinlogFileName() + ":" + transaction.getStartLogPos() + "]xid:" + transaction.getXid());
+            logger.info("filter:TSO:" + transaction.getVirtualTSO() + ":pos:[" + transaction.getBinlogFileName() + ":"
+                + transaction.getStartLogPos() + "]xid:" + transaction.getXid());
             return false;
         }
 
@@ -96,7 +94,7 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
     }
 
     private void doOutput(Transaction transaction, HandlerContext context) throws Exception {
-        ExtractorMetrics.get().metricEvent(transaction);
+        ExtractorMetrics.get().metricsEvent(transaction);
         context.doNext(transaction);
         if (transaction.isDescriptionEvent()) {
             transaction.release();
@@ -105,7 +103,6 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
 
         lastPushTso = transaction.getVirtualTSOModel();
         lastTransaction = transaction;
-        currentFile = context.getRuntimeContext().getBinlogFile();
 
         if (!processingEvent) {
             logger.info("****--- ready to push event start with tso " + transaction.getVirtualTSO() + ", at position "

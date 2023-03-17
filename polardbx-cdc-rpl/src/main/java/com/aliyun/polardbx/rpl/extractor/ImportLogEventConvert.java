@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -115,13 +115,13 @@ public class ImportLogEventConvert extends LogEventConvert {
             break;
         case LogEvent.WRITE_ROWS_EVENT_V1:
         case LogEvent.WRITE_ROWS_EVENT:
-            return parseRowsEvent((WriteRowsLogEvent) logEvent);
+            return parseRowsEvent((WriteRowsLogEvent) logEvent, isSeek);
         case LogEvent.UPDATE_ROWS_EVENT_V1:
         case LogEvent.UPDATE_ROWS_EVENT:
-            return parseRowsEvent((UpdateRowsLogEvent) logEvent);
+            return parseRowsEvent((UpdateRowsLogEvent) logEvent, isSeek);
         case LogEvent.DELETE_ROWS_EVENT_V1:
         case LogEvent.DELETE_ROWS_EVENT:
-            return parseRowsEvent((DeleteRowsLogEvent) logEvent);
+            return parseRowsEvent((DeleteRowsLogEvent) logEvent, isSeek);
         case LogEvent.ROWS_QUERY_LOG_EVENT:
             nowLogicServerId = LogEventUtil.getServerIdFromRowQuery((RowsQueryLogEvent) logEvent);
             return parseRowsQueryEvent((RowsQueryLogEvent) logEvent);
@@ -191,7 +191,7 @@ public class ImportLogEventConvert extends LogEventConvert {
     }
 
     @Override
-    protected MySQLDBMSEvent parseRowsEvent(RowsLogEvent event) {
+    protected MySQLDBMSEvent parseRowsEvent(RowsLogEvent event, boolean isSeek) {
         try {
             TableMapLogEvent table = event.getTable();
             if (table == null) {
@@ -232,6 +232,16 @@ public class ImportLogEventConvert extends LogEventConvert {
             }
 
             BinlogPosition position = createPosition(event.getHeader());
+
+            // 如果是查找模式，那么不进行行数据的解析
+            if (isSeek) {
+                DefaultRowChange rowChange = new DefaultRowChange(action,
+                    rewriteDbName,
+                    table.getTableName(),
+                    new DefaultColumnSet());
+                return new MySQLDBMSEvent(rowChange, position, event.getHeader().getEventLen());
+            }
+
             RowsLogBuffer buffer = event.getRowsBuf(charset);
             BitSet columns = event.getColumns();
             BitSet changeColumns = event.getChangeColumns(); // 非变更的列,而是指存在binlog记录的列,mysql full image模式会提供所有列

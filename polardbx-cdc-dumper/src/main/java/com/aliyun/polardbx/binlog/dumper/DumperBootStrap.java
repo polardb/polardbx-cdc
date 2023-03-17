@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,7 +17,8 @@ package com.aliyun.polardbx.binlog.dumper;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
-import com.aliyun.polardbx.binlog.TaskInfoProvider;
+import com.aliyun.polardbx.binlog.TableCompatibilityProcessor;
+import com.aliyun.polardbx.binlog.TaskConfigProvider;
 import com.aliyun.polardbx.binlog.task.TaskHeartbeat;
 import com.google.common.collect.Maps;
 import org.apache.commons.lang3.StringUtils;
@@ -36,11 +37,11 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTE
 public class DumperBootStrap {
 
     private static final Logger logger = LoggerFactory.getLogger(DumperBootStrap.class);
-    private TaskInfoProvider taskInfoProvider;
+    private TaskConfigProvider taskConfigProvider;
 
     public static void main(String[] args) {
         DumperBootStrap bootStrap = new DumperBootStrap();
-        bootStrap.setTaskInfoProvider(new TaskInfoProvider(handleArgs(args[0]).get(TASK_NAME)));
+        bootStrap.setTaskConfigProvider(new TaskConfigProvider(handleArgs(args[0]).get(TASK_NAME)));
         bootStrap.boot(args);
     }
 
@@ -62,9 +63,13 @@ public class DumperBootStrap {
 
     public void boot(String[] args) {
         try {
+            logger.info("## prepare to start dumper!");
             // spring context
             final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
             appContextBootStrap.boot();
+
+            // try process compatibility
+            TableCompatibilityProcessor.process();
 
             // initial DumpConfig
             Map<String, String> argsMap = Maps.newHashMap();
@@ -76,16 +81,15 @@ public class DumperBootStrap {
 
             // do start
             logger.info("## starting the dumper, with name {}.", taskName);
-            final DumperController controller = new DumperController(taskInfoProvider);
-            controller.start();
-
+            final DumperController controller = new DumperController(taskConfigProvider);
             final TaskHeartbeat taskHeartbeat =
                 new TaskHeartbeat(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID),
-                    DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_TYPE), taskName,
+                    DynamicApplicationConfig.getClusterType(), taskName,
                     DynamicApplicationConfig.getInt(TOPOLOGY_TASK_HEARTBEAT_INTERVAL),
-                    taskInfoProvider.get().getBinlogTaskConfig());
-            taskHeartbeat.setCursorProvider(controller.getLogFileManager());
+                    taskConfigProvider.getTaskRuntimeConfig().getBinlogTaskConfig());
+            taskHeartbeat.setCursorProviderMap(controller.getLogFileManagerCollection().getCursorProviders());
             taskHeartbeat.start();
+            controller.start();
 
             logger.info("## the dumper is running now ......");
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -106,8 +110,8 @@ public class DumperBootStrap {
         }
     }
 
-    public void setTaskInfoProvider(TaskInfoProvider taskInfoProvider) {
-        this.taskInfoProvider = taskInfoProvider;
+    public void setTaskConfigProvider(TaskConfigProvider taskConfigProvider) {
+        this.taskConfigProvider = taskConfigProvider;
     }
 
 }

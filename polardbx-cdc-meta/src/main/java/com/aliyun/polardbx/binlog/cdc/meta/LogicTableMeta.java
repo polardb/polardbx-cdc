@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,6 +29,15 @@ public class LogicTableMeta {
     private String phySchema;
     private String phyTable;
     private List<FieldMetaExt> logicFields = new ArrayList<>();
+    private List<FieldMetaExt> pkList = new ArrayList<>();
+
+    public void addPk(FieldMetaExt fieldMetaExt) {
+        pkList.add(fieldMetaExt);
+    }
+
+    public List<FieldMetaExt> getPkList() {
+        return pkList;
+    }
 
     public boolean isCompatible() {
         return compatible;
@@ -98,6 +107,7 @@ public class LogicTableMeta {
     public static class FieldMetaExt extends FieldMeta {
         private final int logicIndex;
         private final int phyIndex;
+        private FieldMeta phyFieldMeta;
         private boolean typeMatch = true;
 
         public FieldMetaExt(FieldMeta fieldMeta, int logicIndex, int phyIndex) {
@@ -105,6 +115,14 @@ public class LogicTableMeta {
                 fieldMeta.getDefaultValue(), fieldMeta.isUnique(), fieldMeta.getCharset());
             this.logicIndex = logicIndex;
             this.phyIndex = phyIndex;
+        }
+
+        public FieldMeta getPhyFieldMeta() {
+            return phyFieldMeta;
+        }
+
+        public void setPhyFieldMeta(FieldMeta phyFieldMeta) {
+            this.phyFieldMeta = phyFieldMeta;
         }
 
         public void setTypeNotMatch() {

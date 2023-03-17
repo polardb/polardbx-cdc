@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -68,11 +68,7 @@ public class LogEventCollector implements Collector {
         this.eventsPushBlockingTime = new AtomicLong(0L);
         this.disruptorMsgBuffer = RingBuffer
             .createSingleProducer(new MessageEventFactory(), ringBufferSize, new BlockingWaitStrategy());
-        if (taskType == TaskType.Relay) {
-            this.collectStrategy = new CollectStrategyRelay(this, transmitter, isMergeNoTsoXa, taskType);
-        } else {
-            this.collectStrategy = new CollectStrategyFinal(this, transmitter, isMergeNoTsoXa, taskType);
-        }
+        this.collectStrategy = new MergeAndSinkStrategy(this, transmitter, isMergeNoTsoXa, taskType);
         this.collectStrategy.setRingBuffer(disruptorMsgBuffer);
         this.collectStrategy.setStorage(storage);
         this.collectStrategy.start();
@@ -126,7 +122,7 @@ public class LogEventCollector implements Collector {
                 if (fullTimes > 0) {
                     recordBlockingTime(System.nanoTime() - blockingStart);
                 }
-                MergeMetrics.get().setRingBufferQueuedSize(getQueuedSize());
+                MergeMetrics.get().setCollectQueuedSize(getQueuedSize());
                 break;
             } catch (InsufficientCapacityException e) {
                 if (fullTimes == 0) {

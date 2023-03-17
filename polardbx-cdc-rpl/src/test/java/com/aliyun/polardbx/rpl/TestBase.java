@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -33,7 +33,7 @@ import com.aliyun.polardbx.rpl.common.HostManager;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
-import com.aliyun.polardbx.rpl.taskmeta.ReplicateMeta;
+import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import com.aliyun.polardbx.rpl.taskmeta.RplServiceManager;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
 import io.grpc.stub.StreamObserver;
@@ -201,10 +201,10 @@ public class TestBase {
 
     protected void setupMysqlReplica(Connection mysqlDstConn, BinlogPosition position) {
         RplStateMachine stateMachine = DbTaskMetaManager.getRplStateMachine(channel);
-        ReplicateMeta replicateMeta = JSON.parseObject(stateMachine.getConfig(), ReplicateMeta.class);
+        ReplicaMeta replicaMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
         execUpdate(mysqlDstConn, "stop slave", null);
         execUpdate(mysqlDstConn, getChangeMasterSql(srcHostInfo, position), null);
-        execUpdate(mysqlDstConn, printChangeFilterSql(replicateMeta), null);
+        execUpdate(mysqlDstConn, printChangeFilterSql(replicaMeta), null);
         execUpdate(mysqlDstConn, "start slave", null);
     }
 
@@ -223,7 +223,7 @@ public class TestBase {
 
     protected long getTaskId(String channel) {
         RplStateMachine stateMachine = DbTaskMetaManager.getRplStateMachine(channel);
-        RplService service = DbTaskMetaManager.getService(stateMachine.getId(), ServiceType.REPLICA);
+        RplService service = DbTaskMetaManager.getService(stateMachine.getId(), ServiceType.REPLICA_INC);
         return DbTaskMetaManager.listTaskByService(service.getId()).get(0).getId();
     }
 
@@ -397,23 +397,23 @@ public class TestBase {
         return result;
     }
 
-    protected String printChangeFilterSql(ReplicateMeta replicateMeta) {
-        String wildDoTable = adjustWildFilter(replicateMeta.getWildDoTable());
+    protected String printChangeFilterSql(ReplicaMeta replicaMeta) {
+        String wildDoTable = adjustWildFilter(replicaMeta.getWildDoTable());
         wildDoTable = StringUtils.isNotBlank(wildDoTable) ? wildDoTable : "";
-        String wildIgnoreTable = adjustWildFilter(replicateMeta.getWildIgnoreTable());
+        String wildIgnoreTable = adjustWildFilter(replicaMeta.getWildIgnoreTable());
         wildIgnoreTable = StringUtils.isNotBlank(wildIgnoreTable) ? wildIgnoreTable : "";
 
         String sql = String.format("CHANGE REPLICATION FILTER \n" + "REPLICATE_DO_DB=(%s),\n"
                 + "REPLICATE_IGNORE_DB=(%s),\n" + "REPLICATE_DO_TABLE=(%s),\n"
                 + "REPLICATE_IGNORE_TABLE=(%s),\n" + "REPLICATE_WILD_DO_TABLE=(%s),\n"
                 + "REPLICATE_WILD_IGNORE_TABLE=(%s),\n" + "REPLICATE_REWRITE_DB=(%s);",
-            StringUtils.isNotBlank(replicateMeta.getDoDb()) ? replicateMeta.getDoDb() : "",
-            StringUtils.isNotBlank(replicateMeta.getIgnoreDb()) ? replicateMeta.getIgnoreDb() : "",
-            StringUtils.isNotBlank(replicateMeta.getDoTable()) ? replicateMeta.getDoTable() : "",
-            StringUtils.isNotBlank(replicateMeta.getIgnoreTable()) ? replicateMeta.getIgnoreTable() : "",
+            StringUtils.isNotBlank(replicaMeta.getDoDb()) ? replicaMeta.getDoDb() : "",
+            StringUtils.isNotBlank(replicaMeta.getIgnoreDb()) ? replicaMeta.getIgnoreDb() : "",
+            StringUtils.isNotBlank(replicaMeta.getDoTable()) ? replicaMeta.getDoTable() : "",
+            StringUtils.isNotBlank(replicaMeta.getIgnoreTable()) ? replicaMeta.getIgnoreTable() : "",
             wildDoTable,
             wildIgnoreTable,
-            replicateMeta.getRewriteDb());
+            replicaMeta.getRewriteDb());
         System.out.println("stop slave;");
         System.out.println(sql);
         System.out.println("start slave;");

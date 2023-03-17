@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
+import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
@@ -37,8 +37,8 @@ import java.util.zip.CRC32;
 @Slf4j
 public class LogFileGeneratorTest {
 
-    final String version = "8.0.21-PolarDB-X";
     private static final byte[] BINLOG_FILE_HEADER = new byte[] {(byte) 0xfe, 0x62, 0x69, 0x6e};
+    final String version = "8.0.21-PolarDB-X";
     byte[] bytesOfEventHeader = new byte[32];
     byte[] bytesOfEventData = new byte[1024];
 

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,9 +17,11 @@ package com.aliyun.polardbx.rpl.applier;
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.domain.po.RplTablePosition;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
+import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.rpl.common.LogUtil;
 import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
 import com.aliyun.polardbx.rpl.common.RplConstants;
@@ -27,10 +29,11 @@ import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.pipeline.BasePipeline;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
-import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
+import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
 import com.aliyun.polardbx.rpl.taskmeta.TaskStatus;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -39,6 +42,10 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import com.github.rholder.retry.Retryer;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -52,7 +59,6 @@ public class StatisticalProxy implements FlowLimiter {
 
     private final static int MAX_RETRY = 4;
     private final static int COUNTER_OUTDATE_SECONDS = 60;
-    private final static int HEARTBEAT_OUTDATE_SECONDS = 300;
 
     public final static String INTERVAL_1M = "oneMinute";
 
@@ -68,7 +74,6 @@ public class StatisticalProxy implements FlowLimiter {
     private AtomicLong totalInCache = new AtomicLong();
 
     private ScheduledExecutorService executorService;
-    private ExtractorConfig extractorConfig;
     private ApplierConfig applierConfig;
     private Logger positionLogger = LogUtil.getPositionLogger();
     private Logger statisticLogger = LogUtil.getStatisticLogger();
@@ -78,8 +83,8 @@ public class StatisticalProxy implements FlowLimiter {
     private boolean skipAllException = false;
     private int tpsLimit;
     private volatile FlowLimiter limiter;
+    private Retryer<Boolean> retryer;
 
-    private Map<String, String> lastRunTablePositions = new HashMap<>();
 
     private static StatisticalProxy instance = new StatisticalProxy();
 
@@ -93,17 +98,10 @@ public class StatisticalProxy implements FlowLimiter {
     public boolean init(BasePipeline pipeline, String position) {
         try {
             this.position = position;
-            this.extractorConfig = pipeline.getExtractor().getExtractorConfig();
-            this.applierConfig = pipeline.getApplier().getApplierConfig();
+            applierConfig = pipeline.getApplier().getApplierConfig();
             executorService = new ScheduledThreadPoolExecutor(1, new NamedThreadFactory("StatisticalProxy"));
             lastEventTimestamp = System.currentTimeMillis();
 
-            // 加载上次任务崩溃前各个表已经执行到的位点
-            List<RplTablePosition> rplTablePositions = DbTaskMetaManager
-                .listTablePosition(TaskContext.getInstance().getTaskId());
-            for (RplTablePosition rplTablePosition : rplTablePositions) {
-                lastRunTablePositions.put(rplTablePosition.getFullTableName(), rplTablePosition.getPosition());
-            }
 
             applier = pipeline.getApplier();
             skipAllException = pipeline.getPipeLineConfig().isSkipException();
@@ -111,6 +109,13 @@ public class StatisticalProxy implements FlowLimiter {
             applier.setSafeMode(pipeline.getPipeLineConfig().isSafeMode());
             tpsLimit = pipeline.getPipeLineConfig().getFixedTpsLimit();
             initFlowLimiter();
+            retryer = RetryerBuilder.<Boolean>newBuilder()
+                .retryIfException()
+                .retryIfResult(input -> !input)
+                .withWaitStrategy(WaitStrategies.fixedWait(pipeline.getPipeLineConfig().getRetryIntervalMs(),
+                    TimeUnit.MILLISECONDS))
+                .withStopStrategy(StopStrategies.stopAfterAttempt(pipeline.getPipeLineConfig().getApplyRetryMaxTime()))
+                .build();
 
         } catch (Throwable e) {
             log.error("StatisticManager init failed", e);
@@ -122,11 +127,20 @@ public class StatisticalProxy implements FlowLimiter {
 
     public void start() {
         executorService.scheduleAtFixedRate(
-            () -> flushStatistic(), 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
+            this::flushStatistic, 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
         executorService.scheduleAtFixedRate(
-            () -> flushPosition(), 0, 1, TimeUnit.SECONDS);
+            this::flushPosition, 0, 1, TimeUnit.SECONDS);
         executorService.scheduleAtFixedRate(
-            () -> checkPipelineConfig(), 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
+            this::checkPipelineConfig, 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                flushPosition();
+            } catch (Throwable e) {
+                log.warn("Something goes wrong when logging checkpoint.", e);
+            } finally {
+                log.info("Flushed position: {}", position);
+            }
+        }));
     }
 
     public boolean apply(List<DBMSEvent> events) {
@@ -139,7 +153,12 @@ public class StatisticalProxy implements FlowLimiter {
 
     @Override
     public boolean runTask(List<DBMSEvent> events) {
-        return innerApply(events);
+        try {
+            return retryer.call(() -> innerApply(events));
+        } catch (Exception e) {
+            log.error("apply occurs exception: ", e);
+            return false;
+        }
     }
 
     @Override
@@ -156,14 +175,18 @@ public class StatisticalProxy implements FlowLimiter {
     }
 
     private void checkPipelineConfig() {
-        RplTaskConfig taskConfig = DbTaskMetaManager.getTaskConfig(TaskContext.getInstance().getTaskId());
-        PipelineConfig config = JSON.parseObject(taskConfig.getPipelineConfig(), PipelineConfig.class);
-        skipAllException = config.isSkipException();
-        applier.setSkipAllException(skipAllException);
-        applier.setSafeMode(config.isSafeMode());
-        if (this.tpsLimit != config.getFixedTpsLimit()) {
-            this.tpsLimit = config.getFixedTpsLimit();
-            initFlowLimiter();
+        try {
+            RplTaskConfig taskConfig = DbTaskMetaManager.getTaskConfig(TaskContext.getInstance().getTaskId());
+            PipelineConfig config = JSON.parseObject(taskConfig.getPipelineConfig(), PipelineConfig.class);
+            skipAllException = config.isSkipException();
+            applier.setSkipAllException(skipAllException);
+            applier.setSafeMode(config.isSafeMode());
+            if (this.tpsLimit != config.getFixedTpsLimit()) {
+                this.tpsLimit = config.getFixedTpsLimit();
+                initFlowLimiter();
+            }
+        } catch (Throwable e) {
+            log.error("check config exception: ", e);
         }
     }
 
@@ -174,7 +197,7 @@ public class StatisticalProxy implements FlowLimiter {
         } else {
             log.warn("batch apply events failure");
             for (DBMSEvent event : events) {
-                boolean result = applier.apply(Arrays.asList(event));
+                boolean result = applier.apply(Collections.singletonList(event));
                 if (!result) {
                     log.error("stop because of the msg, " + event.toString());
                     return false;
@@ -204,6 +227,11 @@ public class StatisticalProxy implements FlowLimiter {
             }
         }
         return true;
+    }
+
+    public boolean applyDdlSql(String schema, String sql) throws Exception {
+        log.debug("directly apply ddl sql:{}, schema:{}", sql, schema);
+        return applier.applyDdlSql(schema, sql);
     }
 
     public void recordPosition(String position, boolean log) {
@@ -249,78 +277,72 @@ public class StatisticalProxy implements FlowLimiter {
         lastEventTimestamp = System.currentTimeMillis();
     }
 
-    public void recordTablePosition(String tbName, DefaultRowChange lastRowChange) {
-        String position = (String) (lastRowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue());
-        DbTaskMetaManager
-            .updateTablePosition(TaskContext.getInstance().getStateMachineId(),
-                TaskContext.getInstance().getServiceId(), TaskContext.getInstance().getTaskId(), tbName, position);
+    public long computeTaskDelay() {
+        return FSMMetaManager.computeTaskDelay(DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId()));
     }
 
-    public void deleteTaskTablePosition() {
-        DbTaskMetaManager.deleteTablePositionByTask(TaskContext.getInstance().getTaskId());
-    }
-
-    public Map<String, String> getLastRunTablePositions() {
-        return lastRunTablePositions;
+    public BinlogPosition getLatestPosition() {
+        if (StringUtils.isNotBlank(position)) {
+            return BinlogPosition.parseFromString(position);
+        }
+        return null;
     }
 
     public void flushStatistic() {
-        RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
-        if (task == null) {
-            log.error("task has been deleted from db");
-            Runtime.getRuntime().halt(1);;
-        }
-        if (task.getStatus() != TaskStatus.RUNNING.getValue()) {
-            log.info("task id: {}, task status: {}, exit", task.getId(), TaskStatus.from(task.getStatus()).name());
-            Runtime.getRuntime().halt(1);;
-        }
-
-        int retry = 0;
-        while (retry < MAX_RETRY) {
-            try {
-                flushInternal();
-                break;
-            } catch (Throwable e) {
-                log.error("StatisticManager flush failed", e);
-                retry++;
+        try {
+            RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
+            if (task == null) {
+                log.error("task has been deleted from db");
+                System.exit(-1);;
             }
-        }
+            if (task.getStatus() != TaskStatus.RUNNING.getValue()) {
+                log.info("task id: {}, task status: {}, exit", task.getId(), TaskStatus.from(task.getStatus()).name());
+                System.exit(-1);;
+            }
 
-        if (retry >= MAX_RETRY) {
-            log.error("StatisticManager flush failed, retry: {}, process exit", retry);
-            Runtime.getRuntime().halt(1);;
-        }
+            int retry = 0;
+            while (retry < MAX_RETRY) {
+                try {
+                    flushInternal();
+                    break;
+                } catch (Throwable e) {
+                    log.error("StatisticManager flush failed", e);
+                    retry++;
+                }
+            }
 
-        // In some cases, for example, Polar-x CDC dumper restarts, no events will be dumped to Replica and no error throws,
-        // so we need to check the last event timestamp and restart the Replica
-        if (extractorConfig.isEnableHeartbeat()
-            && lastEventTimestamp > 0
-            && System.currentTimeMillis() - lastEventTimestamp > HEARTBEAT_OUTDATE_SECONDS * 1000) {
-            log.error("lastEventTimestamp: {} exceeds {} seconds, process exit", new Date(lastEventTimestamp),
-                HEARTBEAT_OUTDATE_SECONDS);
-            Runtime.getRuntime().halt(1);
+            if (retry >= MAX_RETRY) {
+                log.error("StatisticManager flush failed, retry: {}, process exit", retry);
+                System.exit(-1);
+            }
+        } catch (Throwable e) {
+            log.error("flush statistic exception: ", e);
         }
     }
 
     public void flushPosition() {
-        // get the latest status before update
-        RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
-        if (task == null) {
-            log.error("task has been deleted from db");
-            Runtime.getRuntime().halt(1);;
-        }
-        // task may be set to STOPPED but the still running
-        Date gmtHeartBeat = null;
-        if (lastEventTimestamp > 0) {
-            gmtHeartBeat = new Date(lastEventTimestamp);
-        }
-        if (task.getStatus() == TaskStatus.RUNNING.getValue()) {
-            DbTaskMetaManager.updateTask(TaskContext.getInstance().getTaskId(),
-                null, null, position, null,
-                gmtHeartBeat);
-        } else {
-            log.error("task is not in running status");
-            Runtime.getRuntime().halt(1);;
+        try {
+            // get the latest status before update
+            RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
+            if (task == null) {
+                log.error("task has been deleted from db");
+                System.exit(-1);;
+            }
+            // task may be set to STOPPED but the still running
+            Date gmtHeartBeat = null;
+            if (lastEventTimestamp > 0) {
+                gmtHeartBeat = new Date(lastEventTimestamp);
+            }
+            if (task.getStatus() == TaskStatus.RUNNING.getValue()) {
+                DbTaskMetaManager.updateTask(TaskContext.getInstance().getTaskId(),
+                    null, null, position, null,
+                    gmtHeartBeat);
+            } else {
+                log.error("task is not in running status");
+                System.exit(-1);;
+            }
+        } catch (Throwable e) {
+            log.error("flush position exception: ", e);
         }
     }
 
@@ -343,7 +365,7 @@ public class StatisticalProxy implements FlowLimiter {
         RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
         if (task == null) {
             log.error("task has been deleted from db");
-            Runtime.getRuntime().halt(1);
+            System.exit(-1);
         }
         if (task.getStatus() == TaskStatus.RUNNING.getValue()) {
             DbTaskMetaManager.updateTask(TaskContext.getInstance().getTaskId(),
@@ -351,7 +373,7 @@ public class StatisticalProxy implements FlowLimiter {
                 gmtHeartBeat);
         } else {
             log.error("task is not in running status");
-            Runtime.getRuntime().halt(1);;
+            System.exit(-1);;
         }
     }
 
@@ -362,8 +384,8 @@ public class StatisticalProxy implements FlowLimiter {
         long curRt = rt.getTotalCount();
 
         unit.getTotalConsumeMessageCount().put(intervalItem, curMessageCount);
-        unit.getMessageTps().put(intervalItem, curMessageCount / seconds);
-        unit.getApplyTps().put(intervalItem, curApplyCount / seconds);
+        unit.getMessageRps().put(intervalItem, curMessageCount / seconds);
+        unit.getApplyQps().put(intervalItem, curApplyCount / seconds);
         if (curApplyCount > 0) {
             unit.getAvgMergeBatchSize().put(intervalItem, curBatchSize / curApplyCount);
             unit.getApplyRt().put(intervalItem, curRt / curApplyCount);

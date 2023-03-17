@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,8 @@ package com.aliyun.polardbx.rpl.validation;
 
 import com.alibaba.druid.pool.DruidDataSource;
 import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
@@ -24,6 +26,7 @@ import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.dbmeta.DbMetaManager;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
+import com.aliyun.polardbx.rpl.filter.DataImportFilter;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
@@ -37,7 +40,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -90,7 +92,7 @@ public class ValidationContext {
     /**
      * Chunk size
      */
-    int chunkSize;
+    int chunkSize = DynamicApplicationConfig.getInt(ConfigKeys.RPL_VALIDATION_CHUNK_SIZE);
     /**
      * Current context type
      */
@@ -124,7 +126,7 @@ public class ValidationContext {
     }
 
     public static class CtxFactory {
-        public List<ValidationContext> createCtxList(HostInfo srcHost, HostInfo dstHost) {
+        public List<ValidationContext> createCtxList(HostInfo srcHost, HostInfo dstHost, DataImportFilter filter) {
             List<ValidationContext> contextList = new ArrayList<>();
 
             // add server id to make sure backflow knows how to filter events
@@ -133,36 +135,15 @@ public class ValidationContext {
             log.info("set polarx_server_id: {}", setServerIdSql);
             connectionInitSQLs.add(setServerIdSql);
 
-            Set<String> dbs;
-
-            log.info("rplService id: {}", rplService.getId());
-
-            /*
-            In Polardbx to Drds situation, srcHost is polarx, and dstHost is drds.
-            In Drds to Polardbx scenario, however, srcHost is drds, and dstHost is polarx.
-            In both cases, DataImportMeta.PhysicalMeta points srcHost to physical dbs of Drds, and dst info will be Polarx.
-            Thus, we have to retrieve info from different objects in different scenario.
-             */
-            String dstLogicalDB;
-            if (isPolarxToDrds()) {
-                dbs = new HashSet<>();
-                dbs.add(srcHost.getSchema());
-                dstLogicalDB = dstHost.getSchema();
-            } else {
-                dbs = meta.getSrcDbList();
-                dstLogicalDB = meta.getDstDb();
-            }
-
+            Set<String> dbs = meta.getSrcDbList();
             for (String db : dbs) {
                 ValidationContext context = new ValidationContext();
                 context.setStateMachineId(Long.toString(taskContext.getStateMachineId()));
                 context.setServiceId(Long.toString(taskContext.getServiceId()));
                 context.setTaskId(Long.toString(taskContext.getTaskId()));
                 context.setSrcPhyDB(db);
-                context.setDstLogicalDB(dstLogicalDB);
+                context.setDstLogicalDB(filter.getRewriteDb(db, null));
                 context.setType(getType());
-                // TODO : make this argument configurable
-                context.setChunkSize(1000);
                 context.setType(getType());
                 // filter existing tables
                 DruidDataSource srcDs;
@@ -178,45 +159,29 @@ public class ValidationContext {
                         srcHost.getPassword(),
                         "",
                         1,
-                        4,
+                        20,
                         connParams,
                         null);
                     dstDs = DataSourceUtil.createDruidMySqlDataSource(
                         !isPolarxToDrds(),
                         dstHost.getHost(),
                         dstHost.getPort(),
-                        dstHost.getSchema(),
+                        context.getDstLogicalDB(),
                         dstHost.getUserName(),
                         dstHost.getPassword(),
                         "",
                         1,
-                        4,
+                        20,
                         connParams,
                         connectionInitSQLs);
                     ValTaskRepository repository = new ValTaskRepositoryImpl(context);
                     context.setRepository(repository);
                     List<TableInfo> tableList = new ArrayList<>();
                     List<String> srcTableList;
-                    if (isPolarxToDrds()) {
-                        srcTableList = meta.getLogicalTableList();
-                    } else {
-                        srcTableList = new ArrayList<>(meta.getAllowTableList().get(db));
-                    }
+                    srcTableList = new ArrayList<>(meta.getPhysicalDoTableList().get(db));
                     for (String name : srcTableList) {
-                        log.info("init validation context table list1. db: {}, table: {}", db, name);
-                        TableInfo tableInfo;
-                        if (isPolarxToDrds()) {
-                            // src is polardbx
-                            tableInfo = DbMetaManager.getTableInfo(srcDs, db, name, HostType.POLARX2);
-                        } else {
-                            // src is rds
-                            tableInfo = DbMetaManager.getTableInfo(srcDs, db, name, HostType.RDS);
-                        }
-                        log.info("init validation context table list2. db: {}, table: {}", db, tableInfo.getName());
-                        tableList.add(tableInfo);
+                        tableList.add(DbMetaManager.getTableInfo(srcDs, db, name, meta.getSrcType()));
                     }
-                    // in polarx to drds scenario, the list is actually logical table list which should be identical
-                    // for both polarx and drds
                     context.setSrcPhyTableList(tableList);
                     context.setSrcDs(srcDs);
                     context.setDstDs(dstDs);
@@ -225,7 +190,7 @@ public class ValidationContext {
                         convertToByte(config.isConvertToByte()).
                         build());
                     // set up dst mapping table
-                    context.setMappingTable(getMappingTableMap(tableList, context.getDstLogicalDB(), dstDs, meta));
+                    context.setMappingTable(getMappingTableMap(tableList, context.getDstLogicalDB(), dstDs, filter));
 
                     if (shouldCreateTask()) {
                         repository.createValTasks(getType());
@@ -234,7 +199,7 @@ public class ValidationContext {
                     log.error("Initializing ValidationExtractor exception. src db: {}", db, e);
                     MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR,
                         context.getTaskId(), e.getMessage());
-                    Runtime.getRuntime().halt(1);
+                    System.exit(-1);
                 }
                 contextList.add(context);
                 // update task status. heartbeat has 300s timeout setting
@@ -248,11 +213,11 @@ public class ValidationContext {
          * @param srcTableList
          * @param dstDb
          * @param dstDs
-         * @param meta
+         * @param filter
          * @return
          * @throws Exception
          */
-        private Map<String, TableInfo> getMappingTableMap(List<TableInfo> srcTableList, String dstDb, DruidDataSource dstDs, DataImportMeta.PhysicalMeta meta) throws Exception {
+        private Map<String, TableInfo> getMappingTableMap(List<TableInfo> srcTableList, String dstDb, DruidDataSource dstDs, DataImportFilter filter) throws Exception {
             Map<String, TableInfo> dstTableMap = new HashMap<>();
             Map<String, TableInfo> srcToDstTblMap = new HashMap<>();
             // srcTable --- n:1 ---> dstTable
@@ -262,7 +227,7 @@ public class ValidationContext {
                     TableInfo dstTable = DbMetaManager.getTableInfo(dstDs, dstDb, tableInfo.getName(), HostType.POLARX1);
                     srcToDstTblMap.put(tableInfo.getName(), dstTable);
                 } else {
-                    String dstTblName = meta.getRewriteTableMapping().get(tableInfo.getName());
+                    String dstTblName = filter.getRewriteTable(tableInfo.getName());
                     if (dstTblName == null) {
                         log.error("dst mapping table is null. dst db: {}, src phy table: {}", dstDb,
                             tableInfo.getName());

@@ -43,9 +43,6 @@ export LD_LIBRARY_PATH=${BASE_HOME}/lib:${LD_LIBRARY_PATH}
 export NLS_LANG=AMERICAN_AMERICA.ZHS16GBK
 export LANG=zh_CN.GB18030
 
-if [ -f /home/admin/bin/jdk8.sh ]; then
-    sudo sh /home/admin/bin/jdk8.sh
-fi
 
 if [[ ! "$JVM_PARAMS" =~ "PermSize" ]]; then
   JAVA_OPTS="${JAVA_OPTS} -XX:PermSize=${PERM_MEMORY}m -XX:MaxPermSize=${PERM_MEMORY}m"

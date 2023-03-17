@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,10 +29,10 @@ public class MergeController {
 
     private static final Logger logger = LoggerFactory.getLogger(MergeController.class);
     private final PriorityQueue<MergeItem> priorityQueue = new PriorityQueue<>();
-    private final Set<String> sourceIds = new HashSet<>();
+    private final Set<String> mergeGroupIds = new HashSet<>();
 
-    public boolean contains(String sourceId) {
-        return sourceIds.contains(sourceId);
+    public boolean contains(String mergeGroupId) {
+        return mergeGroupIds.contains(mergeGroupId);
     }
 
     public void push(MergeItem item) {
@@ -40,12 +40,12 @@ public class MergeController {
             logger.debug("push item {}", item);
         }
 
-        if (sourceIds.contains(item.getSourceId())) {
-            throw new PolardbxException("should not push duplicated item for source " + item.getSourceId());
+        if (mergeGroupIds.contains(item.getMergeGroupId())) {
+            throw new PolardbxException("should not push duplicated item for source " + item.getMergeGroupId());
         }
 
         priorityQueue.offer(item);
-        sourceIds.add(item.getSourceId());
+        mergeGroupIds.add(item.getMergeGroupId());
     }
 
     public MergeItem pop() {
@@ -63,7 +63,7 @@ public class MergeController {
             return null;
         }
 
-        sourceIds.remove(item.getSourceId());
+        mergeGroupIds.remove(item.getMergeGroupId());
         return item;
     }
 
@@ -72,10 +72,10 @@ public class MergeController {
     }
 
     public boolean isEmpty() {
-        return sourceIds.isEmpty();
+        return mergeGroupIds.isEmpty();
     }
 
     public int size() {
-        return sourceIds.size();
+        return mergeGroupIds.size();
     }
 }

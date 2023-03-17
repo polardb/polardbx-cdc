@@ -1,1 +1,1 @@
-this docker directory is only for open source
+this docker directory is only for open source.

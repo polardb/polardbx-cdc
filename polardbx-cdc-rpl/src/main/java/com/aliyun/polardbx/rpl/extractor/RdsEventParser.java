@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -82,6 +82,7 @@ public class RdsEventParser extends MysqlEventParser {
         boolean case2 = (entryPosition.getMasterId() != currentServerId);
         boolean case3 = CommonUtil.isMeaninglessBinlogFileName(entryPosition);
         if (case1 || case2 || case3) {
+            log.info("current server id : {}, need server id : {}", currentServerId, entryPosition.getMasterId());
             long timestamp = entryPosition.getTimestamp();
             BinlogPosition findPosition;
             // 当timestamp > 0 且未找到位点时返回null，此时可能该时间戳对应的位点处于oss binlog上
@@ -96,8 +97,6 @@ public class RdsEventParser extends MysqlEventParser {
             }
             // 重新置位一下
             dumpErrorCount = 0;
-            // 清除表位点
-            StatisticalProxy.getInstance().deleteTaskTablePosition();
             return findPosition;
         } else {
             if (entryPosition.getPosition() >= 0L) {

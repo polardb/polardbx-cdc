@@ -73,6 +73,9 @@
         <property name="numTestsPerEvictionRun">
             <value>-1</value>
         </property>
+        <property name="initSQL">
+            <value>set names utf8mb4</value>
+        </property>
     </bean>
 
     <bean id="metaTransactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">

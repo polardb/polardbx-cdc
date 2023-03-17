@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -51,18 +51,20 @@ public class DaemonBootStrap {
                 DynamicApplicationConfig.getString(ConfigKeys.INST_IP),
                 DynamicApplicationConfig.getString(COMMON_PORTS));
 
-            // 初始化表
-            CdcMetaManager cdcMetaManager = new CdcMetaManager();
-            cdcMetaManager.init();
-            String cluster = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+            // Cluster Parameter
+            String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
             String clusterType = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_TYPE);
             if (StringUtils.isBlank(clusterType)) {
                 // 兼容一下历史版本，如果没有配置，默认为CDC Global Binlog集群
                 clusterType = ClusterTypeEnum.BINLOG.name();
             }
 
+            // 初始化表
+            CdcMetaManager cdcMetaManager = new CdcMetaManager(clusterId, clusterType);
+            cdcMetaManager.init();
+
             // Node Reporter
-            NodeReporter nodeReporter = new NodeReporter(cluster, clusterType, "NodeReport",
+            NodeReporter nodeReporter = new NodeReporter(clusterId, clusterType, "NodeReport",
                 DynamicApplicationConfig.getInt(DAEMON_HEARTBEAT_INTERVAL_MS));
             nodeReporter.start();
 

@@ -41,10 +41,6 @@ export LD_LIBRARY_PATH=${BASE_DIR}/lib:${LD_LIBRARY_PATH}
 export NLS_LANG=AMERICAN_AMERICA.ZHS16GBK
 export LANG=zh_CN.GB18030
 
-if [ -f ${HOME}/bin/jdk8.sh ]; then
-    sudo sh ${HOME}/bin/jdk8.sh
-fi
-
 JAVA_OPTS="${JAVA_OPTS} -server -Xms${MEMORY}m -Xmx${MEMORY}m -Xss1m -DtaskName=$TASK_NAME -Dlogback.configurationFile=$logback_configurationFile"
 if [[ ! "$JVM_PARAMS" =~ "PermSize" ]]; then
   JAVA_OPTS="${JAVA_OPTS} -XX:PermSize=${PERM_MEMORY}m -XX:MaxPermSize=${PERM_MEMORY}m"
@@ -55,12 +51,12 @@ JAVA_OPTS="${JAVA_OPTS} -XX:-OmitStackTraceInFastThrow"
 JAVA_OPTS="${JAVA_OPTS} -XX:CMSInitiatingOccupancyFraction=80"
 JAVA_OPTS="${JAVA_OPTS} -XX:+UseCMSInitiatingOccupancyOnly"
 JAVA_OPTS="${JAVA_OPTS} -Djava.net.preferIPv4Stack=true"
-JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDetails"
-JAVA_OPTS="${JAVA_OPTS} -XX:+PrintGCDateStamps"
-JAVA_OPTS="${JAVA_OPTS} -Xloggc:${HOME}/logs/polardbx-binlog/$TASK_NAME/gc.log"
+#JAVA_OPTS="${JAVA_OPTS} -XX:+UseG1GC -XX:MaxGCPauseMillis=250 -XX:+UseGCOverheadLimit -XX:+ExplicitGCInvokesConcurrent"
+JAVA_OPTS="${JAVA_OPTS} -Xlog:gc*:${HOME}/logs/polardbx-binlog/$TASK_NAME/gc.log:time"
 JAVA_OPTS="${JAVA_OPTS} -Dmemory=${MEMORY}"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs -Dfile.encoding=UTF-8"
 JAVA_OPTS="${JAVA_OPTS} -Dcdc.home.dir=${BASE_DIR}"
+JAVA_OPTS="${JAVA_OPTS} --add-exports java.base/jdk.internal.ref=ALL-UNNAMED"
 
 if [ ! -d ${HOME}/.java ]; then
   mkdir "${HOME}/.java"
@@ -76,7 +72,8 @@ fi
 
 JAVA_OPTS="${JAVA_OPTS} -XX:+HeapDumpOnOutOfMemoryError"
 JAVA_OPTS="${JAVA_OPTS} -XX:HeapDumpPath=${HOME}/logs"
-
+JAVA_OPTS="${JAVA_OPTS} -XX:+CrashOnOutOfMemoryError"
+JAVA_OPTS="${JAVA_OPTS} -XX:ErrorFile=${HOME}/hs_err_pid%p.log"
 
 JAVA_OPTS="${JAVA_OPTS} ${JVM_PARAMS}"
 

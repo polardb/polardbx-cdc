@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,8 +15,8 @@
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.google.protobuf.ByteString;
 import lombok.extern.slf4j.Slf4j;
@@ -69,7 +69,7 @@ public class BinlogSyncReader extends BinlogDumpReader {
                 buffer.clear();
                 if (fp == channel.size() && hasNext()) {
                     log.info("transfer, buffer={}, {}, {}<->{}", buffer, hasNext(), channel.position(), channel.size());
-                    transfer();
+                    rotate();
                 } else {
                     this.read();
                 }
@@ -100,7 +100,7 @@ public class BinlogSyncReader extends BinlogDumpReader {
             }
             if (buffer.remaining() == 0 && hasNext() && fp == channel.size()) {
                 log.info("transfer, buffer={}, {}, {}<->{}", buffer, hasNext(), channel.position(), channel.size());
-                transfer();
+                rotate();
             }
 
             int cur = buffer.position();

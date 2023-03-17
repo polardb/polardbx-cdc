@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -41,11 +41,8 @@ public class ConnectionManager {
     private static final Logger log = LoggerFactory.getLogger(ConnectionManager.class);
 
     private static final int MAX_ACTIVE = 60;
-
-    private Properties configProp;
-
     private static ConnectionManager connectionManager = new ConnectionManager();
-
+    private Properties configProp;
     private boolean inited = false;
 
     private boolean skipInitDataNode = false;
@@ -74,21 +71,75 @@ public class ConnectionManager {
     private String cdcSyncDbPort;
     private String cdcSyncDbAddress;
 
+    private String cdcSyncDbUserFirst;
+    private String cdcSyncDbPasswordFirst;
+    private String cdcSyncDbPortFirst;
+    private String cdcSyncDbAddressFirst;
+
     private String cdcSyncDbUserSecond;
     private String cdcSyncDbPasswordSecond;
     private String cdcSyncDbPortSecond;
     private String cdcSyncDbAddressSecond;
+
+    private String cdcSyncDbUserThird;
+    private String cdcSyncDbPasswordThird;
+    private String cdcSyncDbPortThird;
+    private String cdcSyncDbAddressThird;
 
     private DruidDataSource dnDataSource;
     private DruidDataSource dnDataSourceSecond;
     private DruidDataSource metaDataSource;
     private DruidDataSource polardbxDataSource;
     private DruidDataSource cdcSyncDbDataSource;
+    private DruidDataSource cdcSyncDbDataSourceFirst;
     private DruidDataSource cdcSyncDbDataSourceSecond;
+    private DruidDataSource cdcSyncDbDataSourceThird;
 
     private boolean enableOpenSSL;
     private String polardbxMode;
     private String mysqlMode;
+
+    public static ConnectionManager getInstance() {
+        if (!connectionManager.isInited()) {
+            synchronized (connectionManager) {
+                if (!connectionManager.isInited()) {
+                    connectionManager.init();
+                }
+            }
+        }
+        return connectionManager;
+    }
+
+    public static DruidDataSource getDruidDataSource(String server, String port,
+                                                     String user, String password, String db) {
+        String url = String.format(ConfigConstant.URL_PATTERN_WITH_DB + getConnectionProperties(), server, port,
+            db);
+        return getDruidDataSource(url, user, password);
+    }
+
+    public static DruidDataSource getDruidDataSource(String server, String port,
+                                                     String user, String password) {
+        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(), server, port);
+        return getDruidDataSource(url, user, password);
+    }
+
+    public static DruidDataSource getDruidDataSource(String url, String user, String password) {
+        DruidDataSource druidDs = new DruidDataSource();
+        druidDs.setUrl(url);
+        druidDs.setUsername(user);
+        druidDs.setPassword(password);
+        druidDs.setRemoveAbandoned(false);
+        druidDs.setMaxActive(MAX_ACTIVE);
+        try {
+            druidDs.init();
+            druidDs.getConnection();
+        } catch (SQLException e) {
+            String errorMs = "[DruidDataSource getConnection] failed! ";
+            log.error(errorMs, e);
+            Assert.fail(errorMs);
+        }
+        return druidDs;
+    }
 
     private void ConnectionManager() {
 
@@ -130,10 +181,20 @@ public class ConnectionManager {
         this.cdcSyncDbPort = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_PORT);
         this.cdcSyncDbAddress = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_ADDRESS);
 
+        this.cdcSyncDbUserFirst = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_USER_FIRST);
+        this.cdcSyncDbPasswordFirst = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_PASSWORD_FIRST);
+        this.cdcSyncDbPortFirst = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_PORT_FIRST);
+        this.cdcSyncDbAddressFirst = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_ADDRESS_FIRST);
+
         this.cdcSyncDbUserSecond = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_USER_SECOND);
         this.cdcSyncDbPasswordSecond = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_PASSWORD_SECOND);
         this.cdcSyncDbPortSecond = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_PORT_SECOND);
         this.cdcSyncDbAddressSecond = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_ADDRESS_SECOND);
+
+        this.cdcSyncDbUserThird = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_USER_THIRD);
+        this.cdcSyncDbPasswordThird = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_PASSWORD_THIRD);
+        this.cdcSyncDbPortThird = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_PORT_THIRD);
+        this.cdcSyncDbAddressThird = configProp.getProperty(ConfigConstant.CDC_SYNC_DB_ADDRESS_THIRD);
 
         try {
             if (!skipInitDataNode) {
@@ -159,11 +220,17 @@ public class ConnectionManager {
             this.polardbxDataSource = getDruidDataSource(
                 polardbxAddress, polardbxPort, polardbxUser, polardbxPassword, PropertiesUtil.polardbXDBName1(false));
 
-            this.cdcSyncDbDataSource = getDruidDataSource(
-                cdcSyncDbAddress, cdcSyncDbPort, cdcSyncDbUser, cdcSyncDbPassword, "mysql");
             if (usingBinlogX) {
+                this.cdcSyncDbDataSourceFirst = getDruidDataSource(
+                    cdcSyncDbAddressFirst, cdcSyncDbPortFirst, cdcSyncDbUserFirst, cdcSyncDbPasswordFirst, "mysql");
                 this.cdcSyncDbDataSourceSecond = getDruidDataSource(
                     cdcSyncDbAddressSecond, cdcSyncDbPortSecond, cdcSyncDbUserSecond, cdcSyncDbPasswordSecond, "mysql");
+                this.cdcSyncDbDataSourceThird = getDruidDataSource(
+                    cdcSyncDbAddressThird, cdcSyncDbPortThird, cdcSyncDbUserThird, cdcSyncDbPasswordThird, "mysql");
+            } else {
+                // 去除附加的"mysql"，以兼容polardb-x作为测试下游
+                this.cdcSyncDbDataSource = getDruidDataSource(
+                        cdcSyncDbAddress, cdcSyncDbPort, cdcSyncDbUser, cdcSyncDbPassword);
             }
 
             try (Connection polardbxCon = polardbxDataSource.getConnection()) {
@@ -194,42 +261,6 @@ public class ConnectionManager {
         }
     }
 
-    public static ConnectionManager getInstance() {
-        if (!connectionManager.isInited()) {
-            synchronized (connectionManager) {
-                if (!connectionManager.isInited()) {
-                    connectionManager.init();
-                }
-            }
-        }
-        return connectionManager;
-    }
-
-    public static DruidDataSource getDruidDataSource(String server, String port,
-                                                     String user, String password, String db) {
-        String url = String.format(ConfigConstant.URL_PATTERN_WITH_DB + getConnectionProperties(), server, port,
-            db);
-        return getDruidDataSource(url, user, password);
-    }
-
-    public static DruidDataSource getDruidDataSource(String url, String user, String password) {
-        DruidDataSource druidDs = new DruidDataSource();
-        druidDs.setUrl(url);
-        druidDs.setUsername(user);
-        druidDs.setPassword(password);
-        druidDs.setRemoveAbandoned(false);
-        druidDs.setMaxActive(MAX_ACTIVE);
-        try {
-            druidDs.init();
-            druidDs.getConnection();
-        } catch (SQLException e) {
-            String errorMs = "[DruidDataSource getConnection] failed! ";
-            log.error(errorMs, e);
-            Assert.fail(errorMs);
-        }
-        return druidDs;
-    }
-
     public DruidDataSource getDnDataSource() {
         return dnDataSource;
     }
@@ -250,8 +281,16 @@ public class ConnectionManager {
         return cdcSyncDbDataSource;
     }
 
+    public DruidDataSource getCdcSyncDbDataSourceFirst() {
+        return cdcSyncDbDataSourceFirst;
+    }
+
     public DruidDataSource getCdcSyncDbDataSourceSecond() {
         return cdcSyncDbDataSourceSecond;
+    }
+
+    public DruidDataSource getCdcSyncDbDataSourceThird() {
+        return cdcSyncDbDataSourceThird;
     }
 
     public Connection getDruidDataNodeConnection() throws SQLException {
@@ -275,7 +314,7 @@ public class ConnectionManager {
             return getMetaDataSource().getConnection();
         } else {
             String url = String
-                .format(ConfigConstant.URL_PATTERN_WITH_DB + getConnectionProperties(), dnMysqlAddress, dnMysqlPort,
+                .format(ConfigConstant.URL_PATTERN_WITH_DB + getConnectionProperties(), metaAddress, metaPort,
                     getMetaDB);
             return JdbcUtil.createConnection(url, metaUser, metaPassword);
         }
@@ -297,11 +336,27 @@ public class ConnectionManager {
         }
     }
 
+    public Connection getDruidCdcSyncDbConnectionFirst() throws SQLException {
+        if (useDruid) {
+            return getCdcSyncDbDataSourceFirst().getConnection();
+        } else {
+            return newCdcSyncDbConnectionFirst();
+        }
+    }
+
     public Connection getDruidCdcSyncDbConnectionSecond() throws SQLException {
         if (useDruid) {
             return getCdcSyncDbDataSourceSecond().getConnection();
         } else {
             return newCdcSyncDbConnectionSecond();
+        }
+    }
+
+    public Connection getDruidCdcSyncDbConnectionThird() throws SQLException {
+        if (useDruid) {
+            return getCdcSyncDbDataSourceThird().getConnection();
+        } else {
+            return newCdcSyncDbConnectionThird();
         }
     }
 
@@ -350,10 +405,22 @@ public class ConnectionManager {
         return JdbcUtil.createConnection(url, cdcSyncDbUser, cdcSyncDbPassword);
     }
 
+    public Connection newCdcSyncDbConnectionFirst() {
+        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(),
+                cdcSyncDbAddressFirst, cdcSyncDbPortFirst);
+        return JdbcUtil.createConnection(url, cdcSyncDbUserFirst, cdcSyncDbPasswordFirst);
+    }
+
     public Connection newCdcSyncDbConnectionSecond() {
         String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(),
             cdcSyncDbAddressSecond, cdcSyncDbPortSecond);
         return JdbcUtil.createConnection(url, cdcSyncDbUserSecond, cdcSyncDbPasswordSecond);
+    }
+
+    public Connection newCdcSyncDbConnectionThird() {
+        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(),
+            cdcSyncDbAddressThird, cdcSyncDbPortThird);
+        return JdbcUtil.createConnection(url, cdcSyncDbUserThird, cdcSyncDbPasswordThird);
     }
 
     public void close() {
@@ -368,15 +435,17 @@ public class ConnectionManager {
     @Override
     public String toString() {
         return "ConnectionManager{" +
-            "inited=" + inited +
-            ", mysqlUser='" + dnMysqlUser + '\'' +
-            ", mysqlPassword='" + dnMysqlPassword + '\'' +
-            ", mysqlPort='" + dnMysqlPort + '\'' +
-            ", mysqlAddress='" + dnMysqlAddress + '\'' +
-            ", mysqlUserSecond='" + dnMysqlUserSecond + '\'' +
-            ", mysqlPasswordSecond='" + dnMysqlPasswordSecond + '\'' +
-            ", mysqlPortSecond='" + dnMysqlPortSecond + '\'' +
-            ", mysqlAddressSecond='" + dnMysqlAddressSecond + '\'' +
+            "configProp=" + configProp +
+            ", inited=" + inited +
+            ", skipInitDataNode=" + skipInitDataNode +
+            ", dnMysqlUser='" + dnMysqlUser + '\'' +
+            ", dnMysqlPassword='" + dnMysqlPassword + '\'' +
+            ", dnMysqlPort='" + dnMysqlPort + '\'' +
+            ", dnMysqlAddress='" + dnMysqlAddress + '\'' +
+            ", dnMysqlUserSecond='" + dnMysqlUserSecond + '\'' +
+            ", dnMysqlPasswordSecond='" + dnMysqlPasswordSecond + '\'' +
+            ", dnMysqlPortSecond='" + dnMysqlPortSecond + '\'' +
+            ", dnMysqlAddressSecond='" + dnMysqlAddressSecond + '\'' +
             ", polardbxUser='" + polardbxUser + '\'' +
             ", polardbxPassword='" + polardbxPassword + '\'' +
             ", polardbxPort='" + polardbxPort + '\'' +
@@ -385,6 +454,21 @@ public class ConnectionManager {
             ", metaPassword='" + metaPassword + '\'' +
             ", metaPort='" + metaPort + '\'' +
             ", metaAddress='" + metaAddress + '\'' +
+            ", cdcSyncDbUser='" + cdcSyncDbUser + '\'' +
+            ", cdcSyncDbPassword='" + cdcSyncDbPassword + '\'' +
+            ", cdcSyncDbPort='" + cdcSyncDbPort + '\'' +
+            ", cdcSyncDbAddress='" + cdcSyncDbAddress + '\'' +
+            ", cdcSyncDbUserSecond='" + cdcSyncDbUserSecond + '\'' +
+            ", cdcSyncDbPasswordSecond='" + cdcSyncDbPasswordSecond + '\'' +
+            ", cdcSyncDbPortSecond='" + cdcSyncDbPortSecond + '\'' +
+            ", cdcSyncDbAddressSecond='" + cdcSyncDbAddressSecond + '\'' +
+            ", cdcSyncDbUserThird='" + cdcSyncDbUserThird + '\'' +
+            ", cdcSyncDbPasswordThird='" + cdcSyncDbPasswordThird + '\'' +
+            ", cdcSyncDbPortThird='" + cdcSyncDbPortThird + '\'' +
+            ", cdcSyncDbAddressThird='" + cdcSyncDbAddressThird + '\'' +
+            ", enableOpenSSL=" + enableOpenSSL +
+            ", polardbxMode='" + polardbxMode + '\'' +
+            ", mysqlMode='" + mysqlMode + '\'' +
             '}';
     }
 
@@ -476,5 +560,21 @@ public class ConnectionManager {
 
     public String getCdcSyncDbAddressSecond() {
         return cdcSyncDbAddressSecond;
+    }
+
+    public String getCdcSyncDbUserThird() {
+        return cdcSyncDbUserThird;
+    }
+
+    public String getCdcSyncDbPasswordThird() {
+        return cdcSyncDbPasswordThird;
+    }
+
+    public String getCdcSyncDbPortThird() {
+        return cdcSyncDbPortThird;
+    }
+
+    public String getCdcSyncDbAddressThird() {
+        return cdcSyncDbAddressThird;
     }
 }

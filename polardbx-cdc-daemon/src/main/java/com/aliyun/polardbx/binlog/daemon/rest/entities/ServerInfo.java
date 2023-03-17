@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,9 +15,9 @@
 package com.aliyun.polardbx.binlog.daemon.rest.entities;
 
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
+import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
-import com.aliyun.polardbx.binlog.domain.po.RelayFinalTaskInfo;
 
 import java.util.List;
 
@@ -28,7 +28,7 @@ public class ServerInfo {
     private String clusterId;
     private String polarxInstanceId;
     private List<NodeInfo> nodeInfo;
-    private List<RelayFinalTaskInfo> taskInfo;
+    private List<BinlogTaskInfo> taskInfo;
     private List<DumperInfo> dumperInfo;
     private List<BinlogTaskConfig> topologyConfig;
 
@@ -56,11 +56,11 @@ public class ServerInfo {
         this.nodeInfo = nodeInfo;
     }
 
-    public List<RelayFinalTaskInfo> getTaskInfo() {
+    public List<BinlogTaskInfo> getTaskInfo() {
         return taskInfo;
     }
 
-    public void setTaskInfo(List<RelayFinalTaskInfo> taskInfo) {
+    public void setTaskInfo(List<BinlogTaskInfo> taskInfo) {
         this.taskInfo = taskInfo;
     }
 

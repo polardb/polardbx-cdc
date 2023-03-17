@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,14 +14,16 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.aliyun.polardbx.binlog.BufferUtil;
+import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.MarkType;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.domain.MarkInfo;
-import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
-import com.aliyun.polardbx.binlog.dumper.dump.util.EventGenerator;
-import com.aliyun.polardbx.binlog.dumper.metrics.Metrics;
+import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import lombok.Data;
+import com.aliyun.polardbx.binlog.format.utils.ByteArray;
+import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -30,47 +32,49 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.zip.CRC32;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_FILE_SEEK_LAST_TSO_MODE;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.ROWS_QUERY_LOG_EVENT;
 import static com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager.containsTableId;
-import static com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager.getTableIdLength;
+import static com.aliyun.polardbx.binlog.format.utils.BinlogGenerateUtil.getTableIdLength;
 
 /**
  * Created by ziyang.lb
  */
-@Data
 @Slf4j
 public class BinlogFile {
 
     public static final byte[] BINLOG_FILE_HEADER = new byte[] {(byte) 0xfe, 0x62, 0x69, 0x6e};
-    public static final int MAX_PACKET_LENGTH = (256 * 256 * 256 - 1);
 
-    private File file;
-    private RandomAccessFile raf;
-    private FileChannel fileChannel;
-    private CRC32 crc32;
+    private final File file;
+    private final RandomAccessFile raf;
+    private final FileChannel fileChannel;
+    private final int seekBufferSize;
+    private final StreamMetrics metrics;
+
     private ByteBuffer writeBuffer;
     private long lastFlushTime;
     private long filePointer;//FileChannel的position()方法频繁调用的话有严重的性能问题，所以在内存中维护一个指针
-    private int seekBufferSize;
 
     private Long logBegin;
-    private Long logEnd;
+    private LogEndInfo logEndInfo;
 
-    public BinlogFile(File file, String mode, int writeBufferSize, int seekBufferSize, boolean useDirectByteBuffer)
+    public BinlogFile(File file, String mode, int writeBufferSize, int seekBufferSize, boolean useDirectByteBuffer,
+                      StreamMetrics metrics)
         throws FileNotFoundException {
         this.checkMode(mode);
         this.file = file;
         this.raf = new RandomAccessFile(file, mode);
         this.fileChannel = raf.getChannel();
-        this.crc32 = new CRC32();
+        this.seekBufferSize = seekBufferSize * 1024 * 1024;
+        this.metrics = metrics;
+
         if ("rw".equals(mode)) {
             this.writeBuffer = useDirectByteBuffer ? ByteBuffer.allocateDirect(writeBufferSize)
                 : ByteBuffer.allocate(writeBufferSize);
         }
-        this.seekBufferSize = seekBufferSize * 1024 * 1024;//外部传过来的参数为单位为M，需要转化为字节
     }
 
     public void flush() throws IOException {
@@ -87,7 +91,10 @@ public class BinlogFile {
         }
         writeBuffer.clear();
         lastFlushTime = System.currentTimeMillis();
-        Metrics.get().incrementTotalFlushWriteCount();
+
+        if (metrics != null) {
+            metrics.incrementTotalFlushWriteCount();
+        }
     }
 
     public boolean hasBufferedData() {
@@ -113,6 +120,18 @@ public class BinlogFile {
      */
     public long fileSize() throws IOException {
         return raf.length();
+    }
+
+    /**
+     * 尝试对文件进行截断处理
+     */
+    public void tryTruncate() throws IOException {
+        long filePointer = filePointer();
+        long fileSize = fileSize();
+        if (filePointer < fileSize) {
+            truncate(filePointer);
+            log.warn("truncate binlog file, file pointer {}, file size {}", filePointer, fileSize);
+        }
     }
 
     /**
@@ -165,7 +184,10 @@ public class BinlogFile {
         checkPosition(thatPosition, thisPosition);
 
         writeInternal(data, offset, length);
-        Metrics.get().incrementTotalWriteEventCount();
+
+        if (metrics != null) {
+            metrics.incrementTotalWriteEventCount();
+        }
     }
 
     public void writeData(byte[] data, int offset, int length) throws IOException {
@@ -201,15 +223,10 @@ public class BinlogFile {
         }
 
         writeInternal(data, offset, length);
-        Metrics.get().incrementTotalWriteEventCount();
-    }
 
-    /**
-     * 定位最后一个记录tso的事件，并返回tso信息 </br>
-     * 逐条seek可能会有性能问题，遇到性能问题再优化，可能需要引入额外的checkpoint文件
-     */
-    public SeekResult seekLastTso() {
-        return seekLastTsoV2();
+        if (metrics != null) {
+            metrics.incrementTotalWriteEventCount();
+        }
     }
 
     public void close() throws IOException {
@@ -220,10 +237,13 @@ public class BinlogFile {
         if (raf != null) {
             raf.close();
         }
+        if (writeBuffer != null && writeBuffer.isDirect()) {
+            BufferUtil.clean((MappedByteBuffer) writeBuffer);
+        }
         log.info("binlog file successfully closed.");
     }
 
-    private SeekResult seekFirst() {
+    public SeekResult seekFirst() {
         long startTime = System.currentTimeMillis();
         try {
             final long fileLength = fileSize();
@@ -286,8 +306,14 @@ public class BinlogFile {
 
     }
 
+    public SeekResult seekLastTso() {
+        int mode = DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_LAST_TSO_MODE);
+        return seekLastTso(mode);
+    }
+
     // rows_query_envent: https://dev.mysql.com/doc/internals/en/rows-query-event.html
-    private SeekResult seekLastTsoV2() {
+    public SeekResult seekLastTso(int mode) {
+        log.info("prepare to seek last tso from binlog file " + getFileName());
         long startTime = System.currentTimeMillis();
         try {
             final long fileLength = fileSize();
@@ -353,12 +379,16 @@ public class BinlogFile {
                                     //或者content的前缀是CTS(ROWS_QUERY_LOG_EVENT用来记录更多元信息)
                                     //则说明该Event记录的是一个commit tso
                                     if (tsoSize == 54) {
-                                        lastTso = content;
-                                        seekPosition = nextEventAbsolutePos;
+                                        if (isValidTso4Recovery(content, mode)) {
+                                            lastTso = content;
+                                            seekPosition = nextEventAbsolutePos;
+                                        }
                                     } else if (content.startsWith(MarkType.CTS.name())) {
                                         MarkInfo markInfo = new MarkInfo(content);
-                                        lastTso = markInfo.getTso();
-                                        seekPosition = nextEventAbsolutePos;
+                                        if (isValidTso4Recovery(markInfo.getTso(), mode)) {
+                                            lastTso = markInfo.getTso();
+                                            seekPosition = nextEventAbsolutePos;
+                                        }
                                     }
                                 } else if (containsTableId(lastEventType)) {
                                     buffer.position(buffer.position() + 6);
@@ -390,13 +420,21 @@ public class BinlogFile {
             long pos = StringUtils.isBlank(lastTso) ? 0 : seekPosition;
             fileChannel.position(pos);
             filePointer = pos;
-            log.info("seek last tso cost time:" + (System.currentTimeMillis() - startTime) + "ms, skipped event count:"
-                + seekEventCount);
+            log.info(
+                "seek last tso cost time:" + (System.currentTimeMillis() - startTime) + "ms, skipped event count:"
+                    + seekEventCount);
 
-            return new SeekResult(lastTso, lastEventType, lastEventTimestamp, maxTableId);
+            SeekResult result = new SeekResult(lastTso, lastEventType, lastEventTimestamp, maxTableId);
+            result.setBinlogFile(getFileName());
+            result.setPosition(String.valueOf(seekPosition));
+            return result;
         } catch (IOException e) {
             throw new PolardbxException("seek tso failed.", e);
         }
+    }
+
+    private boolean isValidTso4Recovery(String cts, int mode) {
+        return mode == 0 || CommonUtils.isTsoPolicyTrans(cts);
     }
 
     private void writeInternal(byte[] data, int offset, int length) throws IOException {
@@ -411,7 +449,10 @@ public class BinlogFile {
         if (writeBuffer.remaining() == 0) {
             flush();
         }
-        Metrics.get().incrementTotalWriteBytes(length);
+
+        if (metrics != null) {
+            metrics.incrementTotalWriteBytes(length);
+        }
     }
 
     private long readInt32(ByteBuffer buffer) {
@@ -444,6 +485,14 @@ public class BinlogFile {
         return result;
     }
 
+    public File getFile() {
+        return file;
+    }
+
+    public long getLastFlushTime() {
+        return lastFlushTime;
+    }
+
     public long getLogBegin() {
         if (logBegin == null) {
             SeekResult result = seekFirst();
@@ -452,16 +501,17 @@ public class BinlogFile {
         return logBegin;
     }
 
-    public long getLogEnd() {
-        if (logEnd == null) {
-            SeekResult result = seekLastTso();
-            logEnd = result.getLastEventTimestamp() * 1000;
+    public LogEndInfo getLogEndInfo() {
+        if (logEndInfo == null) {
+            SeekResult result = seekLastTso(0);
+            logEndInfo = new LogEndInfo(result.getLastEventTimestamp() * 1000, result.getLastTso());
         }
-        return logEnd;
+        return logEndInfo;
     }
 
     public static class SeekResult {
-
+        private String binlogFile;
+        private String position;
         private String lastTso;
         private Byte lastEventType;
         private Long lastEventTimestamp;
@@ -478,6 +528,22 @@ public class BinlogFile {
             this.lastEventType = lastEventType;
             this.lastEventTimestamp = lastEventTimestamp;
             this.maxTableId = maxTableId;
+        }
+
+        public String getBinlogFile() {
+            return binlogFile;
+        }
+
+        public void setBinlogFile(String binlogFile) {
+            this.binlogFile = binlogFile;
+        }
+
+        public String getPosition() {
+            return position;
+        }
+
+        public void setPosition(String position) {
+            this.position = position;
         }
 
         public String getLastTso() {

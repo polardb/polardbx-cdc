@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.format.field;
 
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
+import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 
 /**
  * case MYSQL_TYPE_BLOB:
@@ -24,6 +25,9 @@ import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
  */
 public class BlobField extends Field {
 
+    private static final int MAX_1_B = (1 << 8) - 1;
+    private static final int MAX_2_B = (1 << 16) - 1;
+    private static final int MAX_3_B = (1 << 24) - 1;
     protected byte[] contents;
 
     public BlobField(CreateField createField) {
@@ -31,30 +35,34 @@ public class BlobField extends Field {
         calculatePackLength();
     }
 
+    @Override
+    public MySQLType getMysqlType() {
+        return MySQLType.MYSQL_TYPE_BLOB;
+    }
+
     public void calculatePackLength() {
         this.packageLength = calcPackLength(mysqlType, (int) fieldLength) - portable_sizeof_char_ptr;
     }
 
-//    private static byte[] hexStr2Byte(String hex) {
-//        ByteBuffer bf = ByteBuffer.allocate(hex.length() / 2);
-//        for (int i = 0; i < hex.length(); i++) {
-//            int hexStr = hex.charAt(i);
-//            i++;
-//            hexStr += hex.charAt(i);
-//            byte b = (byte) Integer.parseInt(hexStr, 16);
-//            bf.put(b);
-//        }
-//        return bf.array();
-//    }
+    public void setContents(byte[] contents) {
+        this.contents = contents;
+    }
 
     @Override
-    public byte[] encode() {
+    public boolean isNull() {
+        return super.isNull() && contents == null;
+    }
+
+    @Override
+    public byte[] encodeInternal() {
         if (contents == null) {
-            if (this.data == null) {
-                return EMPTY;
+            if (this.data instanceof byte[]) {
+                contents = (byte[]) this.data;
+            } else {
+                contents = String.valueOf(this.data).getBytes(charset);
             }
-            contents = this.data.getBytes(charset);
         }
+
         int len = contents.length;
         byte[] binary;
         /*
@@ -63,6 +71,9 @@ public class BlobField extends Field {
         switch (packageLength) {
         case 1: {
             /* TINYBLOB/TINYTEXT */
+            if (len > MAX_1_B) {
+                len = MAX_1_B;
+            }
             binary = new byte[len + 1];
             binary[0] = (byte) len;
             System.arraycopy(contents, 0, binary, 1, len);
@@ -70,6 +81,9 @@ public class BlobField extends Field {
         }
         case 2: {
             /* BLOB/TEXT */
+            if (len > MAX_2_B) {
+                len = MAX_2_B;
+            }
             binary = new byte[len + 2];
             binary[0] = (byte) (0xFF & len);
             binary[1] = (byte) (0xFF & (len >> 8));
@@ -78,6 +92,9 @@ public class BlobField extends Field {
         }
         case 3: {
             /* MEDIUMBLOB/MEDIUMTEXT */
+            if (len > MAX_3_B) {
+                len = MAX_3_B;
+            }
             binary = new byte[len + 3];
             binary[0] = (byte) (0xFF & len);
             binary[1] = (byte) (0xFF & (len >> 8));
@@ -98,7 +115,6 @@ public class BlobField extends Field {
         default:
             throw new IllegalArgumentException("!! Unknown BLOB packlen = " + packageLength);
         }
-
     }
 
     @Override

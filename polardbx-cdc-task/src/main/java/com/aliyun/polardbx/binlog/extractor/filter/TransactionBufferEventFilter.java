@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,6 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.LogEventFilter;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
@@ -29,11 +31,16 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.TransactionStorage;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.extractor.log.TransactionGroup;
+import com.aliyun.polardbx.binlog.extractor.log.processor.EventFilter;
+import com.aliyun.polardbx.binlog.extractor.log.processor.FilterBlacklistTableFilter;
 import com.aliyun.polardbx.binlog.format.utils.BinlogGenerateUtil;
 import com.aliyun.polardbx.binlog.storage.Storage;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * @author chengjin.lyf on 2020/7/15 7:24 下午
@@ -54,8 +61,14 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
      */
     private long lastCommitSequenceNum = -1L;
 
+    private List<EventFilter> eventFilterList = new ArrayList<>();
+
     public TransactionBufferEventFilter(Storage storage) {
         this.storage = storage;
+        String blacklist = DynamicApplicationConfig.getString(ConfigKeys.TASK_META_REBUILD_BLACKLIST);
+        if (StringUtils.isNotBlank(blacklist)) {
+            eventFilterList.add(new FilterBlacklistTableFilter(blacklist));
+        }
     }
 
     @Override
@@ -250,6 +263,11 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
                 transaction.setCommit(context.getRuntimeContext());
             }
             return;
+        }
+        for (EventFilter filter : eventFilterList) {
+            if (filter.doFilter(currentTran, event)) {
+                return;
+            }
         }
         currentTran.processEvent(event, context.getRuntimeContext());
     }

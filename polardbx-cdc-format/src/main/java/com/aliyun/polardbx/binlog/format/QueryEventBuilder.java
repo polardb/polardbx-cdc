@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,15 +14,20 @@
  */
 package com.aliyun.polardbx.binlog.format;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
 import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
 import com.aliyun.polardbx.binlog.format.utils.SQLModeConsts;
-import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
+import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.UnsupportedEncodingException;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DDL_STRICT_TRANS_TABLES_MODE_BLACKLIST_DB;
 
 public class QueryEventBuilder extends BinlogBuilder {
 
@@ -50,16 +55,18 @@ public class QueryEventBuilder extends BinlogBuilder {
 
     public static final String ISO_8859_1 = "ISO-8859-1";
 
+    private static final Set<String> strictModeBlackList = buildBlackList();
+
     /**
      * The ID of the thread that issued this statement.
      * Needed for temporary tables.
      * This is also useful for a DBA for knowing who did what on the master.
      */
-    private int threadId;
+    private final int threadId;
     /**
      * The time in seconds that the statement took to execute. Only useful for inspection by the DBA.
      */
-    private int executeTime;
+    private final int executeTime;
 
     /**
      * The error code resulting from execution of the statement on the master.
@@ -151,18 +158,13 @@ public class QueryEventBuilder extends BinlogBuilder {
     /**
      * default database name
      */
-    private String schema;
-    private String queryString;
-
-    private StatuVarPars statuVarPars;
-
+    private final String schema;
+    private final String queryString;
     private int statusVarStartOffset;
-
-    private boolean isDDL;
-
-    private int clientCharset;
-    private int connectionCharset;
-    private int serverCharset;
+    private final boolean isDDL;
+    private final int clientCharset;
+    private final int connectionCharset;
+    private final int serverCharset;
 
     public QueryEventBuilder(String schema, String queryString, int clientCharset, int connectionCharset,
                              int serverCharset, boolean isDDL, int createTime, long serverId) {
@@ -180,11 +182,9 @@ public class QueryEventBuilder extends BinlogBuilder {
 
     private int putStatusVars(AutoExpandBuffer outputData) throws UnsupportedEncodingException {
         int begin = outputData.position();
-        statuVarPars = new StatuVarPars(outputData);
+        StatusVarPars statuVarPars = new StatusVarPars(outputData);
         statuVarPars.putInt(Q_FLAGS2_CODE, 0);
-        statuVarPars.putLong(Q_SQL_MODE_CODE,
-            SQLModeConsts.MODE_ONLY_FULL_GROUP_BY | SQLModeConsts.MODE_STRICT_TRANS_TABLES
-                | SQLModeConsts.MODE_ERROR_FOR_DIVISION_BY_ZERO | SQLModeConsts.MODE_NO_ENGINE_SUBSTITUTION);
+        statuVarPars.putLong(Q_SQL_MODE_CODE, buildSqlMode());
         statuVarPars.putString(Q_CATALOG_NZ_CODE, "std");
         statuVarPars.putString(Q_TIME_ZONE_CODE, "SYSTEM");
 
@@ -231,11 +231,31 @@ public class QueryEventBuilder extends BinlogBuilder {
         numberToBytes(outputData, 1, INT16);
     }
 
-    private class StatuVarPars {
+    private long buildSqlMode() {
+        long mode = SQLModeConsts.MODE_ONLY_FULL_GROUP_BY | SQLModeConsts.MODE_ERROR_FOR_DIVISION_BY_ZERO |
+            SQLModeConsts.MODE_NO_ENGINE_SUBSTITUTION;
+        if (!strictModeBlackList.contains(StringUtils.lowerCase(schema))) {
+            mode |= SQLModeConsts.MODE_STRICT_TRANS_TABLES;
+        }
+        return mode;
+    }
 
-        private AutoExpandBuffer outputData;
+    private static Set<String> buildBlackList() {
+        String configStr = DynamicApplicationConfig.getString(TASK_DDL_STRICT_TRANS_TABLES_MODE_BLACKLIST_DB);
+        if (StringUtils.isBlank(configStr)) {
+            return Sets.newHashSet();
+        } else {
+            configStr = configStr.toLowerCase();
+            String[] array = configStr.split(",");
+            return Sets.newHashSet(array);
+        }
+    }
 
-        public StatuVarPars(AutoExpandBuffer outputData) {
+    private static class StatusVarPars {
+
+        private final AutoExpandBuffer outputData;
+
+        public StatusVarPars(AutoExpandBuffer outputData) {
             this.outputData = outputData;
         }
 

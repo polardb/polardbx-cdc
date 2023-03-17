@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,6 +19,8 @@ import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 
 /**
  * support MYSQL_TYPE_ENUM
+ *
+ * @author yanfenglin
  */
 public class EnumField extends Field {
 
@@ -28,13 +30,11 @@ public class EnumField extends Field {
     }
 
     @Override
-    public byte[] encode() {
-        if (data == null) {
-            return EMPTY;
-        }
+    public byte[] encodeInternal() {
+        String strData = buildDataStr();
         int v = 0;
         for (int i = 0; i < typeNames.length; i++) {
-            if (typeNames[i].replaceAll("'", "").equalsIgnoreCase(data)) {
+            if (typeNames[i].replaceAll("'", "").equalsIgnoreCase(strData)) {
                 v = i + 1;
                 break;
             }

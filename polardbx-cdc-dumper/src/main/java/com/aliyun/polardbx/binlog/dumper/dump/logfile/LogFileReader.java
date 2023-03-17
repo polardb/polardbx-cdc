@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,21 +15,31 @@
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.dumper.dump.util.ByteArray;
+import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
+import com.aliyun.polardbx.binlog.filesys.CdcFile;
+import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import io.grpc.Status;
 import io.grpc.stub.ServerCallStreamObserver;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_HEARTBEAT_INTERVAL_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_PACKET_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_READ_BUFFER_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_PACKET_SIZE;
@@ -42,21 +52,23 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 @Slf4j
 public class LogFileReader {
 
-    private LogFileManager logFileManager;
+    private final LogFileManager logFileManager;
+    private final StreamMetrics metrics;
 
     public LogFileReader(LogFileManager logFileManager) {
         this.logFileManager = logFileManager;
+        this.metrics = StreamMetrics.getStreamMetrics(logFileManager.getStreamName());
     }
 
-    public void showBinlogEvent(String fileName, long position, long offset, long rowCount,
+    public void showBinlogEvent(CdcFile cdcFile, long position, long offset, long rowCount,
                                 ServerCallStreamObserver<BinlogEvent> serverCallStreamObserver) {
-        log.info("show binlog events in {} from {} limit {}, {}", fileName, position, offset, rowCount);
+        log.info("show binlog events in {} from {} limit {}, {}", cdcFile.getName(), position, offset, rowCount);
         if (logFileManager.getLatestFileCursor() == null) {
             serverCallStreamObserver.onCompleted();
         }
         BinlogEventReader binlogFileReader = null;
         try {
-            binlogFileReader = new BinlogEventReader(logFileManager, fileName, position, offset, rowCount);
+            binlogFileReader = new BinlogEventReader(cdcFile, position, offset, rowCount);
             binlogFileReader.valid();
             binlogFileReader.skipPos();
             binlogFileReader.skipOffset();
@@ -69,7 +81,8 @@ public class LogFileReader {
                     if (binlogFileReader.hasNext()) {
                         serverCallStreamObserver.onNext(binlogFileReader.nextBinlogEvent());
                     } else {
-                        log.info("show binlog events in {} from {} limit {}, {} complete", fileName, position, offset,
+                        log.info("show binlog events in {} from {} limit {}, {} complete", cdcFile.getName(), position,
+                            offset,
                             rowCount);
                         serverCallStreamObserver.onCompleted();
                         break;
@@ -79,7 +92,8 @@ public class LogFileReader {
                 }
             }
         } catch (Throwable th) {
-            log.error("show binlog events in {} from {} limit {}, {} fail", fileName, position, offset, rowCount,
+            log.error("show binlog events in {} from {} limit {}, {} fail", cdcFile.getName(), position, offset,
+                rowCount,
                 th);
             serverCallStreamObserver.onError(Status.INVALID_ARGUMENT.withDescription(th.getMessage()).asException());
         } finally {
@@ -89,18 +103,32 @@ public class LogFileReader {
         }
     }
 
-    public void binlogDump(String fileName, long position,
+    public void binlogDump(String fileName, long position, boolean registered, Map<String, String> ext,
                            ServerCallStreamObserver<DumpStream> serverCallStreamObserver) {
-        log.info("binlogDump from {}@{}", fileName, position);
-        if (logFileManager.getLatestFileCursor() == null) {
-            serverCallStreamObserver.onCompleted();
-        }
         BinlogDumpReader dumpReader = null;
         try {
+            log.info("binlogDump from {}@{}, register parameter value is {}, ext parameter value is {}",
+                fileName, position, registered, ext);
+            long retryInterval = DynamicApplicationConfig.getLong(
+                ConfigKeys.BINLOG_DUMP_WAIT_CURSOR_READY_RETRY_INTERVAL_SECOND);
+            int retryTimesLimit = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_DUMP_WAIT_CURSOR_READY_TIMES_LIMIT);
+            RetryerBuilder.newBuilder().
+                withWaitStrategy(WaitStrategies.fixedWait(retryInterval, TimeUnit.SECONDS)).
+                withStopStrategy(StopStrategies.stopAfterAttempt(retryTimesLimit)).
+                retryIfResult(Objects::isNull).
+                build().
+                call(() -> logFileManager.getLatestFileCursor());
+
             dumpReader = new BinlogDumpReader(logFileManager, fileName, position, getInt(BINLOG_DUMP_PACKET_SIZE),
                 getInt(BINLOG_DUMP_READ_BUFFER_SIZE));
             dumpReader.valid();
+
             ByteString fakeRotateEvent = dumpReader.fakeRotateEvent();
+            if (StringUtils.equalsIgnoreCase(ext.get("master_binlog_checksum"), "NONE") && StringUtils.equalsIgnoreCase(
+                ext.get("source_binlog_checksum"), "NONE")) {
+                fakeRotateEvent = disableChecksum(fakeRotateEvent);
+                dumpReader.setRotateNext(false);
+            }
             ByteString fakeFormatEvent = dumpReader.fakeFormatEvent();
             serverCallStreamObserver.onNext(DumpStream.newBuilder().setPayload(fakeRotateEvent).build());
             show("FakeRotateEvent", fakeRotateEvent);
@@ -116,6 +144,7 @@ public class LogFileReader {
                 if (serverCallStreamObserver.isReady()) {
                     if (dumpReader.hasNext()) {
                         ByteString pack = dumpReader.nextDumpPacks();
+                        metrics.incrementTotalDumpBytes(pack.size());
                         if (log.isDebugEnabled()) {
                             show("BinlogDump", pack);
                         }
@@ -125,8 +154,9 @@ public class LogFileReader {
                         TimeUnit.MILLISECONDS.sleep(timeout);
                         noData += timeout;
                         //默认30s一次心跳(mysql 默认 SELECT Heartbeat FROM MYSQL.SLAVE_MASTER_INFO)
-                        //减少到10s
-                        if (noData > 10000) {
+                        //减少到1s
+                        int interval = DynamicApplicationConfig.getInt(BINLOG_DUMP_HEARTBEAT_INTERVAL_MS);
+                        if (noData > interval) {
                             ByteString heartbeatEvent = dumpReader.heartbeatEvent();
                             show("HeartbeatEvent", heartbeatEvent);
                             serverCallStreamObserver.onNext(
@@ -201,6 +231,15 @@ public class LogFileReader {
         }
     }
 
+    private ByteString disableChecksum(ByteString pack) {
+        byte[] data = pack.substring(0, pack.size() - 4).toByteArray();
+        ByteArray ba = new ByteArray(data);
+        ba.writeLong(data.length - 4, 3);
+        ba.skip(11);
+        ba.writeLong(data.length - 4 - 1, 4);
+        return ByteString.copyFrom(data);
+    }
+
     private void show(String type, ByteString pack) {
         byte[] data = pack.toByteArray();
         ByteArray ba = new ByteArray(data);
@@ -212,7 +251,9 @@ public class LogFileReader {
         long serverId = ba.readLong(4);
         long eventSize = ba.readLong(4);
         int endPos = ba.readInteger(4);
-        log.info("{} serverId={} payload {}[{}->{}]", type, serverId,
-            LogEvent.getTypeName(eventType), endPos - eventSize, endPos);
+        if (log.isDebugEnabled()) {
+            log.debug("{} serverId={} payload {}[{}->{}]", type, serverId,
+                LogEvent.getTypeName(eventType), endPos - eventSize, endPos);
+        }
     }
 }

@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,7 +23,6 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.UpdateRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.dump.SinkFunction;
-import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
 import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
@@ -39,21 +38,22 @@ import com.aliyun.polardbx.binlog.format.utils.BinlogGenerateUtil;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
 import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.time.DateFormatUtils;
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
-import java.nio.charset.Charset;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
 public class BinlogTest {
 
-    //    private static String filePath = "/Users/yanfenglin/Documents/binlog/binlog.000017";
-    private static String filePath = "/Users/yanfenglin/Documents/polardbx-binlog/dumper/binlog/binlog.000001";
-    //    private static String filePath = "/Users/yanfenglin/Documents/binlog/binlog.000001";
+    private static String filePath = System.getProperty("user.dir") + "/binlog/binlog.000001";
     private static AutoExpandBuffer output = new AutoExpandBuffer(1024, 1024);
+    private static List<Computer> assertCallback = new ArrayList<>();
 
     static {
         File f = new File(filePath);
@@ -66,17 +66,20 @@ public class BinlogTest {
     private LocalBinlogParser localBinlogParser = new LocalBinlogParser(filePath);
 
     @Test
-    public void generateFDE() throws Exception {
-        FormatDescriptionEvent event = BinlogGenerateUtil.buildFormatDescriptionEvent(1, "5.6.29-TDDL-5.x");
-        int len = event.write(output);
-//        System.out.println(len);
-//        FileUtils.writeByteArrayToFile(new File(filePath), output.toBytes(), 0, len, false);
+    public void testDataFormat() throws Exception {
+        generateFDE();
+        generateQueryLog();
+        generateRowData();
+        FileUtils.writeByteArrayToFile(new File(filePath), output.toBytes(), 0, output.position(), true);
+        testParseData();
     }
 
-    @Test
-    public void generateTME() throws Exception {
+    private void generateFDE() throws Exception {
+        FormatDescriptionEvent event = BinlogGenerateUtil.buildFormatDescriptionEvent(1, "5.6.29-TDDL-5.x");
+        int len = event.write(output);
+    }
 
-        generateFDE();
+    public void generateRowData() throws Exception {
 
         TableMapEventBuilder tme = new TableMapEventBuilder((int) (System.currentTimeMillis() / 1000),
             1,
@@ -86,9 +89,49 @@ public class BinlogTest {
             "utf8");
         List<Field> fieldList = new ArrayList<>();
 
-        fieldList.add(MakeFieldFactory.makeField("BIGINT(20)", "1", "utf8", false));
-        fieldList.add(MakeFieldFactory.makeField("VARCHAR(256)", "aa", "utf8", false));
-        fieldList.add(MakeFieldFactory.makeField("VARCHAR(10)", "bb", "utf8", false));
+        fieldList.add(MakeFieldFactory.makeField("int unsigned", "4", "utf8", false, true));
+        test(4, "int unsigned test error");
+        fieldList.add(MakeFieldFactory.makeField("int(10) unsigned", "5", "utf8", false, true));
+        test(5, "int(10) unsigned test error");
+        fieldList.add(MakeFieldFactory.makeField("BIGINT( 20)", "6", "utf8", false, false));
+        test(6L, "bigint( 20) unsigned test error");
+        fieldList.add(MakeFieldFactory.makeField("MEDIUMINT", "999", "utf8", false, false));
+        test(999, "MEDIUMINT test error");
+        fieldList.add(MakeFieldFactory.makeField("BIGINT", "888", "utf8", false, false));
+        test(888L, "BIGINT test error");
+        fieldList.add(MakeFieldFactory.makeField("VARCHAR(256)", "aa", "utf8", false, false));
+        test("aa", "VARCHAR(256) test error");
+        fieldList.add(MakeFieldFactory.makeField("VARCHAR(10)", "bb", "utf8", false, false));
+        test("bb", "VARCHAR(10) test error");
+        fieldList.add(MakeFieldFactory.makeField("CHAR(10)", "cc", "utf8", false, false));
+        test("cc", "CHAR(10) test error");
+        fieldList.add(MakeFieldFactory.makeField("tinyint(10)", "3", "utf8", false, false));
+        test(3, "tinyint(10) test error");
+        fieldList.add(MakeFieldFactory.makeField("tinyint", "4", "utf8", false, false));
+        test(4, "tinyint test error");
+        fieldList.add(MakeFieldFactory.makeField("dec(20,5)", "8.4", "utf8", false, false));
+        test(new BigDecimal("8.40000"), "dec(20,5) test error");
+        fieldList.add(MakeFieldFactory
+            .makeField("decimal(20,10)", "3.14", "utf8", false, false));
+        test(new BigDecimal("3.140000000"), "dec(20,10) test error");
+        fieldList.add(MakeFieldFactory
+            .makeField("decimal(30,10)", "31415926534521.3214521234", "utf8", false, false));
+        test(new BigDecimal("31415926534521.3214521234"), "dec(20,10) test error");
+        String now = DateFormatUtils.format(System.currentTimeMillis(), "yyyy-MM-dd HH:mm:ss");
+        fieldList.add(MakeFieldFactory
+            .makeField("timestamp", now, "utf8",
+                false, false));
+        test(now, "timestamp test error");
+        String now1 = DateFormatUtils.format(System.currentTimeMillis(), "yyyy-MM-dd HH:mm:ss");
+        fieldList.add(MakeFieldFactory
+            .makeField("datetime(3)", now1, "utf8",
+                false, false));
+        test(now1, "datetime(3) test error");
+        String now2 = DateFormatUtils.format(System.currentTimeMillis(), "yyyy-MM-dd");
+        fieldList.add(MakeFieldFactory
+            .makeField("date", now2, "utf8",
+                false, false));
+        test(now2, "date test error");
         tme.setFieldList(fieldList);
         int len = tme.write(output);
         RowEventBuilder reb = new RowEventBuilder(tme.getTableId(),
@@ -104,13 +147,9 @@ public class BinlogTest {
         reb.addRowData(rowData);
         int newLen = reb.write(output);
 
-        FileUtils.writeByteArrayToFile(new File(filePath), output.toBytes(), 0, output.position(), true);
-        test();
     }
 
-    @Test
     public void generateQueryLog() throws Exception {
-        generateFDE();
         QueryEventBuilder ddlBuilder = new QueryEventBuilder("",
             "create database test_ddl",
             CollationCharset.utf8mb4Charset.getId(),
@@ -130,13 +169,9 @@ public class BinlogTest {
             (int) (System.currentTimeMillis() / 1000),
             1);
         len += queryEventBuilder.write(output);
-        FileUtils.writeByteArrayToFile(new File(filePath), output.toBytes(), 0, len, true);
-        test();
     }
 
-    @Test
-    public void test() throws IOException, TableIdNotFoundException {
-        BinlogPosition position = new BinlogPosition("master-bin.000067", 124912750L, -1, -1);
+    public void testParseData() throws IOException, TableIdNotFoundException {
         localBinlogParser.dump(new SinkFunction() {
 
             @Override
@@ -188,18 +223,23 @@ public class BinlogTest {
                             for (Serializable s : changeData) {
                                 sb.append(s).append(",");
                             }
+                            System.out.println(sb.toString());
                             break;
                         case WRITE_ROWS_EVENT:
                             sb.append("INSERT \t");
                             for (Serializable s : data) {
                                 sb.append(s).append(",");
                             }
+                            System.out.println(sb.toString());
+                            for (int j = 0; j < data.length; j++) {
+                                Computer computer = assertCallback.get(j);
+                                Assert.assertEquals(computer.errorMsg, computer.a, data[j]);
+                            }
                             break;
                         case DELETE_ROWS_EVENT:
                             break;
                         }
                         sb.append("\nrows end ---------");
-                        System.out.println(sb.toString());
                     }
 
                 }
@@ -230,9 +270,18 @@ public class BinlogTest {
         });
     }
 
-    @Test
-    public void testEncode() {
-        Charset charset = Charset.defaultCharset();
-        System.out.println(charset.newEncoder().maxBytesPerChar());
+    public void test(Serializable a, String msg) {
+        assertCallback.add(new Computer(a, msg));
     }
+
+    class Computer {
+        public Serializable a;
+        public String errorMsg;
+
+        public Computer(Serializable a, String errorMsg) {
+            this.a = a;
+            this.errorMsg = errorMsg;
+        }
+    }
+
 }

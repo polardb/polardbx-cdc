@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -107,13 +107,13 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         return true;
     }
 
-    public void applyBase(BinlogPosition position, LogicMetaTopology topology) {
+    public void applyBase(BinlogPosition position, LogicMetaTopology topology, String cmdId) {
         applySnapshotInternal(topology);
         DDLRecord record = DDLRecord.builder().schemaName("*").ddlSql(GSON.toJson(snapshot()))
             .metaInfo(GSON.toJson(topology)).build();
         try {
             if (applyBaseFlag.compareAndSet(false, true)) {
-                applyToDb(position, record, MetaType.SNAPSHOT.getValue(), null);
+                applyToDb(position, record, MetaType.SNAPSHOT.getValue(), null, cmdId);
             }
         } catch (Throwable t) {
             applyBaseFlag.compareAndSet(true, false);
@@ -121,7 +121,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         }
     }
 
-    public boolean apply(BinlogPosition position, DDLRecord record, String extra) {
+    public boolean apply(BinlogPosition position, DDLRecord record, String extra, String cmdId) {
         boolean checkResult = checkBeforeApply(position.getRtso(), record.getSchemaName(), record.getTableName(),
             record.getDdlSql(), record.getId(), record.getJobId());
 
@@ -148,11 +148,11 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
 
             // 对于create if not exists和drop if exists，如果checkResult为false，不记录到binlog_logic_meta_history，以避免数据膨胀
             // 有时候有些系统(比如DTS)会通过create if not exists的方式维持心跳，如果记录这些信息到history表，会导致数据暴增
-            applyToDb(position, record, MetaType.DDL.getValue(), extra);
+            applyToDb(position, record, MetaType.DDL.getValue(), extra, cmdId);
             Printer.tryPrint(position, record.getSchemaName(), record.getTableName(), this);
         } else {
             if (DynamicApplicationConfig.getBoolean(META_DDL_RECORD_PERSIST_SQL_WITH_EXISTS)) {
-                applyToDb(position, record, MetaType.DDL.getValue(), extra);
+                applyToDb(position, record, MetaType.DDL.getValue(), extra, cmdId);
                 Printer.tryPrint(position, record.getSchemaName(), record.getTableName(), this);
             }
         }
@@ -279,7 +279,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
     /**
      * 快照备份到存储, 这里只需要备份变动的table
      */
-    private void applyToDb(BinlogPosition position, DDLRecord record, byte type, String extra) {
+    public void applyToDb(BinlogPosition position, DDLRecord record, byte type, String extra, String cmdId) {
         if (position == null || position.getRtso().compareTo(maxTsoWithInit) <= 0) {
             return;
         }
@@ -292,6 +292,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
                 .ddl(record.getDdlSql())
                 .topology(record.getMetaInfo())
                 .type(type)
+                .instructionId(cmdId)
                 .extInfo(record.getExtInfo() != null ? GSON.toJson(record.getExtInfo()) : null)
                 .ddlRecordId(record.getId())
                 .ddlJobId(record.getJobId())

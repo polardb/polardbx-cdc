@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -57,7 +57,7 @@ import java.util.regex.Pattern;
 @Slf4j
 public class DdlHelper {
 
-    private static Pattern tsoPattern = Pattern.compile("# POLARX_TSO=([\\W\\w]+)\n");
+    private static Pattern tsoPattern = Pattern.compile("# POLARX_TSO=([\\d]+)\n");
     private static Pattern originSqlPattern = Pattern.compile("# POLARX_ORIGIN_SQL=([\\W\\w]+)\n#");
 
     public static boolean checkDdlDone(String sql, String schema, DbMetaCache dbMetaCache) {
@@ -161,7 +161,7 @@ public class DdlHelper {
         return createTable.toString();
     }
 
-    public static boolean getDdlLock(String ddlTso, String sql) {
+    public static boolean getDdlLock(String ddlTso, String sql, RplDdl outputDdl) {
         // get ddl lock
         RplDdl existDdl = DbTaskMetaManager.getDdl(ddlTso);
         if (existDdl == null) {
@@ -175,13 +175,17 @@ public class DdlHelper {
                 ddl.setJobId(0L);
                 ddl.setState(DdlState.NOT_START.getValue());
                 ddl.setDdlStmt(sql);
-                DbTaskMetaManager.addDdl(ddl);
+                existDdl = DbTaskMetaManager.addDdl(ddl);
+                outputDdl.setId(existDdl.getId());
+                outputDdl.setState(existDdl.getState());
                 return true;
             } catch (Throwable e) {
                 log.error("failed to get ddl lock", e);
                 return false;
             }
         } else {
+            outputDdl.setId(existDdl.getId());
+            outputDdl.setState(existDdl.getState());
             return TaskContext.getInstance().getTaskId() == existDdl.getTaskId();
         }
     }

@@ -5,7 +5,7 @@
  * You may obtain a copy of the License at
  * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,7 @@ package com.aliyun.polardbx.binlog.extractor;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.ServerConfigUtil;
@@ -26,6 +27,7 @@ import com.aliyun.polardbx.binlog.canal.LogEventHandler;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
 import com.aliyun.polardbx.binlog.domain.BinlogParameter;
 import com.aliyun.polardbx.binlog.domain.DbHostVO;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -69,17 +71,21 @@ public class BinlogExtractor implements Extractor {
         "select d.phy_db_name from db_group_info d inner join group_detail_info g on d.group_name = g.group_name where storage_inst_id = '%s';";
     private static final String QUERY_FOR_VERSION = "select version()";
     private static final String QUERY_START_CMD = "select tso from binlog_logic_meta_history order by id asc limit 1";
+    private static final String cnVersion = getCnVersion();
 
-    private static String cnVersion = getCnVersion();
-
+    private final HashSet<String> cdcSchemaSet = new HashSet<>();
     private AuthenticationInfo authenticationInfo;
     private LogEventHandler<?> logEventHandler;
     private Storage storage;
-    private final HashSet<String> cdcSchemaSet = new HashSet<>();
     private String localBinlogFilePath;
     private List<LogEventFilter<?>> processLogEventFilter = Lists.newArrayList();
     private CanalBootstrap canalBootstrap;
     private String startCmdTSO = null;
+
+    private static String getCnVersion() {
+        JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+        return polarxTemplate.queryForObject(QUERY_FOR_VERSION, String.class);
+    }
 
     public void setLogEventHandler(LogEventHandler<?> logEventHandler) {
         this.logEventHandler = logEventHandler;
@@ -128,7 +134,9 @@ public class BinlogExtractor implements Extractor {
             if (schemaName.endsWith("single")) {
                 continue;
             }
-            cdcSchemaSet.add(schemaName);
+            if (schemaName.startsWith("__cdc__")) {
+                cdcSchemaSet.add(schemaName);
+            }
         }
 
         List<String> startCmdTSOList = metaTemplate.queryForList(QUERY_START_CMD, String.class);
@@ -184,10 +192,16 @@ public class BinlogExtractor implements Extractor {
     private void addDefaultFilter(String startTSO) {
 
         long serverId = ServerConfigUtil.getGlobalNumberVar("SERVER_ID");
+        String clusterType = DynamicApplicationConfig.getClusterType();
 
         logger.info("starting binlog extractor serverId : " + serverId);
 
-        EventAcceptFilter acceptFilter = new EventAcceptFilter(authenticationInfo.getStorageInstId(), true);
+        PolarDbXTableMetaManager dbTableMetaManager =
+            new PolarDbXTableMetaManager(authenticationInfo.getStorageInstId(), authenticationInfo);
+        dbTableMetaManager.init();
+
+        EventAcceptFilter acceptFilter =
+            new EventAcceptFilter(authenticationInfo.getStorageInstId(), true, dbTableMetaManager, cdcSchemaSet);
         acceptFilter.addAcceptEvent(LogEvent.FORMAT_DESCRIPTION_EVENT);
         // accept dml
         acceptFilter.addAcceptEvent(LogEvent.WRITE_ROWS_EVENT);
@@ -214,10 +228,10 @@ public class BinlogExtractor implements Extractor {
         // 合并完事务后,要在合并事务是识别出逻辑DDL，，可以并发整形
         canalBootstrap.addLogFilter(new TransactionBufferEventFilter(storage));
         // 整形
-        canalBootstrap.addLogFilter(new RebuildEventLogFilter(serverId, acceptFilter, cdcSchemaSet));
+        canalBootstrap.addLogFilter(new RebuildEventLogFilter(serverId, acceptFilter,
+            ClusterTypeEnum.BINLOG_X.name().equals(clusterType), dbTableMetaManager));
 
         canalBootstrap.addLogFilter(new MinTSOFilter(startTSO));
-
     }
 
     @Override
@@ -249,11 +263,6 @@ public class BinlogExtractor implements Extractor {
             binlogPosition.setTso(-1);
         }
         return binlogPosition;
-    }
-
-    private static String getCnVersion() {
-        JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
-        return polarxTemplate.queryForObject(QUERY_FOR_VERSION, String.class);
     }
 
     public List<LogEventFilter<?>> getProcessLogEventFilter() {

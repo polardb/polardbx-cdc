@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -80,6 +80,8 @@ public class DruidDataSourceWrapper extends DruidDataSource
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("tinyInt1isBit", "false");
         // 16MB，兼容一下ADS不支持mysql，5.1.38+的server变量查询为大写的问题，人肉指定一下最大包大小
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("maxAllowedPacket", "1073741824");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useServerPrepStmts", "false");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("pedantic", "true");
     }
 
     protected ReentrantReadWriteLock readWriteLock;
@@ -89,22 +91,6 @@ public class DruidDataSourceWrapper extends DruidDataSource
     protected LoadingCache<String, DruidDataSource> nestedDataSources;
     protected volatile DruidDataSource proxyDataSource;
     protected ScheduledExecutorService scheduledExecutorService;
-
-//    private volatile static DruidDataSourceWrapper dataSource;
-//    public static DruidDataSourceWrapper getInstance() {
-//        if (dataSource == null) {
-//            synchronized (DruidDataSourceWrapper.class) {
-//                if (dataSource == null) {
-//                    dataSource = new DruidDataSourceWrapper();
-//                }
-//            }
-//        }
-//        return dataSource;
-//    }
-//
-//    public DruidDataSourceWrapper() {
-//
-//    }
 
     public DruidDataSourceWrapper(String dbName, String user,
                                   String passwd, String encoding, int minPoolSize,
@@ -216,6 +202,14 @@ public class DruidDataSourceWrapper extends DruidDataSource
         });
         scheduledExecutorService
             .scheduleAtFixedRate(this::scan, SERVER_CHECK_INTERVAL, SERVER_CHECK_INTERVAL, TimeUnit.MILLISECONDS);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                logger.info("## stop pooled druid data source.");
+                this.close();
+            } catch (Throwable e) {
+                logger.warn("##something goes wrong when closing pooled druid data source.", e);
+            }
+        }));
     }
 
     private void scan() {

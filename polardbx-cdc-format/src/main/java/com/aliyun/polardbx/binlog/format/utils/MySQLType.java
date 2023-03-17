@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -43,15 +43,15 @@ public enum MySQLType {
 
     MYSQL_TYPE_ENUM(247, 2), MYSQL_TYPE_SET(248, 2),
 
-    MYSQL_TYPE_TINY_BLOB(249, 1), MYSQL_TYPE_MEDIUM_BLOB(250, 1),
+    MYSQL_TYPE_TINYBLOB(249, 1), MYSQL_TYPE_MEDIUMBLOB(250, 1),
 
-    MYSQL_TYPE_LONG_BLOB(251, 1), MYSQL_TYPE_BLOB(252, 1),
+    MYSQL_TYPE_LONGBLOB(251, 1), MYSQL_TYPE_BLOB(252, 1),
 
-    MYSQL_TYPE_VAR_STRING(253, 2), MYSQL_TYPE_STRING(254, 2),
+    MYSQL_TYPE_VARSTRING(253, 2), MYSQL_TYPE_STRING(254, 2),
 
-    MYSQL_TYPE_GEOMETRY(255, 1), MYSQL_TYPE_BOOL(244, 1)/*< Currently just a placeholder */, MYSQL_TYPE_TYPED_ARRAY(20,
-        0),  /*< Used for replication only */
-    MYSQL_TYPE_INVALID(243, 0);
+    MYSQL_TYPE_GEOMETRY(255, 1), MYSQL_TYPE_BOOL(244, 1)/*< Currently just a placeholder */,
+
+    MYSQL_TYPE_TYPED_ARRAY(20, 0),  /*< Used for replication only */MYSQL_TYPE_INVALID(243, 0);
 
     private final int type;
     private final int metaLen;

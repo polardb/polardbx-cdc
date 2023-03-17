@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,7 +19,7 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.metrics.MergeMetrics;
+import com.aliyun.polardbx.binlog.metrics.TransmitMetrics;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
 import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.protocol.MessageType;
@@ -165,7 +165,7 @@ public class LogEventTransmitter implements Transmitter {
     public void dump(String startTso, TxnOutputStream<DumpReply> outputStream) throws InterruptedException {
         final AtomicBoolean first = new AtomicBoolean(true);
         while (running) {
-            MergeMetrics.get().setDumpingQueueSize(dumpingQueueSize.get());
+            TransmitMetrics.get().setDumpingQueueSize(dumpingQueueSize.get());
             if (dryRun && dryRunMode == 1) {
                 pollFromDumpingQueue();
                 continue;
@@ -200,8 +200,8 @@ public class LogEventTransmitter implements Transmitter {
     public void transmit(MessageEvent messageEvent) {
         try {
             TxnToken txnToken = messageEvent.getToken();
-            MergeMetrics.get().setTransmitQueuedSize(transmitQueueSize.get());
-            MergeMetrics.get().setDelayTimeOnTransmit(System.currentTimeMillis() - messageEvent.getTsoTimestamp());
+            TransmitMetrics.get().setTransmitQueuedSize(transmitQueueSize.get());
+            TransmitMetrics.get().setDelayTimeOnTransmit(System.currentTimeMillis() - messageEvent.getTsoTimestamp());
 
             if (txnToken.getType() == TxnType.FORMAT_DESC) {
                 logger.info("received a format_desc txn token in log event transmitter, tso is :" + txnToken.getTso());
@@ -275,7 +275,7 @@ public class LogEventTransmitter implements Transmitter {
                         sendData(buffer);
                         sendEnd();
                         clearCache(messageEvent);
-                        MergeMetrics.get().incrementSingleTransmitCount();
+                        TransmitMetrics.get().incrementSingleTransmitCount();
                     } else {
                         checkIfFlushChunk(messageEvent, false);
                     }
@@ -356,7 +356,7 @@ public class LogEventTransmitter implements Transmitter {
 
         DumpReply dumpReply = builder.setPacketMode(packetMode).build();
         addToDumpingQueue(dumpReply);
-        MergeMetrics.get().addChunkTransmitCount(messageChunk.getMessageEvents().size());
+        TransmitMetrics.get().addChunkTransmitCount(messageChunk.getMessageEvents().size());
         messageChunk.clear();
     }
 
@@ -395,9 +395,6 @@ public class LogEventTransmitter implements Transmitter {
                 .setSchema(checkAndGetSchemaName(eventData))
                 .setTable(checkAndGetTableName(eventData))
                 .build();
-            if (taskType == TaskType.Relay) {
-                txnItem = txnItem.toBuilder().setTraceId(txnItemRef.getTraceId()).build();
-            }
             items.add(txnItem);
 
             if ((chunkMode == ChunkMode.MEMSIZE && memSize >= chunkItemSize * CHUNK_MEM_UNIT) ||

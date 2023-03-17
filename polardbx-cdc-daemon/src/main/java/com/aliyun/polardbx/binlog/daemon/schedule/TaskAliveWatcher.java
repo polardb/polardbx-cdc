@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,10 +23,10 @@ import com.aliyun.polardbx.binlog.daemon.pipeline.CommandPipeline;
 import com.aliyun.polardbx.binlog.daemon.vo.CommandResult;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
-import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.RelayFinalTaskInfoMapper;
 import com.aliyun.polardbx.binlog.domain.BinlogTaskConfigStatus;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
@@ -50,6 +50,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_ROCKS_BASE_PATH;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TASK_STOP_NOLOCAL_WHITLIST;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_PATH;
@@ -67,8 +68,8 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
     private final DumperInfoMapper dumperInfoMapper =
         SpringContextHolder.getObject(DumperInfoMapper.class);
-    private final RelayFinalTaskInfoMapper taskInfoMapper =
-        SpringContextHolder.getObject(RelayFinalTaskInfoMapper.class);
+    private final BinlogTaskInfoMapper taskInfoMapper =
+        SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
 
     public TaskAliveWatcher(String cluster, String clusterType, String taskName, int interval) {
         super(cluster, clusterType, taskName, interval);
@@ -120,16 +121,17 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
 
     private void process(BinlogTaskConfig config) throws Exception {
         Optional<CommonInfo> infoOptional;
-        if (TaskType.Relay.name().equals(config.getRole()) || TaskType.Final.name().equals(config.getRole())) {
+        if (TaskType.Relay.name().equals(config.getRole()) || TaskType.Final.name().equals(config.getRole())
+            || TaskType.Dispatcher.name().equals(config.getRole())) {
             infoOptional = taskInfoMapper.selectOne(
-                s -> s.where(RelayFinalTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                    .and(RelayFinalTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
-                .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated()));
+                s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
+                    .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
+                .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(), s.getVersion()));
         } else {
             infoOptional = dumperInfoMapper.selectOne(
                 s -> s.where(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                     .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
-                .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated()));
+                .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(), s.getVersion()));
         }
 
         if (infoOptional.isPresent()) {
@@ -140,20 +142,21 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             CommonInfo info = infoOptional.get();
             long now = System.currentTimeMillis();
             int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS);
-            if (now - info.startTime.getTime() > heartbeatTimeout * 2
-                && now - info.heartbeatTime.getTime() > heartbeatTimeout) {
-                MonitorManager.getInstance().triggerAlarm(MonitorType.PROCESS_HEARTBEAT_TIMEOUT_WARNING, info.name);
+            if (now - info.heartbeatTime.getTime() > heartbeatTimeout) {
 
                 //心跳超时，但进程还在，一个典型的场景：大数据量场景下GC很频繁，导致cpu使用率很高，Task进程的心跳会出现超时
                 if (!isTaskProcessAlive(config.getTaskName())) {
+                    MonitorManager.getInstance().triggerAlarm(MonitorType.PROCESS_HEARTBEAT_TIMEOUT_WARNING, info.name);
                     log.info("detected heartbeat timeout, and task is already down, prepare to restart, task name {}.",
                         config.getTaskName());
-                    cleanInfo(config);
-                    restartTask(config.getTaskName(), config.getMem());
+                    restartTask(config, config.getTaskName(), config.getMem());
                 } else {
                     log.info("detected heartbeat timeout, but task is still alive, will not restart, task name {}.",
                         config.getTaskName());
                 }
+            }
+            if (info.version < config.getVersion()) {
+                restartTask(config, config.getTaskName(), config.getMem());
             }
         } else {
             startTask(config.getTaskName(), config.getMem(), false);
@@ -226,7 +229,7 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private void restartTask(String taskName, int mem) throws Exception {
+    private void restartTask(BinlogTaskConfig config, String taskName, int mem) throws Exception {
         //检查最近启动时间，小于2分钟，则不重启
         CommandResult result = commander.execCommand(
             new String[] {
@@ -247,12 +250,14 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         }
 
         commander.stopTask(taskName);
-        log.info("task {} is stopped.", taskName);
+        cleanInfo(config);
+        log.info("task {} is restarted.", taskName);
         startTask(taskName, mem, true);
     }
 
     private void cleanInfo(BinlogTaskConfig config) {
-        if (TaskType.Relay.name().equals(config.getRole()) || TaskType.Final.name().equals(config.getRole())) {
+        if (TaskType.Relay.name().equals(config.getRole()) || TaskType.Final.name().equals(config.getRole())
+            || TaskType.Dispatcher.name().equals(config.getRole())) {
             deleteTaskInfo(config.getTaskName());
         } else {
             deleteDumperInfo(config.getTaskName());
@@ -269,19 +274,19 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
 
     private void deleteTaskInfo(String name) {
         taskInfoMapper.delete(s ->
-            s.where(RelayFinalTaskInfoDynamicSqlSupport.clusterId,
+            s.where(BinlogTaskInfoDynamicSqlSupport.clusterId,
                 SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
-                .and(RelayFinalTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
+                .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
     }
 
     private void tryCleanResource(Set<String> localTasks) {
-        tryCleanRocksDb(localTasks);
+        tryCleanRocksDb(DynamicApplicationConfig.getString(STORAGE_PERSIST_PATH), localTasks);
+        tryCleanRocksDb(DynamicApplicationConfig.getString(BINLOG_X_ROCKS_BASE_PATH), localTasks);
         tryCleanRdsBinlog(localTasks);
     }
 
-    private void tryCleanRocksDb(Set<String> localTasks) {
+    private void tryCleanRocksDb(String basePath, Set<String> localTasks) {
         try {
-            String basePath = DynamicApplicationConfig.getString(STORAGE_PERSIST_PATH);
             File baseDir = new File(basePath);
             if (baseDir.exists()) {
                 File[] files = baseDir.listFiles((dir, name) -> !localTasks.contains(name));
@@ -334,11 +339,13 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         String name;
         Date heartbeatTime;
         Date startTime;
+        long version;
 
-        public CommonInfo(String name, Date heartbeatTime, Date startTime) {
+        public CommonInfo(String name, Date heartbeatTime, Date startTime, Long version) {
             this.name = name;
             this.heartbeatTime = heartbeatTime;
             this.startTime = startTime;
+            this.version = version;
         }
 
         @Override

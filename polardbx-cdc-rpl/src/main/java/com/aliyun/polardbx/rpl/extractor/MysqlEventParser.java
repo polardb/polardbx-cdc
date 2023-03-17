@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -62,7 +62,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     protected BinlogEventSink eventSink;
     protected boolean tryUseMysqlMinPosition;
     protected BinlogPosition startPosition;
-    protected int MAX_RETRY = 20;
+    protected int MAX_RETRY = 1;
     protected boolean autoRetry = true;
     protected boolean directExitWhenStop = true;
     protected IErrorHandler userDefinedHandler;
@@ -129,7 +129,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
             boolean alreadyDeal = userDefinedHandler.handle(e);
             if (directExitWhenStop && !alreadyDeal) {
                 log.error("encounter uncaught exception, process will exit.", e);
-                Runtime.getRuntime().halt(1);
+                System.exit(-1);
             }
         });
         parseThread.setName(String.format("address = %s , EventParser",
@@ -140,24 +140,26 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     @Override
     protected BinlogPosition findStartPosition(ErosaConnection connection, BinlogPosition position) throws IOException {
         BinlogPosition startPosition = findStartPositionInternal(connection, position);
+        if (startPosition == null) {
+            return null;
+        }
         if (needTransactionPosition.get()) {
-            log.warn("prepare to find last position : " + startPosition.toString());
+            log.warn("prepare to find last position : " + startPosition);
             Long preTransactionStartPosition = findTransactionBeginPosition(connection, startPosition);
             if (!preTransactionStartPosition.equals(startPosition.getPosition())) {
-                log.warn("find new start Transaction Position , old : ",
+                log.warn("find new start Transaction Position , old : {}",
                     startPosition.getPosition() + ", new : " + preTransactionStartPosition);
 
-                BinlogPosition newStartPosition = new BinlogPosition(startPosition.getFileName(),
+                startPosition = new BinlogPosition(startPosition.getFileName(),
                     preTransactionStartPosition,
                     startPosition.getMasterId(),
                     startPosition.getTimestamp());
-                startPosition = newStartPosition;
             }
             needTransactionPosition.compareAndSet(true, false);
         }
 
         // 兼容一下以前的dbsync的无文件前缀,添加一个默认值
-        if (startPosition != null && startPosition.getFilePattern() == null) {
+        if (startPosition.getFilePattern() == null) {
             connection.reconnect();
             BinlogPosition endPosition = findEndPosition((MysqlConnection) connection);
             startPosition.setFilePattern(endPosition.getFilePattern());
@@ -598,6 +600,11 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                     preDump(erosaConnection);
 
                     erosaConnection.connect();
+
+                    BinlogPosition refreshedPosition = StatisticalProxy.getInstance().getLatestPosition();
+                    if (refreshedPosition != null) {
+                        startPosition = refreshedPosition;
+                    }
 
                     // 5. 获取最后的位置信息
                     BinlogPosition processedStartPosition = findStartPosition(erosaConnection, startPosition);

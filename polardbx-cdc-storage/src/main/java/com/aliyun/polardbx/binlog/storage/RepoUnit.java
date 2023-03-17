@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,6 +28,8 @@ import org.rocksdb.WriteOptions;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -42,11 +44,13 @@ public class RepoUnit {
     ReadOptions readOptions;
     boolean disableWal;
     boolean checkNull;
+    boolean cleanFileWhenClose;
 
-    public RepoUnit(String persistPath, boolean disableWal, boolean checkNull) {
+    public RepoUnit(String persistPath, boolean disableWal, boolean checkNull, boolean cleanFileWhenClose) {
         this.persistPath = persistPath;
         this.disableWal = disableWal;
         this.checkNull = checkNull;
+        this.cleanFileWhenClose = cleanFileWhenClose;
     }
 
     public void put(byte[] key, byte[] value) throws RocksDBException {
@@ -76,13 +80,23 @@ public class RepoUnit {
         rocksDB.deleteRange(writeOptions, beginKey, endKey);
     }
 
-    public List<Pair<byte[], byte[]>> getRange(byte[] key, int count) {
-        List<Pair<byte[], byte[]>> result = new ArrayList<>();
+    public boolean exists(byte[] key) throws RocksDBException {
+        byte[] value = rocksDB.get(readOptions, key);
+        return value != null && value.length > 0;
+    }
+
+    public LinkedList<Pair<byte[], byte[]>> getRange(byte[] key, int count, long maxByteSize) {
+        LinkedList<Pair<byte[], byte[]>> result = new LinkedList<>();
         try (RocksIterator iterator = rocksDB.newIterator(readOptions)) {
             int i = 0;
+            long byteSize = 0;
             for (iterator.seek(key); iterator.isValid() && i < count; iterator.next()) {
                 Pair<byte[], byte[]> pair = Pair.of(iterator.key(), iterator.value());
                 result.add(pair);
+                byteSize += pair.getValue().length;
+                if (byteSize >= maxByteSize && i > 1) {
+                    break;
+                }
                 i++;
             }
         }
@@ -122,7 +136,33 @@ public class RepoUnit {
     public byte[] getMaxKey() {
         try (RocksIterator iterator = rocksDB.newIterator(readOptions)) {
             iterator.seekToLast();
-            return iterator.key();
+            if (iterator.isValid()) {
+                return iterator.key();
+            } else {
+                return null;
+            }
+        }
+    }
+
+    public Pair<byte[], byte[]> seekPre(byte[] target, Pair<byte[], byte[]> boundPair) {
+        ReadOptions ro = new ReadOptions(readOptions);
+        if (boundPair != null) {
+            ro.setIterateLowerBound(new Slice(boundPair.getKey()));
+            ro.setIterateUpperBound(new Slice(boundPair.getValue()));
+        }
+        try (RocksIterator iterator = rocksDB.newIterator(ro)) {
+            iterator.seekForPrev(target);
+            if (iterator.isValid()) {
+                if (Arrays.equals(target, iterator.key())) {
+                    iterator.prev();
+                    if (iterator.isValid()) {
+                        return Pair.of(iterator.key(), iterator.value());
+                    }
+                } else {
+                    return Pair.of(iterator.key(), iterator.value());
+                }
+            }
+            return null;
         }
     }
 
@@ -177,11 +217,12 @@ public class RepoUnit {
                 rocksDB.close();
             }
 
-            File path = new File(persistPath);
-            if (path.exists()) {
-                FileUtils.deleteDirectory(path);
+            if (cleanFileWhenClose) {
+                File path = new File(persistPath);
+                if (path.exists()) {
+                    FileUtils.deleteDirectory(path);
+                }
             }
-
             log.info("Repo Unit is closed with path : " + persistPath);
         } catch (Throwable t) {
             log.error("Repo Unit is closing failed with path : " + persistPath, t);

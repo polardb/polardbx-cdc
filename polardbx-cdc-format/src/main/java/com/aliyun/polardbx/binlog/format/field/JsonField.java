@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,9 +16,11 @@ package com.aliyun.polardbx.binlog.format.field;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONException;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.canal.binlog.JsonConversion;
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
+import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -29,28 +31,52 @@ import java.util.Map;
  */
 public class JsonField extends BlobField {
 
-    private static int SMALL_OFFSET_SIZE = 2;
+    private static final int SMALL_OFFSET_SIZE = 2;
 
+    private static final int KEY_ENTRY_SIZE_SMALL = 2 + SMALL_OFFSET_SIZE;
 
-    private static int KEY_ENTRY_SIZE_SMALL = 2 + SMALL_OFFSET_SIZE;
+    private static final int VALUE_ENTRY_SIZE_SMALL = 1 + SMALL_OFFSET_SIZE;
 
-
-    private static int VALUE_ENTRY_SIZE_SMALL = 1 + SMALL_OFFSET_SIZE;
-
-    public JsonField(CreateField createField) {
+    public JsonField(CreateField createField) throws InvalidInputDataException {
         super(createField);
 
-        ByteBuffer buffer = ByteBuffer.allocate(1024);
-        buffer.order(ByteOrder.LITTLE_ENDIAN);
-        JSONObject jsonObject = JSON.parseObject(this.data);
-        buffer.put((byte) 0);
-        serialJsonValue(buffer, 0, jsonObject);
-        int pos = buffer.position();
-        buffer.flip();
-        contents = new byte[pos];
-        buffer.get(contents);
-        fieldLength = pos;
+        // prepare and check
+        check();
+
+        if (!isNull()) {
+            // parse and build
+            String value = buildDataStr();
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
+            buffer.order(ByteOrder.LITTLE_ENDIAN);
+            JSON jsonObject = (JSON) JSON.parse(value);
+            buffer.put((byte) 0);
+            serialJsonValue(buffer, 0, jsonObject);
+            int pos = buffer.position();
+            buffer.flip();
+            contents = new byte[pos];
+            buffer.get(contents);
+            fieldLength = pos;
+        }
         calculatePackLength();
+    }
+
+    private void check() throws InvalidInputDataException {
+        if (!isNull()) {
+            // 正常应该都可以parse过，但在执行modify column时，数据可能被截断，则会出现解析失败，如：
+            // 将json类型调整为varchar类型，alter table t_1 modify column c_json varchar(10)
+            // 部分物理表已经变更为varchar，此时进行插入，完整的json数据会被截断，此处拿到截断的数据，就会报错
+            String value = buildDataStr();
+            try {
+                JSON.parse(value);
+            } catch (JSONException e) {
+                throw new InvalidInputDataException("invalid input data : " + value, e);
+            }
+        }
+    }
+
+    @Override
+    public MySQLType getMysqlType() {
+        return MySQLType.MYSQL_TYPE_JSON;
     }
 
     private void serialJsonValue(ByteBuffer buffer, int typeOffset, Object o) {
@@ -86,11 +112,9 @@ public class JsonField extends BlobField {
         } else if (o instanceof Double) {
             buffer.putDouble((Double) o);
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_DOUBLE);
-            buffer.putShort(typeOffset + 1, (short) 8);
         } else if (o instanceof Boolean) {
             buffer.put((byte) (((Boolean) o) ? JsonConversion.JSONB_TRUE_LITERAL : JsonConversion.JSONB_FALSE_LITERAL));
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_LITERAL);
-            buffer.putShort(typeOffset + 1, (short) 1);
         } else if (o == null) {
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_LITERAL);
             buffer.put((byte) JsonConversion.JSONB_NULL_LITERAL);
@@ -136,16 +160,17 @@ public class JsonField extends BlobField {
         int sizePos = buffer.position();
         buffer.putShort((short) 0);
 
-        int entrySize = VALUE_ENTRY_SIZE_SMALL;
-        int entryPos = buffer.position();
-        for (int i = 0; i < entrySize * size; i++) {
+        int mark = buffer.position();
+        for (int i = 0; i < size; i++) {
             buffer.put((byte) 0);
+            buffer.putShort((short) 0);
         }
 
         for (int i = 0; i < size; i++) {
             Object o = array.get(i);
-            buffer.putShort(entryPos + 1, (short) (buffer.position() - startPosition));
-            serialJsonValue(buffer, entryPos += entrySize, o);
+            int typeOffset = mark + i * VALUE_ENTRY_SIZE_SMALL;
+            buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
+            serialJsonValue(buffer, typeOffset, o);
         }
         buffer.putShort(sizePos, (short) (buffer.position() - startPosition));
     }

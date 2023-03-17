@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,9 +14,16 @@
  */
 package com.aliyun.polardbx.binlog.dumper;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.TypeReference;
 import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManager;
+import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManagerCollection;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileReader;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.rpc.cdc.BinaryLog;
@@ -45,13 +52,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 
-import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.Constants.STREAM_NAME_GLOBAL;
 import static io.grpc.internal.GrpcUtil.getThreadFactory;
 
 /**
@@ -60,36 +69,49 @@ import static io.grpc.internal.GrpcUtil.getThreadFactory;
 @Slf4j
 public class CdcServer {
 
+    private static final Logger metaLogger = LogUtil.getMetaLogger();
     private final String taskName;
-    private final LogFileManager logFileManager;
+    private final LogFileManagerCollection logFileManagerCollection;
     private final int port;
-
+    private final ExecutorService executor;
+    private final BinlogTaskConfig taskConfig;
     private Server server;
     private boolean localMode;
-    private final ExecutorService executor;
-    private static Logger metaLogger = LogUtil.getMetaLogger();
 
-    public CdcServer(String taskName, LogFileManager logFileManager, int port) {
+    public CdcServer(String taskName, LogFileManagerCollection logFileManagerCollection, int port,
+                     BinlogTaskConfig taskConfig) {
         this.taskName = taskName;
-        this.logFileManager = logFileManager;
+        this.logFileManagerCollection = logFileManagerCollection;
         this.port = port;
-        this.executor = Executors.newCachedThreadPool(getThreadFactory("Cdc-server-thread" + "-%d", true));
+        this.taskConfig = taskConfig;
+        this.executor = Executors.newCachedThreadPool(getThreadFactory("Cdc-server-thread" + "-%d", false));
     }
 
     public void start() {
         if (!localMode) {
-            if (!RuntimeLeaderElector.isDumperLeader(taskName)) {
+            //多流模式没有dumper leader
+            if (TaskType.Dumper.name().equals(taskConfig.getRole())
+                && !RuntimeLeaderElector.isDumperLeader(taskName)) {
                 return;
             }
         }
         CdcServiceGrpc.CdcServiceImplBase svc = new CdcServiceGrpc.CdcServiceImplBase() {
             @Override
             public void showBinaryLogs(Request request, StreamObserver<BinaryLog> responseObserver) {
-                List<File> files = logFileManager.getAllLogFilesOrdered();
-                for (int i = 0; i < files.size(); i++) {
+                log.info("CDC Server receive a show binary logs request, with stream name: {}",
+                    request.getStreamName());
+                LogFileManager logFileManager = getLogFileManager(request.getStreamName());
+                List<CdcFile> files;
+                if (request.getExcludeRemoteFiles()) {
+                    files = logFileManager.getAllLocalBinlogFilesOrdered();
+                } else {
+                    files = logFileManager.getAllBinlogFilesOrdered();
+                }
+
+                for (CdcFile file : files) {
                     responseObserver.onNext(BinaryLog.newBuilder()
-                        .setLogName(files.get(i).getName())
-                        .setFileSize(files.get(i).length())
+                        .setLogName(file.getName())
+                        .setFileSize(file.size())
                         .build());
                 }
                 responseObserver.onCompleted();
@@ -98,24 +120,31 @@ public class CdcServer {
             @Override
             public void showBinlogEvents(ShowBinlogEventsRequest request,
                                          StreamObserver<BinlogEvent> responseObserver) {
+                log.info("CDC Server receive a show binlog events request, with stream name: {}, log name: {}",
+                    request.getStreamName(), request.getLogName());
                 final ServerCallStreamObserver<BinlogEvent> serverCallStreamObserver =
                     (ServerCallStreamObserver<BinlogEvent>) responseObserver;
+                LogFileManager logFileManager = getLogFileManager(request.getStreamName());
                 LogFileReader logFileReader = new LogFileReader(logFileManager);
-                String fileName = StringUtils.isEmpty(request.getLogName()) ? logFileManager
-                    .getMinBinlogFileName()
-                    : request.getLogName();
-                logFileReader.showBinlogEvent(fileName, request.getPos(), request.getOffset(), request.getRowCount(),
+                CdcFile cdcFile = StringUtils.isEmpty(request.getLogName()) ? logFileManager.getMinBinlogFile() :
+                    logFileManager.getBinlogFileByName(request.getLogName());
+                logFileReader.showBinlogEvent(cdcFile, request.getPos(), request.getOffset(), request.getRowCount(),
                     serverCallStreamObserver);
             }
 
             @Override
             public void showMasterStatus(Request request, StreamObserver<MasterStatus> responseObserver) {
+                log.info("CDC Server receive a show master status request, with stream name: {}",
+                    request.getStreamName());
+                LogFileManager logFileManager = getLogFileManager(request.getStreamName());
                 Cursor cursor = logFileManager.getLatestFileCursor();
                 if (cursor != null) {
                     responseObserver.onNext(MasterStatus.newBuilder().setFile(cursor.getFileName())
                         .setPosition(cursor.getFilePosition()).build());
                 } else {
-                    responseObserver.onNext(MasterStatus.newBuilder().setFile(logFileManager.getMaxBinlogFileName())
+                    CdcFile maxFile = logFileManager.getMaxBinlogFile();
+                    String fileName = maxFile == null ? "" : maxFile.getName();
+                    responseObserver.onNext(MasterStatus.newBuilder().setFile(fileName)
                         .setPosition(4).build());
                 }
                 responseObserver.onCompleted();
@@ -123,21 +152,37 @@ public class CdcServer {
 
             @Override
             public void dump(DumpRequest request, StreamObserver<DumpStream> responseObserver) {
+                log.info("CDC Server receive a dump request, with stream name: {}, file name: {}, position: {}, "
+                        + "registered: {}, ext: {}.", request.getStreamName(), request.getFileName(),
+                    request.getPosition(), request.getRegistered(), request.getExt());
 
                 final ServerCallStreamObserver<DumpStream> serverCallStreamObserver =
                     (ServerCallStreamObserver<DumpStream>) responseObserver;
 
+                LogFileManager logFileManager = getLogFileManager(request.getStreamName());
                 String fileName = request.getFileName();
-                log.info("dump {} {}", fileName, request.getPosition());
-
                 if (StringUtils.isEmpty(fileName)) {
-                    request = DumpRequest.newBuilder().setFileName(logFileManager.getMinBinlogFileName())
-                        .setPosition(
-                            request.getPosition())
+                    CdcFile cdcFile = logFileManager.getMinBinlogFile();
+                    String searchFile = cdcFile != null ? cdcFile.getName() : "";
+                    request = DumpRequest.newBuilder()
+                        .setFileName(searchFile)
+                        .setPosition(request.getPosition())
                         .build();
                 }
+
+                Map<String, String> ext = new HashMap<>();
+                if (StringUtils.isNotBlank(request.getExt())) {
+                    ext = JSON.parseObject(request.getExt(), new TypeReference<Map<String, String>>() {
+                    });
+                }
+
                 LogFileReader logFileReader = new LogFileReader(logFileManager);
-                logFileReader.binlogDump(request.getFileName(), request.getPosition(), serverCallStreamObserver);
+                logFileReader.binlogDump(
+                    request.getFileName(),
+                    request.getPosition(),
+                    request.getRegistered(),
+                    ext,
+                    serverCallStreamObserver);
             }
 
             @Override
@@ -147,6 +192,7 @@ public class CdcServer {
                 TxnOutputStream<DumpStream> txnOutputStream = new TxnOutputStream<>(serverCallStreamObserver);
                 txnOutputStream.init();
 
+                LogFileManager logFileManager = getLogFileManager(request.getStreamName());
                 executor.submit(() -> {
                     LogFileReader logFileReader = new LogFileReader(logFileManager);
                     txnOutputStream.setExecutingThead(Thread.currentThread());
@@ -223,6 +269,25 @@ public class CdcServer {
             } catch (Exception e) {
                 log.warn("cdc server stop fail", e);
             }
+        }
+    }
+
+    private LogFileManager getLogFileManager(String streamName) {
+        if (TaskType.Dumper.name().equals(taskConfig.getRole())) {
+            log.info("prepare to get LogFileManager for global binlog.");
+            return logFileManagerCollection.get(STREAM_NAME_GLOBAL);
+        } else if (TaskType.DumperX.name().equals(taskConfig.getRole())) {
+            log.info("prepare to get LogFileManager for binlog-x with stream name " + streamName);
+            if (StringUtils.isBlank(streamName)) {
+                throw new PolardbxException("stream name can`t be blank.");
+            }
+            LogFileManager logFileManager = logFileManagerCollection.get(streamName);
+            if (logFileManager == null) {
+                throw new PolardbxException("stream " + streamName + "is not working on this dumper.");
+            }
+            return logFileManager;
+        } else {
+            throw new PolardbxException("get LogFileManger error for role " + taskConfig.getRole());
         }
     }
 

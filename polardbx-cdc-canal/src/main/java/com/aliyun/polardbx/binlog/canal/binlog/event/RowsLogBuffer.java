@@ -3,9 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * </p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -264,17 +264,21 @@ public final class RowsLogBuffer {
             return null;
         } else {
             // Extracting field value from packed buffer.
-            return fetchValue(type, meta, isBinary, buffer, newCharsetName);
+            return fetchValue(type, meta, isBinary, buffer, newCharsetName, false);
         }
     }
 
+    public final Serializable fetchValue(int type, final int meta, boolean isBinary, boolean unsigned) {
+        return fetchValue(type, meta, isBinary, buffer, charsetName, unsigned);
+    }
+
     public final Serializable fetchValue(int type, final int meta, boolean isBinary) {
-        return fetchValue(type, meta, isBinary, buffer, charsetName);
+        return fetchValue(type, meta, isBinary, buffer, charsetName, false);
     }
 
     public final Serializable fetchValue(int type, final int meta, boolean isBinary, byte[] orginalData,
                                          String charsetName) {
-        return fetchValue(type, meta, isBinary, new LogBuffer(orginalData, 0, orginalData.length), charsetName);
+        return fetchValue(type, meta, isBinary, new LogBuffer(orginalData, 0, orginalData.length), charsetName, false);
     }
 
     /**
@@ -282,7 +286,8 @@ public final class RowsLogBuffer {
      *
      * @see mysql-5.1.60/sql/log_event.cc - log_event_print_value
      */
-    final Serializable fetchValue(int type, final int meta, boolean isBinary, LogBuffer buffer, String charsetName) {
+    final Serializable fetchValue(int type, final int meta, boolean isBinary, LogBuffer buffer, String charsetName,
+                                  boolean unsigned) {
         int len = 0;
 
         if (type == LogEvent.MYSQL_TYPE_STRING) {
@@ -317,43 +322,44 @@ public final class RowsLogBuffer {
             // XXX: How to check signed / unsigned?
             // value = unsigned ? Long.valueOf(buffer.getUint32()) :
             // Integer.valueOf(buffer.getInt32());
-            value = Integer.valueOf(buffer.getInt32());
+            value = unsigned ? Long.valueOf(buffer.getUint32()) :
+                Integer.valueOf(buffer.getInt32());
             javaType = Types.INTEGER;
             length = 4;
             break;
         }
         case LogEvent.MYSQL_TYPE_TINY: {
             // XXX: How to check signed / unsigned?
-            // value = Integer.valueOf(unsigned ? buffer.getUint8() :
-            // buffer.getInt8());
-            value = Integer.valueOf(buffer.getInt8());
+            value = Integer.valueOf(unsigned ? buffer.getUint8() :
+                buffer.getInt8());
+//            value = Integer.valueOf(buffer.getInt8());
             javaType = Types.TINYINT; // java.sql.Types.INTEGER;
             length = 1;
             break;
         }
         case LogEvent.MYSQL_TYPE_SHORT: {
             // XXX: How to check signed / unsigned?
-            // value = Integer.valueOf(unsigned ? buffer.getUint16() :
-            // buffer.getInt16());
-            value = Integer.valueOf((short) buffer.getInt16());
+            value = Integer.valueOf(unsigned ? buffer.getUint16() :
+                buffer.getInt16());
+//            value = Integer.valueOf((short) buffer.getInt16());
             javaType = Types.SMALLINT; // java.sql.Types.INTEGER;
             length = 2;
             break;
         }
         case LogEvent.MYSQL_TYPE_INT24: {
             // XXX: How to check signed / unsigned?
-            // value = Integer.valueOf(unsigned ? buffer.getUint24() :
-            // buffer.getInt24());
-            value = Integer.valueOf(buffer.getInt24());
+            value = Integer.valueOf(unsigned ? buffer.getUint24() :
+                buffer.getInt24());
+//            value = Integer.valueOf(buffer.getInt24());
             javaType = Types.INTEGER;
             length = 3;
             break;
         }
         case LogEvent.MYSQL_TYPE_LONGLONG: {
             // XXX: How to check signed / unsigned?
-            // value = unsigned ? buffer.getUlong64()) :
-            // Long.valueOf(buffer.getLong64());
-            value = Long.valueOf(buffer.getLong64());
+            value = unsigned ? buffer.getUlong64() :
+                Long.valueOf(buffer.getLong64());
+//            value = Long.valueOf(buffer.getLong64());
             javaType = Types.BIGINT; // Types.INTEGER;
             length = 8;
             break;
