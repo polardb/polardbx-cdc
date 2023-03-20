@@ -823,6 +823,7 @@ public class FSMMetaManager {
                 DbTaskMetaManager.updateTaskStatus(task.getId(), TaskStatus.STOPPED);
             }
         }
+        DbTaskMetaManager.updateStateMachine(newStateMachine);
     }
 
     public static void updateReplicaConfig(RplStateMachine stateMachine, ReplicaMeta replicaMeta,
