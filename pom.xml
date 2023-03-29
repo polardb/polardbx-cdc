@@ -339,7 +339,7 @@
                             <repositoryLayout>default</repositoryLayout>
                             <groupId>com.alibaba.polardbx</groupId>
                             <artifactId>polardbx-parser</artifactId>
-                            <version>3.3</version>
+                            <version>3.4</version>
                             <packaging>jar</packaging>
                             <generatePom>true</generatePom>
                         </configuration>
