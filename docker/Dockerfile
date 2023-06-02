@@ -18,6 +18,7 @@ WORKDIR /home/admin
 
 COPY admin /home/admin/
 COPY polardbx-binlog.tar.gz  /home/admin/polardbx-binlog.tar.gz
+COPY 20-nproc.conf /etc/security/limits.d/
 
 RUN chmod +x /home/admin/app.sh
 
