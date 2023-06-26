@@ -95,12 +95,8 @@ public class MysqlApplier extends BaseApplier {
 
         try {
             boolean res;
-            if (dbmsEvents.size() == 1) {
-                if (ApplyHelper.isDdl(dbmsEvents.get(0))) {
-                    res = ddlApply(dbmsEvents.get(0));
-                } else {
-                    res = trivialDmlApply(dbmsEvents);
-                }
+            if (dbmsEvents.size() == 1 && ApplyHelper.isDdl(dbmsEvents.get(0))) {
+                res = ddlApply(dbmsEvents.get(0));
             } else {
                 res = dmlApply(dbmsEvents);
             }
