@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
@@ -30,19 +31,19 @@ import com.aliyun.polardbx.binlog.format.field.MakeFieldFactory;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
 import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
-import com.google.gson.Gson;
 import com.google.protobuf.UnsafeByteOperations;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-@Slf4j
 public class TableMapEventReformator implements EventReformater<TableMapLogEvent> {
 
+    private static final Logger log = LoggerFactory.getLogger("rebuildEventLogger");
     private final PolarDbXTableMetaManager tableMetaManager;
 
     public TableMapEventReformator(PolarDbXTableMetaManager tableMetaManager) {
@@ -112,7 +113,7 @@ public class TableMapEventReformator implements EventReformater<TableMapLogEvent
             .setPayload(UnsafeByteOperations.unsafeWrap(ReformatContext.toByte(tme))).build();
         txnItemRef.setEventData(eventData);
         if (log.isDebugEnabled()) {
-            log.debug("table map event : " + new Gson().toJson(tle.toBytes()));
+            log.debug("table map event : " + JSONObject.toJSONString(tle.toBytes()));
         }
 
         return true;
@@ -139,9 +140,8 @@ public class TableMapEventReformator implements EventReformater<TableMapLogEvent
             } else {
                 String charset =
                     getCharset(fieldMetaExt, tableMeta.getLogicSchema(), tableMeta.getLogicTable(), defaultCharset);
-                String defaultValue = fieldMetaExt.getDefaultValue();
                 Field field = MakeFieldFactory.makeField(fieldMetaExt.getColumnType(),
-                    defaultValue,
+                    null,
                     charset,
                     fieldMetaExt.isNullable(),
                     fieldMetaExt.isUnsigned());

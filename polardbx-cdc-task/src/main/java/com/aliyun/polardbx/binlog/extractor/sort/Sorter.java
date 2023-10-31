@@ -14,14 +14,14 @@
  */
 package com.aliyun.polardbx.binlog.extractor.sort;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
+import com.aliyun.polardbx.binlog.extractor.log.TransactionFilter;
+import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,25 +30,25 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSACTION_SKIP_WHITELIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACT_SORT_HOLD_SIZE;
 
 /**
  * Created by ziyang.lb
  **/
 @Slf4j
 public class Sorter {
-    private static final Logger skipTranslogger = LoggerFactory.getLogger("SKIP_TRANS_LOG");
-    private final Set<String> waitTrans;
+    private static final Logger skipTransLogger = LoggerFactory.getLogger("SKIP_TRANS_LOG");
+
+    private final Set<TxnKey> waitTrans;
     private final List<SortItem> items;
-    private final Map<String, Transaction> transMap;
-    private final PriorityQueue<TransNode> transQueue;
+    private final Map<TxnKey, Transaction> transMap;
+    private final PriorityQueue<TransNode> transQueue;//TODO,transQueue是可以持久化的
     private final AtomicReference<SortItem> firstSortItem;
-    private final boolean RANDOM_DISCARD_COMMIT_SWITCH =
-        DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_TRANSACTION_RANDOM_DISCARD_COMMIT);
     private SortItem maxSortItem;
 
     public Sorter() {
@@ -65,27 +65,21 @@ public class Sorter {
         }
 
         if (item.getType() == SortItemType.PreWrite) {
-            waitTrans.add(item.getXid());
-            if (transMap.put(item.getXid(), item.getTransaction()) != null) {
-                throw new PolardbxException("duplicate xid for ： " + item.getXid());
+            waitTrans.add(item.getTxnKey());
+            if (transMap.put(item.getTxnKey(), item.getTransaction()) != null) {
+                throw new PolardbxException("duplicate txn key for ： " + item.getTxnKey());
             }
         } else {
-            if (RANDOM_DISCARD_COMMIT_SWITCH) {
-                // xa事务随机丢弃，制造block场景
-                if (CommonUtils.randomBoolean(5)) {
-                    log.warn("[inject trouble] discard commit event for : " + item.getXid());
+            if (transMap.get(item.getTxnKey()) == null) {
+                if (TransactionFilter.shouldFilter(item.getTxnKey(),
+                    item.getTransPosInfo().getBinlogFile(), item.getTransPosInfo().getPos())) {
                     return;
                 }
+                throw new PolardbxException("txn key is not existed in trans map for : " + item.getTxnKey());
             }
-            if (transMap.get(item.getXid()) == null) {
-                if (wantSkip(item.getXid())) {
-                    return;
-                }
-                throw new PolardbxException("xid is not existed in trans map for : " + item.getXid());
-            }
-            waitTrans.remove(item.getXid());
+            waitTrans.remove(item.getTxnKey());
             if (item.getType() == SortItemType.Commit) {
-                transQueue.add(new TransNode(item.getTransaction()));
+                transQueue.add(new TransNode(item));
             }
         }
         items.add(item);
@@ -95,30 +89,18 @@ public class Sorter {
         return items.size();
     }
 
-    public List<Transaction> getAvailableTrans() {
+    public List<Transaction> getAvailableTrans(int fetchSize) {
         List<Transaction> result = new LinkedList<>();
         if (items.isEmpty()) {
             return result;
         }
 
-        int skipThreshold = DynamicApplicationConfig.getInt(ConfigKeys.TASK_TRANSACTION_SKIP_THRESHOLD);
-        if (items.size() > skipThreshold) {
-            // 加一个优化， items 比较大的情况，可能有丢失commit或者rollback现象
-            // 只清理头部即可
-            SortItem item = items.get(0);
-            if (item.getType() == SortItemType.PreWrite) {
-                String xid = item.getXid();
-                if (wantSkip(xid)) {
-                    log.info("hit the whitelist, skip transaction with xid {}.", xid);
-                    skipTranslogger.info("skip : " + xid);
-                    if (waitTrans.remove(xid)) {
-                        //释放一下 transaction
-                        item.getTransaction().release();
-                    }
-                    transMap.remove(xid);
-                }
-            }
+        long holdSize = DynamicApplicationConfig.getLong(TASK_EXTRACT_SORT_HOLD_SIZE);
+        if (holdSize > 0 && transMap.size() < holdSize) {
+            return result;
         }
+
+        trySkip();
 
         long startTime = System.currentTimeMillis();
         while (true) {
@@ -128,17 +110,16 @@ public class Sorter {
 
             SortItem item = items.get(0);
             if (item.getType() == SortItemType.PreWrite) {
-                if (waitTrans.contains(item.getXid())) {
+                if (waitTrans.contains(item.getTxnKey())) {
                     if (log.isDebugEnabled()) {
-                        log.debug("Transaction {} is not ready.", item.getXid());
+                        log.debug("Transaction {} is not ready.", item.getTxnKey());
                     }
                     break;
                 } else {
                     items.remove(0);
                 }
             } else {
-                if (maxSortItem == null ||
-                    item.getTransaction().getVirtualTSO().compareTo(maxSortItem.getTransaction().getVirtualTSO()) > 0) {
+                if (maxSortItem == null || item.getTransaction().compareTo(maxSortItem.getTransaction()) > 0) {
                     maxSortItem = item;
                 }
                 items.remove(0);
@@ -151,14 +132,18 @@ public class Sorter {
         //  P1 P2 C1 P3 C2 C3
         TransNode t;
         while ((t = transQueue.peek()) != null && maxSortItem != null) {
-            if (t.getTransaction().getVirtualTSO().compareTo(maxSortItem.getTransaction().getVirtualTSO()) <= 0) {
+            if (t.getTransaction().compareTo(maxSortItem.getTransaction()) <= 0) {
                 t = transQueue.poll();
-                transMap.remove(t.getTransaction().getXid());
+                transMap.remove(Objects.requireNonNull(t).getTxnKey());
                 result.add(t.getTransaction());
                 if (log.isDebugEnabled()) {
                     log.debug(t.getTransaction().toString());
                 }
             } else {
+                break;
+            }
+
+            if (fetchSize > 0 && result.size() >= fetchSize) {
                 break;
             }
         }
@@ -174,26 +159,28 @@ public class Sorter {
         return result;
     }
 
-    private boolean wantSkip(String xid) {
-        String skipWhiteList = DynamicApplicationConfig.getString(TASK_TRANSACTION_SKIP_WHITELIST);
-        if (StringUtils.isBlank(skipWhiteList)) {
-            return false;
-        }
-        String[] array = StringUtils.split(skipWhiteList, "#");
-        for (String skipXid : array) {
-            if (xid.equals(skipXid)) {
-                return true;
+    private void trySkip() {
+        int skipThreshold = DynamicApplicationConfig.getInt(ConfigKeys.TASK_EXTRACT_FILTER_TRANS_THRESHOLD);
+        if (items.size() > skipThreshold) {
+            // 加一个优化， items 比较大的情况，可能有丢失commit或者rollback现象
+            // 只清理头部即可
+            SortItem item = items.get(0);
+            if (item.getType() == SortItemType.PreWrite) {
+                TxnKey txnKey = item.getTxnKey();
+                if (TransactionFilter.shouldFilter(txnKey,
+                    item.getTransPosInfo().getBinlogFile(), item.getTransPosInfo().getPos())) {
+                    if (waitTrans.remove(txnKey)) {
+                        //释放一下 transaction
+                        item.getTransaction().release();
+                    }
+                    transMap.remove(txnKey);
+                }
             }
         }
-        return false;
     }
 
-    public Transaction getTransByXid(String xid) {
-        return transMap.get(xid);
-    }
-
-    public TransNode peekFirstNode() {
-        return transQueue.peek();
+    public Transaction getTransByTxnKey(TxnKey txnKey) {
+        return transMap.get(txnKey);
     }
 
     public SortItem peekFirstSortItem() {
@@ -212,15 +199,21 @@ public class Sorter {
     }
 
     public static class TransNode implements Comparable<TransNode> {
+        private final TxnKey txnKey;
         private final Transaction transaction;
 
-        public TransNode(Transaction trans) {
-            this.transaction = trans;
+        public TransNode(SortItem item) {
+            this.txnKey = item.getTxnKey();
+            this.transaction = item.getTransaction();
         }
 
         @Override
         public int compareTo(TransNode o) {
             return transaction.compareTo(o.transaction);
+        }
+
+        public TxnKey getTxnKey() {
+            return txnKey;
         }
 
         public Transaction getTransaction() {

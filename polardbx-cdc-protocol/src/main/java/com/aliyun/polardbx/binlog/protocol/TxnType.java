@@ -76,6 +76,15 @@ public enum TxnType
    * <code>META_CONFIG_ENV_CHANGE = 6;</code>
    */
   META_CONFIG_ENV_CHANGE(6),
+  /**
+   * <pre>
+   **
+   *滚动binlog
+   * </pre>
+   *
+   * <code>FLUSH_LOG = 7;</code>
+   */
+  FLUSH_LOG(7),
   UNRECOGNIZED(-1),
   ;
 
@@ -133,6 +142,15 @@ public enum TxnType
    * <code>META_CONFIG_ENV_CHANGE = 6;</code>
    */
   public static final int META_CONFIG_ENV_CHANGE_VALUE = 6;
+  /**
+   * <pre>
+   **
+   *滚动binlog
+   * </pre>
+   *
+   * <code>FLUSH_LOG = 7;</code>
+   */
+  public static final int FLUSH_LOG_VALUE = 7;
 
 
   public final int getNumber() {
@@ -165,6 +183,7 @@ public enum TxnType
       case 3: return META_SCALE;
       case 5: return META_HEARTBEAT;
       case 6: return META_CONFIG_ENV_CHANGE;
+      case 7: return FLUSH_LOG;
       default: return null;
     }
   }

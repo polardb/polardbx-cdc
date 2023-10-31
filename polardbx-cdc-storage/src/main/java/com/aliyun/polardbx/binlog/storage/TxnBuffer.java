@@ -15,9 +15,9 @@
 package com.aliyun.polardbx.binlog.storage;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import lombok.SneakyThrows;
@@ -29,6 +29,7 @@ import org.rocksdb.util.ByteUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Serializable;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -48,73 +49,69 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PARALLEL_RESTORE_BAT
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PARALLEL_RESTORE_ENABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PARALLEL_RESTORE_MAX_EVENT_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PARALLEL_RESTORE_PARALLELISM;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRACEID_DISORDER_IGNORE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACT_DISORDER_TRACE_ID_ALLOWED;
 
 /**
  * Created by ziyang.lb
  **/
-public class TxnBuffer {
-    public static final AtomicLong CURRENT_TXN_COUNT = new AtomicLong(0);
-    public static final AtomicLong CURRENT_TXN_PERSISTED_COUNT = new AtomicLong(0);
+public class TxnBuffer implements Serializable {
+    public static final AtomicLong CURRENT_TXN_BUFFER_COUNT = new AtomicLong(0);
+    public static final AtomicLong CURRENT_TXN_BUFFER_PERSISTED_COUNT = new AtomicLong(0);
 
     private static final Logger logger = LoggerFactory.getLogger(TxnBuffer.class);
     private static final Logger traceIdLogger = LoggerFactory.getLogger("traceIdDisorderLogger");
     private static final String clusterType = DynamicApplicationConfig.getClusterType();
     private static final AtomicLong sequenceGenerator = new AtomicLong(0L);
+    private static final AtomicLong entitySequenceGenerator = new AtomicLong(0L);
     private static final int beginKeySubSequence = 1;
+    private static final String entityKeyPrefix = "TXN_BUFFER_ENTITY_";
+    private static Repository repository;
 
-    private final Repository repository;
-    private final TxnKey txnKey;
-    private final AtomicBoolean started;
-    private final AtomicBoolean completed;
-    private final Long txnBufferId;
-    private final AtomicInteger subSequenceGenerator;
+    private long entityPersistKey;
+    private boolean entityPersisted;
+    private TxnBufferEntity entity;
+    private Long txnBufferId;
 
-    private LinkedList<TxnItemRef> refList;
-    private Iterator<TxnItemRef> iterator;
-    private long memSize;
-    private int itemSizeBeforeMerge;
-    private String lastTraceId;
-    private volatile boolean hasPersistingData;
-    private volatile boolean shouldPersist;
-    private volatile boolean restored;
+    public TxnBuffer() {
+    }
 
     TxnBuffer(TxnKey txnKey, Repository repository) {
-        this.txnKey = txnKey;
-        this.refList = new LinkedList<>();
-        this.started = new AtomicBoolean(false);
-        this.completed = new AtomicBoolean(false);
-        this.repository = repository;
-        this.shouldPersist = false;
-        this.hasPersistingData = false;
+        TxnBuffer.repository = repository;
+        this.entity = new TxnBufferEntity();
+        this.entity.txnKey = txnKey;
+        this.entity.refList = new LinkedList<>();
+        this.entity.started = new AtomicBoolean(false);
+        this.entity.completed = new AtomicBoolean(false);
+        this.entity.shouldPersist = false;
+        this.entity.hasPersistingData = false;
         this.txnBufferId = nextSequence();
-        this.subSequenceGenerator = new AtomicInteger(beginKeySubSequence - 1);
+        this.entity.subSequenceGenerator = new AtomicInteger(beginKeySubSequence - 1);
         StorageMemoryLeakDectectorManager.getInstance().watch(this);
-        CURRENT_TXN_COUNT.incrementAndGet();
+        CURRENT_TXN_BUFFER_COUNT.incrementAndGet();
     }
 
     /**
      * 将TxnBuffer标记为启动状态，处于启动状态的buffer才可以append数据
      */
     public boolean markStart() {
-        return started.compareAndSet(false, true);
+        return entity.started.compareAndSet(false, true);
     }
 
     /**
      * 将TxnBuffer标记为完成状态, 处于完成状态之后，不能再append数据
      */
     public void markComplete() {
-        if (!completed.compareAndSet(false, true)) {
+        if (!entity.completed.compareAndSet(false, true)) {
             throw new PolardbxException("txn buffer has already completed, can't mark complete again.");
         }
-        itemSizeBeforeMerge = refList.size();
+        entity.itemSizeBeforeMerge = entity.refList.size();
     }
 
     public synchronized boolean persist() {
-        if (!shouldPersist) {
+        if (entity != null && !entity.shouldPersist) {
             persistPreviousItems();
-            shouldPersist = true;
-            CURRENT_TXN_PERSISTED_COUNT.incrementAndGet();
+            entity.shouldPersist = true;
+            CURRENT_TXN_BUFFER_PERSISTED_COUNT.incrementAndGet();
             return true;
         }
         return false;
@@ -125,18 +122,34 @@ public class TxnBuffer {
      */
     void close() {
         StorageMemoryLeakDectectorManager.getInstance().unwatch(this);
-        if (hasPersistingData) {
-            if (repository.getDeleteMode() == DeleteMode.RANGE) {
-                try {
-                    byte[] beginKey = buildTxnItemRefKeyWithSubSequence(beginKeySubSequence);
-                    getRepoUnit().deleteRange(beginKey, peekNextTxnItemRefKey().getRight());
-                } catch (RocksDBException e) {
-                    throw new PolardbxException("delete rang failed", e);
+        if (entity.started.compareAndSet(true, false)) {
+            if (entity.hasPersistingData) {
+                if (repository.getDeleteMode() == DeleteMode.RANGE) {
+                    try {
+                        byte[] beginKey = buildTxnItemRefKeyWithSubSequence(beginKeySubSequence);
+                        getRepoUnit().deleteRange(beginKey, peekNextTxnItemRefKey().getRight());
+                    } catch (RocksDBException e) {
+                        throw new PolardbxException("delete rang failed", e);
+                    }
+                } else if (repository.getDeleteMode() == DeleteMode.SINGLE) {
+                    entity.refList.forEach(r -> {
+                        //在merge阶段，选中为delegate的buffer会包含所有的TxnItem，在close的时候，让每个buffer各司其职，只清理自己的TxnItem
+                        if (r.getTxnBuffer() == this && r.isPersisted()) {
+                            try {
+                                r.delete();
+                            } catch (RocksDBException e) {
+                                throw new PolardbxException("delete txn item failed.", e);
+                            }
+                        }
+                    });
+                } else if (repository.getDeleteMode() == DeleteMode.NONE) {
+                    // for test, do nothing
+                } else {
+                    throw new PolardbxException("Invalid Delete Mode : " + repository.getDeleteMode());
                 }
-            } else if (repository.getDeleteMode() == DeleteMode.SINGLE) {
-                refList.forEach(r -> {
-                    //在merge阶段，选中为delegate的buffer会包含所有的TxnItem，在close的时候，让每个buffer各司其职，只清理自己的TxnItem
-                    if (r.getTxnBuffer() == this && r.isPersisted()) {
+            } else {
+                entity.refList.forEach(r -> {
+                    if (r.getTxnBuffer() == this) {
                         try {
                             r.delete();
                         } catch (RocksDBException e) {
@@ -144,26 +157,12 @@ public class TxnBuffer {
                         }
                     }
                 });
-            } else if (repository.getDeleteMode() == DeleteMode.NONE) {
-                // for test, do nothing
-            } else {
-                throw new PolardbxException("Invalid Delete Mode : " + repository.getDeleteMode());
             }
-        } else {
-            refList.forEach(r -> {
-                if (r.getTxnBuffer() == this) {
-                    try {
-                        r.delete();
-                    } catch (RocksDBException e) {
-                        throw new PolardbxException("delete txn item failed.", e);
-                    }
-                }
-            });
-        }
 
-        CURRENT_TXN_COUNT.decrementAndGet();
-        if (shouldPersist) {
-            CURRENT_TXN_PERSISTED_COUNT.decrementAndGet();
+            CURRENT_TXN_BUFFER_COUNT.decrementAndGet();
+            if (entity.shouldPersist) {
+                CURRENT_TXN_BUFFER_PERSISTED_COUNT.decrementAndGet();
+            }
         }
     }
 
@@ -178,7 +177,7 @@ public class TxnBuffer {
      * 将单个事务数据append到缓存队列
      */
     public void push(TxnBufferItem txnItem) {
-        if (!started.get()) {
+        if (!entity.started.get()) {
             throw new PolardbxException("can't push item to not started txn buffer.");
         }
 
@@ -187,14 +186,15 @@ public class TxnBuffer {
         }
 
         //traceId是允许重复的，但不能回跳，所以此处只对乱序的情况进行校验
-        if (StringUtils.isNotBlank(lastTraceId) && txnItem.getTraceId().compareTo(lastTraceId) < 0) {
-            boolean ignoreDisorderedTraceId = DynamicApplicationConfig.getBoolean(TASK_TRACEID_DISORDER_IGNORE);
+        if (StringUtils.isNotBlank(entity.lastTraceId) && txnItem.getTraceId().compareTo(entity.lastTraceId) < 0) {
+            boolean ignoreDisorderedTraceId = DynamicApplicationConfig.getBoolean(
+                TASK_EXTRACT_DISORDER_TRACE_ID_ALLOWED);
             if (!ignoreDisorderedTraceId) {
                 throw new PolardbxException("detected disorderly traceId，current traceId is " + txnItem.getTraceId()
-                    + ",last traceId is " + lastTraceId);
+                    + ",last traceId is " + entity.lastTraceId);
             } else {
                 traceIdLogger.warn("detected disorderly traceId，current traceId is " + txnItem.getTraceId()
-                    + " , last traceId is " + lastTraceId + " , origin traceId is " + txnItem.getOriginTraceId()
+                    + " , last traceId is " + entity.lastTraceId + " , origin traceId is " + txnItem.getOriginTraceId()
                     + " , binlog file name is " + txnItem.getBinlogFile() + " , binlog position is " + txnItem
                     .getBinlogPosition());
             }
@@ -204,7 +204,7 @@ public class TxnBuffer {
     }
 
     public boolean isPersisted() {
-        return shouldPersist;
+        return entity.shouldPersist;
     }
 
     private void doAdd(TxnBufferItem txnItem) {
@@ -213,13 +213,13 @@ public class TxnBuffer {
             txnItem.getEventType(), txnItem.getPayload(), txnItem.getSchema(), txnItem.getTable(),
             txnItem.getHashKey(), txnItem.getPrimaryKey());
 
-        memSize += txnItem.size();
-        lastTraceId = txnItem.getTraceId();
+        entity.memSize += txnItem.size();
+        entity.lastTraceId = txnItem.getTraceId();
         tryPersist(ref, txnItem.size());
-        refList.add(ref);
+        entity.refList.add(ref);
 
         if (logger.isDebugEnabled()) {
-            logger.debug("accept an item for txn buffer " + txnKey);
+            logger.debug("accept an item for txn buffer " + entity.txnKey);
         }
     }
 
@@ -230,8 +230,8 @@ public class TxnBuffer {
     }
 
     private TxnItemRef doAddBefore(TxnBufferItem txnItem) {
-        memSize += txnItem.size();
-        lastTraceId = txnItem.getTraceId();
+        entity.memSize += txnItem.size();
+        entity.lastTraceId = txnItem.getTraceId();
         TxnItemRef ref = makeRef(txnItem);
         tryPersist(ref, txnItem.size());
         return ref;
@@ -249,51 +249,53 @@ public class TxnBuffer {
             throw new PolardbxException("Buffer size should't be zero.");
         }
 
-        if (refList.getFirst().getEventType() != LogEvent.TABLE_MAP_EVENT) {
+        if (entity.refList.getFirst().getEventType() != LogEvent.TABLE_MAP_EVENT) {
             throw new PolardbxException("The first event is not table_map_event, but is "
-                + refList.getFirst().getEventType() + ", and corresponding txn key is " + txnKey);
+                + entity.refList.getFirst().getEventType() + ", and corresponding txn key is " + entity.txnKey);
         }
 
-        if (other.refList.getFirst().getEventType() != LogEvent.TABLE_MAP_EVENT) {
+        if (other.entity.refList.getFirst().getEventType() != LogEvent.TABLE_MAP_EVENT) {
             throw new PolardbxException(
-                "The first event is not table_map_event, but is " + other.refList.getFirst().getEventType()
-                    + ", and corresponding txn key is " + txnKey);
+                "The first event is not table_map_event, but is " + other.entity.refList.getFirst().getEventType()
+                    + ", and corresponding txn key is " + entity.txnKey);
         }
 
-        this.refList = mergeTwoSortList(refList, other.refList);
-        this.memSize += other.memSize;
+        this.entity.refList = mergeTwoSortList(entity.refList, other.entity.refList);
+        this.entity.memSize += other.entity.memSize;
     }
 
     public void compressDuplicateTraceId() {
-        String lastTraceId = "";
-        for (TxnItemRef ref : refList) {
-            if (ref.getEventType() == LogEvent.TABLE_MAP_EVENT) {
-                if (StringUtils.equals(lastTraceId, ref.getTraceId())) {
-                    ref.clearRowsQuery();
-                } else {
-                    lastTraceId = ref.getTraceId();
+        if (!ClusterType.BINLOG_X.name().equals(clusterType)) {
+            String lastTraceId = "";
+            for (TxnItemRef ref : entity.refList) {
+                if (ref.getEventType() == LogEvent.TABLE_MAP_EVENT) {
+                    if (StringUtils.equals(lastTraceId, ref.getTraceId())) {
+                        ref.clearRowsQuery();
+                    } else {
+                        lastTraceId = ref.getTraceId();
+                    }
                 }
             }
         }
     }
 
     public boolean isLargeTrans() {
-        return memSize >= Math.min(repository.getTxnItemPersistThreshold(), repository.getTxnPersistThreshold());
+        return entity.memSize >= Math.min(repository.getTxnItemPersistThreshold(), repository.getTxnPersistThreshold());
     }
 
     public void restore() {
-        if (hasPersistingData && !restored) {
+        if (entity.hasPersistingData && !entity.restored) {
             byte[] beginKey = buildTxnItemRefKeyWithSubSequence(beginKeySubSequence);
             byte[] endKey = peekNextTxnItemRefKey().getRight();
-            List<Pair<byte[], byte[]>> repoList = getRepoUnit().getRange(beginKey, endKey, itemSizeBeforeMerge);
-            if (repoList.size() != itemSizeBeforeMerge) {
+            List<Pair<byte[], byte[]>> repoList = getRepoUnit().getRange(beginKey, endKey, entity.itemSizeBeforeMerge);
+            if (repoList.size() != entity.itemSizeBeforeMerge) {
                 throw new PolardbxException(
                     "list size from repository is not equal to sub sequence, [" + repoList.size() + ","
-                        + itemSizeBeforeMerge + "]");
+                        + entity.itemSizeBeforeMerge + "]");
             }
 
             int count = 0;
-            for (TxnItemRef txnItemRef : refList) {
+            for (TxnItemRef txnItemRef : entity.refList) {
                 if (txnItemRef.getTxnBuffer() == this) {
                     try {
                         Pair<byte[], byte[]> pair = repoList.get(count);
@@ -312,12 +314,12 @@ public class TxnBuffer {
                         .size() + ", count in memory is " + count);
             }
 
-            restored = true;
+            entity.restored = true;
         }
     }
 
     private void printErrorForRestore(List<Pair<byte[], byte[]>> repoList, int count) {
-        List<TxnItemRef> txnItemRefs = refList.stream().filter(i -> i.getTxnBuffer() == TxnBuffer.this)
+        List<TxnItemRef> txnItemRefs = entity.refList.stream().filter(i -> i.getTxnBuffer() == TxnBuffer.this)
             .collect(Collectors.toList());
         List<String> repoKeyList = repoList.stream()
             .map(p -> new String(p.getKey())).collect(Collectors.toList());
@@ -327,7 +329,7 @@ public class TxnBuffer {
 
         logger.error("meet fatal error when restore txn item, repository list size is {}, "
                 + "ref list size is {}, ref list size for this txn buffer is {}, current count is {},.",
-            repoList.size(), refList.size(), txnItemRefs.size(), count);
+            repoList.size(), entity.refList.size(), txnItemRefs.size(), count);
         logger.error("key list for repository list is : " + JSONObject.toJSONString(repoKeyList, true));
         logger.error("key list for txn item ref list is :" + JSONObject.toJSONString(refKeyList, true));
     }
@@ -336,18 +338,18 @@ public class TxnBuffer {
      * 包内访问，for test
      */
     boolean seek(TxnItemRef itemRef) {
-        int index = Collections.binarySearch(refList, itemRef);
+        int index = Collections.binarySearch(entity.refList, itemRef);
         if (index < 0) {
             return false;
         }
 
         LinkedList<TxnItemRef> list = new LinkedList<>();
         for (int i = 0; i < index; i++) {
-            list.add(refList.get(i));
+            list.add(entity.refList.get(i));
         }
 
-        refList = list;
-        lastTraceId = list.get(list.size() - 1).getTraceId();
+        entity.refList = list;
+        entity.lastTraceId = list.get(list.size() - 1).getTraceId();
         return true;
     }
 
@@ -358,7 +360,7 @@ public class TxnBuffer {
     }
 
     Pair<Integer, byte[]> peekNextTxnItemRefKey() {
-        int subSequence = subSequenceGenerator.get() + 1;
+        int subSequence = entity.subSequenceGenerator.get() + 1;
         byte[] key = buildTxnItemRefKeyWithSubSequence(subSequence);
         return Pair.of(subSequence, key);
     }
@@ -461,7 +463,7 @@ public class TxnBuffer {
     }
 
     private void tryClearRowsQuery(TxnItemRef txnItemRef) {
-        if (!ClusterTypeEnum.BINLOG_X.name().equals(clusterType)) {
+        if (!ClusterType.BINLOG_X.name().equals(clusterType)) {
             txnItemRef.clearRowsQuery();
         }
     }
@@ -486,7 +488,7 @@ public class TxnBuffer {
     }
 
     private int nextSubSequence() {
-        int sequence = subSequenceGenerator.incrementAndGet();
+        int sequence = entity.subSequenceGenerator.incrementAndGet();
         if (sequence == Integer.MAX_VALUE) {
             throw new PolardbxException("sub sequence exceed max value.");
         }
@@ -503,40 +505,42 @@ public class TxnBuffer {
         }
 
         if (repository.isForcePersist()) {
-            if (!shouldPersist) {
+            if (!entity.shouldPersist) {
                 persistPreviousItems();
-                shouldPersist = true;
-                CURRENT_TXN_PERSISTED_COUNT.incrementAndGet();
+                entity.shouldPersist = true;
+                CURRENT_TXN_BUFFER_PERSISTED_COUNT.incrementAndGet();
             }
-        } else if (!shouldPersist) {
+        } else if (!entity.shouldPersist) {
             if (payloadSize >= repository.getTxnItemPersistThreshold() && repository.isReachPersistThreshold(true)) {
                 // 单个Event大小如果超过了指定阈值，立刻进行内存使用率的校验，如果超过阈值，则触发落盘
-                shouldPersist = true;
+                entity.shouldPersist = true;
                 logger.info("Txn Item size is greater than txnItemPersistThreshold,"
                         + " txnKey is {},txnItemSize is {},txnItemPersistThreshold is {}.",
-                    txnKey, memSize, repository.getTxnItemPersistThreshold());
+                    entity.txnKey, entity.memSize, repository.getTxnItemPersistThreshold());
 
-            } else if (memSize >= repository.getTxnPersistThreshold() && repository.isReachPersistThreshold(true)) {
+            } else if (entity.memSize >= repository.getTxnPersistThreshold() && repository
+                .isReachPersistThreshold(true)) {
                 // 单个事务大小如果超过了指定阈值，立刻进行内存使用率的校验，如果超过阈值，则触发落盘
-                shouldPersist = true;
+                entity.shouldPersist = true;
                 logger.info("Txn Buffer size is greater than txnPersistThreshold,"
                         + " txnKey is {},txnBuffSize is {},txnPersisThreshold is {}.",
-                    txnKey, memSize, repository.getTxnPersistThreshold());
+                    entity.txnKey, entity.memSize, repository.getTxnPersistThreshold());
 
             } else {
-                shouldPersist = repository.isReachPersistThreshold(false);
-                if (shouldPersist) {
-                    logger.info("Persisting mode is open for txn buffer : " + txnKey + ",caused by memory ratio.");
+                entity.shouldPersist = repository.isReachPersistThreshold(false);
+                if (entity.shouldPersist) {
+                    logger
+                        .info("Persisting mode is open for txn buffer : " + entity.txnKey + ",caused by memory ratio.");
                 }
             }
 
-            if (shouldPersist) {
+            if (entity.shouldPersist) {
                 persistPreviousItems();
-                CURRENT_TXN_PERSISTED_COUNT.incrementAndGet();
+                CURRENT_TXN_BUFFER_PERSISTED_COUNT.incrementAndGet();
             }
         }
 
-        if (shouldPersist) {
+        if (entity.shouldPersist) {
             try {
                 persistOneItem(ref);
             } catch (RocksDBException e) {
@@ -547,7 +551,7 @@ public class TxnBuffer {
 
     private void persistPreviousItems() {
         //将历史item也进行持久化
-        refList.forEach(r -> {
+        entity.refList.forEach(r -> {
             try {
                 persistOneItem(r);
             } catch (RocksDBException e) {
@@ -558,34 +562,34 @@ public class TxnBuffer {
     }
 
     private void persistOneItem(TxnItemRef ref) throws RocksDBException {
-        hasPersistingData = true;
+        entity.hasPersistingData = true;
         ref.persist();
     }
 
     public TxnKey getTxnKey() {
-        return txnKey;
+        return entity.txnKey;
     }
 
     public Iterator<TxnItemRef> iterator() {
-        return refList.iterator();
+        return entity.refList.iterator();
     }
 
     public Iterator<TxnItemRef> parallelRestoreIterator() {
-        if (iterator == null) {
+        if (entity.iterator == null) {
             boolean enableParallelRestore = DynamicApplicationConfig.getBoolean(STORAGE_PARALLEL_RESTORE_ENABLE);
             if (enableParallelRestore) {
-                this.iterator = new ParallelRestoreIterator(refList);
+                this.entity.iterator = new ParallelRestoreIterator(entity.refList);
             } else {
-                this.iterator = iterator();
+                this.entity.iterator = iterator();
             }
         }
-        return iterator;
+        return entity.iterator;
     }
 
     public IteratorBuffer iteratorWrapper() {
         return new IteratorBuffer() {
 
-            private ListIterator<TxnItemRef> llIt = refList.listIterator();
+            private ListIterator<TxnItemRef> llIt = entity.refList.listIterator();
             private TxnItemRef curRef;
 
             @Override
@@ -620,20 +624,57 @@ public class TxnBuffer {
         };
     }
 
+    @SneakyThrows
+    public void persistEntity() {
+        if (entity != null && !entity.shouldPersist) {
+            throw new PolardbxException("can`t serialize Entity for TxnBuffer which not persisted! " + entity.txnKey);
+        }
+        if (!entityPersisted) {
+            entityPersistKey = entitySequenceGenerator.incrementAndGet();
+            getRepoUnit().put(buildEntityKey(), entity.serialize());
+            entity = null;
+            entityPersisted = true;
+        }
+    }
+
+    @SneakyThrows
+    public void restoreEntity() {
+        if (entityPersisted) {
+            byte[] key = buildEntityKey();
+            byte[] value = getRepoUnit().get(key);
+            entity = TxnBufferEntity.deserialize(value);
+            entity.refList.forEach(i -> i.setTxnBuffer(this));
+            getRepoUnit().delete(key);
+            entityPersisted = false;
+        }
+    }
+
+    @SneakyThrows
+    public void deleteEntity() {
+        if (entityPersisted) {
+            getRepoUnit().delete(buildEntityKey());
+        }
+    }
+
+    private byte[] buildEntityKey() {
+        return ByteUtil.bytes(entityKeyPrefix +
+            StringUtils.leftPad(String.valueOf(entityPersistKey), 19, "0"));
+    }
+
     public TxnItemRef getItemRef(int index) {
-        return refList.get(index);
+        return entity.refList.get(index);
     }
 
     public boolean isCompleted() {
-        return completed.get();
+        return entity.completed.get();
     }
 
     public int itemSize() {
-        return refList == null ? 0 : refList.size();
+        return entity.refList == null ? 0 : entity.refList.size();
     }
 
     public long memSize() {
-        return memSize;
+        return entity.memSize;
     }
 
     public RepoUnit getRepoUnit() {
@@ -641,7 +682,7 @@ public class TxnBuffer {
     }
 
     private static class ParallelRestoreIterator implements Iterator<TxnItemRef> {
-        private final static ThreadPoolExecutor EXECUTORS;
+        private static final ThreadPoolExecutor EXECUTORS;
 
         static {
             int parallelism = DynamicApplicationConfig.getInt(STORAGE_PARALLEL_RESTORE_PARALLELISM);

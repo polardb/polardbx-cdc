@@ -20,7 +20,7 @@ import java.io.PrintWriter;
 
 public class WatchObject {
 
-    private long createTime;
+    private final long createTime;
     private String trace;
 
     public WatchObject() {

@@ -34,7 +34,6 @@ import javax.servlet.ServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Enumeration;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -46,15 +45,14 @@ public class ACLFilter extends RequestFilter {
     private static final String TIMESTAMP = "timestamp";
     // 30s超时
     private static final long TIME_OUT = TimeUnit.SECONDS.toMillis(30);
-    private static Map<String, String> akMap = new HashMap<>();
     public final String AK;
     private final String SK;
     private final Log log = LogFactory.getLog(ACLFilter.class);
     private final Set<URLMatcher> urlSets;
 
     public ACLFilter(String basePackage) {
-        this.AK = DynamicApplicationConfig.getString(ConfigKeys.DEAMON_REST_API_ACL_AK);
-        this.SK = DynamicApplicationConfig.getString(ConfigKeys.DEAMON_REST_API_ACL_SK);
+        this.AK = DynamicApplicationConfig.getString(ConfigKeys.DAEMON_REST_API_ACL_AK);
+        this.SK = DynamicApplicationConfig.getString(ConfigKeys.DAEMON_REST_API_ACL_SK);
         URLScanner scanner = new URLScanner(ACL.class, basePackage);
         urlSets = scanner.scan();
         log.info("url sets for acl control is " + urlSets);

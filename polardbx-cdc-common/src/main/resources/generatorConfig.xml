@@ -5,6 +5,9 @@
 
 <generatorConfiguration>
     <context id="polarx_tables" targetRuntime="MyBatis3DynamicSql">
+        <property name="autoDelimitKeywords" value="true"/>
+        <property name="beginningDelimiter" value="`"/>
+        <property name="endingDelimiter" value="`"/>
         <!-- prevent a lot of comments in the generated code. Add the following configuration control -->
         <commentGenerator>
             <property name="suppressAllComments" value="false"/>
@@ -13,8 +16,8 @@
 
         <jdbcConnection driverClass="com.mysql.jdbc.Driver"
                         connectionURL="jdbc:mysql://127.0.0.1:3306"
-                        userId="diamond"
-                        password="diamond1qaz@2wsx">
+                        userId="YOUR_USER_ID"
+                        password="YOUR_PASSWORD">
             <property name="useInformationSchema" value="true"/>
         </jdbcConnection>
 
@@ -36,8 +39,8 @@
         </javaClientGenerator>
 
         <!-- data table generation operation schema: equivalent to library name; tablename: table name; domainobjectname: corresponding do -->
-
         <!-- CN相关表-->
+        <!--
         <table schema="polardbx_meta_db_polardbx" tableName="db_group_info" domainObjectName="DbGroupInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="tables_ext" domainObjectName="TablesExt"/>
         <table schema="polardbx_meta_db_polardbx" tableName="storage_info" domainObjectName="StorageInfo"/>
@@ -46,9 +49,10 @@
         <table schema="polardbx_meta_db_polardbx" tableName="server_info" domainObjectName="ServerInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="node_info" domainObjectName="PolarxCNodeInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="user_priv" domainObjectName="UserPriv"/>
-
+        -->
 
         <!-- Binlog相关表 -->
+        <!--
         <table schema="polardbx_meta_db_polardbx" tableName="binlog_node_info"
                domainObjectName="NodeInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="binlog_task_config"
@@ -87,9 +91,11 @@
                domainObjectName="BinlogStorageSequence">
             <generatedKey column="id" sqlStatement="MySql" identity="true"/>
         </table>
+        -->
 
 
         <!-- Replica & 数据迁移相关表 -->
+        <!--
         <table schema="polardbx_meta_db_polardbx" tableName="rpl_service" domainObjectName="RplService">
             <generatedKey column="id" sqlStatement="MySql" identity="true"/>
         </table>
@@ -102,13 +108,20 @@
         <table schema="polardbx_meta_db_polardbx" tableName="rpl_db_full_position" domainObjectName="RplDbFullPosition">
             <generatedKey column="id" sqlStatement="MySql" identity="true"/>
         </table>
-        <table schema="polardbx_meta_db_polardbx" tableName="rpl_ddl" domainObjectName="RplDdl">
-            <generatedKey column="id" sqlStatement="MySql" identity="true"/>
-        </table>
         <table schema="polardbx_meta_db_polardbx" tableName="validation_task" domainObjectName="ValidationTask">
             <generatedKey column="id" sqlStatement="MySql" identity="true"/>
         </table>
         <table schema="polardbx_meta_db_polardbx" tableName="validation_diff" domainObjectName="ValidationDiff"/>
         <table schema="polardbx_meta_db_polardbx" tableName="inst_config" domainObjectName="InstConfig"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="rpl_ddl_main" domainObjectName="RplDdl">
+            <generatedKey column="id" sqlStatement="MySql" identity="true"/>
+        </table>
+        <table schema="polardbx_meta_db_polardbx" tableName="rpl_ddl_sub" domainObjectName="RplDdlSub">
+            <generatedKey column="id" sqlStatement="MySql" identity="true"/>
+        </table>
+        <table schema="polardbx_meta_db_polardbx" tableName="rpl_stat_metrics" domainObjectName="RplStatMetrics">
+            <generatedKey column="id" sqlStatement="MySql" identity="true"/>
+        </table>
+        -->
     </context>
 </generatorConfiguration>

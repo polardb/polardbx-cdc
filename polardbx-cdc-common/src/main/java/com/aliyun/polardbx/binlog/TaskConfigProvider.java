@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
@@ -28,8 +29,6 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
 
@@ -48,7 +47,6 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
  **/
 @Slf4j
 public class TaskConfigProvider {
-    private final static Gson GSON = new GsonBuilder().create();
     private final String taskName;
 
     public TaskConfigProvider(String taskName) {
@@ -60,16 +58,14 @@ public class TaskConfigProvider {
 
         BinlogTaskConfigMapper mapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
         Optional<BinlogTaskConfig> opTask = mapper
-            .selectOne(
-                s -> s
-                    .where(BinlogTaskConfigDynamicSqlSupport.clusterId,
-                        IsEqualTo.of(() -> DynamicApplicationConfig.getString(CLUSTER_ID)))
-                    .and(BinlogTaskConfigDynamicSqlSupport.taskName, IsEqualTo.of(() -> taskName)));
+            .selectOne(s -> s.where(BinlogTaskConfigDynamicSqlSupport.clusterId,
+                IsEqualTo.of(() -> DynamicApplicationConfig.getString(CLUSTER_ID)))
+                .and(BinlogTaskConfigDynamicSqlSupport.taskName, IsEqualTo.of(() -> taskName)));
         if (!opTask.isPresent()) {
             throw new PolardbxException("task config is null");
         }
         BinlogTaskConfig task = opTask.get();
-        ExecutionConfig config = GSON.fromJson(task.getConfig(), ExecutionConfig.class);
+        ExecutionConfig config = JSONObject.parseObject(task.getConfig(), ExecutionConfig.class);
 
         taskRuntimeConfig = new TaskRuntimeConfig();
         taskRuntimeConfig.setId(task.getId());
@@ -125,6 +121,6 @@ public class TaskConfigProvider {
             throw new PolardbxException("can`t find storage info for tso " + currentTso);
         }
         log.info("storage list to consume for this task is " + storageHistoryInfos.get(0).getStorageContent());
-        return GSON.fromJson(storageHistoryInfos.get(0).getStorageContent(), StorageContent.class);
+        return JSONObject.parseObject(storageHistoryInfos.get(0).getStorageContent(), StorageContent.class);
     }
 }

@@ -22,9 +22,12 @@ import com.aliyun.polardbx.binlog.cdc.meta.MetaMetrics;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
 import com.aliyun.polardbx.binlog.extractor.MultiStreamStartTsoWindow;
+import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.aliyun.polardbx.binlog.metrics.format.TableFormat;
+import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
+import com.aliyun.polardbx.binlog.proc.ProcUtils;
 import com.aliyun.polardbx.binlog.storage.StorageMetrics;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
@@ -32,7 +35,7 @@ import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
 import com.aliyun.polardbx.binlog.util.MetricsReporter;
 import com.google.common.collect.Lists;
 import lombok.SneakyThrows;
-import org.apache.commons.lang3.StringUtils;
+import org.hyperic.sigar.CpuPerc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.CollectionUtils;
@@ -46,8 +49,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.PRINT_METRICS;
-import static com.aliyun.polardbx.binlog.canal.LogEventUtil.getGroupFromXid;
-import static com.aliyun.polardbx.binlog.canal.LogEventUtil.getHexTranIdFromXid;
 
 /**
  * Created by ziyang.lb
@@ -115,6 +116,7 @@ public class MetricsManager {
         contactTransmitMetrics(snapshot, stringBuilder);
         contactStorageMetrics(snapshot, stringBuilder);
         contactJvmMetrics(snapshot, stringBuilder);
+        contactProcMetrics(snapshot, stringBuilder);
         contactRelayWriterMetrics(snapshot, stringBuilder);
         contactRelayStreamMetrics(snapshot, stringBuilder);
 
@@ -149,6 +151,12 @@ public class MetricsManager {
             String prefix = "polardbx_cdc_task_";
             CommonMetricsHelper.addJvmMetrics(commonMetrics, jvmSnapshot, prefix);
         }
+
+        ProcSnapshot procSnapshot = snapshot.procSnapshot;
+        if (procSnapshot != null) {
+            CommonMetricsHelper.addProcMetrics(commonMetrics, procSnapshot, "polardbx_cdc_task_");
+        }
+
         if (!CollectionUtils.isEmpty(commonMetrics)) {
             MetricsReporter.report(commonMetrics);
         }
@@ -201,7 +209,7 @@ public class MetricsManager {
                 "sorter_first_trans",
                 "ms_queue_size",
                 "ms_pass_cnt");
-            threadExtInfoFormat.addColumn("tid", "storage", "firstTransXidInSorter", "firstTransDecoded");
+            threadExtInfoFormat.addColumn("tid", "storage", "firstTransKeyInSorter");
             for (ThreadRecorder record : ThreadRecorder.getRecorderMap().values()) {
                 threadInfoFormat.addRow(record.getTid(),
                     record.getStorageInstanceId(),
@@ -211,30 +219,15 @@ public class MetricsManager {
                     record.getPosition(),
                     Math.max(System.currentTimeMillis() - record.getWhen() * 1000, 0),
                     record.getQueuedTransSizeInSorter(),
-                    record.getFirstTransInSorter(),
+                    record.getFirstTransPosInSorter(),
                     record.getMergeSourceQueueSize(),
                     record.getMergeSourcePassCount());
 
-                String firstXid = record.getFirstTransXidInSorter();
-                threadExtInfoFormat
-                    .addRow(record.getTid(), record.getStorageInstanceId(), firstXid, decodeXid(firstXid));
+                String firstTransKey = record.getFirstTransKeyInSorter();
+                threadExtInfoFormat.addRow(record.getTid(), record.getStorageInstanceId(), firstTransKey);
             }
             stringBuilder.append(threadInfoFormat);
             stringBuilder.append(threadExtInfoFormat);
-        }
-    }
-
-    private String decodeXid(String xid) {
-        try {
-            if (StringUtils.isNotBlank(xid)) {
-                String tranId = getHexTranIdFromXid(xid, "utf8");
-                String group = getGroupFromXid(xid, "utf8");
-                return String.format("tranId : %s, group : %s", tranId, group);
-            } else {
-                return "";
-            }
-        } catch (Throwable t) {
-            return t.getMessage();
         }
     }
 
@@ -285,11 +278,11 @@ public class MetricsManager {
         jvmFormatInfo.addColumn(
             "youngUsed",
             "youngMax",
-            "youngCollectionCount",
+            "youngCollectionCnt",
             "youngCollectionTime(ms)",
             "oldUsed",
             "oldMax",
-            "oldCollectionCount",
+            "oldCollectionCnt",
             "oldCollectionTime(ms)");
         jvmFormatInfo.addRow(
             snapshot.jvmSnapshot.getYoungUsed(),
@@ -303,23 +296,50 @@ public class MetricsManager {
         sb.append(jvmFormatInfo);
     }
 
+    private void contactProcMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
+        if (snapshot.procSnapshot == null) {
+            return;
+        }
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        TableFormat osFormatInfo = new TableFormat("Proc Metrics");
+        osFormatInfo.addColumn(
+            "pid",
+            "startTime",
+            "cpuPercent",
+            "cpuTotal",
+            "cpuUser",
+            "cpuSys",
+            "memSize",
+            "fdNum");
+        osFormatInfo.addRow(
+            snapshot.procSnapshot.getPid(),
+            sdf.format(new Date(snapshot.procSnapshot.getStartTime())),
+            CpuPerc.format(snapshot.procSnapshot.getCpuPercent()),
+            snapshot.procSnapshot.getCpuTotal(),
+            snapshot.procSnapshot.getCpuUser(),
+            snapshot.procSnapshot.getCpuSys(),
+            snapshot.procSnapshot.getMemSize(),
+            snapshot.procSnapshot.getFdNum());
+        sb.append(osFormatInfo);
+    }
+
     private void contactStorageMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
         TableFormat storageMetrics = new TableFormat("Storage Metrics");
         storageMetrics.addColumn(
-            "currentTxnBufferCount",
-            "persistedTxnBufferCount",
-            "currentTxnItemCount",
-            "persistedTxnItemCount",
-            "totalTxnCreateCount",
-            "totalTxnCreateCostTime(nano)",
+            "curTxnBufferCnt",
+            "persistTxnBufferCnt",
+            "curTxnItemCnt",
+            "persistTxnItemCnt",
+            "curTransactionCnt",
+            "persistTransactionCnt",
             "cleanerQueuedSize");
         storageMetrics.addRow(
-            TxnBuffer.CURRENT_TXN_COUNT.get(),
-            TxnBuffer.CURRENT_TXN_PERSISTED_COUNT.get(),
+            TxnBuffer.CURRENT_TXN_BUFFER_COUNT.get(),
+            TxnBuffer.CURRENT_TXN_BUFFER_PERSISTED_COUNT.get(),
             TxnItemRef.CURRENT_TXN_ITEM_COUNT.get(),
             TxnItemRef.CURRENT_TXN_ITEM_PERSISTED_COUNT.get(),
-            StorageMetrics.get().getTxnCreateCount(),
-            StorageMetrics.get().getTxnCreateCostTime(),
+            Transaction.CURRENT_TRANSACTION_COUNT.get(),
+            Transaction.CURRENT_TRANSACTION_PERSISTED_COUNT.get(),
             StorageMetrics.get().getCleanerQueuedSize());
         sb.append(storageMetrics);
     }
@@ -495,6 +515,7 @@ public class MetricsManager {
         snapshot.mergeMetrics = MergeMetrics.get().snapshot();
         snapshot.transmitMetrics = TransmitMetrics.get().snapshot();
         snapshot.jvmSnapshot = JvmUtils.buildJvmSnapshot();
+        snapshot.procSnapshot = ProcUtils.buildProcSnapshot();
         snapshot.metaMetrics = MetaMetrics.get().snapshot();
         snapshot.aggregateCoreMetrics = buildCoreMetrics(snapshot);
 
@@ -544,8 +565,8 @@ public class MetricsManager {
             SpringContextHolder.getObject(BinlogLogicMetaHistoryMapper.class).count(s -> s);
         aggregateCoreMetrics.phyDdlHistoryCount =
             SpringContextHolder.getObject(BinlogPhyDdlHistoryMapper.class).count(s -> s);
-        aggregateCoreMetrics.storeTxnCount = TxnBuffer.CURRENT_TXN_COUNT.get();
-        aggregateCoreMetrics.storePersistedTxnCount = TxnBuffer.CURRENT_TXN_PERSISTED_COUNT.get();
+        aggregateCoreMetrics.storeTxnCount = TxnBuffer.CURRENT_TXN_BUFFER_COUNT.get();
+        aggregateCoreMetrics.storePersistedTxnCount = TxnBuffer.CURRENT_TXN_BUFFER_PERSISTED_COUNT.get();
         aggregateCoreMetrics.storeTxnItemCount = TxnItemRef.CURRENT_TXN_ITEM_COUNT.get();
         aggregateCoreMetrics.storePersistedTxnItemCount = TxnItemRef.CURRENT_TXN_ITEM_PERSISTED_COUNT.get();
         aggregateCoreMetrics.storeToCleanTxnSize = StorageMetrics.get().getCleanerQueuedSize().longValue();
@@ -561,6 +582,7 @@ public class MetricsManager {
         MergeMetrics mergeMetrics;
         TransmitMetrics transmitMetrics;
         JvmSnapshot jvmSnapshot;
+        ProcSnapshot procSnapshot;
         MetaMetrics metaMetrics;
         AggregateCoreMetrics aggregateCoreMetrics;
     }

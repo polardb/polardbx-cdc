@@ -40,7 +40,6 @@ public abstract class AbstractBinlogFileReadChannel extends AbstractInterruptibl
     protected abstract void getRange(long startPosition);
 
     public final int read(ByteBuffer dst, long startPosition) throws IOException {
-        implCloseChannel();
         getRange(startPosition);
         return readHelper(dst);
     }
@@ -54,7 +53,6 @@ public abstract class AbstractBinlogFileReadChannel extends AbstractInterruptibl
         }
 
         if (position == 0) {
-            implCloseChannel();
             getRange(4L);
         }
 
@@ -65,28 +63,21 @@ public abstract class AbstractBinlogFileReadChannel extends AbstractInterruptibl
         return position;
     }
 
+    /**
+     * todo @yudong 亟待优化， 如果newPosition > position, 调用skip方法
+     */
     public final void position(long newPosition) throws IOException {
-        implCloseChannel();
         getRange(newPosition);
     }
 
+    /**
+     * todo @yudong 优化, 避免调用getRange函数
+     */
     public final long size() throws IOException {
         if (fileSize == -1) {
-            implCloseChannel();
             getRange(4L);
         }
         return fileSize;
-    }
-
-    @Override
-    public void implCloseChannel() {
-        if (inputStream != null) {
-            try {
-                inputStream.close();
-            } catch (IOException e) {
-                log.error("close remote binlog file input stream error", e);
-            }
-        }
     }
 
     private int readHelper(ByteBuffer dst) throws IOException {

@@ -15,11 +15,12 @@
 package com.aliyun.polardbx.binlog.remote.lindorm;
 
 import com.aliyun.oss.common.utils.CRC64;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.remote.lindorm.thrift.fileservice.generated.CreateFileResponse;
 import com.aliyun.polardbx.binlog.remote.lindorm.thrift.fileservice.generated.FileInfo;
 import com.aliyun.polardbx.binlog.remote.lindorm.thrift.fileservice.generated.ReadFileResponse;
 import com.aliyun.polardbx.binlog.remote.lindorm.thrift.fileservice.generated.WriteFileResponse;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.amazonaws.services.s3.model.AmazonS3Exception;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.ObjectMetadata;
@@ -28,11 +29,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.ListUtils;
 import org.junit.Assert;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
-
-import com.aliyun.polardbx.binlog.ConfigKeys;
-import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
-import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -40,22 +38,22 @@ import java.util.List;
 import java.util.Random;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
+
 /**
  * @author yudong
  * @since 2022/10/11
  **/
 @Slf4j
-public class LindormClientTest {
+@Ignore
+public class LindormClientTest extends BaseTest {
     private static LindormClient lindormClient;
     private static final String bucketName = "qatest-bucket";
     private static final String testPath = "lindorm-client-test/";
 
     @BeforeClass
     public static void prepareClient() {
-        final SpringContextBootStrap appContextBootStrap =
-                new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
         String accessKey = getString(ConfigKeys.LINDORM_ACCESSKEY_ID);
         String accessSecret = getString(ConfigKeys.LINDORM_ACCESSKEY_ID_SECRET);
         String endpoint = getString(ConfigKeys.LINDORM_ENDPOINT);
@@ -118,7 +116,7 @@ public class LindormClientTest {
             }
             lindormClient.createFile(bucketName, file);
         }
-        for (String file: files) {
+        for (String file : files) {
             Assert.assertTrue(lindormClient.doesObjectExist(bucketName, file));
         }
         lindormClient.deleteObjects(bucketName, files);
@@ -134,7 +132,7 @@ public class LindormClientTest {
             lindormClient.deleteObject(bucketName, fileName);
         }
         String content = "Nearly all men can stand adversity, " +
-                "but if you want to test a man's character, give him power.";
+            "but if you want to test a man's character, give him power.";
         ByteBuffer buffer = ByteBuffer.wrap(content.getBytes());
         CRC64 crc64 = new CRC64();
         crc64.update(content.getBytes(), content.length());
@@ -157,7 +155,7 @@ public class LindormClientTest {
             files.add(fileName + i);
         }
         String content = "Nearly all men can stand adversity, " +
-                "but if you want to test a man's character, give him power.";
+            "but if you want to test a man's character, give him power.";
         ByteBuffer buffer = ByteBuffer.wrap(content.getBytes());
         CRC64 crc64 = new CRC64();
         crc64.update(content.getBytes(), content.length());
@@ -179,7 +177,7 @@ public class LindormClientTest {
             lindormClient.deleteObject(bucketName, fileName);
         }
         String content = "Nearly all men can stand adversity, " +
-                "but if you want to test a man's character, give him power.";
+            "but if you want to test a man's character, give him power.";
         ByteBuffer buffer = ByteBuffer.wrap(content.getBytes());
         CRC64 crc64 = new CRC64();
         crc64.update(content.getBytes(), content.length());
@@ -231,7 +229,7 @@ public class LindormClientTest {
         CRC64 crc64 = new CRC64();
         crc64.update(data, data.length);
         WriteFileResponse response = lindormClient.writeFile(oid, bucketName, fileName, content,
-                0, data.length, 0, crc64.getValue());
+            0, data.length, 0, crc64.getValue());
         Assert.assertEquals(bucketName, response.bucket);
         Assert.assertEquals(fileName, response.path);
         Assert.assertEquals(oid, response.outputStreamId);
@@ -250,7 +248,7 @@ public class LindormClientTest {
         CRC64 firstPartCrc64 = new CRC64();
         firstPartCrc64.update(data, data.length);
         long nextPos = lindormClient.writeFile(oid, bucketName, fileName, firstPartContent,
-                0, data.length, 0, firstPartCrc64.getValue()).nextOffset;
+            0, data.length, 0, firstPartCrc64.getValue()).nextOffset;
         Assert.assertEquals(data.length, nextPos);
         // write second part
         new Random().nextBytes(data);
@@ -258,7 +256,7 @@ public class LindormClientTest {
         CRC64 secondPartCrc64 = new CRC64();
         secondPartCrc64.update(data, data.length);
         nextPos = lindormClient.writeFile(oid, bucketName, fileName, secondPartContent,
-                0, data.length, data.length, secondPartCrc64.getValue()).nextOffset;
+            0, data.length, data.length, secondPartCrc64.getValue()).nextOffset;
         Assert.assertEquals(data.length << 1, nextPos);
 
         lindormClient.completeFile(oid, bucketName, fileName);
@@ -295,7 +293,7 @@ public class LindormClientTest {
         List<FileInfo> fileInfos = lindormClient.listFileInfos(bucketName, testListPath);
         Assert.assertEquals(n, fileInfos.size());
         List<String> actualFileList = fileInfos.stream().map(FileInfo::getPath)
-                .sorted(String::compareTo).collect(Collectors.toList());
+            .sorted(String::compareTo).collect(Collectors.toList());
         boolean compareResult = ListUtils.isEqualList(expectFileList, actualFileList);
         Assert.assertTrue(compareResult);
     }

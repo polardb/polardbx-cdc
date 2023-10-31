@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.rpl.taskmeta;
 
 import lombok.Data;
+
 import java.util.Set;
 
 /**

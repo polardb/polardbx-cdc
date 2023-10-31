@@ -31,7 +31,6 @@ private static final long serialVersionUID = 0L;
   }
   private TxnToken() {
     tso_ = "";
-    txnId_ = "";
     partitionId_ = "";
     originMergeSourceId_ = "";
     type_ = 0;
@@ -79,10 +78,9 @@ private static final long serialVersionUID = 0L;
             tso_ = s;
             break;
           }
-          case 18: {
-            java.lang.String s = input.readStringRequireUtf8();
+          case 16: {
 
-            txnId_ = s;
+            txnId_ = input.readInt64();
             break;
           }
           case 26: {
@@ -242,41 +240,14 @@ private static final long serialVersionUID = 0L;
   }
 
   public static final int TXNID_FIELD_NUMBER = 2;
-  private volatile java.lang.Object txnId_;
+  private long txnId_;
   /**
-   * <code>string txnId = 2;</code>
+   * <code>int64 txnId = 2;</code>
    * @return The txnId.
    */
   @java.lang.Override
-  public java.lang.String getTxnId() {
-    java.lang.Object ref = txnId_;
-    if (ref instanceof java.lang.String) {
-      return (java.lang.String) ref;
-    } else {
-      com.google.protobuf.ByteString bs = 
-          (com.google.protobuf.ByteString) ref;
-      java.lang.String s = bs.toStringUtf8();
-      txnId_ = s;
-      return s;
-    }
-  }
-  /**
-   * <code>string txnId = 2;</code>
-   * @return The bytes for txnId.
-   */
-  @java.lang.Override
-  public com.google.protobuf.ByteString
-      getTxnIdBytes() {
-    java.lang.Object ref = txnId_;
-    if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
-          com.google.protobuf.ByteString.copyFromUtf8(
-              (java.lang.String) ref);
-      txnId_ = b;
-      return b;
-    } else {
-      return (com.google.protobuf.ByteString) ref;
-    }
+  public long getTxnId() {
+    return txnId_;
   }
 
   public static final int PARTITIONID_FIELD_NUMBER = 3;
@@ -699,8 +670,8 @@ private static final long serialVersionUID = 0L;
     if (!getTsoBytes().isEmpty()) {
       com.google.protobuf.GeneratedMessageV3.writeString(output, 1, tso_);
     }
-    if (!getTxnIdBytes().isEmpty()) {
-      com.google.protobuf.GeneratedMessageV3.writeString(output, 2, txnId_);
+    if (txnId_ != 0L) {
+      output.writeInt64(2, txnId_);
     }
     if (!getPartitionIdBytes().isEmpty()) {
       com.google.protobuf.GeneratedMessageV3.writeString(output, 3, partitionId_);
@@ -753,8 +724,9 @@ private static final long serialVersionUID = 0L;
     if (!getTsoBytes().isEmpty()) {
       size += com.google.protobuf.GeneratedMessageV3.computeStringSize(1, tso_);
     }
-    if (!getTxnIdBytes().isEmpty()) {
-      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(2, txnId_);
+    if (txnId_ != 0L) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeInt64Size(2, txnId_);
     }
     if (!getPartitionIdBytes().isEmpty()) {
       size += com.google.protobuf.GeneratedMessageV3.computeStringSize(3, partitionId_);
@@ -824,8 +796,8 @@ private static final long serialVersionUID = 0L;
 
     if (!getTso()
         .equals(other.getTso())) return false;
-    if (!getTxnId()
-        .equals(other.getTxnId())) return false;
+    if (getTxnId()
+        != other.getTxnId()) return false;
     if (!getPartitionId()
         .equals(other.getPartitionId())) return false;
     if (!getOriginMergeSourceId()
@@ -868,7 +840,8 @@ private static final long serialVersionUID = 0L;
     hash = (37 * hash) + TSO_FIELD_NUMBER;
     hash = (53 * hash) + getTso().hashCode();
     hash = (37 * hash) + TXNID_FIELD_NUMBER;
-    hash = (53 * hash) + getTxnId().hashCode();
+    hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+        getTxnId());
     hash = (37 * hash) + PARTITIONID_FIELD_NUMBER;
     hash = (53 * hash) + getPartitionId().hashCode();
     hash = (37 * hash) + ORIGINMERGESOURCEID_FIELD_NUMBER;
@@ -1037,7 +1010,7 @@ private static final long serialVersionUID = 0L;
       super.clear();
       tso_ = "";
 
-      txnId_ = "";
+      txnId_ = 0L;
 
       partitionId_ = "";
 
@@ -1171,9 +1144,8 @@ private static final long serialVersionUID = 0L;
         tso_ = other.tso_;
         onChanged();
       }
-      if (!other.getTxnId().isEmpty()) {
-        txnId_ = other.txnId_;
-        onChanged();
+      if (other.getTxnId() != 0L) {
+        setTxnId(other.getTxnId());
       }
       if (!other.getPartitionId().isEmpty()) {
         partitionId_ = other.partitionId_;
@@ -1332,78 +1304,33 @@ private static final long serialVersionUID = 0L;
       return this;
     }
 
-    private java.lang.Object txnId_ = "";
+    private long txnId_ ;
     /**
-     * <code>string txnId = 2;</code>
+     * <code>int64 txnId = 2;</code>
      * @return The txnId.
      */
-    public java.lang.String getTxnId() {
-      java.lang.Object ref = txnId_;
-      if (!(ref instanceof java.lang.String)) {
-        com.google.protobuf.ByteString bs =
-            (com.google.protobuf.ByteString) ref;
-        java.lang.String s = bs.toStringUtf8();
-        txnId_ = s;
-        return s;
-      } else {
-        return (java.lang.String) ref;
-      }
+    @java.lang.Override
+    public long getTxnId() {
+      return txnId_;
     }
     /**
-     * <code>string txnId = 2;</code>
-     * @return The bytes for txnId.
-     */
-    public com.google.protobuf.ByteString
-        getTxnIdBytes() {
-      java.lang.Object ref = txnId_;
-      if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
-            com.google.protobuf.ByteString.copyFromUtf8(
-                (java.lang.String) ref);
-        txnId_ = b;
-        return b;
-      } else {
-        return (com.google.protobuf.ByteString) ref;
-      }
-    }
-    /**
-     * <code>string txnId = 2;</code>
+     * <code>int64 txnId = 2;</code>
      * @param value The txnId to set.
      * @return This builder for chaining.
      */
-    public Builder setTxnId(
-        java.lang.String value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  
+    public Builder setTxnId(long value) {
+      
       txnId_ = value;
       onChanged();
       return this;
     }
     /**
-     * <code>string txnId = 2;</code>
+     * <code>int64 txnId = 2;</code>
      * @return This builder for chaining.
      */
     public Builder clearTxnId() {
       
-      txnId_ = getDefaultInstance().getTxnId();
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string txnId = 2;</code>
-     * @param value The bytes for txnId to set.
-     * @return This builder for chaining.
-     */
-    public Builder setTxnIdBytes(
-        com.google.protobuf.ByteString value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  checkByteStringIsUtf8(value);
-      
-      txnId_ = value;
+      txnId_ = 0L;
       onChanged();
       return this;
     }

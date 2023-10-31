@@ -29,8 +29,6 @@ public interface Migrator {
 
     /**
      * Migrate one table from source to target
-     * @param tableInfo
-     * @throws Exception
      */
     void migrate(TableInfo tableInfo) throws Exception;
 }

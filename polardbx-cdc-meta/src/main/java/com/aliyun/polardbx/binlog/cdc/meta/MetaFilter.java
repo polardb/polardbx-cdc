@@ -21,9 +21,9 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.Set;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_LOGIC_DDL_APPLY_DATABASE_BLACKLIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_LOGIC_DDL_APPLY_TABLE_BLACKLIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_LOGIC_DDL_APPLY_TSO_BLACKLIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_LOGIC_DDL_DB_BLACKLIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_LOGIC_DDL_TABLE_BLACKLIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_LOGIC_DDL_TSO_BLACKLIST;
 
 /**
  * created by ziyang.lb
@@ -51,7 +51,7 @@ public class MetaFilter {
     }
 
     private static void initBlacklist() {
-        String configStr1 = DynamicApplicationConfig.getString(META_LOGIC_DDL_APPLY_DATABASE_BLACKLIST);
+        String configStr1 = DynamicApplicationConfig.getString(META_BUILD_LOGIC_DDL_DB_BLACKLIST);
         if (StringUtils.isNotBlank(configStr1)) {
             String[] array = configStr1.toLowerCase().split(",");
             logicDdlApplyDatabaseBlackList = Sets.newHashSet(array);
@@ -60,7 +60,7 @@ public class MetaFilter {
         }
         log.info("ddl apply database blacklist is " + logicDdlApplyDatabaseBlackList);
 
-        String configStr2 = DynamicApplicationConfig.getString(META_LOGIC_DDL_APPLY_TABLE_BLACKLIST);
+        String configStr2 = DynamicApplicationConfig.getString(META_BUILD_LOGIC_DDL_TABLE_BLACKLIST);
         if (StringUtils.isNotBlank(configStr2)) {
             String[] array = configStr2.toLowerCase().split(",");
             logicDdlApplyTableBlackList = Sets.newHashSet(array);
@@ -69,7 +69,7 @@ public class MetaFilter {
         }
         log.info("ddl apply table blacklist is " + logicDdlApplyTableBlackList);
 
-        String configStr3 = DynamicApplicationConfig.getString(META_LOGIC_DDL_APPLY_TSO_BLACKLIST);
+        String configStr3 = DynamicApplicationConfig.getString(META_BUILD_LOGIC_DDL_TSO_BLACKLIST);
         if (StringUtils.isNotBlank(configStr3)) {
             String[] array = configStr3.toLowerCase().split(",");
             logicDdlApplyTsoBlackList = Sets.newHashSet(array);

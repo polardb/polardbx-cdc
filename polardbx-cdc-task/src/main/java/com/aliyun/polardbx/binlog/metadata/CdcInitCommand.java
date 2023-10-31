@@ -16,7 +16,9 @@ package com.aliyun.polardbx.binlog.metadata;
 
 public interface CdcInitCommand {
 
+    boolean exists();
+
     void tryStart();
 
-    boolean waitSuccess();
+    boolean isSuccess();
 }

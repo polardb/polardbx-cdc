@@ -15,11 +15,16 @@
 package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
+import com.github.rholder.retry.RetryException;
 
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 public interface FlowLimiter {
-    boolean runTask(List<DBMSEvent> events);
 
-    boolean runTranTask(List<Transaction> transactions);
+    void runTask(List<DBMSEvent> events) throws ExecutionException, RetryException;
+
+    void runTranTask(List<Transaction> transactions) throws ExecutionException, RetryException;
+
+    void acquire();
 }

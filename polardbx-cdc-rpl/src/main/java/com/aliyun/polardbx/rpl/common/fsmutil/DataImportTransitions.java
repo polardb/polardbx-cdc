@@ -49,7 +49,7 @@ public class DataImportTransitions {
 
         @Override
         public boolean isMatch(long FSMId) {
-            return FSMMetaManager.checkIncServiceCatchUp(FSMId);
+            return FSMMetaManager.checkServiceCatchUp(FSMId, ServiceType.INC_COPY);
         }
     }
 
@@ -85,7 +85,7 @@ public class DataImportTransitions {
 
         @Override
         public boolean isMatch(long FSMId) {
-            return FSMMetaManager.checkIncServiceCatchUp(FSMId);
+            return FSMMetaManager.checkServiceCatchUp(FSMId, ServiceType.INC_COPY);
         }
     }
 
@@ -97,7 +97,31 @@ public class DataImportTransitions {
 
         @Override
         public boolean isMatch(long FSMId) {
-            return !FSMMetaManager.checkIncServiceCatchUp(FSMId);
+            return !FSMMetaManager.checkServiceCatchUp(FSMId, ServiceType.INC_COPY);
+        }
+    }
+
+    public static class CheckBackFlowCatchUpTransition extends FSMTransition {
+        public CheckBackFlowCatchUpTransition() {
+            super(FSMState.BACK_FLOW, FSMState.BACK_FLOW_CATCH_UP,
+                null, null);
+        }
+
+        @Override
+        public boolean isMatch(long FSMId) {
+            return FSMMetaManager.checkServiceCatchUp(FSMId, ServiceType.CDC_INC);
+        }
+    }
+
+    public static class CheckBackFlowNotCatchUpTransition extends FSMTransition {
+        public CheckBackFlowNotCatchUpTransition() {
+            super(FSMState.BACK_FLOW_CATCH_UP, FSMState.BACK_FLOW,
+                null, null);
+        }
+
+        @Override
+        public boolean isMatch(long FSMId) {
+            return !FSMMetaManager.checkServiceCatchUp(FSMId, ServiceType.CDC_INC);
         }
     }
 

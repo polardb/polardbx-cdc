@@ -16,7 +16,6 @@ package com.aliyun.polardbx.binlog.util;
 
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.CommonMetrics;
-import com.aliyun.polardbx.binlog.base.BaseTest;
 import com.google.common.collect.Lists;
 import org.apache.http.entity.ContentType;
 import org.junit.Ignore;
@@ -27,7 +26,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-public class HttpHelperTest extends BaseTest {
+public class HttpHelperTest {
 
     @Test
     @Ignore

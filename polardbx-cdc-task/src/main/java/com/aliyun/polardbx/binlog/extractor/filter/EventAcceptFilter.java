@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.extractor.filter;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.LogEventFilter;
@@ -28,7 +29,6 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.IFilterBuilder;
 import com.google.common.collect.Sets;
-import com.google.gson.Gson;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,8 +41,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACTOR_LOGIC_DB_BLACKLIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACTOR_LOGIC_TABLE_BLACKLIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACT_FILTER_LOGIC_DB_BLACKLIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACT_FILTER_LOGIC_TABLE_BLACKLIST;
 import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 
@@ -115,13 +115,14 @@ public class EventAcceptFilter implements LogEventFilter<LogEvent>, IFilterBuild
 
     private void refreshFilter() {
         if (logger.isDebugEnabled()) {
-            logger.debug("start rebuild table filter : " + new Gson().toJson(filter) + " => " + storageInstanceId);
+            logger.debug("start rebuild table filter : " + JSONObject.toJSONString(filter)
+                + " => " + storageInstanceId);
         }
 
         this.filter = buildTableFilter();
 
         if (logger.isDebugEnabled()) {
-            logger.debug("success rebuild filter : " + new Gson().toJson(filter) + " => " + storageInstanceId);
+            logger.debug("success rebuild filter : " + JSONObject.toJSONString(filter) + " => " + storageInstanceId);
         }
     }
 
@@ -189,14 +190,14 @@ public class EventAcceptFilter implements LogEventFilter<LogEvent>, IFilterBuild
         Set<String> excludeLogicDbs = Sets.newHashSet();
         Set<String> excludeLogicTables = Sets.newHashSet();
 
-        String dbBlackList = DynamicApplicationConfig.getString(TASK_EXTRACTOR_LOGIC_DB_BLACKLIST);
+        String dbBlackList = DynamicApplicationConfig.getString(TASK_EXTRACT_FILTER_LOGIC_DB_BLACKLIST);
         if (StringUtils.isNotBlank(dbBlackList)) {
             dbBlackList = dbBlackList.toLowerCase();
             String[] array = StringUtils.split(dbBlackList, ",");
             excludeLogicDbs.addAll(Arrays.asList(array));
         }
 
-        String tableBlackList = DynamicApplicationConfig.getString(TASK_EXTRACTOR_LOGIC_TABLE_BLACKLIST);
+        String tableBlackList = DynamicApplicationConfig.getString(TASK_EXTRACT_FILTER_LOGIC_TABLE_BLACKLIST);
         if (StringUtils.isNotBlank(tableBlackList)) {
             tableBlackList = tableBlackList.toLowerCase();
             String[] array = StringUtils.split(tableBlackList, ",");

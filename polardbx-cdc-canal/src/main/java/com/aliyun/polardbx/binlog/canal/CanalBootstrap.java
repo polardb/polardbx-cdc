@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.canal;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.BinlogDumpContext;
@@ -40,8 +40,8 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_RECALLDAYS;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_FORCE_CONSUME_BACKUP;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_FORCED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_RECALL_DAYS_LIMIT;
 
 public class CanalBootstrap {
 
@@ -56,12 +56,11 @@ public class CanalBootstrap {
     private final List<LogEventFilter<?>> filterList = new ArrayList<>();
     private final LinkedList<String> searchQueue = new LinkedList<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
-
+    private final Long preferHostId;
     private MySqlInfo mySqlInfo;
     private DefaultBinlogEventHandle handle;
     private LogEventHandler<?> handler;
     private Thread runnableThread;
-    private final Long preferHostId;
 
     public CanalBootstrap(AuthenticationInfo authenticationInfo, String polarxServerVersion,
                           String localBinlogDir, Long preferHostId, String startCmdTSO) {
@@ -133,7 +132,7 @@ public class CanalBootstrap {
             .getEndPosition() + "]");
         connection.disconnect();
 
-        boolean forceConsumeBackup = DynamicApplicationConfig.getBoolean(TASK_RDSBINLOG_FORCE_CONSUME_BACKUP);
+        boolean forceConsumeBackup = DynamicApplicationConfig.getBoolean(TASK_DUMP_OFFLINE_BINLOG_FORCED);
         if (forceConsumeBackup) {
             logger.info("start consuming binlog from backup in force mode.");
             consumeOss(requestTso);
@@ -185,9 +184,11 @@ public class CanalBootstrap {
         if (StringUtils.isNotBlank(requestTso)) {
             requestTime = CommonUtils.getTsoPhysicalTime(requestTso, TimeUnit.MILLISECONDS);
         }
-        OssConnection connection = new OssConnection(authenticationInfo.getStorageInstId(), authenticationInfo.getUid(),
-            authenticationInfo.getBid(), localBinlogDir, preferHostId,
-            DynamicApplicationConfig.getInt(TASK_RDSBINLOG_DOWNLOAD_RECALLDAYS), mySqlInfo.getServerId(), requestTime);
+        OssConnection connection =
+            new OssConnection(authenticationInfo.getStorageMasterInstId(), authenticationInfo.getUid(),
+                authenticationInfo.getBid(), localBinlogDir, preferHostId,
+                DynamicApplicationConfig.getInt(TASK_DUMP_OFFLINE_BINLOG_RECALL_DAYS_LIMIT), mySqlInfo.getServerId(),
+                requestTime);
         do {
             long realTso = -1;
             if (requestTso != null && requestTso.length() > 19) {
@@ -205,7 +206,7 @@ public class CanalBootstrap {
 
             try {
                 //保留这块逻辑，删除历史记录
-                new File(localBinlogDir + File.separator + authenticationInfo.getStorageInstId()).deleteOnExit();
+                new File(localBinlogDir + File.separator + authenticationInfo.getStorageMasterInstId()).deleteOnExit();
             } catch (Exception e) {
                 // 消费完后，自动删除目录
             }
@@ -220,7 +221,7 @@ public class CanalBootstrap {
         BinlogDumpContext.setDumpStage(BinlogDumpContext.DumpStage.STAGE_DUMP);
         handle =
             new DefaultBinlogEventHandle(authenticationInfo, polarxServerVersion, startPosition, requestTso,
-                mySqlInfo.getServerCharactorSet(), mySqlInfo.getLowerCaseTableNames());
+                mySqlInfo.getServerCharactorSet(), mySqlInfo.getLowerCaseTableNames(), mySqlInfo.getSqlMode());
 
         for (LogEventFilter<?> filter : filterList) {
             handle.addFilter(filter);
@@ -245,7 +246,7 @@ public class CanalBootstrap {
         BinlogDumpContext.setDumpStage(BinlogDumpContext.DumpStage.STAGE_SEARCH);
         connection.connect();
         ISearchTsoEventHandle searchTsoEventHandle;
-        boolean inQuickMode = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_QUICKMODE);
+        boolean inQuickMode = SearchMode.isSearchInQuickMode();
         if (inQuickMode) {
             // 每次直接清空handler，当搜索oss时，根据tso定位文件。
             processor.setHandle(null);
@@ -255,14 +256,15 @@ public class CanalBootstrap {
             if (StringUtils.isNotBlank(this.startCmdTSO)) {
                 startCmdTSO = CommonUtils.getTsoTimestamp(this.startCmdTSO);
             }
-            if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_HANDLE_V1)) {
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_RECOVER_SEARCH_TSO_WITH_V_1_ALGORITHM)) {
 
                 searchTsoEventHandle =
                     new SearchTsoEventHandleV1(authenticationInfo, requestTso, searchTso, startCmdTSO);
             } else {
-                boolean quickMode = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_QUICKMODE);
+                boolean quickMode = SearchMode.isSearchInQuickMode();
+                String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
                 searchTsoEventHandle =
-                    new SearchTsoEventHandleV2(authenticationInfo, searchTso, startCmdTSO, quickMode);
+                    new SearchTsoEventHandleV2(authenticationInfo, searchTso, startCmdTSO, quickMode, clusterId);
             }
             processor.setHandle(searchTsoEventHandle);
         } else {

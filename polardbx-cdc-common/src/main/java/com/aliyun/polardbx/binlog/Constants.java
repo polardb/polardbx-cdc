@@ -14,11 +14,13 @@
  */
 package com.aliyun.polardbx.binlog;
 
-/**
- * created by ziyang.lb
- **/
-public interface Constants {
-    String STREAM_NAME_GLOBAL = "stream_global";
-    String GROUP_NAME_GLOBAL = "group_global";
-    String VERSION_PATH_PREFIX = "V";
+public abstract class Constants {
+    public static final String MDC_STREAM_SEQ = "stream_seq";
+    public static final String MDC_THREAD_LOGGER_KEY = "thread_logger";
+    public static final String MDC_THREAD_LOGGER_VALUE_BINLOG_BACKUP = "binlog_backup";
+    public static final String MDC_THREAD_LOGGER_VALUE_BINLOG_CLEAN = "binlog_clean";
+    public static final String MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP = "binlog_dump";
+    public static final String MDC_THREAD_LOGGER_VALUE_BINLOG_SYNC = "binlog_sync";
+
+    public static final String RELAY_DATA_FORCE_CLEAN_FLAG = "force_clean_flag";
 }

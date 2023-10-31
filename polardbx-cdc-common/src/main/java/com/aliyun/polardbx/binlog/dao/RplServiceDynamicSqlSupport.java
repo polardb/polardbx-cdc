@@ -17,49 +17,38 @@ package com.aliyun.polardbx.binlog.dao;
 import java.sql.JDBCType;
 import java.util.Date;
 import javax.annotation.Generated;
-
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class RplServiceDynamicSqlSupport {
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.863+08:00",
-        comments = "Source Table: rpl_service")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.913+08:00", comments="Source Table: rpl_service")
     public static final RplService rplService = new RplService();
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.863+08:00",
-        comments = "Source field: rpl_service.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.914+08:00", comments="Source field: rpl_service.id")
     public static final SqlColumn<Long> id = rplService.id;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.864+08:00",
-        comments = "Source field: rpl_service.gmt_created")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.914+08:00", comments="Source field: rpl_service.gmt_created")
     public static final SqlColumn<Date> gmtCreated = rplService.gmtCreated;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.864+08:00",
-        comments = "Source field: rpl_service.gmt_modified")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.914+08:00", comments="Source field: rpl_service.gmt_modified")
     public static final SqlColumn<Date> gmtModified = rplService.gmtModified;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.864+08:00",
-        comments = "Source field: rpl_service.state_machine_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.914+08:00", comments="Source field: rpl_service.state_machine_id")
     public static final SqlColumn<Long> stateMachineId = rplService.stateMachineId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.864+08:00",
-        comments = "Source field: rpl_service.service_type")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.914+08:00", comments="Source field: rpl_service.service_type")
     public static final SqlColumn<Integer> serviceType = rplService.serviceType;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.864+08:00",
-        comments = "Source field: rpl_service.state_list")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.914+08:00", comments="Source field: rpl_service.state_list")
     public static final SqlColumn<String> stateList = rplService.stateList;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.864+08:00",
-        comments = "Source field: rpl_service.channel")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.914+08:00", comments="Source field: rpl_service.channel")
     public static final SqlColumn<String> channel = rplService.channel;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.864+08:00",
-        comments = "Source field: rpl_service.status")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.914+08:00", comments="Source field: rpl_service.status")
     public static final SqlColumn<Integer> status = rplService.status;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:45:40.863+08:00",
-        comments = "Source Table: rpl_service")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.913+08:00", comments="Source Table: rpl_service")
     public static final class RplService extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

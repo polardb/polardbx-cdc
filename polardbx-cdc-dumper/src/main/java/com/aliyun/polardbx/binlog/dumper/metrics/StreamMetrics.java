@@ -25,6 +25,14 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.DELETE_ROWS_EVENT;
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.DELETE_ROWS_EVENT_V1;
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.TABLE_MAP_EVENT;
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.UPDATE_ROWS_EVENT;
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.UPDATE_ROWS_EVENT_V1;
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.WRITE_ROWS_EVENT;
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.WRITE_ROWS_EVENT_V1;
+
 /**
  * Created by ziyang.lb
  **/
@@ -42,6 +50,22 @@ public class StreamMetrics implements MetricsObserver {
      * 从dumper启动开始计算，截止到当前，已经收到的dml event的总个数
      */
     private long totalWriteDmlEventCount;
+    /**
+     * 从dumper启动开启计算，截止到当前，已经收到的dml TabMap event的总个数，对应TABLE_MAP_EVENT
+     */
+    private long totalWriteDmlTabMapEventCount;
+    /**
+     * 从dumper启动开启计算，截止到当前，已经收到的dml insert event的总个数，对应WRITE_ROWS_EVENT
+     */
+    private long totalWriteDmlInsertEventCount;
+    /**
+     * 从dumper启动开启计算，截止到当前，已经收到的dml update event的总个数，对应WRITE_ROWS_EVENT
+     */
+    private long totalWriteDmlUpdateEventCount;
+    /**
+     * 从dumper启动开启计算，截止到当前，已经收到的dml delete event的总个数，对应WRITE_ROWS_EVENT
+     */
+    private long totalWriteDmlDeleteEventCount;
     /**
      * 从dumper启动开始计算，截止到当前，已经收到的ddl event的总个数
      */
@@ -120,6 +144,10 @@ public class StreamMetrics implements MetricsObserver {
         StreamMetrics result = new StreamMetrics(this.streamId);
         result.totalWriteDdlEventCount = this.totalWriteDdlEventCount;
         result.totalWriteDmlEventCount = this.totalWriteDmlEventCount;
+        result.totalWriteDmlTabMapEventCount = this.totalWriteDmlTabMapEventCount;
+        result.totalWriteDmlInsertEventCount = this.totalWriteDmlInsertEventCount;
+        result.totalWriteDmlUpdateEventCount = this.totalWriteDmlUpdateEventCount;
+        result.totalWriteDmlDeleteEventCount = this.totalWriteDmlDeleteEventCount;
         result.totalRevEventCount = this.totalRevEventCount;
         result.totalRevEventBytes = this.totalRevEventBytes;
         result.totalWriteEventBytes = this.totalWriteEventBytes;
@@ -155,9 +183,19 @@ public class StreamMetrics implements MetricsObserver {
         totalWriteTxnCount++;
     }
 
-    public void incrementTotalWriteDmlEventCount() {
+    public void incrementTotalWriteDmlEventCount(int eventType) {
         totalWriteDmlEventCount++;
         totalRevEventCount++;
+
+        if (eventType == TABLE_MAP_EVENT) {
+            totalWriteDmlTabMapEventCount++;
+        } else if (eventType == WRITE_ROWS_EVENT || eventType == WRITE_ROWS_EVENT_V1) {
+            totalWriteDmlInsertEventCount++;
+        } else if (eventType == UPDATE_ROWS_EVENT || eventType == UPDATE_ROWS_EVENT_V1) {
+            totalWriteDmlUpdateEventCount++;
+        } else if (eventType == DELETE_ROWS_EVENT || eventType == DELETE_ROWS_EVENT_V1) {
+            totalWriteDmlDeleteEventCount++;
+        }
     }
 
     public void incrementTotalWriteDdlEventCount() {
@@ -238,6 +276,30 @@ public class StreamMetrics implements MetricsObserver {
 
     public long getTotalWriteEventCount() {
         return totalWriteEventCount;
+    }
+
+    public long getTotalWriteDmlEventCount() {
+        return totalWriteDmlEventCount;
+    }
+
+    public long getTotalWriteDmlTabMapEventCount() {
+        return totalWriteDmlTabMapEventCount;
+    }
+
+    public long getTotalWriteDmlInsertEventCount() {
+        return totalWriteDmlInsertEventCount;
+    }
+
+    public long getTotalWriteDmlUpdateEventCount() {
+        return totalWriteDmlUpdateEventCount;
+    }
+
+    public long getTotalWriteDmlDeleteEventCount() {
+        return totalWriteDmlDeleteEventCount;
+    }
+
+    public long getTotalWriteDdlEventCount() {
+        return totalWriteDdlEventCount;
     }
 
     public long getTotalWriteEventBytes() {

@@ -35,9 +35,8 @@ Linux)
 esac
 BASE_DIR=${BASE_DIR}/../
 logback_configurationFile=$BASE_DIR/conf/logback.xml
-export LD_LIBRARY_PATH=${BASE_DIR}/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=${BASE_DIR}/lib/native:${LD_LIBRARY_PATH}
 export NLS_LANG=AMERICAN_AMERICA.ZHS16GBK
-
 
 JAVA_OPTS="${JAVA_OPTS} -server -Xms${MEMORY}m -Xmx${MEMORY}m -Xss1m -Djute.maxbuffer=10240000 -DtaskName=$TASK_NAME -Dlogback.configurationFile=$logback_configurationFile"
 JAVA_OPTS="${JAVA_OPTS} -XX:+UseParallelGC"

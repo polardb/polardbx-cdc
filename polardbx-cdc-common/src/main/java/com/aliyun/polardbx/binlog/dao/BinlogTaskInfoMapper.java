@@ -44,6 +44,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
+import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.binlogTaskInfo;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.clusterId;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.containerId;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.gmtCreated;
@@ -51,9 +52,10 @@ import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.gmt
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.gmtModified;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.id;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.ip;
+import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.polarxInstId;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.port;
-import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.relayFinalTaskInfo;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.role;
+import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.sourcesList;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.status;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.taskName;
 import static com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport.version;
@@ -61,33 +63,33 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 @Mapper
 public interface BinlogTaskInfoMapper {
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.873+08:00",
         comments = "Source Table: binlog_task_info")
-    BasicColumn[] selectList = BasicColumn
-        .columnList(id, gmtCreated, gmtModified, clusterId, taskName, ip, port, role, status, gmtHeartbeat, containerId,
-            version);
+    BasicColumn[] selectList =
+        BasicColumn.columnList(id, gmtCreated, gmtModified, clusterId, taskName, ip, port, role, status, gmtHeartbeat,
+            containerId, version, polarxInstId, sourcesList);
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.866+08:00",
         comments = "Source Table: binlog_task_info")
     @SelectProvider(type = SqlProviderAdapter.class, method = "select")
     long count(SelectStatementProvider selectStatement);
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.867+08:00",
         comments = "Source Table: binlog_task_info")
     @DeleteProvider(type = SqlProviderAdapter.class, method = "delete")
     int delete(DeleteStatementProvider deleteStatement);
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.867+08:00",
         comments = "Source Table: binlog_task_info")
     @InsertProvider(type = SqlProviderAdapter.class, method = "insert")
     int insert(InsertStatementProvider<BinlogTaskInfo> insertStatement);
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.868+08:00",
         comments = "Source Table: binlog_task_info")
     @InsertProvider(type = SqlProviderAdapter.class, method = "insertMultiple")
     int insertMultiple(MultiRowInsertStatementProvider<BinlogTaskInfo> multipleInsertStatement);
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.868+08:00",
         comments = "Source Table: binlog_task_info")
     @SelectProvider(type = SqlProviderAdapter.class, method = "select")
     @ConstructorArgs({
@@ -102,11 +104,13 @@ public interface BinlogTaskInfoMapper {
         @Arg(column = "status", javaType = Integer.class, jdbcType = JdbcType.INTEGER),
         @Arg(column = "gmt_heartbeat", javaType = Date.class, jdbcType = JdbcType.TIMESTAMP),
         @Arg(column = "container_id", javaType = String.class, jdbcType = JdbcType.VARCHAR),
-        @Arg(column = "version", javaType = Long.class, jdbcType = JdbcType.BIGINT)
+        @Arg(column = "version", javaType = Long.class, jdbcType = JdbcType.BIGINT),
+        @Arg(column = "polarx_inst_id", javaType = String.class, jdbcType = JdbcType.VARCHAR),
+        @Arg(column = "sources_list", javaType = String.class, jdbcType = JdbcType.LONGVARCHAR)
     })
     Optional<BinlogTaskInfo> selectOne(SelectStatementProvider selectStatement);
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.869+08:00",
         comments = "Source Table: binlog_task_info")
     @SelectProvider(type = SqlProviderAdapter.class, method = "select")
     @ConstructorArgs({
@@ -121,28 +125,30 @@ public interface BinlogTaskInfoMapper {
         @Arg(column = "status", javaType = Integer.class, jdbcType = JdbcType.INTEGER),
         @Arg(column = "gmt_heartbeat", javaType = Date.class, jdbcType = JdbcType.TIMESTAMP),
         @Arg(column = "container_id", javaType = String.class, jdbcType = JdbcType.VARCHAR),
-        @Arg(column = "version", javaType = Long.class, jdbcType = JdbcType.BIGINT)
+        @Arg(column = "version", javaType = Long.class, jdbcType = JdbcType.BIGINT),
+        @Arg(column = "polarx_inst_id", javaType = String.class, jdbcType = JdbcType.VARCHAR),
+        @Arg(column = "sources_list", javaType = String.class, jdbcType = JdbcType.LONGVARCHAR)
     })
     List<BinlogTaskInfo> selectMany(SelectStatementProvider selectStatement);
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.869+08:00",
         comments = "Source Table: binlog_task_info")
     @UpdateProvider(type = SqlProviderAdapter.class, method = "update")
     int update(UpdateStatementProvider updateStatement);
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.869+08:00",
         comments = "Source Table: binlog_task_info")
     default long count(CountDSLCompleter completer) {
-        return MyBatis3Utils.countFrom(this::count, relayFinalTaskInfo, completer);
+        return MyBatis3Utils.countFrom(this::count, binlogTaskInfo, completer);
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.869+08:00",
         comments = "Source Table: binlog_task_info")
     default int delete(DeleteDSLCompleter completer) {
-        return MyBatis3Utils.deleteFrom(this::delete, relayFinalTaskInfo, completer);
+        return MyBatis3Utils.deleteFrom(this::delete, binlogTaskInfo, completer);
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.87+08:00",
         comments = "Source Table: binlog_task_info")
     default int deleteByPrimaryKey(Long id_) {
         return delete(c ->
@@ -150,10 +156,10 @@ public interface BinlogTaskInfoMapper {
         );
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.871+08:00",
         comments = "Source Table: binlog_task_info")
     default int insert(BinlogTaskInfo record) {
-        return MyBatis3Utils.insert(this::insert, record, relayFinalTaskInfo, c ->
+        return MyBatis3Utils.insert(this::insert, record, binlogTaskInfo, c ->
             c.map(id).toProperty("id")
                 .map(gmtCreated).toProperty("gmtCreated")
                 .map(gmtModified).toProperty("gmtModified")
@@ -166,13 +172,15 @@ public interface BinlogTaskInfoMapper {
                 .map(gmtHeartbeat).toProperty("gmtHeartbeat")
                 .map(containerId).toProperty("containerId")
                 .map(version).toProperty("version")
+                .map(polarxInstId).toProperty("polarxInstId")
+                .map(sourcesList).toProperty("sourcesList")
         );
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.58+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.872+08:00",
         comments = "Source Table: binlog_task_info")
     default int insertMultiple(Collection<BinlogTaskInfo> records) {
-        return MyBatis3Utils.insertMultiple(this::insertMultiple, records, relayFinalTaskInfo, c ->
+        return MyBatis3Utils.insertMultiple(this::insertMultiple, records, binlogTaskInfo, c ->
             c.map(id).toProperty("id")
                 .map(gmtCreated).toProperty("gmtCreated")
                 .map(gmtModified).toProperty("gmtModified")
@@ -185,13 +193,15 @@ public interface BinlogTaskInfoMapper {
                 .map(gmtHeartbeat).toProperty("gmtHeartbeat")
                 .map(containerId).toProperty("containerId")
                 .map(version).toProperty("version")
+                .map(polarxInstId).toProperty("polarxInstId")
+                .map(sourcesList).toProperty("sourcesList")
         );
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.872+08:00",
         comments = "Source Table: binlog_task_info")
     default int insertSelective(BinlogTaskInfo record) {
-        return MyBatis3Utils.insert(this::insert, record, relayFinalTaskInfo, c ->
+        return MyBatis3Utils.insert(this::insert, record, binlogTaskInfo, c ->
             c.map(id).toPropertyWhenPresent("id", record::getId)
                 .map(gmtCreated).toPropertyWhenPresent("gmtCreated", record::getGmtCreated)
                 .map(gmtModified).toPropertyWhenPresent("gmtModified", record::getGmtModified)
@@ -204,28 +214,30 @@ public interface BinlogTaskInfoMapper {
                 .map(gmtHeartbeat).toPropertyWhenPresent("gmtHeartbeat", record::getGmtHeartbeat)
                 .map(containerId).toPropertyWhenPresent("containerId", record::getContainerId)
                 .map(version).toPropertyWhenPresent("version", record::getVersion)
+                .map(polarxInstId).toPropertyWhenPresent("polarxInstId", record::getPolarxInstId)
+                .map(sourcesList).toPropertyWhenPresent("sourcesList", record::getSourcesList)
         );
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.874+08:00",
         comments = "Source Table: binlog_task_info")
     default Optional<BinlogTaskInfo> selectOne(SelectDSLCompleter completer) {
-        return MyBatis3Utils.selectOne(this::selectOne, selectList, relayFinalTaskInfo, completer);
+        return MyBatis3Utils.selectOne(this::selectOne, selectList, binlogTaskInfo, completer);
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.875+08:00",
         comments = "Source Table: binlog_task_info")
     default List<BinlogTaskInfo> select(SelectDSLCompleter completer) {
-        return MyBatis3Utils.selectList(this::selectMany, selectList, relayFinalTaskInfo, completer);
+        return MyBatis3Utils.selectList(this::selectMany, selectList, binlogTaskInfo, completer);
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.875+08:00",
         comments = "Source Table: binlog_task_info")
     default List<BinlogTaskInfo> selectDistinct(SelectDSLCompleter completer) {
-        return MyBatis3Utils.selectDistinct(this::selectMany, selectList, relayFinalTaskInfo, completer);
+        return MyBatis3Utils.selectDistinct(this::selectMany, selectList, binlogTaskInfo, completer);
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.875+08:00",
         comments = "Source Table: binlog_task_info")
     default Optional<BinlogTaskInfo> selectByPrimaryKey(Long id_) {
         return selectOne(c ->
@@ -233,13 +245,13 @@ public interface BinlogTaskInfoMapper {
         );
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.876+08:00",
         comments = "Source Table: binlog_task_info")
     default int update(UpdateDSLCompleter completer) {
-        return MyBatis3Utils.update(this::update, relayFinalTaskInfo, completer);
+        return MyBatis3Utils.update(this::update, binlogTaskInfo, completer);
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.877+08:00",
         comments = "Source Table: binlog_task_info")
     static UpdateDSL<UpdateModel> updateAllColumns(BinlogTaskInfo record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(id).equalTo(record::getId)
@@ -253,10 +265,12 @@ public interface BinlogTaskInfoMapper {
             .set(status).equalTo(record::getStatus)
             .set(gmtHeartbeat).equalTo(record::getGmtHeartbeat)
             .set(containerId).equalTo(record::getContainerId)
-            .set(version).equalTo(record::getVersion);
+            .set(version).equalTo(record::getVersion)
+            .set(polarxInstId).equalTo(record::getPolarxInstId)
+            .set(sourcesList).equalTo(record::getSourcesList);
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.877+08:00",
         comments = "Source Table: binlog_task_info")
     static UpdateDSL<UpdateModel> updateSelectiveColumns(BinlogTaskInfo record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(id).equalToWhenPresent(record::getId)
@@ -270,10 +284,12 @@ public interface BinlogTaskInfoMapper {
             .set(status).equalToWhenPresent(record::getStatus)
             .set(gmtHeartbeat).equalToWhenPresent(record::getGmtHeartbeat)
             .set(containerId).equalToWhenPresent(record::getContainerId)
-            .set(version).equalToWhenPresent(record::getVersion);
+            .set(version).equalToWhenPresent(record::getVersion)
+            .set(polarxInstId).equalToWhenPresent(record::getPolarxInstId)
+            .set(sourcesList).equalToWhenPresent(record::getSourcesList);
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.879+08:00",
         comments = "Source Table: binlog_task_info")
     default int updateByPrimaryKey(BinlogTaskInfo record) {
         return update(c ->
@@ -288,11 +304,13 @@ public interface BinlogTaskInfoMapper {
                 .set(gmtHeartbeat).equalTo(record::getGmtHeartbeat)
                 .set(containerId).equalTo(record::getContainerId)
                 .set(version).equalTo(record::getVersion)
+                .set(polarxInstId).equalTo(record::getPolarxInstId)
+                .set(sourcesList).equalTo(record::getSourcesList)
                 .where(id, isEqualTo(record::getId))
         );
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-22T21:03:05.581+08:00",
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-06-08T15:33:05.879+08:00",
         comments = "Source Table: binlog_task_info")
     default int updateByPrimaryKeySelective(BinlogTaskInfo record) {
         return update(c ->
@@ -307,6 +325,8 @@ public interface BinlogTaskInfoMapper {
                 .set(gmtHeartbeat).equalToWhenPresent(record::getGmtHeartbeat)
                 .set(containerId).equalToWhenPresent(record::getContainerId)
                 .set(version).equalToWhenPresent(record::getVersion)
+                .set(polarxInstId).equalToWhenPresent(record::getPolarxInstId)
+                .set(sourcesList).equalToWhenPresent(record::getSourcesList)
                 .where(id, isEqualTo(record::getId))
         );
     }

@@ -35,7 +35,7 @@ public interface TableMetaTSDB {
     /**
      * 销毁资源
      */
-    void destory();
+    void destroy();
 
     /**
      * 获取当前的表结构
@@ -57,4 +57,5 @@ public interface TableMetaTSDB {
      */
     Map<String/* schema */, String> snapshot();
 
+    BinlogPosition INIT_POSITION = BinlogPosition.parseFromString("0:0#-2.-1");
 }

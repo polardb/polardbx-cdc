@@ -18,7 +18,6 @@ service CdcService {
 
   rpc Sync (DumpRequest) returns (stream DumpStream) {}
 
-  ////////////////////////////// replicate   ///////////////////////////
   rpc ChangeMaster (ChangeMasterRequest) returns (RplCommandResponse) {}
 
   rpc ChangeReplicationFilter (ChangeReplicationFilterRequest) returns (RplCommandResponse) {}
@@ -30,6 +29,7 @@ service CdcService {
   rpc ResetSlave (ResetSlaveRequest) returns (RplCommandResponse) {}
 
   rpc ShowSlaveStatus (ShowSlaveStatusRequest) returns (stream ShowSlaveStatusResponse) {}
+
 }
 
 message Request {
@@ -103,7 +103,6 @@ message StopSlaveRequest{
 message ResetSlaveRequest{
   string    request = 1;
 }
-
 message ChangeReplicationFilterRequest{
   string    request = 1;
 }

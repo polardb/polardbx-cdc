@@ -18,6 +18,7 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.ValidationDiffDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.ValidationDiffMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.filter.DataImportFilter;
@@ -51,7 +52,8 @@ public class ReconExtractor extends BaseExtractor {
     private DataImportFilter filter;
     private List<ValidationContext> contextList;
 
-    public ReconExtractor(ReconExtractorConfig extractorConfig, HostInfo srcHost, HostInfo dstHost, DataImportFilter filter) {
+    public ReconExtractor(ReconExtractorConfig extractorConfig, HostInfo srcHost, HostInfo dstHost,
+                          DataImportFilter filter) {
         super(extractorConfig);
         this.extractorName = "ReconExtractor";
         this.extractorConfig = extractorConfig;
@@ -59,15 +61,14 @@ public class ReconExtractor extends BaseExtractor {
         this.dstHost = dstHost;
         this.filter = filter;
         executorService = ThreadPoolUtil.createExecutorWithFixedNum(extractorConfig.getParallelCount(),
-                                                                    extractorName);
+            extractorName);
         runningProcessors = new ArrayList<>();
     }
 
     @Override
-    public boolean init() throws Exception {
-        log.info("Initializing extractor {}", extractorName);
+    public void init() throws Exception {
+        super.init();
         contextList = ValidationContext.getFactory().createCtxList(srcHost, dstHost, filter);
-        return true;
     }
 
     @Override
@@ -88,12 +89,12 @@ public class ReconExtractor extends BaseExtractor {
         for (Future future : runningProcessors) {
             allDone &= future.isDone();
         }
-        if (allDone)  {
+        if (allDone) {
             if (isReconFinished()) {
                 return true;
             } else {
                 log.error("All futures have been done but some tasks are not finished");
-                System.exit(-1);
+                throw new PolardbxException("All futures have been done but some tasks are not finished");
             }
         }
         return false;

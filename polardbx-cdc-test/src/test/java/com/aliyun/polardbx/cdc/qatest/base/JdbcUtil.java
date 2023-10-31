@@ -18,6 +18,7 @@ import com.alibaba.druid.pool.DruidDataSource;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Assert;
 import org.slf4j.Logger;
@@ -56,13 +57,13 @@ import static com.google.common.truth.Truth.assertWithMessage;
  */
 public class JdbcUtil {
 
+    public static final String DEFAULT_PHY_DB = "mysql";
+    public static final String DROP_TABLE_SQL = "drop table if exists %s";
+    public static final String CREATE_TABLE_LIKE_SQL = "create table %s like %s";
     private static final Logger log = LoggerFactory.getLogger(JdbcUtil.class);
     private static final String URL_PATTERN = "jdbc:mysql://%s:%s/%s?%s";
     private static final String DEFAULT_CONN_PROPS =
         "useUnicode=true&characterEncoding=utf8&useSSL=false&connectTimeout=5000&socketTimeout=12000";
-    public static final String DEFAULT_PHY_DB = "mysql";
-    public final static String DROP_TABLE_SQL = "drop table if exists %s";
-    public final static String CREATE_TABLE_LIKE_SQL = "create table %s like %s";
 
     /**
      * 关闭statment
@@ -1166,102 +1167,6 @@ public class JdbcUtil {
         }
     }
 
-    public static class MyNumber {
-
-        BigDecimal number;
-
-        public MyNumber(BigDecimal number) {
-            super();
-            this.number = number;
-        }
-
-        public BigDecimal getNumber() {
-            return number;
-        }
-
-        public String toString() {
-            return this.number == null ? null : this.number.toString();
-        }
-
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-            if (obj == null) {
-                return false;
-            }
-            if (getClass() != obj.getClass()) {
-                String errorMS = "[类型不一致]" + this.getClass() + "  " + obj.getClass();
-                log.error(errorMS);
-                Assert.fail(errorMS);
-            }
-            MyNumber other = (MyNumber) obj;
-            if (number == null) {
-                return other.number == null;
-            } else {
-                BigDecimal o = this.number;
-                BigDecimal o2 = other.number;
-
-                return o.subtract(o2).abs().compareTo(new BigDecimal(0.0001)) < 0;
-            }
-        }
-    }
-
-    // 时间类型的比较不需要特别准确，
-    public static class MyDate {
-
-        public Date date;
-        public final boolean assertTypeMatch;
-
-        public MyDate(Date date) {
-            this(date, true);
-        }
-
-        public MyDate(Date date, boolean assertTypeMatch) {
-            super();
-            this.date = date;
-            this.assertTypeMatch = assertTypeMatch;
-        }
-
-        public Date getDate() {
-            return date;
-        }
-
-        public String toString() {
-            return this.date == null ? null : String.valueOf(this.date.getTime());
-        }
-
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-            if (obj == null) {
-                return false;
-            }
-            if (getClass() != obj.getClass()) {
-                String errorMS = "[类型不一致]" + this.getClass() + "  " + obj.getClass();
-                log.error(errorMS);
-                if (assertTypeMatch) {
-                    Assert.fail(errorMS);
-                } else {
-                    return false;
-                }
-            }
-            MyDate other = (MyDate) obj;
-            if (date == null) {
-                if (other.date != null) {
-                    return false;
-                }
-            } else {
-                Date o = this.date;
-                Date o2 = other.date;
-
-                return ((o.getTime() - o2.getTime()) / 1000 >= -10) && ((o.getTime() - o2.getTime()) / 1000 <= 10);
-            }
-            return false;
-        }
-    }
-
     /**
      * 关闭连接
      */
@@ -1654,7 +1559,7 @@ public class JdbcUtil {
     }
 
     public static void useDb(Connection connection, String db) {
-        executeQuery("use " + db, connection);
+        executeQuery("use `" + db + "`", connection);
     }
 
     public static String createLikeTable(
@@ -1811,13 +1716,16 @@ public class JdbcUtil {
     /**
      * 获得表中所有列的列名
      */
-    public static List<String> getColumnNamesByDesc(Connection conn, String dbName, String tbName) throws SQLException {
-        List<String> columns = new ArrayList<>();
+    public static List<Pair<String, String>> getColumnNamesByDesc(Connection conn, String dbName, String tbName)
+        throws SQLException {
+        List<Pair<String, String>> columns = new ArrayList<>();
         String sql = String.format("DESC `%s`.`%s`", escape(dbName), escape(tbName));
         try (ResultSet rs = executeQuerySuccess(conn, sql)) {
             while (rs.next()) {
                 String column = rs.getString(1);
-                columns.add(column);
+                String columnType = rs.getString(2);
+                Pair<String, String> pair = new ImmutablePair<>(column, columnType);
+                columns.add(pair);
             }
         }
         return columns;
@@ -1826,15 +1734,22 @@ public class JdbcUtil {
     /**
      * 获得表中各列的列名到类型的映射
      */
-    public static Map<String, String> getColumnTypesByDesc(Connection conn, String dbName, String tbName)
+    public static Map<String, ColumnType> getColumnTypesByDesc(Connection conn, String dbName, String tbName)
         throws SQLException {
-        Map<String, String> name2Type = new HashMap<>();
+        Map<String, ColumnType> name2Type = new HashMap<>();
         String sql = String.format("DESC `%s`.`%s`", escape(dbName), escape(tbName));
         try (ResultSet rs = executeQuerySuccess(conn, sql)) {
             while (rs.next()) {
+                ColumnType columnType = new ColumnType();
                 String columnName = rs.getString(1);
                 String type = rs.getString(2);
-                name2Type.put(columnName, type);
+                String canNull = rs.getString(3);
+                String defaultValue = rs.getString(5);
+                columnType.setType(type);
+                columnType.setDefaultValue(defaultValue);
+                columnType.setCanNull(StringUtils.equalsAnyIgnoreCase(canNull, "YES"));
+
+                name2Type.put(columnName, columnType);
             }
         }
         return name2Type;
@@ -1897,8 +1812,9 @@ public class JdbcUtil {
             }
         }
         List<String> res = new ArrayList<>();
-        List<String> columns = getColumnNamesByDesc(conn, dbName, tbName);
-        for (String c : columns) {
+        List<Pair<String, String>> columns = getColumnNamesByDesc(conn, dbName, tbName);
+        for (Pair<String, String> p : columns) {
+            String c = p.getLeft();
             if (keys.contains(c)) {
                 res.add(c);
             }
@@ -1908,7 +1824,10 @@ public class JdbcUtil {
 
     public static List<String> showTables(Connection conn, String database) throws SQLException {
         List<String> tables = new ArrayList<>();
-        try (ResultSet rs = executeQuery("show tables from " + database, conn)) {
+        try (ResultSet rs = executeQuery(
+            "select TABLE_NAME from information_schema.TABLES where TABLE_SCHEMA = '" + database
+                + "' and TABLE_TYPE='BASE TABLE'",
+            conn)) {
             while (rs.next()) {
                 String table = rs.getString(1);
                 tables.add(table);
@@ -1926,6 +1845,102 @@ public class JdbcUtil {
             }
         }
         return databases;
+    }
+
+    public static class MyNumber {
+
+        BigDecimal number;
+
+        public MyNumber(BigDecimal number) {
+            super();
+            this.number = number;
+        }
+
+        public BigDecimal getNumber() {
+            return number;
+        }
+
+        public String toString() {
+            return this.number == null ? null : this.number.toString();
+        }
+
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null) {
+                return false;
+            }
+            if (getClass() != obj.getClass()) {
+                String errorMS = "[类型不一致]" + this.getClass() + "  " + obj.getClass();
+                log.error(errorMS);
+                Assert.fail(errorMS);
+            }
+            MyNumber other = (MyNumber) obj;
+            if (number == null) {
+                return other.number == null;
+            } else {
+                BigDecimal o = this.number;
+                BigDecimal o2 = other.number;
+
+                return o.subtract(o2).abs().compareTo(new BigDecimal(0.0001)) < 0;
+            }
+        }
+    }
+
+    // 时间类型的比较不需要特别准确，
+    public static class MyDate {
+
+        public final boolean assertTypeMatch;
+        public Date date;
+
+        public MyDate(Date date) {
+            this(date, true);
+        }
+
+        public MyDate(Date date, boolean assertTypeMatch) {
+            super();
+            this.date = date;
+            this.assertTypeMatch = assertTypeMatch;
+        }
+
+        public Date getDate() {
+            return date;
+        }
+
+        public String toString() {
+            return this.date == null ? null : String.valueOf(this.date.getTime());
+        }
+
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null) {
+                return false;
+            }
+            if (getClass() != obj.getClass()) {
+                String errorMS = "[类型不一致]" + this.getClass() + "  " + obj.getClass();
+                log.error(errorMS);
+                if (assertTypeMatch) {
+                    Assert.fail(errorMS);
+                } else {
+                    return false;
+                }
+            }
+            MyDate other = (MyDate) obj;
+            if (date == null) {
+                if (other.date != null) {
+                    return false;
+                }
+            } else {
+                Date o = this.date;
+                Date o2 = other.date;
+
+                return ((o.getTime() - o2.getTime()) / 1000 >= -10) && ((o.getTime() - o2.getTime()) / 1000 <= 10);
+            }
+            return false;
+        }
     }
 
 }

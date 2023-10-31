@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.transmit.relay;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.metrics.RelayStreamMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;

@@ -48,26 +48,26 @@ import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
 
 @Mapper
 public interface DumperInfoMapper {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.159+08:00", comments="Source Table: binlog_dumper_info")
-    BasicColumn[] selectList = BasicColumn.columnList(id, gmtCreated, gmtModified, clusterId, taskName, ip, port, role, status, gmtHeartbeat, containerId, version);
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
+    BasicColumn[] selectList = BasicColumn.columnList(id, gmtCreated, gmtModified, clusterId, taskName, ip, port, role, status, gmtHeartbeat, containerId, version, polarxInstId);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.149+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.403+08:00", comments="Source Table: binlog_dumper_info")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     long count(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.15+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.403+08:00", comments="Source Table: binlog_dumper_info")
     @DeleteProvider(type=SqlProviderAdapter.class, method="delete")
     int delete(DeleteStatementProvider deleteStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.151+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.403+08:00", comments="Source Table: binlog_dumper_info")
     @InsertProvider(type=SqlProviderAdapter.class, method="insert")
     int insert(InsertStatementProvider<DumperInfo> insertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.152+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.403+08:00", comments="Source Table: binlog_dumper_info")
     @InsertProvider(type=SqlProviderAdapter.class, method="insertMultiple")
     int insertMultiple(MultiRowInsertStatementProvider<DumperInfo> multipleInsertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.152+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Long.class, jdbcType=JdbcType.BIGINT, id=true),
@@ -81,11 +81,12 @@ public interface DumperInfoMapper {
         @Arg(column="status", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
         @Arg(column="gmt_heartbeat", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
         @Arg(column="container_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
-        @Arg(column="version", javaType=Long.class, jdbcType=JdbcType.BIGINT)
+        @Arg(column="version", javaType=Long.class, jdbcType=JdbcType.BIGINT),
+        @Arg(column="polarx_inst_id", javaType=String.class, jdbcType=JdbcType.VARCHAR)
     })
     Optional<DumperInfo> selectOne(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.154+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Long.class, jdbcType=JdbcType.BIGINT, id=true),
@@ -99,32 +100,33 @@ public interface DumperInfoMapper {
         @Arg(column="status", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
         @Arg(column="gmt_heartbeat", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
         @Arg(column="container_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
-        @Arg(column="version", javaType=Long.class, jdbcType=JdbcType.BIGINT)
+        @Arg(column="version", javaType=Long.class, jdbcType=JdbcType.BIGINT),
+        @Arg(column="polarx_inst_id", javaType=String.class, jdbcType=JdbcType.VARCHAR)
     })
     List<DumperInfo> selectMany(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.154+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     @UpdateProvider(type=SqlProviderAdapter.class, method="update")
     int update(UpdateStatementProvider updateStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.155+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default long count(CountDSLCompleter completer) {
         return MyBatis3Utils.countFrom(this::count, dumperInfo, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.155+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default int delete(DeleteDSLCompleter completer) {
         return MyBatis3Utils.deleteFrom(this::delete, dumperInfo, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.156+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default int deleteByPrimaryKey(Long id_) {
         return delete(c -> 
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.156+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default int insert(DumperInfo record) {
         return MyBatis3Utils.insert(this::insert, record, dumperInfo, c ->
             c.map(id).toProperty("id")
@@ -139,10 +141,11 @@ public interface DumperInfoMapper {
             .map(gmtHeartbeat).toProperty("gmtHeartbeat")
             .map(containerId).toProperty("containerId")
             .map(version).toProperty("version")
+            .map(polarxInstId).toProperty("polarxInstId")
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.158+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default int insertMultiple(Collection<DumperInfo> records) {
         return MyBatis3Utils.insertMultiple(this::insertMultiple, records, dumperInfo, c ->
             c.map(id).toProperty("id")
@@ -157,10 +160,11 @@ public interface DumperInfoMapper {
             .map(gmtHeartbeat).toProperty("gmtHeartbeat")
             .map(containerId).toProperty("containerId")
             .map(version).toProperty("version")
+            .map(polarxInstId).toProperty("polarxInstId")
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.158+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default int insertSelective(DumperInfo record) {
         return MyBatis3Utils.insert(this::insert, record, dumperInfo, c ->
             c.map(id).toPropertyWhenPresent("id", record::getId)
@@ -175,37 +179,38 @@ public interface DumperInfoMapper {
             .map(gmtHeartbeat).toPropertyWhenPresent("gmtHeartbeat", record::getGmtHeartbeat)
             .map(containerId).toPropertyWhenPresent("containerId", record::getContainerId)
             .map(version).toPropertyWhenPresent("version", record::getVersion)
+            .map(polarxInstId).toPropertyWhenPresent("polarxInstId", record::getPolarxInstId)
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.161+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default Optional<DumperInfo> selectOne(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectOne(this::selectOne, selectList, dumperInfo, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.161+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default List<DumperInfo> select(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectList(this::selectMany, selectList, dumperInfo, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.161+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default List<DumperInfo> selectDistinct(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectDistinct(this::selectMany, selectList, dumperInfo, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.162+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default Optional<DumperInfo> selectByPrimaryKey(Long id_) {
         return selectOne(c ->
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.162+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     default int update(UpdateDSLCompleter completer) {
         return MyBatis3Utils.update(this::update, dumperInfo, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.163+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.404+08:00", comments="Source Table: binlog_dumper_info")
     static UpdateDSL<UpdateModel> updateAllColumns(DumperInfo record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(id).equalTo(record::getId)
                 .set(gmtCreated).equalTo(record::getGmtCreated)
@@ -218,10 +223,11 @@ public interface DumperInfoMapper {
                 .set(status).equalTo(record::getStatus)
                 .set(gmtHeartbeat).equalTo(record::getGmtHeartbeat)
                 .set(containerId).equalTo(record::getContainerId)
-                .set(version).equalTo(record::getVersion);
+                .set(version).equalTo(record::getVersion)
+                .set(polarxInstId).equalTo(record::getPolarxInstId);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.163+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.405+08:00", comments="Source Table: binlog_dumper_info")
     static UpdateDSL<UpdateModel> updateSelectiveColumns(DumperInfo record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(id).equalToWhenPresent(record::getId)
                 .set(gmtCreated).equalToWhenPresent(record::getGmtCreated)
@@ -234,10 +240,11 @@ public interface DumperInfoMapper {
                 .set(status).equalToWhenPresent(record::getStatus)
                 .set(gmtHeartbeat).equalToWhenPresent(record::getGmtHeartbeat)
                 .set(containerId).equalToWhenPresent(record::getContainerId)
-                .set(version).equalToWhenPresent(record::getVersion);
+                .set(version).equalToWhenPresent(record::getVersion)
+                .set(polarxInstId).equalToWhenPresent(record::getPolarxInstId);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.164+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.405+08:00", comments="Source Table: binlog_dumper_info")
     default int updateByPrimaryKey(DumperInfo record) {
         return update(c ->
             c.set(gmtCreated).equalTo(record::getGmtCreated)
@@ -251,11 +258,12 @@ public interface DumperInfoMapper {
             .set(gmtHeartbeat).equalTo(record::getGmtHeartbeat)
             .set(containerId).equalTo(record::getContainerId)
             .set(version).equalTo(record::getVersion)
+            .set(polarxInstId).equalTo(record::getPolarxInstId)
             .where(id, isEqualTo(record::getId))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-04-11T09:47:17.165+08:00", comments="Source Table: binlog_dumper_info")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-06-08T11:43:39.405+08:00", comments="Source Table: binlog_dumper_info")
     default int updateByPrimaryKeySelective(DumperInfo record) {
         return update(c ->
             c.set(gmtCreated).equalToWhenPresent(record::getGmtCreated)
@@ -269,6 +277,7 @@ public interface DumperInfoMapper {
             .set(gmtHeartbeat).equalToWhenPresent(record::getGmtHeartbeat)
             .set(containerId).equalToWhenPresent(record::getContainerId)
             .set(version).equalToWhenPresent(record::getVersion)
+            .set(polarxInstId).equalToWhenPresent(record::getPolarxInstId)
             .where(id, isEqualTo(record::getId))
         );
     }

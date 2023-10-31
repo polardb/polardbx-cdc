@@ -26,7 +26,6 @@ import java.util.List;
 
 /**
  * @author siyu.yusi
- * @date 02/28/2022
  **/
 public interface ValTaskRepository {
     /**
@@ -36,52 +35,36 @@ public interface ValTaskRepository {
 
     /**
      * Count validation task records number
-     * @return
      */
     long countValRecords(String srcTable);
 
     /**
      * Get validation task
-     * @param srcPhyTable
-     * @return
-     * @throws Exception
      */
     ValidationTask getValTaskRecord(String srcPhyTable) throws Exception;
 
     /**
      * Persis diff rows
-     * @param srcTable
-     * @param keyRowValList
-     * @throws Exception
      */
     void persistDiffRows(TableInfo srcTable, List<Record> keyRowValList) throws Exception;
 
     /**
      * Update validation task state
-     * @param srcTable
-     * @param state
-     * @throws Exception
      */
     void updateValTaskState(TableInfo srcTable, ValidationStateEnum state) throws Exception;
 
     /**
      * Get validation task list
-     * @return
      */
     List<ValidationTask> getValTaskList();
 
     /**
      * Get diff list based on src physical table name
-     * @param srcTable
-     * @return
      */
     List<ValidationDiff> getValDiffList(TableInfo srcTable);
 
     /**
      * Get validation task with external id
-     * @param refId
-     * @return
-     * @throws SQLException
      */
     ValidationTask getValTaskByRefId(String refId) throws SQLException;
 }

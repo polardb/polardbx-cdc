@@ -40,12 +40,6 @@ public class TableMetaHistoryWatcher extends AbstractBinlogTimerTask {
     @Override
     public void exec() {
         try {
-            if (!RuntimeLeaderElector.isDaemonLeader()) {
-                if (log.isDebugEnabled()) {
-                    log.debug("current daemon is not a leader, skip to build table mata snap and clean!");
-                }
-                return;
-            }
             if (RuntimeLeaderElector.isLeader(TABLE_META_REBUILD_LOCK)) {
                 tableMetaHistoryDbHelper.tryClean();
             }

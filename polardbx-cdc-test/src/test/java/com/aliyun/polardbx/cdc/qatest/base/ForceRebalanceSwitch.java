@@ -20,8 +20,8 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_REFRESH_INTERVAL_MINUTE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RECOVER_TSO_TESTING_ENABLE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_FORCE_REFRESH_TOPOLOGY_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
 
 /**
  * created by ziyang.lb
@@ -33,8 +33,8 @@ public class ForceRebalanceSwitch extends RplBaseTestCase {
     public void open() throws SQLException {
         try (Connection connection = getMetaConnection()) {
             Statement stmt = connection.createStatement();
-            stmt.execute(String.format(SQL, TOPOLOGY_FORCE_REFRESH_INTERVAL_MINUTE, 15));
-            stmt.execute(String.format(SQL, TOPOLOGY_RECOVER_TSO_TESTING_ENABLE, "true"));
+            stmt.execute(String.format(SQL, DAEMON_FORCE_REFRESH_TOPOLOGY_INTERVAL, 15));
+            stmt.execute(String.format(SQL, TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED, "RANDOM"));
         }
         try (Connection connection = getPolardbxConnection()) {
             Statement stmt = connection.createStatement();
@@ -46,8 +46,8 @@ public class ForceRebalanceSwitch extends RplBaseTestCase {
     public void close() throws SQLException {
         try (Connection connection = getMetaConnection()) {
             Statement stmt = connection.createStatement();
-            stmt.execute(String.format(SQL, TOPOLOGY_FORCE_REFRESH_INTERVAL_MINUTE, 0));
-            stmt.execute(String.format(SQL, TOPOLOGY_RECOVER_TSO_TESTING_ENABLE, "false"));
+            stmt.execute(String.format(SQL, DAEMON_FORCE_REFRESH_TOPOLOGY_INTERVAL, 0));
+            stmt.execute(String.format(SQL, TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED, "false"));
         }
     }
 }

@@ -30,14 +30,11 @@ import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.TransactionStorage;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
-import com.aliyun.polardbx.binlog.extractor.log.TransactionGroup;
 import com.aliyun.polardbx.binlog.extractor.log.processor.EventFilter;
 import com.aliyun.polardbx.binlog.extractor.log.processor.FilterBlacklistTableFilter;
-import com.aliyun.polardbx.binlog.format.utils.BinlogGenerateUtil;
-import com.aliyun.polardbx.binlog.storage.Storage;
+import com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,10 +43,9 @@ import java.util.List;
  * @author chengjin.lyf on 2020/7/15 7:24 下午
  * @since 1.0.25
  */
+@Slf4j
 public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
-
-    private static final Logger logger = LoggerFactory.getLogger(TransactionBufferEventFilter.class);
-    private final Storage storage;
+    private final List<EventFilter> eventFilterList = new ArrayList<>();
     private TransactionStorage transactionStorage;
     private Transaction currentTran;
     private boolean receiveFormatDesc = false;
@@ -61,11 +57,8 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
      */
     private long lastCommitSequenceNum = -1L;
 
-    private List<EventFilter> eventFilterList = new ArrayList<>();
-
-    public TransactionBufferEventFilter(Storage storage) {
-        this.storage = storage;
-        String blacklist = DynamicApplicationConfig.getString(ConfigKeys.TASK_META_REBUILD_BLACKLIST);
+    public TransactionBufferEventFilter() {
+        String blacklist = DynamicApplicationConfig.getString(ConfigKeys.TASK_EXTRACT_FILTER_PHYSICAL_TABLE_BLACKLIST);
         if (StringUtils.isNotBlank(blacklist)) {
             eventFilterList.add(new FilterBlacklistTableFilter(blacklist));
         }
@@ -145,9 +138,9 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         RuntimeContext rc = context.getRuntimeContext();
 
         if (StringUtils.isNotBlank(xid)) {
-            Transaction transaction = transactionStorage.getByXid(xid);
+            Transaction transaction = transactionStorage.getByXid(xid, context.getRuntimeContext());
             if (transaction == null) {
-                logger.warn("rollback event not found transaction obj , xid : " + xid + " event log : "
+                log.warn("rollback event not found transaction obj , xid : " + xid + " event log : "
                     + logEvent.getHeader().getLogPos());
                 return;
             }
@@ -163,11 +156,11 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             String errorMsg = "occur fatal error, new transaction start but last transaction not finish! last id: "
                 + currentTran.getTransactionId() + " ,last pos: " + currentTran.getStartLogPos() +
                 ", cur id: " + LogEventUtil.getXid(logEvent) + " ,cur pos:" + logEvent.getLogPos();
-            logger.error(errorMsg);
+            log.error(errorMsg);
             throw new PolardbxException(errorMsg);
         }
         try {
-            Transaction tran = new Transaction(logEvent, context.getRuntimeContext(), storage);
+            Transaction tran = new Transaction(logEvent, context.getRuntimeContext());
             tran.setStart();
             currentTran = tran;
             if (tran.isCdcSingle()) {
@@ -195,7 +188,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         Transaction commitTran;
         String xid = LogEventUtil.getXid(event);
         if (StringUtils.isNotBlank(xid)) {
-            commitTran = transactionStorage.getByXid(xid);
+            commitTran = transactionStorage.getByXid(xid, context.getRuntimeContext());
             if (commitTran != null && lastCommitSequenceNum > 0) {
                 commitTran.setTsoTransaction(true);
                 commitTran.setRealTSO(lastCommitSequenceNum);
@@ -229,12 +222,14 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
     }
 
-    private void tryDoNext(HandlerContext context) throws Exception {
-        transactionStorage.purge();
-        TransactionGroup group;
-        while ((group = transactionStorage.fetchNext()) != null) {
-            context.doNext(group);
-        }
+    private void tryDoNext(HandlerContext context) {
+        transactionStorage.purge(transactionGroup -> {
+            try {
+                context.doNext(transactionGroup);
+            } catch (Exception e) {
+                throw new PolardbxException("send transaction group to next handler error!", e);
+            }
+        });
     }
 
     private void writeFormatDescriptionEvent(FormatDescriptionLogEvent fde, HandlerContext context) throws Exception {
@@ -248,7 +243,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         transactionStorage.add(transaction);
         transaction.setCommit(context.getRuntimeContext());
         receiveFormatDesc = true;
-        logger.info("send format description event to next");
+        log.info("send format description event to next");
     }
 
     private void processEvent(LogEvent event, HandlerContext context) throws Exception {
@@ -258,7 +253,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             }
             // 如果currentTran==null，说明此Query Event是DDL，识别出是DDL，直接push清空storage
             if (event.getHeader().getType() == LogEvent.QUERY_EVENT) {
-                Transaction transaction = new Transaction((QueryLogEvent) event, context.getRuntimeContext(), storage);
+                Transaction transaction = new Transaction((QueryLogEvent) event, context.getRuntimeContext());
                 transactionStorage.add(transaction);
                 transaction.setCommit(context.getRuntimeContext());
             }

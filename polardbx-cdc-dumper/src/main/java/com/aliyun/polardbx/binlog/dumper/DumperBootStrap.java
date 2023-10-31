@@ -29,7 +29,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS;
 
 /**
  * Created by ziyang.lb
@@ -46,7 +46,7 @@ public class DumperBootStrap {
     }
 
     private static Map<String, String> handleArgs(String arg) {
-        Map<String, String> propMap = new HashMap<String, String>();
+        Map<String, String> propMap = new HashMap<>();
         String[] argpiece = arg.split(" ");
         for (String argstr : argpiece) {
             String[] kv = argstr.split("=");
@@ -85,7 +85,7 @@ public class DumperBootStrap {
             final TaskHeartbeat taskHeartbeat =
                 new TaskHeartbeat(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID),
                     DynamicApplicationConfig.getClusterType(), taskName,
-                    DynamicApplicationConfig.getInt(TOPOLOGY_TASK_HEARTBEAT_INTERVAL),
+                    DynamicApplicationConfig.getInt(TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS),
                     taskConfigProvider.getTaskRuntimeConfig().getBinlogTaskConfig());
             taskHeartbeat.setCursorProviderMap(controller.getLogFileManagerCollection().getCursorProviders());
             taskHeartbeat.start();

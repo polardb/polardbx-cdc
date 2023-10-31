@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.cdc.qatest.base;
 
-import com.aliyun.polardbx.binlog.util.TestConfig;
+import com.aliyun.polardbx.binlog.testing.TestConfig;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;

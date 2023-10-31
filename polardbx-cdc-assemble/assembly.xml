@@ -16,6 +16,13 @@
                 <include>*</include>
             </includes>
         </fileSet>
+        <fileSet>
+            <directory>target/classes/native</directory>
+            <outputDirectory>polardbx-binlog.standalone/lib/native</outputDirectory>
+            <includes>
+                <include>**/*</include>
+            </includes>
+        </fileSet>
     </fileSets>
     <files>
         <file>

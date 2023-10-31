@@ -14,10 +14,10 @@
  */
 package com.aliyun.polardbx.binlog.remote.oss;
 
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.remote.Appender;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.ListUtils;
 import org.apache.commons.io.FileUtils;
@@ -38,22 +38,18 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
  * @since 2022/8/18
  **/
 @Slf4j
-public class OssClientProviderTest {
+public class OssClientProviderTest extends BaseTest {
     private final String testPath = "oss-manager-test";
     private OssManager ossManager;
 
     @Before
     public void before() {
-        final SpringContextBootStrap appContextBootStrap =
-            new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
         OssConfig ossConfig = new OssConfig();
         ossConfig.setAccessKeyId(getString(ConfigKeys.OSS_ACCESSKEY_ID));
         ossConfig.setAccessKeySecret(getString(ConfigKeys.OSS_ACCESSKEY_ID_SECRET));
         ossConfig.setBucketName(getString(ConfigKeys.OSS_BUCKET));
         ossConfig.setEndpoint(getString(ConfigKeys.OSS_ENDPOINT));
-        ossConfig.setPolardbxInstance("test-instance");
+        ossConfig.setPolardbxInstance("unit-test");
         ossManager = new OssManager(ossConfig);
         ossManager.deleteAll(testPath);
     }
@@ -66,21 +62,6 @@ public class OssClientProviderTest {
 
     @Test
     public void ossManagerTest() {
-        // test getBucketName
-        String expectBucketName = "yudong-bucket-bj";
-        String actualBucketName = ossManager.getBucket();
-        Assert.assertEquals(expectBucketName, actualBucketName);
-
-        // test listBuckets, this may fail
-        List<String> expectBucketList = new ArrayList<>();
-        expectBucketList.add("yudong-bucket-bj");
-        expectBucketList.add("huhehaote-general");
-        expectBucketList.sort(String::compareTo);
-        List<String> actualBucketList = ossManager.listBuckets();
-        actualBucketList.sort(String::compareTo);
-        boolean compareResult = ListUtils.isEqualList(expectBucketList, actualBucketList);
-        Assert.assertTrue(compareResult);
-
         // test listFiles
         String ossTestPath = BinlogFileUtil.buildRemoteFileFullName(testPath, "test");
         ossManager.deleteAll(ossTestPath);
@@ -105,7 +86,7 @@ public class OssClientProviderTest {
         actualFileList = ossManager.listFiles(ossTestPath);
         expectFileList.sort(String::compareTo);
         actualFileList.sort(String::compareTo);
-        compareResult = ListUtils.isEqualList(expectFileList, actualFileList);
+        boolean compareResult = ListUtils.isEqualList(expectFileList, actualFileList);
         Assert.assertTrue(compareResult);
 
         // test isObjectsExistForPrefix
@@ -116,29 +97,20 @@ public class OssClientProviderTest {
 
         // test getSize
         long expectSize = fileContent.length();
-        long actualSize = ossManager.getSize(expectFileList.get(0));
+        long actualSize = ossManager.getSize(ossTestPath + "/" + expectFileList.get(0));
         Assert.assertEquals(expectSize, actualSize);
 
         // test deleteFile
-        ossManager.delete(expectFileList.get(0));
+        ossManager.delete(ossTestPath + "/" + expectFileList.get(0));
         expectFileList.remove(0);
         actualFileList = ossManager.listFiles(ossTestPath);
         compareResult = ListUtils.isEqualList(expectFileList, actualFileList);
         Assert.assertTrue(compareResult);
 
         // test getObjectData
-        byte[] data = ossManager.getObjectData(expectFileList.get(0));
+        byte[] data = ossManager.getObjectData(ossTestPath + "/" + expectFileList.get(0));
         String actualFileContent = new String(data);
         Assert.assertEquals(fileContent, actualFileContent);
-
-        // test prepareDownloadLink
-        String downloadLink = ossManager.prepareDownloadLink(expectFileList.get(0), 600);
-        log.info("file {} download link:{}", expectFileList.get(0), downloadLink);
-
-        // test download
-        File f = new File(testPath);
-        f.mkdirs();
-        ossManager.download(expectFileList.get(0), testPath);
 
         // test clearDirectory
         ossManager.deleteAll(ossTestPath);

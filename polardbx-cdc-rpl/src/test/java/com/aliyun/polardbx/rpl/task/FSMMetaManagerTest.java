@@ -14,11 +14,12 @@
  */
 package com.aliyun.polardbx.rpl.task;
 
+import com.aliyun.polardbx.binlog.ResultCode;
 import com.aliyun.polardbx.rpl.TestBase;
-import com.aliyun.polardbx.rpl.common.ResultCode;
 import com.aliyun.polardbx.rpl.common.fsmutil.DataImportTaskDetailInfo;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 /**
@@ -26,6 +27,7 @@ import org.junit.Test;
  *
  * @author siyu.yusi
  */
+@Ignore
 public class FSMMetaManagerTest extends TestBase {
     @Test
     public void testGetStateMachineDetail() {

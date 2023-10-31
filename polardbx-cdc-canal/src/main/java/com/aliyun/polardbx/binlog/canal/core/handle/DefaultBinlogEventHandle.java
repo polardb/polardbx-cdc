@@ -43,16 +43,19 @@ public class DefaultBinlogEventHandle implements EventHandle {
     private String requestTSO;
     private ServerCharactorSet serverCharactorSet;
     private int lowerCaseTableNames;
+    private String sqlModel;
 
     public DefaultBinlogEventHandle(AuthenticationInfo runningInfo, String polarxVersion,
                                     BinlogPosition startPosition, String requestTSO,
-                                    ServerCharactorSet serverCharactorSet, int lowerCaseTableNames) {
+                                    ServerCharactorSet serverCharactorSet, int lowerCaseTableNames,
+                                    String sqlModel) {
         this.runningInfo = runningInfo;
         this.polarxVersion = polarxVersion;
         this.startPosition = startPosition;
         this.requestTSO = requestTSO;
         this.serverCharactorSet = serverCharactorSet;
         this.lowerCaseTableNames = lowerCaseTableNames;
+        this.sqlModel = sqlModel;
     }
 
     public void addFilter(LogEventFilter logEventFilter) {
@@ -110,6 +113,7 @@ public class DefaultBinlogEventHandle implements EventHandle {
         recorder.dump();
         runtimeContext = new RuntimeContext(recorder);
         runtimeContext.setVersion(polarxVersion);
+        runtimeContext.setSqlMode(sqlModel);
         runtimeContext.setRecovery(StringUtils.isNotBlank(requestTSO));
         runtimeContext.setStartPosition(startPosition);
         runtimeContext.setServerCharactorSet(serverCharactorSet);

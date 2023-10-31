@@ -1,27 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration scan="true" scanPeriod="10 seconds">
 
-    <appender name="fileAppender"
-              class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/logs/polardbx-binlog/${taskName}/default.log</file>
-        <append>true</append>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/default.%i.log.gz
-            </fileNamePattern>
-            <timeBasedFileNamingAndTriggeringPolicy
-                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
-                <maxFileSize>200MB</maxFileSize>
-            </timeBasedFileNamingAndTriggeringPolicy>
-            <maxHistory>10</maxHistory>
-        </rollingPolicy>
-        <encoder>
-            <pattern>
-                <![CDATA[
+    <appender name="fileAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator>
+            <Key>thread_logger</Key>
+            <DefaultValue>default</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="fileAppender-${thread_logger}" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${HOME}/logs/polardbx-binlog/${taskName}/${thread_logger}.log</file>
+                <append>true</append>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <fileNamePattern>
+                        ${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/${thread_logger}.%i.log.gz
+                    </fileNamePattern>
+                    <timeBasedFileNamingAndTriggeringPolicy
+                            class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                        <maxFileSize>200MB</maxFileSize>
+                    </timeBasedFileNamingAndTriggeringPolicy>
+                    <maxHistory>10</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>
+                        <![CDATA[
 						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n
 						]]>
-            </pattern>
-            <charset class="java.nio.charset.Charset">UTF-8</charset>
-        </encoder>
+                    </pattern>
+                    <charset class="java.nio.charset.Charset">UTF-8</charset>
+                </encoder>
+            </appender>
+        </sift>
     </appender>
 
     <appender name="consoleAppender" class="ch.qos.logback.core.ConsoleAppender">
@@ -37,6 +45,28 @@
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
             <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/commit.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>5</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="reformatAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${HOME}/logs/polardbx-binlog/${taskName}/reformat.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/reformat.%i.log.gz
             </fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy
                     class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
@@ -121,10 +151,10 @@
     </appender>
 
     <appender name="duplicateTransactionAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${HOME}/logs/polardbx-binlog/${taskName}/duplicateTransaction.log</file>
+        <file>${HOME}/logs/polardbx-binlog/${taskName}/duplicate_trans.log</file>
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/duplicateTransaction.%i.log.gz
+            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/duplicate_trans.%i.log.gz
             </fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy
                     class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
@@ -164,12 +194,11 @@
         </encoder>
     </appender>
 
-
     <appender name="traceIdDisorderAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${HOME}/logs/polardbx-binlog/${taskName}/traceid-disorder.log</file>
+        <file>${HOME}/logs/polardbx-binlog/${taskName}/traceid_disorder.log</file>
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/traceid-disorder.%i.log.gz
+            <fileNamePattern>${HOME}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/traceid_disorder.%i.log.gz
             </fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy
                     class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
@@ -270,10 +299,10 @@
 
     <appender name="skipTransAppender"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/logs/polardbx-binlog/${taskName}/skipTrans.log</file>
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/skip_trans.log</file>
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/skipTrans.%i.log.gz
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/skip_trans.%i.log.gz
             </fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy
                     class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
@@ -290,7 +319,6 @@
             <charset class="java.nio.charset.Charset">UTF-8</charset>
         </encoder>
     </appender>
-
 
     <appender name="metricsAppender"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
@@ -317,10 +345,10 @@
 
     <appender name="metaMetricsAppender"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/logs/polardbx-binlog/${taskName}/meta-metrics.log</file>
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/meta_metrics.log</file>
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/meta-metrics.%i.log.gz
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/meta_metrics.%i.log.gz
             </fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy
                     class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
@@ -363,10 +391,10 @@
 
     <appender name="rebuildEventAppender"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/logs/polardbx-binlog/${taskName}/rebuildEvent.log</file>
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/rebuild_event.log</file>
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/rebuildEvent.%i.log.gz
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/rebuild_event.%i.log.gz
             </fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy
                     class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
@@ -386,10 +414,10 @@
 
     <appender name="eventCommitAppender"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/logs/polardbx-binlog/${taskName}/eventCommit.log</file>
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/event_commit.log</file>
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/eventCommit.%i.log.gz
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/event_commit.%i.log.gz
             </fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy
                     class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
@@ -444,14 +472,13 @@
         <appender-ref ref="fileAppender"/>
     </logger>
 
-    <logger name="com.aliyun.polardbx.binlog.extractor.filter.RebuildEventLogFilter" level="INFO" additivity="false">
+    <logger name="rebuildEventLogger" level="INFO" additivity="false">
         <appender-ref ref="rebuildEventAppender"/>
     </logger>
 
     <logger name="com.aliyun.polardbx.binlog.extractor.filter.RtRecordFilter" level="INFO" additivity="false">
         <appender-ref ref="eventCommitAppender"/>
     </logger>
-
 
     <logger name="duplicateTransactionLogger" level="INFO" additivity="false">
         <appender-ref ref="duplicateTransactionAppender"/>
@@ -503,6 +530,10 @@
 
     <logger name="SKIP_TRANS_LOG" level="INFO" additivity="false">
         <appender-ref ref="skipTransAppender"/>
+    </logger>
+
+    <logger name="reformatLogger" level="INFO" additivity="false">
+        <appender-ref ref="reformatAppender"/>
     </logger>
 
     <root level="INFO">

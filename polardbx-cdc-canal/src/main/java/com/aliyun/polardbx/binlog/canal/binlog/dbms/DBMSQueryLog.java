@@ -30,6 +30,7 @@ public abstract class DBMSQueryLog extends DBMSEvent {
     /**
      * Return the database update action.
      */
+    @Override
     public DBMSAction getAction() {
         if (action == null) {
             action = DBMSAction.fromQuery(getQuery());
@@ -56,6 +57,11 @@ public abstract class DBMSQueryLog extends DBMSEvent {
      * Return the errorCode of query log executing.
      */
     public abstract int getErrorCode();
+
+    /**
+     * Return the value of sql mode in binlog.
+     */
+    public abstract long getSqlMode();
 
     /**
      * {@inheritDoc}

@@ -16,8 +16,6 @@ package com.aliyun.polardbx.binlog.canal;
 
 import com.aliyun.polardbx.binlog.canal.core.dump.ErosaConnection;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
-import com.aliyun.polardbx.binlog.canal.core.dump.OssConnection;
-import com.aliyun.polardbx.binlog.error.PolardbxException;
 
 import java.io.IOException;
 
@@ -30,11 +28,10 @@ public class DefaultBinlogFileInfoFetcher implements IBinlogFileInfoFetcher {
     public DefaultBinlogFileInfoFetcher(ErosaConnection connection) {
         if (connection instanceof MysqlConnection) {
             this.connection = connection.fork();
-        } else if (connection instanceof OssConnection) {
-            this.connection = connection;
         } else {
-            throw new PolardbxException("invalid connection type " + connection.getClass());
+            this.connection = connection;
         }
+
     }
 
     @Override

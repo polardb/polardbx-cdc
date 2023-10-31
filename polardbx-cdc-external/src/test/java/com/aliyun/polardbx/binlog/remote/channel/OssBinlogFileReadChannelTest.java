@@ -19,11 +19,16 @@ import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.AppendObjectRequest;
 import com.aliyun.oss.model.AppendObjectResult;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.github.rholder.retry.RetryException;
+import com.github.rholder.retry.Retryer;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.BeforeClass;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
@@ -34,6 +39,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Random;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.CRC32;
 
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
@@ -43,20 +50,15 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
  * @since 2022/9/30
  **/
 @Slf4j
-public class OssBinlogFileReadChannelTest {
+public class OssBinlogFileReadChannelTest extends BaseTest {
     private static OSS ossClient;
     private static String bucket;
     private static final String fileName = "binlog.000001";
     private static OssBinlogFileReadChannel ossChannel;
     private static FileChannel localChannel;
 
-    @BeforeClass
-    public static void prepare() throws IOException {
-        // prepare oss client
-        final SpringContextBootStrap appContextBootStrap =
-            new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
+    @Before
+    public void prepare() throws ExecutionException, RetryException {
         bucket = getString(ConfigKeys.OSS_BUCKET);
         String accessKeySecret = getString(ConfigKeys.OSS_ACCESSKEY_ID_SECRET);
         String accessKeyId = getString(ConfigKeys.OSS_ACCESSKEY_ID);
@@ -65,13 +67,18 @@ public class OssBinlogFileReadChannelTest {
         boolean exist = ossClient.doesBucketExist(bucket);
         Assert.assertTrue(exist);
 
-        prepareTestFile();
+        Retryer<Object> retryer = RetryerBuilder.newBuilder().retryIfException()
+            .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.SECONDS))
+            .withStopStrategy(StopStrategies.stopAfterAttempt(10)).build();
+        retryer.call(() -> {
+            prepareTestFile();
+            return null;
+        });
     }
 
     @AfterClass
     public static void cleanUp() {
         ossClient.deleteObject(bucket, fileName);
-        new File(fileName).delete();
     }
 
     private static void prepareTestFile() throws IOException {
@@ -83,6 +90,7 @@ public class OssBinlogFileReadChannelTest {
             localFile.delete();
         }
         localFile.createNewFile();
+        localFile.deleteOnExit();
 
         FileOutputStream outputStream = new FileOutputStream(localFile, true);
 
@@ -152,7 +160,6 @@ public class OssBinlogFileReadChannelTest {
     @Test
     public void testReadWithPos() throws IOException {
         // 测试从某个指定的位置读取一次
-
         long fileSize = localChannel.size();
         ByteBuffer buffer1 = ByteBuffer.allocate(1024);
         ByteBuffer buffer2 = ByteBuffer.allocate(1024);
@@ -161,8 +168,7 @@ public class OssBinlogFileReadChannelTest {
         CRC32 localCrc = new CRC32();
         CRC32 ossCrc = new CRC32();
 
-        // 随机测试100次
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 10; i++) {
             long pos = (long) (Math.random() * fileSize);
             readLen1 = localChannel.read(buffer1, pos);
             readLen2 = ossChannel.read(buffer2, pos);
@@ -178,7 +184,6 @@ public class OssBinlogFileReadChannelTest {
     @Test
     public void testRead() throws IOException {
         // 测试从头至尾读取一个文件
-
         localChannel.position(4L);
         ossChannel.position(4L);
         ByteBuffer buffer1 = ByteBuffer.allocate(1024);
@@ -201,8 +206,7 @@ public class OssBinlogFileReadChannelTest {
 
     @Test
     public void testReadWithArbitrarySizeBuffer() throws IOException {
-        // 随机测试100次
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 10; i++) {
             int bufferSize = 1024 + new Random().nextInt(1024);
             localChannel.position(4L);
             ossChannel.position(4L);

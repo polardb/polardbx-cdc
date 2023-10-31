@@ -15,6 +15,8 @@
 package com.aliyun.polardbx.rpl.extractor;
 
 import com.alibaba.polardbx.druid.wall.spi.MySqlWallProvider;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
@@ -28,6 +30,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultColumnSet;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowData;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowsQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.XATransactionType;
 import com.aliyun.polardbx.binlog.canal.binlog.event.DeleteRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.IntvarLogEvent;
@@ -55,6 +58,7 @@ import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.filter.BaseFilter;
@@ -63,9 +67,9 @@ import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.util.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.springframework.util.CollectionUtils;
 
 import javax.sql.DataSource;
 import java.io.Serializable;
@@ -77,6 +81,12 @@ import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Scanner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_FILTER_TABLE_ERROR;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.PRIVATE_DDL_DDL_PREFIX;
 
 /**
  * 基于{@linkplain LogEvent}转化为Entry对象的处理
@@ -96,6 +106,7 @@ public class LogEventConvert {
     public static final int version = 1;
     public static final String BEGIN = "BEGIN";
     public static final String COMMIT = "COMMIT";
+    private static final Pattern ORIGIN_SQL_PATTERN = Pattern.compile(PRIVATE_DDL_DDL_PREFIX + "([\\W\\w]+)");
 
     protected static final String MYSQL = "mysql";
     protected static final String HA_HEALTH_CHECK = "ha_health_check";
@@ -108,7 +119,7 @@ public class LogEventConvert {
     protected boolean filterQueryDml = true;
     protected boolean filterRowsQuery = false;
     // 是否跳过table相关的解析异常,比如表不存在或者列数量不匹配,issue 92
-    protected boolean filterTableError = false;
+    protected boolean filterTableError = DynamicApplicationConfig.getBoolean(RPL_FILTER_TABLE_ERROR);
     protected boolean firstBinlogFile = true;
     protected HostType srcHostType;
     protected HostInfo metaHostInfo;
@@ -116,6 +127,7 @@ public class LogEventConvert {
 
     protected FieldMeta rdsImplicitIDFieldMeta;
     protected TableMeta rdsHeartBeatTableMeta;
+    protected String nowTso;
 
     public LogEventConvert(HostInfo metaHostInfo, BaseFilter filter, BinlogPosition startBinlogPosition,
                            HostType srcHostType) {
@@ -154,7 +166,7 @@ public class LogEventConvert {
             2,
             null,
             null);
-        this.tableMetaCache = new TableMetaCache(dataSource);
+        this.tableMetaCache = new TableMetaCache(dataSource, srcHostType == HostType.POLARX2);
         initMeta();
     }
 
@@ -222,6 +234,7 @@ public class LogEventConvert {
         case LogEvent.DELETE_ROWS_EVENT:
             return parseRowsEvent((DeleteRowsLogEvent) logEvent, isSeek);
         case LogEvent.ROWS_QUERY_LOG_EVENT:
+            nowTso = LogEventUtil.getTsoFromRowQuery(((RowsQueryLogEvent) logEvent).getRowsQuery());
             return parseRowsQueryEvent((RowsQueryLogEvent) logEvent);
         case LogEvent.ANNOTATE_ROWS_EVENT:
             return parseAnnotateRowsEvent((AnnotateRowsEvent) logEvent);
@@ -247,34 +260,48 @@ public class LogEventConvert {
     protected MySQLDBMSEvent parseQueryEvent(QueryLogEvent event, boolean isSeek) {
         String queryString = event.getQuery();
         if (StringUtils.endsWithIgnoreCase(queryString, BEGIN)) {
+            nowTso = null;
             DBMSTransactionBegin transactionBegin = createTransactionBegin(event.getSessionId());
             return new MySQLDBMSEvent(transactionBegin, createPosition(event.getHeader()),
                 event.getHeader().getEventLen());
         } else if (StringUtils.endsWithIgnoreCase(queryString, COMMIT)) {
+            nowTso = null;
             DBMSTransactionEnd transactionEnd = createTransactionEnd(0L);
             return new MySQLDBMSEvent(transactionEnd, createPosition(event.getHeader()),
                 event.getHeader().getEventLen());
         } else {
+            // ddl
+            // 先提取# POLARX_TSO=
+            String tso = CommonUtils.extractPrivateTSOFromDDL(queryString);
+            if (StringUtils.isNotBlank(tso)) {
+                nowTso = tso;
+            }
+
+            String originSql = queryString;
+            Scanner scanner = new Scanner(queryString);
+            while (scanner.hasNextLine()) {
+                String str = scanner.nextLine();
+                Matcher matcher = ORIGIN_SQL_PATTERN.matcher(str);
+                if (matcher.find()) {
+                    originSql = matcher.group(1);
+                    break;
+                }
+            }
+
             // DDL语句处理
             // 只保留最后一条，queryString都是一样的
             HashMap<String, String> ddlInfo = Maps.newHashMap();
 
-            // 校验 sql 语句合法
-            MySqlWallProvider provider = new MySqlWallProvider();
-            if (!provider.checkValid(queryString)) {
-                return null;
-            }
-
             // 解析 sql 语句
-            if (StringUtils.startsWithIgnoreCase(StringUtils.trim(queryString), "flush")
-                || StringUtils.startsWithIgnoreCase(StringUtils.trim(queryString), "grant")
-                || StringUtils.startsWithIgnoreCase(StringUtils.trim(queryString), "create user")
-                || StringUtils.startsWithIgnoreCase(StringUtils.trim(queryString), "drop user")) {
+            if (StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "flush")
+                || StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "grant")
+                || StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "create user")
+                || StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "drop user")) {
                 return null;
             }
-            List<DdlResult> resultList = DruidDdlParser.parse(queryString, event.getDbName());
+            List<DdlResult> resultList = DruidDdlParser.parse(originSql, event.getDbName());
             if (CollectionUtils.isEmpty(resultList)) {
-                if (!(queryString.startsWith("/*!") && queryString.endsWith("*/"))) {
+                if (!(originSql.startsWith("/*!") && originSql.endsWith("*/"))) {
                     log.error("DDL result list is empty. Raw query string: {}, db: {}", queryString, event.getDbName());
                 }
                 return null;
@@ -312,6 +339,9 @@ public class LogEventConvert {
             if (filter.ignoreEvent(rewriteDbName, result.getTableName(), action, event.getServerId())) {
                 return null;
             }
+            if (filter.ignoreEventByTso(nowTso)) {
+                return null;
+            }
 
             // 跨库 ddl，构造 DDL 事件时，要使用其真正的 db，即 result.getSchemaName()
             if (!StringUtils.equalsIgnoreCase(event.getDbName(), result.getSchemaName())) {
@@ -326,30 +356,21 @@ public class LogEventConvert {
 
             // 更新内存 tableMetaCache
             BinlogPosition position = createPosition(event.getHeader());
-            tableMetaCache.apply(position, rewriteDbName, queryString);
+            tableMetaCache.apply(position, rewriteDbName, originSql);
 
             // 构造对象
             DefaultQueryLog queryEvent = new DefaultQueryLog(rewriteDbName,
                 queryString,
                 new java.sql.Timestamp(event.getHeader().getWhen() * 1000),
                 event.getErrorCode(),
+                event.getSqlMode(),
                 result.getType());
 
             // 将 ddl 的一些信息 set 到 optionValue
             if (!ddlInfo.isEmpty()) {
                 queryEvent.setOptionValue(DefaultQueryLog.ddlInfo, ddlInfo);
             }
-
-            MySQLDBMSEvent mySQLDBMSEvent =
-                new MySQLDBMSEvent(queryEvent, createPosition(event.getHeader()), event.getHeader().getEventLen());
-
-            // 如果是 XA 事务，解析
-            DBMSXATransaction xaTransaction = getXaTransaction(queryString);
-            if (xaTransaction != null) {
-                mySQLDBMSEvent.setXaTransaction(xaTransaction);
-            }
-
-            return mySQLDBMSEvent;
+            return new MySQLDBMSEvent(queryEvent, createPosition(event.getHeader()), event.getHeader().getEventLen());
         }
     }
 
@@ -361,7 +382,7 @@ public class LogEventConvert {
         String queryString = null;
         try {
             queryString = new String(event.getRowsQuery().getBytes(ISO_8859_1), charset);
-            return buildQueryEntry(queryString, event.getHeader(), DBMSAction.ROWQUERY);
+            return buildRowsQueryEntry(queryString, event.getHeader(), DBMSAction.ROWQUERY);
         } catch (UnsupportedEncodingException e) {
             throw new CanalParseException(e);
         }
@@ -438,6 +459,9 @@ public class LogEventConvert {
             if (filter.ignoreEvent(rewriteDbName, table.getTableName(), action, event.getServerId())) {
                 return null;
             }
+            if (filter.ignoreEventByTso(nowTso)) {
+                return null;
+            }
             if (isRDSHeartBeat(rewriteDbName, table.getTableName())) {
                 return null;
             }
@@ -486,7 +510,9 @@ public class LogEventConvert {
                     fieldMeta.isUnsigned(),
                     fieldMeta.isNullable(),
                     fieldMeta.isKey(),
-                    fieldMeta.isUnique());
+                    fieldMeta.isUnique(),
+                    fieldMeta.isGenerated(),
+                    fieldMeta.isImplicitPk());
                 dbmsColumns.add(column);
             }
 
@@ -543,15 +569,11 @@ public class LogEventConvert {
             }
 
             FieldMeta fieldMeta = tableMeta.getFields().get(i);
-            // fixed issue
-            // https://github.com/alibaba/canal/issues/66，特殊处理binary/varbinary，不能做编码处理
-            boolean isBinary = StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "VARBINARY")
-                || StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "BINARY");
             // 优先使用列的 charset, 如果列没有则使用表的 charset, 表一定有 charset
             String charset = StringUtils.isNotBlank(fieldMeta.getCharset()) ? fieldMeta
                 .getCharset() : tableMeta.getCharset();
             String javaCharset = CharsetConversion.getJavaCharset(charset);
-            buffer.nextValue(info.type, info.meta, isBinary, javaCharset);
+            buffer.nextValue(info.type, info.meta, fieldMeta.isBinary(), javaCharset);
 
             int javaType = buffer.getJavaType();
             Serializable dataValue = null;
@@ -565,7 +587,7 @@ public class LogEventConvert {
                 case Types.BIGINT:
                     // 处理unsigned类型
                     Number number = (Number) value;
-                    if (fieldMeta != null && fieldMeta.isUnsigned() && number.longValue() < 0) {
+                    if (fieldMeta.isUnsigned() && number.longValue() < 0) {
                         switch (buffer.getLength()) {
                         case 1: /* MYSQL_TYPE_TINY */
                             dataValue = String.valueOf(Integer.valueOf(TINYINT_MAX_VALUE + number.intValue()));
@@ -709,14 +731,25 @@ public class LogEventConvert {
             queryString,
             new java.sql.Timestamp(logHeader.getWhen() * 1000),
             0,
+            0,
+            action);
+
+        return new MySQLDBMSEvent(queryLog, createPosition(logHeader), logHeader.getEventLen());
+    }
+
+    protected MySQLDBMSEvent buildRowsQueryEntry(String queryString, LogHeader logHeader, DBMSAction action) {
+        DefaultRowsQueryLog queryLog = new DefaultRowsQueryLog(
+            queryString,
             action);
 
         return new MySQLDBMSEvent(queryLog, createPosition(logHeader), logHeader.getEventLen());
     }
 
     protected BinlogPosition createPosition(LogHeader logHeader) {
-        return new BinlogPosition(binlogFileName, logHeader.getLogPos(), logHeader.getServerId(),
+        BinlogPosition position = new BinlogPosition(binlogFileName, logHeader.getLogPos(), logHeader.getServerId(),
             logHeader.getWhen()); // 记录到秒
+        position.setRtso(nowTso);
+        return position;
     }
 
     protected TableMeta getTableMeta(String dbName, String tbName) {
@@ -734,8 +767,7 @@ public class LogEventConvert {
         } catch (Throwable e) {
             String message = ExceptionUtils.getRootCauseMessage(e);
             if (filterTableError) {
-                if (StringUtils.containsIgnoreCase(message, "errorNumber=1146")
-                    && StringUtils.containsIgnoreCase(message, "doesn't exist")) {
+                if (StringUtils.containsIgnoreCase(message, "doesn't exist")) {
                     return null;
                 }
                 if (StringUtils.containsIgnoreCase(message, "Unknown database")) {
@@ -784,5 +816,10 @@ public class LogEventConvert {
 
     public void setCharset(String charset) {
         this.charset = charset;
+    }
+
+    public boolean rollback(BinlogPosition position) {
+        this.nowTso = position.getRtso();
+        return tableMetaCache.rollback(position);
     }
 }

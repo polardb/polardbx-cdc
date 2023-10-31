@@ -43,7 +43,7 @@ import com.aliyun.oss.model.PartETag;
 import com.aliyun.oss.model.UploadPartRequest;
 import com.aliyun.oss.model.UploadPartResult;
 import com.aliyun.oss.model.VersionListing;
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -68,12 +68,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_UPLOAD_MAX_APPEND_FILE_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_UPLOAD_MULTI_APPEND_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_UPLOAD_PART_SIZE;
 
 /**
  * @author chengjin
- *
+ * <p>
  * 传给OssManager方法的fileName是增加了group name和stream name
  * 前缀的文件名，而存储在oss上的文件名在此基础上又包装了一层
  * 见 BinlogFileUtil.buildRemoteFileFullName，增加了前缀 "polardbx_cdc/instance name/"
@@ -85,7 +85,7 @@ public class OssManager implements IRemoteManager {
     private static final Logger logger = LoggerFactory.getLogger(OssManager.class);
     private static final int PART_SIZE = DynamicApplicationConfig.getInt(BINLOG_BACKUP_UPLOAD_PART_SIZE);
     private static final long MAX_APPEND_FILE_SIZE =
-        1024 * 1024 * 1024 * DynamicApplicationConfig.getLong(BINLOG_BACKUP_UPLOAD_MAX_APPEND_FILE_SIZE);
+        1024 * 1024 * 1024 * DynamicApplicationConfig.getLong(BINLOG_BACKUP_UPLOAD_MULTI_APPEND_THRESHOLD);
     private final OssConfig ossConfig;
 
     public OssManager(OssConfig ossConfig) {
@@ -213,6 +213,11 @@ public class OssManager implements IRemoteManager {
     }
 
     @Override
+    public boolean supportMultiAppend() {
+        return true;
+    }
+
+    @Override
     public boolean useMultiAppender(long size) {
         return size >= MAX_APPEND_FILE_SIZE;
     }
@@ -229,7 +234,7 @@ public class OssManager implements IRemoteManager {
     @Override
     public void download(String fileName, String localPath) {
         DownloadModeEnum downloadMode =
-            DownloadModeEnum.valueOf(DynamicApplicationConfig.getString(ConfigKeys.BINLOG_DOWNLOAD_MODE));
+            DownloadModeEnum.valueOf(DynamicApplicationConfig.getString(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MODE));
         if (downloadMode == DownloadModeEnum.PARALLEL) {
             parallelDownload(fileName, localPath);
         } else {
@@ -250,8 +255,8 @@ public class OssManager implements IRemoteManager {
     private void parallelDownload(String fileName, String localPath) {
         OSS client = getOssClient();
         String ossFileName = BinlogFileUtil.buildRemoteFileFullName(fileName, ossConfig.polardbxInstance);
-        Long partSize = DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DOWNLOAD_PART_SIZE);
-        Integer taskNum = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_DOWNLOAD_MAX_THREAD_NUM);
+        Long partSize = DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_PART_SIZE);
+        Integer taskNum = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MAX_THREAD_NUM);
         DownloadFileRequest downloadFileRequest = new DownloadFileRequest(ossConfig.bucketName, ossFileName);
         downloadFileRequest.setDownloadFile(new File(localPath, fileName).getPath());
         downloadFileRequest.setPartSize(partSize);

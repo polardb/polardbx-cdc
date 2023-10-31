@@ -14,6 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
 
+import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.BinlogScheduleHistoryMapper;
@@ -39,8 +41,6 @@ import com.aliyun.polardbx.binlog.scheduler.ScheduleHistoryContent;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -51,14 +51,14 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_GROUP_NAME;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SUSPEND_TOPOLOGY_REBUILDING;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildExpectedStorageTso4BinlogX;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildStorageHistoryInfo;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildStorageInfos;
-import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.checkContainers;
-import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.clearStaleInfos;
+import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.checkContainerStatus;
+import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.clearStaleMetaData;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.getStreamConfig;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.lockAndCheck;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.shouldRefreshTopology;
@@ -69,7 +69,6 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
  **/
 @Slf4j
 public class BinlogXTopologyService implements TopologyService {
-    private static final Gson GSON = new GsonBuilder().create();
 
     private final String clusterId;
     private final String clusterType;
@@ -101,7 +100,7 @@ public class BinlogXTopologyService implements TopologyService {
     @Override
     public void tryBuild() {
         String suspendTopologyRebuilding = SystemDbConfig.getSystemDbConfig(CLUSTER_SUSPEND_TOPOLOGY_REBUILDING);
-        if (StringUtils.isNotBlank(suspendTopologyRebuilding) && "true".equals(suspendTopologyRebuilding)) {
+        if (StringUtils.isNotBlank(suspendTopologyRebuilding) && CommonConstants.TRUE.equals(suspendTopologyRebuilding)) {
             log.info("current cluster is in suspend state , skip rebuilding cluster topology");
             return;
         }
@@ -111,10 +110,10 @@ public class BinlogXTopologyService implements TopologyService {
 
     private void refreshTopology() {
         log.info("current daemon is leader, do with the cluster's topology project!");
-        checkContainers(resourceManager);
+        checkContainerStatus(resourceManager);
         String preClusterConfigStr = SystemDbConfig.getSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY);
-        ClusterSnapshot preClusterSnapshot = GSON.fromJson(preClusterConfigStr, ClusterSnapshot.class);
-        clearStaleInfos(preClusterSnapshot.getVersion());
+        ClusterSnapshot preClusterSnapshot = JSONObject.parseObject(preClusterConfigStr, ClusterSnapshot.class);
+        clearStaleMetaData(preClusterSnapshot.getVersion());
         String expectedStorageTso = buildExpectedStorageTso4BinlogX();
         ExecutionSnapshot executionSnapshot = resourceManager.getExecutionSnapshot();
         StorageHistoryInfo storageHistoryInfo = buildStorageHistoryInfo(expectedStorageTso);
@@ -186,10 +185,10 @@ public class BinlogXTopologyService implements TopologyService {
                 StorageHistoryInfo info = new StorageHistoryInfo();
                 info.setStatus(0);
                 info.setTso(ExecutionConfig.ORIGIN_TSO);
-                info.setStorageContent(GSON.toJson(content));
+                info.setStorageContent(JSONObject.toJSONString(content));
                 info.setInstructionId("-1");
                 info.setClusterId(clusterId);
-                info.setGroupName(DynamicApplicationConfig.getString(BINLOG_X_STREAM_GROUP_NAME));
+                info.setGroupName(DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME));
                 storageHistoryMapper.insert(info);
 
                 List<XStream> streams = getStreamConfig();
@@ -205,7 +204,8 @@ public class BinlogXTopologyService implements TopologyService {
             }
 
             //对版本号进行+1并更新
-            SystemDbConfig.updateSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY, GSON.toJson(postClusterSnapshot));
+            SystemDbConfig
+                .updateSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY, JSONObject.toJSONString(postClusterSnapshot));
 
             //记录历史
             ScheduleHistoryContent content = new ScheduleHistoryContent(executionSnapshot,
@@ -213,7 +213,7 @@ public class BinlogXTopologyService implements TopologyService {
             BinlogScheduleHistory history = new BinlogScheduleHistory();
             history.setVersion(postClusterSnapshot.getVersion());
             history.setClusterId(clusterId);
-            history.setContent(GSON.toJson(content));
+            history.setContent(JSONObject.toJSONString(content));
             scheduleHistoryMapper.insert(history);
 
             return null;

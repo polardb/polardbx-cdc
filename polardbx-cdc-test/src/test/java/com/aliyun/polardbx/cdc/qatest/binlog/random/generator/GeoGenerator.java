@@ -26,6 +26,6 @@ public class GeoGenerator extends AbstractValueGenerator<String> {
     @SneakyThrows
     @Override
     public String generator() {
-        return "GeomFromText('POINT(" + RandomUtils.nextFloat() + " " + RandomUtils.nextFloat() + ")')";
+        return "ST_GeomFromText('POINT(" + RandomUtils.nextFloat() + " " + RandomUtils.nextFloat() + ")')";
     }
 }

@@ -14,15 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.dao;
 
-import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.*;
-import static org.mybatis.dynamic.sql.SqlBuilder.*;
-
 import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistory;
-import java.util.Collection;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
-import javax.annotation.Generated;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
 import org.apache.ibatis.annotations.DeleteProvider;
@@ -46,29 +38,88 @@ import org.mybatis.dynamic.sql.update.render.UpdateStatementProvider;
 import org.mybatis.dynamic.sql.util.SqlProviderAdapter;
 import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
 
+import javax.annotation.Generated;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.Optional;
+
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.binlogFile;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.binlogPhyDdlHistory;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.clusterId;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.dbName;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.ddl;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.extra;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.gmtCreated;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.gmtModified;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.id;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.pos;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.storageInstId;
+import static com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport.tso;
+import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
+
 @Mapper
 public interface BinlogPhyDdlHistoryMapper {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.719+08:00", comments="Source Table: binlog_phy_ddl_history")
-    BasicColumn[] selectList = BasicColumn.columnList(id, gmtCreated, gmtModified, tso, binlogFile, pos, storageInstId, dbName, extra, clusterId, ddl);
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.581+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    BasicColumn[] selectList = BasicColumn
+        .columnList(id, gmtCreated, gmtModified, tso, binlogFile, pos, storageInstId, dbName, extra, clusterId, ddl);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.711+08:00", comments="Source Table: binlog_phy_ddl_history")
-    @SelectProvider(type=SqlProviderAdapter.class, method="select")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.584+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    static UpdateDSL<UpdateModel> updateAllColumns(BinlogPhyDdlHistory record, UpdateDSL<UpdateModel> dsl) {
+        return dsl.set(id).equalTo(record::getId)
+                .set(gmtCreated).equalTo(record::getGmtCreated)
+                .set(gmtModified).equalTo(record::getGmtModified)
+                .set(tso).equalTo(record::getTso)
+                .set(binlogFile).equalTo(record::getBinlogFile)
+                .set(pos).equalTo(record::getPos)
+                .set(storageInstId).equalTo(record::getStorageInstId)
+                .set(dbName).equalTo(record::getDbName)
+                .set(extra).equalTo(record::getExtra)
+                .set(clusterId).equalTo(record::getClusterId)
+                .set(ddl).equalTo(record::getDdl);
+    }
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.584+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    static UpdateDSL<UpdateModel> updateSelectiveColumns(BinlogPhyDdlHistory record, UpdateDSL<UpdateModel> dsl) {
+        return dsl.set(id).equalToWhenPresent(record::getId)
+                .set(gmtCreated).equalToWhenPresent(record::getGmtCreated)
+                .set(gmtModified).equalToWhenPresent(record::getGmtModified)
+                .set(tso).equalToWhenPresent(record::getTso)
+                .set(binlogFile).equalToWhenPresent(record::getBinlogFile)
+                .set(pos).equalToWhenPresent(record::getPos)
+                .set(storageInstId).equalToWhenPresent(record::getStorageInstId)
+                .set(dbName).equalToWhenPresent(record::getDbName)
+                .set(extra).equalToWhenPresent(record::getExtra)
+                .set(clusterId).equalToWhenPresent(record::getClusterId)
+                .set(ddl).equalToWhenPresent(record::getDdl);
+    }
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.572+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    @SelectProvider(type = SqlProviderAdapter.class, method = "select")
     long count(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.712+08:00", comments="Source Table: binlog_phy_ddl_history")
-    @DeleteProvider(type=SqlProviderAdapter.class, method="delete")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.573+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    @DeleteProvider(type = SqlProviderAdapter.class, method = "delete")
     int delete(DeleteStatementProvider deleteStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.712+08:00", comments="Source Table: binlog_phy_ddl_history")
-    @InsertProvider(type=SqlProviderAdapter.class, method="insert")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.574+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    @InsertProvider(type = SqlProviderAdapter.class, method = "insert")
     int insert(InsertStatementProvider<BinlogPhyDdlHistory> insertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.712+08:00", comments="Source Table: binlog_phy_ddl_history")
-    @InsertProvider(type=SqlProviderAdapter.class, method="insertMultiple")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.574+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    @InsertProvider(type = SqlProviderAdapter.class, method = "insertMultiple")
     int insertMultiple(MultiRowInsertStatementProvider<BinlogPhyDdlHistory> multipleInsertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.713+08:00", comments="Source Table: binlog_phy_ddl_history")
-    @SelectProvider(type=SqlProviderAdapter.class, method="select")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.575+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    @SelectProvider(type = SqlProviderAdapter.class, method = "select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Integer.class, jdbcType=JdbcType.INTEGER, id=true),
         @Arg(column="gmt_created", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
@@ -84,8 +135,9 @@ public interface BinlogPhyDdlHistoryMapper {
     })
     Optional<BinlogPhyDdlHistory> selectOne(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.714+08:00", comments="Source Table: binlog_phy_ddl_history")
-    @SelectProvider(type=SqlProviderAdapter.class, method="select")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.576+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    @SelectProvider(type = SqlProviderAdapter.class, method = "select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Integer.class, jdbcType=JdbcType.INTEGER, id=true),
         @Arg(column="gmt_created", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
@@ -101,28 +153,33 @@ public interface BinlogPhyDdlHistoryMapper {
     })
     List<BinlogPhyDdlHistory> selectMany(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.715+08:00", comments="Source Table: binlog_phy_ddl_history")
-    @UpdateProvider(type=SqlProviderAdapter.class, method="update")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.577+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
+    @UpdateProvider(type = SqlProviderAdapter.class, method = "update")
     int update(UpdateStatementProvider updateStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.715+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.577+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default long count(CountDSLCompleter completer) {
         return MyBatis3Utils.countFrom(this::count, binlogPhyDdlHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.715+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.577+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default int delete(DeleteDSLCompleter completer) {
         return MyBatis3Utils.deleteFrom(this::delete, binlogPhyDdlHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.716+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.578+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default int deleteByPrimaryKey(Integer id_) {
-        return delete(c -> 
+        return delete(c ->
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.716+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.578+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default int insert(BinlogPhyDdlHistory record) {
         return MyBatis3Utils.insert(this::insert, record, binlogPhyDdlHistory, c ->
             c.map(id).toProperty("id")
@@ -139,7 +196,8 @@ public interface BinlogPhyDdlHistoryMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.717+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.579+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default int insertMultiple(Collection<BinlogPhyDdlHistory> records) {
         return MyBatis3Utils.insertMultiple(this::insertMultiple, records, binlogPhyDdlHistory, c ->
             c.map(id).toProperty("id")
@@ -156,7 +214,8 @@ public interface BinlogPhyDdlHistoryMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.718+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.58+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default int insertSelective(BinlogPhyDdlHistory record) {
         return MyBatis3Utils.insert(this::insert, record, binlogPhyDdlHistory, c ->
             c.map(id).toPropertyWhenPresent("id", record::getId)
@@ -173,64 +232,40 @@ public interface BinlogPhyDdlHistoryMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.72+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.582+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default Optional<BinlogPhyDdlHistory> selectOne(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectOne(this::selectOne, selectList, binlogPhyDdlHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.72+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.582+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default List<BinlogPhyDdlHistory> select(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectList(this::selectMany, selectList, binlogPhyDdlHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.72+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.583+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default List<BinlogPhyDdlHistory> selectDistinct(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectDistinct(this::selectMany, selectList, binlogPhyDdlHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.721+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.583+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default Optional<BinlogPhyDdlHistory> selectByPrimaryKey(Integer id_) {
         return selectOne(c ->
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.721+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.583+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default int update(UpdateDSLCompleter completer) {
         return MyBatis3Utils.update(this::update, binlogPhyDdlHistory, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.721+08:00", comments="Source Table: binlog_phy_ddl_history")
-    static UpdateDSL<UpdateModel> updateAllColumns(BinlogPhyDdlHistory record, UpdateDSL<UpdateModel> dsl) {
-        return dsl.set(id).equalTo(record::getId)
-                .set(gmtCreated).equalTo(record::getGmtCreated)
-                .set(gmtModified).equalTo(record::getGmtModified)
-                .set(tso).equalTo(record::getTso)
-                .set(binlogFile).equalTo(record::getBinlogFile)
-                .set(pos).equalTo(record::getPos)
-                .set(storageInstId).equalTo(record::getStorageInstId)
-                .set(dbName).equalTo(record::getDbName)
-                .set(extra).equalTo(record::getExtra)
-                .set(clusterId).equalTo(record::getClusterId)
-                .set(ddl).equalTo(record::getDdl);
-    }
-
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.722+08:00", comments="Source Table: binlog_phy_ddl_history")
-    static UpdateDSL<UpdateModel> updateSelectiveColumns(BinlogPhyDdlHistory record, UpdateDSL<UpdateModel> dsl) {
-        return dsl.set(id).equalToWhenPresent(record::getId)
-                .set(gmtCreated).equalToWhenPresent(record::getGmtCreated)
-                .set(gmtModified).equalToWhenPresent(record::getGmtModified)
-                .set(tso).equalToWhenPresent(record::getTso)
-                .set(binlogFile).equalToWhenPresent(record::getBinlogFile)
-                .set(pos).equalToWhenPresent(record::getPos)
-                .set(storageInstId).equalToWhenPresent(record::getStorageInstId)
-                .set(dbName).equalToWhenPresent(record::getDbName)
-                .set(extra).equalToWhenPresent(record::getExtra)
-                .set(clusterId).equalToWhenPresent(record::getClusterId)
-                .set(ddl).equalToWhenPresent(record::getDdl);
-    }
-
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.722+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.585+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default int updateByPrimaryKey(BinlogPhyDdlHistory record) {
         return update(c ->
             c.set(gmtCreated).equalTo(record::getGmtCreated)
@@ -247,7 +282,8 @@ public interface BinlogPhyDdlHistoryMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-07-06T17:08:09.723+08:00", comments="Source Table: binlog_phy_ddl_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-05-28T23:47:58.585+08:00",
+        comments = "Source Table: binlog_phy_ddl_history")
     default int updateByPrimaryKeySelective(BinlogPhyDdlHistory record) {
         return update(c ->
             c.set(gmtCreated).equalToWhenPresent(record::getGmtCreated)

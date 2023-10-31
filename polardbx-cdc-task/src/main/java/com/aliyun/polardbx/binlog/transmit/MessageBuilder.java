@@ -40,7 +40,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_TXN_STREAM_DUMP_REPLY_PACKET_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_TXN_STREAM_PACKET_MODE;
 
 /**
  * created by ziyang.lb
@@ -50,7 +50,7 @@ public class MessageBuilder {
 
     private static PacketMode getActualPacketMode() {
         PacketMode packetMode = PacketMode.valueOf(DynamicApplicationConfig.getString(
-            BINLOG_TXN_STREAM_DUMP_REPLY_PACKET_MODE));
+            BINLOG_TXN_STREAM_PACKET_MODE));
         if (packetMode == PacketMode.RANDOM) {
             List<PacketMode> list = Lists.newArrayList(PacketMode.BYTES, PacketMode.OBJECT);
             Collections.shuffle(list);

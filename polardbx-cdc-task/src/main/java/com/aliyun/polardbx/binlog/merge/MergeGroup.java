@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGER_GROUP_QUEUE_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_GROUP_QUEUE_SIZE;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_LOOP_ERROR;
 
 /**
@@ -39,7 +39,7 @@ import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_LOOP_E
  **/
 @Slf4j
 public class MergeGroup {
-    private static final int MERGE_GROUP_QUEUE_SIZE = DynamicApplicationConfig.getInt(TASK_MERGER_GROUP_QUEUE_SIZE);
+    private static final int MERGE_GROUP_QUEUE_SIZE = DynamicApplicationConfig.getInt(TASK_MERGE_GROUP_QUEUE_SIZE);
 
     private final String identifier;
     private final Storage storage;

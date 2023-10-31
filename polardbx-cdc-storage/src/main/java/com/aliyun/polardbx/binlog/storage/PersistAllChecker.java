@@ -21,9 +21,9 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.Random;
 import java.util.function.Supplier;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_IS_PERSIST_ON;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_ALL_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_CHECK_INTERVAL_MILLS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_ENABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_MODE;
 
 /**
@@ -39,7 +39,7 @@ public class PersistAllChecker {
     public PersistAllChecker() {
         checkInterVal = DynamicApplicationConfig.getInt(STORAGE_PERSIST_CHECK_INTERVAL_MILLS);
         persistMode = PersistMode.valueOf(DynamicApplicationConfig.getString(STORAGE_PERSIST_MODE));
-        isSupportPersist = DynamicApplicationConfig.getBoolean(STORAGE_IS_PERSIST_ON);
+        isSupportPersist = DynamicApplicationConfig.getBoolean(STORAGE_PERSIST_ENABLE);
     }
 
     public void checkWithCallback(boolean instantCheck, Supplier<String> supplier) {
@@ -70,7 +70,7 @@ public class PersistAllChecker {
         return JvmUtils.getOldUsedRatio() > threshold;
     }
 
-    private boolean randomFlag() {
+    public boolean randomFlag() {
         boolean randomFlag = false;
         if (persistMode == PersistMode.RANDOM) {
             //实验室Random模式进行随机验证
@@ -78,5 +78,13 @@ public class PersistAllChecker {
             randomFlag = random.nextBoolean();
         }
         return randomFlag;
+    }
+
+    public boolean isSupportPersist() {
+        return isSupportPersist;
+    }
+
+    public PersistMode getPersistMode() {
+        return persistMode;
     }
 }

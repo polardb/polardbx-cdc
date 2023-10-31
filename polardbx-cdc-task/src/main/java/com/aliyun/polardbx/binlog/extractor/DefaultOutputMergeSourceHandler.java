@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.extractor;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
@@ -30,7 +31,6 @@ import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.storage.Storage;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
-import com.google.gson.Gson;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Int64Value;
 import org.slf4j.Logger;
@@ -38,8 +38,8 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Iterator;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGER_DRYRUN;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGER_DRYRUN_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_DRY_RUN;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_DRY_RUN_MODE;
 import static com.aliyun.polardbx.binlog.util.TxnTokenUtil.cleanTxnBuffer4Token;
 
 public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transaction> {
@@ -58,8 +58,8 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
     public DefaultOutputMergeSourceHandler(MergeSource mergeSource, Storage storage) {
         this.mergeSource = mergeSource;
         this.storage = storage;
-        this.dryRun = DynamicApplicationConfig.getBoolean(TASK_MERGER_DRYRUN);
-        this.dryRunMode = DynamicApplicationConfig.getInt(TASK_MERGER_DRYRUN_MODE);
+        this.dryRun = DynamicApplicationConfig.getBoolean(TASK_MERGE_DRY_RUN);
+        this.dryRunMode = DynamicApplicationConfig.getInt(TASK_MERGE_DRY_RUN_MODE);
     }
 
     @Override
@@ -73,9 +73,9 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
     }
 
     private void logTransAudit(Transaction transaction) {
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACTOR_RECORD_TRANSLOG)) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_LOG_TRANS)) {
             transactionLogger.info(transaction.toString());
-            if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACTOR_RECORD_TRANSLOG_DETAIL)) {
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_LOG_TRANS_DETAIL)) {
                 Iterator<TxnItemRef> iterator = transaction.iterator();
                 if (iterator != null) {
                     logger.info("================== Detail Info Begin ================== ");
@@ -91,17 +91,17 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
     }
 
     private void pushToken(Transaction transaction) throws Exception {
-        TxnKey tk = transaction.getBufferKey();
-        String txnId;
+        TxnKey tk = transaction.getTxnKey();
+        long txnId;
         if (tk != null) {
             txnId = tk.getTxnId();
         } else {
-            txnId = transaction.getTransactionId() + "";
+            txnId = transaction.getTransactionId();
         }
 
         TxnToken.Builder txnTokenBuilder = TxnToken.newBuilder()
             .setPartitionId(transaction.getPartitionId())
-            .setTso(transaction.getVirtualTSO())
+            .setTso(transaction.getVirtualTsoStr())
             .setTxnSize(transaction.getEventCount())
             .setTxnId(txnId)
             .setType(TxnType.DML)
@@ -113,7 +113,7 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             txnTokenBuilder.setType(TxnType.FORMAT_DESC);
             txnTokenBuilder.setPayload(ByteString.copyFrom(transaction.getDescriptionLogEventData()));
             logger.info("output format description  : " + transaction.getPartitionId() + " for : "
-                + transaction.getVirtualTSO());
+                + transaction.getVirtualTsoStr());
         }
 
         if (transaction.isHeartbeat()) {
@@ -129,7 +129,7 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             txnTokenBuilder.setTable(table == null ? "" : table);
             txnTokenBuilder.setDdl(transaction.getDdlEvent().getDdlRecord().getDdlSql());
             logger.info("output logic ddl : " + transaction.getDdlEvent().getDdlRecord().getDdlSql() +
-                " for : " + transaction.getVirtualTSO());
+                " for : " + transaction.getVirtualTsoStr());
         }
 
         if (transaction.isCDCStartCommand()) {
@@ -138,24 +138,26 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
         }
 
         if (transaction.isStorageChangeCommand()) {
-            Gson gson = new Gson().newBuilder().create();
             StorageChangeInfo changeInfo = new StorageChangeInfo();
             changeInfo.setInstructionId(transaction.getInstructionId());
-            changeInfo.setStorageChangeEntity(gson.fromJson(transaction.getInstructionContent(),
+            changeInfo.setStorageChangeEntity(JSONObject.parseObject(transaction.getInstructionContent(),
                 StorageChangeInfo.StorageChangeEntity.class));
-            txnTokenBuilder.setPayload(ByteString.copyFrom(gson.toJson(changeInfo), "utf8"));
+            txnTokenBuilder.setPayload(ByteString.copyFrom(JSONObject.toJSONString(changeInfo), "utf8"));
             txnTokenBuilder.setType(TxnType.META_SCALE);
             logger.info("output logic meta scale : " + transaction.getInstructionContent() + " for : "
-                + transaction.getVirtualTSO());
+                + transaction.getVirtualTsoStr());
         } else if (transaction.isEnvConfigChangeCommand()) {
-            Gson gson = new Gson().newBuilder().create();
             EnvConfigChangeInfo configChangeInfo = new EnvConfigChangeInfo();
             configChangeInfo.setInstructionId(transaction.getInstructionId());
             configChangeInfo.setContent(transaction.getInstructionContent());
-            txnTokenBuilder.setPayload(ByteString.copyFrom(gson.toJson(configChangeInfo), "utf8"));
+            txnTokenBuilder.setPayload(ByteString.copyFrom(JSONObject.toJSONString(configChangeInfo), "utf8"));
             txnTokenBuilder.setType(TxnType.META_CONFIG_ENV_CHANGE);
             logger.info("output logic meta config env change : " + transaction.getInstructionContent() + " for : "
-                + transaction.getVirtualTSO());
+                + transaction.getVirtualTsoStr());
+        } else if (transaction.isFlushLogCommand()) {
+            txnTokenBuilder.setType(TxnType.FLUSH_LOG);
+            logger.info("output logic command flush log for : "
+                + transaction.getVirtualTsoStr());
         }
 
         if (transaction.getServerId() != null) {
@@ -173,8 +175,7 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
                 }
                 transaction.release();
                 break;
-            } catch (TimeoutException e) {
-
+            } catch (TimeoutException ignored) {
             } catch (PolardbxException e) {
                 throw new PolardbxException(
                     "txn keys " + transaction.getTransactionId() + " party " + transaction.getPartitionId(), e);

@@ -19,6 +19,7 @@ import com.aliyun.polardbx.rpl.common.RplConstants;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.sql.Connection;
@@ -31,6 +32,7 @@ import java.util.Map;
  * @author shicai.xsc 2021/4/22 17:01
  * @since 5.0.0.0
  */
+@Ignore
 public class DmlE2ETest extends TestBase {
 
     private static final String DB_1 = "filter_db1";

@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.rpl.dbmeta;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
@@ -52,14 +52,20 @@ public class DbMetaManager {
 
     public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
                                          HostType hostType) throws SQLException {
+        return getTableInfo(dataSource, schema, tbName, hostType, true);
+    }
+
+    public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
+                                         HostType hostType, boolean needUk) throws SQLException {
         TableInfo tableInfo = new TableInfo(schema, tbName);
         List<ColumnInfo> columns = getTableColumnInfos(dataSource, schema, tbName);
         List<String> pks = getTablePks(dataSource, schema, tbName);
-        List<String> uks = getTableUks(dataSource, schema, tbName);
-
         tableInfo.setColumns(columns);
         tableInfo.setPks(pks);
-        tableInfo.setUks(uks);
+        if (needUk) {
+            List<String> uks = getTableUks(dataSource, schema, tbName);
+            tableInfo.setUks(uks);
+        }
 
         if (hostType.getValue() == HostType.POLARX1.getValue() || hostType.getValue() == HostType.POLARX2.getValue()) {
             List<String> shardKeys = getTableShardKeys(dataSource, tbName);
@@ -156,10 +162,11 @@ public class DbMetaManager {
             rs = metaData.getColumns("", wrapEscape(schema), wrapEscape(tbName), null);
 
             while (rs.next()) {
-                String columnName = rs.getString(4);
-                int columnType = rs.getInt(5);
-                String typeName = rs.getString(6);
-                int nullable = rs.getInt(11);
+                String columnName = rs.getString("COLUMN_NAME");
+                int columnType = rs.getInt("DATA_TYPE");
+                String typeName = rs.getString("TYPE_NAME");
+                int nullable = rs.getInt("NULLABLE");
+                String isGeneratedColumn = rs.getString("IS_GENERATEDCOLUMN");
                 String[] typeSplit = typeName.split(" ");
 
                 // unsigned types
@@ -205,7 +212,7 @@ public class DbMetaManager {
                     continue;
                 }
                 columnList.add(new ColumnInfo(columnName.toLowerCase(), columnType, "",
-                    (nullable != DatabaseMetaData.columnNoNulls)));
+                    (nullable != DatabaseMetaData.columnNoNulls), StringUtils.equals(isGeneratedColumn, "YES")));
             }
         } catch (Throwable e) {
             log.error("failed in getTableColumnInfos, schema:{}, tbName:{}", schema, tbName);

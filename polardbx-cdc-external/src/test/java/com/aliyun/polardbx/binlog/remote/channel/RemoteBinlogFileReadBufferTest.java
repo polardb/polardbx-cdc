@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.remote.channel;
 
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Test;
@@ -30,7 +31,7 @@ import java.util.zip.CRC32;
  * @since 2022/9/30
  **/
 @Slf4j
-public class RemoteBinlogFileReadBufferTest {
+public class RemoteBinlogFileReadBufferTest extends BaseTest {
 
     @Test
     public void testReadWithArbitrarySizeBuffer() throws IOException {

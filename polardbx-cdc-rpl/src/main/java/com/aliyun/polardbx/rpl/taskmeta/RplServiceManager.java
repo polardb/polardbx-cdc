@@ -1,3 +1,5 @@
+package com.aliyun.polardbx.rpl.taskmeta;
+
 /**
  * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,37 +14,38 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.aliyun.polardbx.rpl.taskmeta;
 
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.TypeReference;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.CommonConstants;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.ResultCode;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
-import com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest;
-import com.aliyun.polardbx.rpc.cdc.ChangeReplicationFilterRequest;
-import com.aliyun.polardbx.rpc.cdc.ResetSlaveRequest;
-import com.aliyun.polardbx.rpc.cdc.RplCommandResponse;
-import com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusRequest;
-import com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusResponse;
-import com.aliyun.polardbx.rpc.cdc.StartSlaveRequest;
-import com.aliyun.polardbx.rpc.cdc.StopSlaveRequest;
-import com.aliyun.polardbx.rpl.applier.StatisticUnit;
+import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
 import com.aliyun.polardbx.rpl.common.fsmutil.ReplicaFSM;
-import io.grpc.stub.StreamObserver;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.MutablePair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -52,126 +55,430 @@ import java.util.Map;
  */
 public class RplServiceManager {
 
-    private final static String OPERATION_ON_RUNNING_SLAVE_ERROR =
+    private static final String OPERATION_ON_RUNNING_SLAVE_ERROR =
         "This operation cannot be performed with a running slave; "
             + "run STOP SLAVE (FOR CHANNEL 'channel_name') first";
-    private final static String MULTIPLE_CHANNELS_EXIST =
-        "Multiple channels exist on the slave. Please provide channel name as an argument";
-    private final static String CHANNEL_NOT_EXIST =
+    private static final String CHANNEL_NOT_EXIST =
         "Slave channel for this channel name does not exist";
+    private static final String SUB_CHANNEL_NOT_EXIST =
+        "Slave channel for this sub channel does not exist";
+    private static final String OPERATION_ON_SUB_CHANNEL = "This operation cannot be performed on sub channel";
+    private static final String ILLEGAL_PARAM = "Found illegal param name: %s";
+    private static final String CANNOT_CHANGE =
+        "Fixed param cannot be changed through change master, run reset slave all [for channel] first";
 
-    private final static Logger rplLogger = LoggerFactory.getLogger(RplServiceManager.class);
+    private static final Logger rplLogger = LoggerFactory.getLogger(RplServiceManager.class);
 
-    //////////////////////////////// For RPC calls ///// ///////////////////////////
-    public static void startSlave(StartSlaveRequest request, StreamObserver<RplCommandResponse> responseObserver) {
+    private static final MetaManagerTranProxy TRANSACTION_MANAGER =
+        SpringContextHolder.getObject(MetaManagerTranProxy.class);
+
+    private static final List<String> LEGAL_PARAMS_FOR_CHANGE_MASTER = Arrays.asList(
+        RplConstants.CHANNEL, RplConstants.MODE, RplConstants.MASTER_HOST, RplConstants.MASTER_PORT,
+        RplConstants.MASTER_USER, RplConstants.MASTER_PASSWORD, RplConstants.MASTER_LOG_FILE,
+        RplConstants.MASTER_LOG_POS, RplConstants.IGNORE_SERVER_IDS, RplConstants.SOURCE_HOST_TYPE,
+        RplConstants.STREAM_GROUP, RplConstants.ENABLE_DYNAMIC_MASTER_HOST, RplConstants.WRITE_SERVER_ID,
+        RplConstants.CHANNEL, RplConstants.SUB_CHANNEL, RplConstants.TRIGGER_DYNAMIC_MASTER_HOST,
+        RplConstants.TRIGGER_AUTO_POSITION, RplConstants.FORCE_CHANGE);
+
+    private static final List<String> LEGAL_PARAMS_FOR_CHANGE_FILTER = Arrays.asList(
+        RplConstants.REPLICATE_DO_DB, RplConstants.REPLICATE_IGNORE_DB, RplConstants.REPLICATE_DO_TABLE,
+        RplConstants.REPLICATE_IGNORE_TABLE, RplConstants.REPLICATE_WILD_DO_TABLE,
+        RplConstants.REPLICATE_WILD_IGNORE_TABLE, RplConstants.REPLICATE_REWRITE_DB, RplConstants.REPLICATE_SKIP_TSO,
+        RplConstants.REPLICATE_SKIP_UNTIL_TSO, RplConstants.REPLICATE_ENABLE_DDL,
+        RplConstants.CHANNEL, RplConstants.SUB_CHANNEL);
+
+    //////////////////////////////// For RESTFUL calls ///// ///////////////////////////
+    public static ResultCode<?> startSlave(Map<String, String> params) {
         try {
-            Map<String, String> params = parseRequest(request.getRequest());
-            rplLogger.info("receive start slave for channel: {}, params: {}", params.get(RplConstants.CHANNEL), params);
-            if (!checkSlaveExist(params, responseObserver)) {
-                return;
-            }
-            List<RplStateMachine> stateMachines = listRplStateMachine(params.get(RplConstants.CHANNEL));
+            return TRANSACTION_MANAGER.startSlaveWithTran(params);
+        } catch (Throwable e) {
+            rplLogger.error("start slave occurs exception:", e);
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(e.getMessage()).data(false).build();
+        }
+    }
+
+    public static ResultCode<?> startSlaveWithTran(Map<String, String> params) {
+        rplLogger.info("receive start slave, params: {}", params);
+        if (!checkSubChannel(params)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(SUB_CHANNEL_NOT_EXIST).data(false)
+                .build();
+        }
+        if (!checkSlaveExist(params)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(CHANNEL_NOT_EXIST).data(false).build();
+        }
+        if (!params.containsKey(RplConstants.SUB_CHANNEL)) {
+            List<RplStateMachine> stateMachines = listRplStateMachineDefaultAll(params.get(RplConstants.CHANNEL));
             for (RplStateMachine stateMachine : stateMachines) {
                 FSMMetaManager.startStateMachine(stateMachine.getId());
                 rplLogger.info("start statemachine, {}", stateMachine.getId());
             }
-            FSMMetaManager.distributeTasks();
-            setRpcRplCommandResponse(responseObserver, 0, "");
+        } else {
+            FSMMetaManager.startTask(Long.parseLong(params.get(RplConstants.SUB_CHANNEL)));
+            rplLogger.info("start task, {}", params.get(RplConstants.SUB_CHANNEL));
+        }
+        return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
+    }
+
+    public static ResultCode<?> stopSlave(Map<String, String> params) {
+        try {
+            return TRANSACTION_MANAGER.stopSlaveWithTran(params);
         } catch (Throwable e) {
-            rplLogger.error("start slave occurs exception:", e);
-            setRpcRplCommandResponse(responseObserver, 1, e.getMessage());
+            rplLogger.error("stop slave occurs exception:", e);
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(e.getMessage()).data(false).build();
         }
     }
 
-    public static void stopSlave(StopSlaveRequest request, StreamObserver<RplCommandResponse> responseObserver) {
-        try {
-            Map<String, String> params = parseRequest(request.getRequest());
-            rplLogger.info("receive stop slave for channel: {}, params: {}", params.get(RplConstants.CHANNEL), params);
-            if (!checkSlaveExist(params, responseObserver)) {
-                return;
-            }
-            List<RplStateMachine> stateMachines = listRplStateMachine(params.get(RplConstants.CHANNEL));
+    public static ResultCode<?> stopSlaveWithTran(Map<String, String> params) {
+        rplLogger.info("receive stop slave, params: {}", params);
+        if (!checkSubChannel(params)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(SUB_CHANNEL_NOT_EXIST).data(false)
+                .build();
+        }
+        if (!checkSlaveExist(params)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(CHANNEL_NOT_EXIST).data(false).build();
+        }
+        if (!params.containsKey(RplConstants.SUB_CHANNEL)) {
+            List<RplStateMachine> stateMachines = listRplStateMachineDefaultAll(params.get(RplConstants.CHANNEL));
             for (RplStateMachine stateMachine : stateMachines) {
                 FSMMetaManager.stopStateMachine(stateMachine.getId());
                 rplLogger.info("stop statemachine, {}", stateMachine.getId());
             }
-            setRpcRplCommandResponse(responseObserver, 0, "");
-        } catch (Throwable e) {
-            rplLogger.error("stop slave occurs exception:", e);
-            setRpcRplCommandResponse(responseObserver, 1, e.getMessage());
+        } else {
+            FSMMetaManager.stopTask(Long.parseLong(params.get(RplConstants.SUB_CHANNEL)));
+            rplLogger.info("stop task, {}", params.get(RplConstants.SUB_CHANNEL));
         }
+
+        return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
     }
 
-    public static void resetSlave(ResetSlaveRequest request, StreamObserver<RplCommandResponse> responseObserver) {
+    public static ResultCode<?> resetSlave(Map<String, String> params) {
         try {
-            Map<String, String> params = parseRequest(request.getRequest());
-            rplLogger.info("receive reset slave for channel: {}, params: {}", params.get(RplConstants.CHANNEL), params);
-
-            // rules :
-            // RESET SLAVE ALL, remove all rpl fsm
-            // RESET SLAVE ALL FOR CHANNEL 'xxx', remove rpl fsm with specific channel name
-            // RESET SLAVE, remove history of all rpl fsm
-            // RESET SLAVE FOR CHANNEL 'xxx', remove history of rpl fsm with specific channel name
-            // here history means position, error and statistical data
-
-            if (!checkSlaveRunning(params, responseObserver) || !checkSlaveExist(params, responseObserver)) {
-                return;
-            }
-
-            List<RplStateMachine> stateMachines = listRplStateMachine(params.get(RplConstants.CHANNEL));
-            for (RplStateMachine stateMachine : stateMachines) {
-                if (StringUtils.equalsIgnoreCase("false", params.get(RplConstants.IS_ALL))) {
-                    FSMMetaManager.clearReplicaHistory(stateMachine, false);
-                    rplLogger.info("remove history of replica fsm, {}", stateMachine.getId());
-                } else {
-                    DbTaskMetaManager.deleteStateMachine(stateMachine.getId());
-                    rplLogger.info("remove replica fsm itself, {}", stateMachine.getId());
-                }
-            }
-            setRpcRplCommandResponse(responseObserver, 0, "");
+            return TRANSACTION_MANAGER.resetSlaveWithTran(params);
         } catch (Throwable e) {
             rplLogger.error("reset slave occurs exception:", e);
-            setRpcRplCommandResponse(responseObserver, 1, e.getMessage());
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(e.getMessage()).data(false).build();
         }
     }
 
-    public static void showSlaveStatus(ShowSlaveStatusRequest request,
-                                       StreamObserver<ShowSlaveStatusResponse> responseObserver) {
-        Map<String, String> params = parseRequest(request.getRequest());
-        rplLogger.info("receive show slave status for channel: {}, params: {}", params.get(RplConstants.CHANNEL),
-            params);
+    public static ResultCode<?> resetSlaveWithTran(Map<String, String> params) {
+        rplLogger.info("receive reset slave, params: {}", params);
 
-        List<RplStateMachine> stateMachines = listRplStateMachine(params.get(RplConstants.CHANNEL));
-        // no need to check channel exist
-        // mysql> show slave status for channel 'a';
-        // Empty set (0.01 sec)
+        // rules :
+        // RESET SLAVE ALL, remove all rpl fsm
+        // RESET SLAVE ALL FOR CHANNEL 'xxx', remove rpl fsm with specific channel name
+        // RESET SLAVE, remove history of all rpl fsm
+        // RESET SLAVE FOR CHANNEL 'xxx', remove history of rpl fsm with specific channel name
+        // here history means position, error and statistical data
 
+        if (params.containsKey(RplConstants.SUB_CHANNEL)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(OPERATION_ON_SUB_CHANNEL)
+                .data(false).build();
+        }
+
+        if (!checkSlaveExist(params)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(CHANNEL_NOT_EXIST).data(false).build();
+        }
+
+        if (!checkSlaveRunning(params)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(OPERATION_ON_RUNNING_SLAVE_ERROR)
+                .data(false).build();
+        }
+
+        List<RplStateMachine> stateMachines = listRplStateMachineDefaultAll(params.get(RplConstants.CHANNEL));
         for (RplStateMachine stateMachine : stateMachines) {
-            rplLogger.info("show status for fsm, {}", stateMachine.getId());
-            ReplicaMeta replicaMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
-            RplService service = DbTaskMetaManager.getService(stateMachine.getId(), ServiceType.REPLICA_INC);
-            List<RplTask> tasks = DbTaskMetaManager.listTaskByService(service.getId());
-            RplTask slowestTask = findSlowestTask(tasks);
-            List<String> positionDetails;
-            if (StringUtils.isNotBlank(slowestTask.getPosition())) {
-                positionDetails = CommonUtil.parsePosition(slowestTask.getPosition());
+            if (StringUtils.equalsIgnoreCase("false", params.get(RplConstants.IS_ALL))) {
+                FSMMetaManager.clearReplicaHistory(stateMachine);
+                rplLogger.info("remove history of replica fsm, {}", stateMachine.getId());
             } else {
-                rplLogger.error("position of task is blank, fsm id: {}, task id: {}",
-                    stateMachine.getId(), slowestTask.getId());
+                FSMMetaManager.deleteStateMachine(stateMachine.getId());
+                rplLogger.info("remove replica fsm itself, {}", stateMachine.getId());
+            }
+        }
+        return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
+    }
+
+    public static ResultCode<?> showSlaveStatus(Map<String, String> params) {
+        rplLogger.info("receive show slave status, params: {}", params);
+        List<LinkedHashMap<String, String>> responses = new ArrayList<>();
+        if (!checkSubChannel(params)) {
+            return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success")
+                .data(JSON.toJSONString(responses)).build();
+        }
+        if (!params.containsKey(RplConstants.SUB_CHANNEL)) {
+            List<RplStateMachine> stateMachines = listRplStateMachineDefaultAll(params.get(RplConstants.CHANNEL));
+            for (RplStateMachine stateMachine : stateMachines) {
+                rplLogger.info("show status for fsm, {}", stateMachine.getId());
+                RplService service = DbTaskMetaManager.getService(stateMachine.getId(), ServiceType.REPLICA_INC);
+                List<RplTask> tasks = DbTaskMetaManager.listTaskByService(service.getId());
+                extractStatusFromTask(tasks, stateMachine, responses);
+            }
+        } else {
+            RplTask task = DbTaskMetaManager.getTask(Long.parseLong(params.get(RplConstants.SUB_CHANNEL)));
+            List<RplTask> tasks = Collections.singletonList(task);
+            RplStateMachine stateMachine = DbTaskMetaManager.getStateMachine(task.getStateMachineId());
+            extractStatusFromTask(tasks, stateMachine, responses);
+        }
+        return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success")
+            .data(JSON.toJSONString(responses)).build();
+    }
+
+    public static ResultCode<?> changeMaster(Map<String, String> params) {
+        try {
+            return TRANSACTION_MANAGER.changeMasterWithTran(params);
+        } catch (Throwable e) {
+            rplLogger.error("change master occurs exception:", e);
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(e.getMessage())
+                .data(false).build();
+        }
+    }
+
+    public static ResultCode<?> changeMasterWithTran(Map<String, String> params) {
+        rplLogger.info("receive change master, params: {}", params);
+        try {
+            // 参数检查
+            for (String paramName : params.keySet()) {
+                if (!LEGAL_PARAMS_FOR_CHANGE_MASTER.contains(paramName)) {
+                    return ResultCode.builder().code(CommonConstants.FAILURE_CODE)
+                        .msg(String.format(ILLEGAL_PARAM, paramName))
+                        .data(false)
+                        .build();
+                }
+            }
+
+            params.putIfAbsent(RplConstants.CHANNEL, "");
+            if (!checkSubChannel(params)) {
+                return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(SUB_CHANNEL_NOT_EXIST).data(false)
+                    .build();
+            }
+            if (!checkSlaveRunning(params)) {
+                return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(OPERATION_ON_RUNNING_SLAVE_ERROR)
+                    .data(false).build();
+            }
+
+            // sub channel单独处理 只允许修改指定的几个参数，详见extractChangeMasterParamsForModify
+            if (params.containsKey(RplConstants.SUB_CHANNEL)) {
+                RplTask task = DbTaskMetaManager.getTask(Long.parseLong(params.get(RplConstants.SUB_CHANNEL)));
+                ReplicaMeta replicaMeta = extractMetaFromTaskConfig(task);
+                extractChangeMasterParamsForSubChannelModify(params, replicaMeta);
+                FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta,
+                    params.containsKey(RplConstants.MASTER_LOG_FILE)
+                        && params.containsKey(RplConstants.MASTER_LOG_POS));
+                return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
+            }
+
+            // 处理channel
+            RplStateMachine stateMachine = DbTaskMetaManager.getRplStateMachine(params.get(RplConstants.CHANNEL));
+            if (stateMachine == null) {
+                createMaster(params);
+                return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
+            } else {
+                // rules:
+                // 1. 如果我们设置MASTER_HOST 或 MASTER_PORT 或 MODE 或 host_type 或 stream_group参数，
+                // 则"无论如何"视为新的master,直接重建 (与mysql行为一致)
+                // 2. 如果我们设置MASTER_LOG_FILE 与 MASTER_LOG_POS参数，则视为新的position
+                // 清除位点上下文并修改fsm/service/task的元数据
+                // 3. 如果创建任务时未指定位点，则默认采用最新位点
+                if (!Boolean.parseBoolean(params.getOrDefault(RplConstants.FORCE_CHANGE, "false"))) {
+                    if (params.containsKey(RplConstants.MASTER_HOST) || params.containsKey(RplConstants.MASTER_PORT)
+                        || params.containsKey(RplConstants.MODE) || params.containsKey(RplConstants.SOURCE_HOST_TYPE)
+                        || params.containsKey(RplConstants.STREAM_GROUP)) {
+                        return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(CANNOT_CHANGE).data(false)
+                            .build();
+                    }
+                }
+                List<RplTask> tasks = DbTaskMetaManager.listTaskByStateMachine(stateMachine.getId());
+                for (RplTask task : tasks) {
+                    ReplicaMeta replicaMeta = extractMetaFromTaskConfig(task);
+                    extractChangeMasterParams(params, replicaMeta);
+                    FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta,
+                        params.containsKey(RplConstants.MASTER_LOG_FILE)
+                            && params.containsKey(RplConstants.MASTER_LOG_POS));
+                }
+                // 目前只有更新meta cn的时候需要更新common meta
+                ReplicaMeta commonMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
+                extractChangeMasterParams(params, commonMeta);
+                FSMMetaManager.updateReplicaConfig(stateMachine, commonMeta);
+
+                // 特殊处理 trigger_auto_position 和 trigger_auto_cn
+                if (params.containsKey(RplConstants.TRIGGER_DYNAMIC_MASTER_HOST) &&
+                    CommonConstants.TRUE.equalsIgnoreCase(params.get(RplConstants.TRIGGER_DYNAMIC_MASTER_HOST))) {
+                    generateDynamicHostInfo(stateMachine);
+                }
+                if (params.containsKey(RplConstants.TRIGGER_AUTO_POSITION) &&
+                    CommonConstants.TRUE.equalsIgnoreCase(params.get(RplConstants.TRIGGER_AUTO_POSITION))) {
+                    generateLatestPosition(stateMachine);
+                }
+            }
+        } catch (Throwable e) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(e.getMessage()).build();
+        }
+        return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
+    }
+
+    public static void createMaster(Map<String, String> params) throws Exception {
+        ReplicaMeta replicaMeta = new ReplicaMeta();
+        extractChangeMasterParams(params, replicaMeta);
+        rplLogger.info("receive change master for channel: {}, create new fsm from config: {}",
+            params.get(RplConstants.CHANNEL), replicaMeta);
+        ReplicaFSM.getInstance().create(replicaMeta);
+    }
+
+    public static ResultCode<?> changeReplicationFilter(Map<String, String> params) {
+        try {
+            return TRANSACTION_MANAGER.changeReplicationFilterWithTran(params);
+        } catch (Throwable e) {
+            rplLogger.error("change replication filter occurs exception:", e);
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(e.getMessage()).data(false).build();
+        }
+    }
+
+    public static ResultCode<?> changeReplicationFilterWithTran(Map<String, String> params) {
+        for (String paramName : params.keySet()) {
+            if (!LEGAL_PARAMS_FOR_CHANGE_FILTER.contains(paramName)) {
+                return ResultCode.builder().code(CommonConstants.FAILURE_CODE)
+                    .msg(String.format(ILLEGAL_PARAM, paramName))
+                    .data(false)
+                    .build();
+            }
+        }
+        rplLogger.info("receive change replication filter, params: {}", params);
+        if (!checkSlaveRunning(params)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(OPERATION_ON_RUNNING_SLAVE_ERROR)
+                .data(false).build();
+        }
+        if (!checkSlaveExist(params)) {
+            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(CHANNEL_NOT_EXIST).data(false).build();
+        }
+        processSchemaTableName(params);
+
+        if (!params.containsKey(RplConstants.SUB_CHANNEL)) {
+            List<RplStateMachine> stateMachines = listRplStateMachineDefaultAll(params.get(RplConstants.CHANNEL));
+            for (RplStateMachine stateMachine : stateMachines) {
+                List<RplTask> tasks = DbTaskMetaManager.listTaskByStateMachine(stateMachine.getId());
+                for (RplTask task : tasks) {
+                    ReplicaMeta replicaMeta = extractMetaFromTaskConfig(task);
+                    rplLogger.info("receive change replication filter for stateMachine id: {}, new config: {}",
+                        stateMachine.getId(), replicaMeta);
+                    extractChangeFilterParams(params, replicaMeta);
+                    FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta, false);
+                }
+                ReplicaMeta commonMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
+                rplLogger.info("receive change replication filter for stateMachine id: {}, old config: {}",
+                    stateMachine.getId(), commonMeta);
+                extractChangeFilterParams(params, commonMeta);
+                FSMMetaManager.updateReplicaConfig(stateMachine, commonMeta);
+            }
+        } else {
+            RplTask task = DbTaskMetaManager.getTask(Long.parseLong(params.get(RplConstants.SUB_CHANNEL)));
+            ReplicaMeta replicaMeta = extractMetaFromTaskConfig(task);
+            extractChangeFilterParams(params, replicaMeta);
+            FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta, false);
+        }
+
+        return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
+    }
+
+    public static void processSchemaTableName(Map<String, String> params) {
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            String paramName = entry.getKey();
+            String paramValue = entry.getValue();
+            if (!StringUtils.equals(paramName, RplConstants.REPLICATE_WILD_DO_TABLE) &&
+                !StringUtils.equals(paramName, RplConstants.REPLICATE_WILD_IGNORE_TABLE)) {
+                entry.setValue(SQLUtils.normalize(paramValue));
+            }
+        }
+    }
+
+    public static boolean checkSubChannel(Map<String, String> params) {
+        try {
+            if (params.containsKey(RplConstants.SUB_CHANNEL)) {
+                long taskId = Long.parseLong(params.get(RplConstants.SUB_CHANNEL));
+                RplTask task = DbTaskMetaManager.getTask(taskId);
+                if (null == task) {
+                    return false;
+                }
+            }
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        return true;
+    }
+
+    public static List<RplStateMachine> listRplStateMachineDefaultAll(String channel) {
+        List<RplStateMachine> stateMachines = new ArrayList<>();
+        if (null != channel) {
+            RplStateMachine stateMachine = DbTaskMetaManager.getRplStateMachine(channel);
+            if (stateMachine != null) {
+                stateMachines.add(stateMachine);
+            }
+        } else {
+            stateMachines = DbTaskMetaManager.listRplStateMachine();
+        }
+        return stateMachines;
+    }
+
+    public static boolean checkSlaveExist(Map<String, String> params) {
+        if (!params.containsKey(RplConstants.SUB_CHANNEL)) {
+            List<RplStateMachine> stateMachines = listRplStateMachineDefaultAll(params.get(RplConstants.CHANNEL));
+            if (params.containsKey(RplConstants.CHANNEL) && stateMachines.isEmpty()) {
+                rplLogger.error("replica fsm not exist for this channel name : {}", params.get(RplConstants.CHANNEL));
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static boolean checkSlaveRunning(Map<String, String> params) {
+        if (!params.containsKey(RplConstants.SUB_CHANNEL)) {
+            List<RplStateMachine> stateMachines = listRplStateMachineDefaultAll(params.get(RplConstants.CHANNEL));
+            for (RplStateMachine stateMachine : stateMachines) {
+                if (stateMachine.getStatus() == StateMachineStatus.RUNNING.getValue()) {
+                    rplLogger.error("replica fsm is running thus not support this action, channel name: {}",
+                        params.get(RplConstants.CHANNEL));
+                    return false;
+                }
+            }
+        } else {
+            RplTask rpltask = DbTaskMetaManager.getTask(Long.parseLong(params.get(RplConstants.SUB_CHANNEL)));
+            if (rpltask.getStatus() == TaskStatus.RUNNING.getValue() ||
+                rpltask.getStatus() == TaskStatus.READY.getValue() ||
+                rpltask.getStatus() == TaskStatus.RESTART.getValue()) {
+                rplLogger.error("replica task is running thus not support this action, sub channel name: {}",
+                    params.get(RplConstants.SUB_CHANNEL));
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // return first replica cluster
+    public static String findActiveReplicaCluster() {
+        if (ClusterType.REPLICA.name().equals(DynamicApplicationConfig.getClusterType())) {
+            return DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+        } else {
+            List<NodeInfo> nodeInfoList = DbTaskMetaManager.listActiveClusterNode(ClusterType.REPLICA.name());
+            if (CollectionUtils.isEmpty(nodeInfoList)) {
+                return DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+            } else {
+                return nodeInfoList.get(0).getClusterId();
+            }
+        }
+    }
+
+    public static void extractStatusFromTask(List<RplTask> tasks, RplStateMachine stateMachine,
+                                             List<LinkedHashMap<String, String>> responses) {
+        for (RplTask task : tasks) {
+            RplTaskConfig config = DbTaskMetaManager.getTaskConfig(task.getId());
+            ExtractorConfig extractorConfig = JSON.parseObject(config.getExtractorConfig(), ExtractorConfig.class);
+            ReplicaMeta replicaMeta = JSON.parseObject(extractorConfig.getSourceToTargetConfig(), ReplicaMeta.class);
+            List<String> positionDetails;
+            if (StringUtils.isNotBlank(task.getPosition())) {
+                positionDetails = CommonUtil.parsePosition(task.getPosition());
+            } else {
                 positionDetails = CommonUtil.parsePosition(CommonUtil.getRplInitialPosition());
             }
-
-            long skipCounter = 0;
-            for (RplTask task : tasks) {
-                if (StringUtils.isBlank(task.getStatistic())) {
-                    continue;
-                }
-                StatisticUnit unit = JSON.parseObject(task.getStatistic(), StatisticUnit.class);
-                skipCounter += unit.getSkipCounter();
-            }
-
-            String running = service.getStatus() == ServiceStatus.RUNNING.getValue() ? "Yes" : "No";
-            Map<String, String> response = new HashMap<>();
+            String running = task.getStatus() == TaskStatus.RUNNING.getValue() ? "Yes" : "No";
+            LinkedHashMap<String, String> response = new LinkedHashMap<>();
             response.put("Master_Host", replicaMeta.getMasterHost());
             response.put("Master_User", replicaMeta.getMasterUser());
             response.put("Master_Port", Integer.toString(replicaMeta.getMasterPort()));
@@ -188,367 +495,218 @@ public class RplServiceManager {
             response.put("Replicate_Ignore_Table", replicaMeta.getIgnoreTable());
             response.put("Replicate_Wild_Do_Table", replicaMeta.getWildDoTable());
             response.put("Replicate_Wild_Ignore_Table", replicaMeta.getWildIgnoreTable());
-            response.put("Last_Error", slowestTask.getLastError());
-            response.put("Skip_Counter", String.valueOf(skipCounter));
+            response.put("Last_Error", task.getLastError());
             response.put("Exec_Master_Log_Pos", positionDetails.get(1));
             response.put("Until_Condition", "None");
             response.put("Master_SSL_Allowed", "No");
-            response.put("Seconds_Behind_Master", String.valueOf(FSMMetaManager.computeTaskDelay(slowestTask)));
+            response.put("Seconds_Behind_Master", String.valueOf(FSMMetaManager.computeTaskDelay(task)));
             response.put("Master_SSL_Verify_Server_Cert", "No");
             response.put("Replicate_Ignore_Server_Ids", replicaMeta.getIgnoreServerIds());
             response.put("SQL_Remaining_Delay", "NULL");
             response.put("Slave_SQL_Running_State", running);
             response.put("Auto_Position", "0");
             response.put("Replicate_Rewrite_DB", replicaMeta.getRewriteDb());
-            response.put("Channel_Name", stateMachine.getChannel());
             response.put("Replicate_Mode", replicaMeta.isImageMode() ?
-                RplConstants.IMAGE_MODE: RplConstants.INCREMENTAL_MODE);
+                RplConstants.IMAGE_MODE : RplConstants.INCREMENTAL_MODE);
             response.put("Running_Stage", FSMState.from(stateMachine.getState()).name());
-            responseObserver
-                .onNext(ShowSlaveStatusResponse.newBuilder().setResponse(JSON.toJSONString(response))
-                    .build());
+            response.put("Replicate_Enable_Ddl", String.valueOf(replicaMeta.isEnableDdl()));
+            response.put("Skip_Tso", replicaMeta.getSkipTso());
+            response.put("Skip_Until_Tso", replicaMeta.getSkipUntilTso());
+            response.put("Channel_Name", stateMachine.getChannel());
+            response.put("Sub_Channel_Name", task.getId().toString());
+            for (Map.Entry<String, String> entry : response.entrySet()) {
+                if (entry.getValue() == null) {
+                    entry.setValue("");
+                }
+            }
+            responses.add(response);
         }
-        responseObserver.onCompleted();
     }
 
-    public static void changeMaster(ChangeMasterRequest request, StreamObserver<RplCommandResponse> responseObserver) {
-        try {
-            Map<String, String> params = parseRequest(request.getRequest());
-            rplLogger.info("receive change master for channel: {}, params: {}", params.get(RplConstants.CHANNEL),
-                params);
-            List<RplStateMachine> existStateMachines = listRplStateMachine(params.get(RplConstants.CHANNEL));
-            if (!checkSlaveRunning(params, responseObserver)) {
-                return;
+    public static void extractChangeFilterParams(Map<String, String> params, ReplicaMeta replicaMeta) {
+        if (params.containsKey(RplConstants.REPLICATE_DO_DB)) {
+            // origin: (full_src_1, rpl)
+            // in db: full_src_1,rpl
+            replicaMeta.setDoDb(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_DO_DB)));
+        }
+        if (params.containsKey(RplConstants.REPLICATE_IGNORE_DB)) {
+            // origin: (full_src_1, gbktest)
+            // in db: full_src_1,gbktest
+            replicaMeta.setIgnoreDb(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_IGNORE_DB)));
+        }
+        if (params.containsKey(RplConstants.REPLICATE_DO_TABLE)) {
+            // origin: (full_src_1.t1, full_src_1.t2)
+            // in db: full_src_1.t1,full_src_1.t2
+            replicaMeta.setDoTable(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_DO_TABLE)));
+        }
+        if (params.containsKey(RplConstants.REPLICATE_IGNORE_TABLE)) {
+            // origin: (full_src_1.t2, full_src_1.t3)
+            // in db: full_src_1.t3,full_src_1.t2
+            replicaMeta
+                .setIgnoreTable(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_IGNORE_TABLE)));
+        }
+        if (params.containsKey(RplConstants.REPLICATE_WILD_DO_TABLE)) {
+            // origin: ('d%.tb\_charset%', 'd%.col\_charset%')
+            // in db: d%.tb\_charset%,d%.col\_charset%
+            String replicateWildDoTable = CommonUtil
+                .removeBracket(params.get(RplConstants.REPLICATE_WILD_DO_TABLE));
+            replicateWildDoTable = replicateWildDoTable.replace("'", "");
+            replicaMeta.setWildDoTable(replicateWildDoTable);
+        }
+        if (params.containsKey(RplConstants.REPLICATE_WILD_IGNORE_TABLE)) {
+            // origin: ('d%.tb\\_charset%', 'd%.col\\_charset%')
+            // in db: d%.tb\_charset%,d%.col\_charset%
+            String replicateWildIgnoreTable = CommonUtil
+                .removeBracket(params.get(RplConstants.REPLICATE_WILD_IGNORE_TABLE));
+            replicateWildIgnoreTable = replicateWildIgnoreTable.replace("'", "");
+            replicaMeta.setWildIgnoreTable(replicateWildIgnoreTable);
+        }
+        if (params.containsKey(RplConstants.REPLICATE_REWRITE_DB)) {
+            // origin: ((full_src_1, full_dst_1), (full_src_2, full_dst_2))
+            // in db: (full_src_1,full_dst_1),(full_src_2,full_dst_2)
+            replicaMeta.setRewriteDb(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_REWRITE_DB)));
+        }
+        if (params.containsKey(RplConstants.REPLICATE_SKIP_TSO)) {
+            replicaMeta.setSkipTso(params.get(RplConstants.REPLICATE_SKIP_TSO));
+        }
+        if (params.containsKey(RplConstants.REPLICATE_SKIP_UNTIL_TSO)) {
+            replicaMeta.setSkipTso(params.get(RplConstants.REPLICATE_SKIP_UNTIL_TSO));
+        }
+        if (params.containsKey(RplConstants.REPLICATE_ENABLE_DDL)) {
+            replicaMeta.setEnableDdl(Boolean.parseBoolean(params.get(RplConstants.REPLICATE_ENABLE_DDL)));
+        }
+    }
+
+    public static ReplicaMeta extractMetaFromTaskConfig(RplTask task) {
+        RplTaskConfig config = DbTaskMetaManager.getTaskConfig(task.getId());
+        ExtractorConfig extractorConfig = JSON.parseObject(config.getExtractorConfig(), ExtractorConfig.class);
+        return JSON.parseObject(extractorConfig.getSourceToTargetConfig(), ReplicaMeta.class);
+    }
+
+    public static void extractChangeMasterParams(Map<String, String> params, ReplicaMeta replicaMeta) {
+        replicaMeta.setClusterId(findActiveReplicaCluster());
+        if (params.containsKey(RplConstants.CHANNEL)) {
+            replicaMeta.setChannel(params.get(RplConstants.CHANNEL));
+        }
+        replicaMeta.setImageMode(false);
+        if (params.containsKey(RplConstants.MODE)) {
+            if (StringUtils.equalsIgnoreCase(params.get(RplConstants.MODE), RplConstants.IMAGE_MODE)) {
+                replicaMeta.setImageMode(true);
             }
-            if (StringUtils.isBlank(params.get(RplConstants.CHANNEL)) && existStateMachines.size() > 1) {
-                rplLogger.error("This action does not support multiple channels, channel name: {}",
-                    params.get(RplConstants.CHANNEL));
-                setRpcRplCommandResponse(responseObserver, 1, MULTIPLE_CHANNELS_EXIST);
-                return;
+        }
+        if (params.containsKey(RplConstants.MASTER_HOST)) {
+            CommonUtil.hostSafeCheck(params.get(RplConstants.MASTER_HOST));
+            replicaMeta.setMasterHost(params.get(RplConstants.MASTER_HOST));
+        }
+        if (params.containsKey(RplConstants.MASTER_PORT)) {
+            replicaMeta.setMasterPort(Integer.parseInt(params.get(RplConstants.MASTER_PORT)));
+        }
+        if (params.containsKey(RplConstants.MASTER_USER)) {
+            replicaMeta.setMasterUser(params.get(RplConstants.MASTER_USER));
+        }
+        if (params.containsKey(RplConstants.MASTER_PASSWORD)) {
+            replicaMeta.setMasterPassword(params.get(RplConstants.MASTER_PASSWORD));
+        }
+        if (params.containsKey(RplConstants.MASTER_LOG_FILE)
+            && params.containsKey(RplConstants.MASTER_LOG_POS)) {
+            replicaMeta.setPosition(
+                params.get(RplConstants.MASTER_LOG_FILE) + ":" + params.get(RplConstants.MASTER_LOG_POS));
+        }
+        if (params.containsKey(RplConstants.IGNORE_SERVER_IDS)) {
+            // origin: (1,2)
+            // in db: 1,2
+            String ignoreServerIds = CommonUtil.removeBracket(params.get(RplConstants.IGNORE_SERVER_IDS));
+            replicaMeta.setIgnoreServerIds(ignoreServerIds);
+        }
+        replicaMeta.setMasterType(HostType.POLARX2);
+        if (params.containsKey(RplConstants.SOURCE_HOST_TYPE)) {
+            if (StringUtils.equalsIgnoreCase(RplConstants.RDS, params.get(RplConstants.SOURCE_HOST_TYPE))) {
+                replicaMeta.setMasterType(HostType.RDS);
+            } else if (StringUtils.equalsIgnoreCase(RplConstants.MYSQL, params.get(RplConstants.SOURCE_HOST_TYPE))) {
+                replicaMeta.setMasterType(HostType.MYSQL);
             }
-            // 如未设置file和pos，则MASTER_LOG_FILE='' and MASTER_LOG_POS=4,意思是找所能找到的最早的binlog的开头
-            if (existStateMachines.size() == 0) {
-                ReplicaMeta replicaMeta = new ReplicaMeta();
-                replicaMeta.setClusterId(findActiveReplicaCluster());
-                if (params.containsKey(RplConstants.CHANNEL)) {
-                    replicaMeta.setChannel(params.get(RplConstants.CHANNEL));
-                }
-                replicaMeta.setImageMode(false);
-                if (params.containsKey(RplConstants.MODE)) {
-                    if (StringUtils.equalsIgnoreCase(params.get(RplConstants.MODE), RplConstants.IMAGE_MODE)) {
-                        replicaMeta.setImageMode(true);
-                    }
-                }
-                if (params.containsKey(RplConstants.MASTER_HOST)) {
-                    replicaMeta.setMasterHost(params.get(RplConstants.MASTER_HOST));
-                }
-                if (params.containsKey(RplConstants.MASTER_PORT)) {
-                    replicaMeta.setMasterPort(Integer.parseInt(params.get(RplConstants.MASTER_PORT)));
-                }
-                if (params.containsKey(RplConstants.MASTER_USER)) {
-                    replicaMeta.setMasterUser(params.get(RplConstants.MASTER_USER));
-                }
-                if (params.containsKey(RplConstants.MASTER_PASSWORD)) {
-                    replicaMeta.setMasterPassword(params.get(RplConstants.MASTER_PASSWORD));
-                }
-                if (params.containsKey(RplConstants.MASTER_LOG_FILE)
-                    && params.containsKey(RplConstants.MASTER_LOG_POS)) {
-                    replicaMeta.setPosition(
-                        params.get(RplConstants.MASTER_LOG_FILE) + ":" + params.get(RplConstants.MASTER_LOG_POS));
-                } else {
-                    replicaMeta.setPosition(CommonUtil.getRplInitialPosition());
-                }
-                if (params.containsKey(RplConstants.IGNORE_SERVER_IDS)) {
-                    // origin: (1,2)
-                    // in db: 1,2
-                    String ignoreServerIds = CommonUtil.removeBracket(params.get(RplConstants.IGNORE_SERVER_IDS));
-                    replicaMeta.setIgnoreServerIds(ignoreServerIds);
-                }
-                replicaMeta.setMasterType(HostType.POLARX2);
-                if (params.containsKey(RplConstants.SOURCE_HOST_TYPE)) {
-                    if (StringUtils.equalsIgnoreCase("rds", params.get(RplConstants.SOURCE_HOST_TYPE))) {
-                        replicaMeta.setMasterType(HostType.RDS);
-                    } else if (StringUtils.equalsIgnoreCase("mysql", params.get(RplConstants.SOURCE_HOST_TYPE))) {
-                        replicaMeta.setMasterType(HostType.MYSQL);
-                    }
-                }
+        }
+        if (params.containsKey(RplConstants.STREAM_GROUP)) {
+            replicaMeta.setStreamGroup(params.get(RplConstants.STREAM_GROUP));
+        }
+        if (params.containsKey(RplConstants.ENABLE_DYNAMIC_MASTER_HOST)) {
+            replicaMeta.setEnableDynamicMasterHost(Boolean.parseBoolean(params
+                .get(RplConstants.ENABLE_DYNAMIC_MASTER_HOST)));
+        }
+        if (params.containsKey(RplConstants.WRITE_SERVER_ID)) {
+            replicaMeta.setServerId(params.get(RplConstants.WRITE_SERVER_ID));
+        }
+        replicaMeta.setDoDb("");
+        replicaMeta.setIgnoreDb("");
+        replicaMeta.setDoTable("");
+        replicaMeta.setIgnoreTable("");
+        replicaMeta.setWildDoTable("");
+        replicaMeta.setWildIgnoreTable("");
+        replicaMeta.setRewriteDb("");
+    }
 
-                replicaMeta.setDoDb("");
-                replicaMeta.setIgnoreDb("");
-                replicaMeta.setDoTable("");
-                replicaMeta.setIgnoreTable("");
-                replicaMeta.setWildDoTable("");
-                replicaMeta.setWildIgnoreTable("");
-                replicaMeta.setRewriteDb("");
+    public static void extractChangeMasterParamsForSubChannelModify(Map<String, String> params,
+                                                                    ReplicaMeta replicaMeta) {
+        if (params.containsKey(RplConstants.MASTER_HOST)) {
+            CommonUtil.hostSafeCheck(params.get(RplConstants.MASTER_HOST));
+            replicaMeta.setMasterHost(params.get(RplConstants.MASTER_HOST));
+        }
+        if (params.containsKey(RplConstants.MASTER_PORT)) {
+            replicaMeta.setMasterPort(Integer.parseInt(params.get(RplConstants.MASTER_PORT)));
+        }
+        if (params.containsKey(RplConstants.MASTER_USER)) {
+            replicaMeta.setMasterUser(params.get(RplConstants.MASTER_USER));
+        }
+        if (params.containsKey(RplConstants.MASTER_PASSWORD)) {
+            replicaMeta.setMasterPassword(params.get(RplConstants.MASTER_PASSWORD));
+        }
+        if (params.containsKey(RplConstants.MASTER_LOG_FILE)
+            && params.containsKey(RplConstants.MASTER_LOG_POS)) {
+            replicaMeta.setPosition(
+                params.get(RplConstants.MASTER_LOG_FILE) + ":" + params.get(RplConstants.MASTER_LOG_POS));
+        }
+    }
 
-                rplLogger.info("receive change master for channel: {}, create new fsm from config: {}",
-                    params.get(RplConstants.CHANNEL), replicaMeta);
-                ReplicaFSM.getInstance().create(replicaMeta);
+    public static void generateDynamicHostInfo(RplStateMachine stateMachine) {
+        ReplicaMeta meta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
+        try (Connection connection = DriverManager
+            .getConnection(String.format("jdbc:mysql://%s:%s", meta.getMasterHost(),
+                meta.getMasterPort()), meta.getMasterUser(), meta.getMasterPassword())) {
+            List<MutablePair<String, Integer>> masterInfos = CommonUtil.getComputeNodes(connection);
+            List<RplTask> tasks = DbTaskMetaManager.listTaskByStateMachine(stateMachine.getId());
+            for (int i = 0; i < tasks.size(); i++) {
+                RplTask task = tasks.get(i);
+                ReplicaMeta replicaMeta = RplServiceManager.extractMetaFromTaskConfig(task);
+                replicaMeta.setMasterHost(masterInfos.get(i % masterInfos.size()).getLeft());
+                replicaMeta.setMasterPort(masterInfos.get(i % masterInfos.size()).getRight());
+                FSMMetaManager.updateReplicaTaskConfig(tasks.get(i), replicaMeta, false);
+            }
+        } catch (SQLException e) {
+            throw new PolardbxException("connect to master failed ", e);
+        }
+    }
 
+    public static void generateLatestPosition(RplStateMachine stateMachine) {
+        ReplicaMeta meta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
+        try (Connection connection = DriverManager
+            .getConnection(String.format("jdbc:mysql://%s:%s", meta.getMasterHost(),
+                meta.getMasterPort()), meta.getMasterUser(), meta.getMasterPassword())) {
+            List<String> streamPositions;
+            if (StringUtils.isNotEmpty(meta.getStreamGroup())) {
+                streamPositions = CommonUtil.getStreamLatestPositions(connection, meta.getStreamGroup());
             } else {
-                // rules:
-
-                // 1. 如果我们设置MASTER_HOST 或 MASTER_PORT参数，则"无论如何"视为新的master
-                // 2. 如果我们设置MASTER_LOG_FILE 与 MASTER_LOG_POS参数，则视为新的position
-                // 清除位点上下文并修改fsm/service/task的元数据
-                // 此时如未设置file和pos，则MASTER_LOG_FILE='0' and MASTER_LOG_POS=4,意思是找所能找到的最早的binlog的开头
-
-                // 如果未采用新master且MASTER_LOG_FILE 与 MASTER_LOG_POS都没有指定，则使用上次保存的位置
-                // 复用table_position和ddl表，修改fsm/service/task的元数据
-
-                // 不支持MASTER_LOG_POS=0时自动匹配最新binlog offset，mysql8.0文档中无相关信息
-
-
-                // assert that only 1 statemachine here
-                RplStateMachine stateMachine = existStateMachines.get(0);
-                ReplicaMeta replicaMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
-                if (params.containsKey(RplConstants.MASTER_HOST)) {
-                    if (StringUtils.equalsIgnoreCase(params.get(RplConstants.MASTER_HOST),
-                        replicaMeta.getMasterHost())) {
-                        params.remove(RplConstants.MASTER_HOST);
-                    } else {
-                        replicaMeta.setMasterHost(params.get(RplConstants.MASTER_HOST));
-                    }
-                }
-                if (params.containsKey(RplConstants.MASTER_PORT)) {
-                    if (StringUtils.equalsIgnoreCase(params.get(RplConstants.MASTER_PORT),
-                        String.valueOf(replicaMeta.getMasterPort()))) {
-                        params.remove(RplConstants.MASTER_PORT);
-                    } else {
-                        replicaMeta.setMasterPort(Integer.parseInt(params.get(RplConstants.MASTER_PORT)));
-                    }
-                }
-                if (params.containsKey(RplConstants.MODE)) {
-                    boolean tempImageMode =
-                        StringUtils.equalsIgnoreCase(params.get(RplConstants.MODE), RplConstants.IMAGE_MODE);
-                    if (tempImageMode == replicaMeta.imageMode) {
-                        params.remove(RplConstants.MODE);
-                    } else {
-                        replicaMeta.setImageMode(tempImageMode);
-                    }
-                }
-                if (params.containsKey(RplConstants.MASTER_USER)) {
-                    replicaMeta.setMasterUser(params.get(RplConstants.MASTER_USER));
-                }
-                if (params.containsKey(RplConstants.MASTER_PASSWORD)) {
-                    replicaMeta.setMasterPassword(params.get(RplConstants.MASTER_PASSWORD));
-                }
-                if (params.containsKey(RplConstants.MASTER_LOG_FILE)
-                    && params.containsKey(RplConstants.MASTER_LOG_POS)) {
-                    replicaMeta.setPosition(params.get(RplConstants.MASTER_LOG_FILE) + ":" +
-                        params.get(RplConstants.MASTER_LOG_POS));
-                } else {
-                    replicaMeta.setPosition(CommonUtil.getRplInitialPosition());
-                }
-                if (params.containsKey(RplConstants.IGNORE_SERVER_IDS)) {
-                    String ignoreServerIds = CommonUtil.removeBracket(params.get(RplConstants.IGNORE_SERVER_IDS));
-                    replicaMeta.setIgnoreServerIds(ignoreServerIds);
-                }
-
-                replicaMeta.setMasterType(HostType.POLARX2);
-                if (params.containsKey(RplConstants.SOURCE_HOST_TYPE)) {
-                    if (StringUtils.equalsIgnoreCase("rds", params.get(RplConstants.SOURCE_HOST_TYPE))) {
-                        replicaMeta.setMasterType(HostType.RDS);
-                    } else if (StringUtils.equalsIgnoreCase("mysql", params.get(RplConstants.SOURCE_HOST_TYPE))) {
-                        replicaMeta.setMasterType(HostType.MYSQL);
-                    }
-                }
-
-                // 1. if host / port / mode modified, then remove all history (full and incremental),reset fsm state
-                // and use new position
-                // 2. if log file name / log file offset modified, then remove incremental history and use new position
-                // 3. if above keep unchanged, update meta and do not use new position
-                if (params.containsKey(RplConstants.MASTER_HOST)
-                    || params.containsKey(RplConstants.MASTER_PORT) || params.containsKey(RplConstants.MODE)) {
-                    // check if equal to now config
-                    rplLogger.info("receive change master for channel: {}, update old fsm with new master or position "
-                        + "from config: {}", params.get(RplConstants.CHANNEL), replicaMeta);
-                    // clear all context about table position
-                    FSMMetaManager.clearReplicaHistory(stateMachine, true);
-                    FSMMetaManager.updateReplicaConfig(stateMachine, replicaMeta, true, true);
-                } else if (params.containsKey(RplConstants.MASTER_LOG_FILE)
-                    && params.containsKey(RplConstants.MASTER_LOG_POS)) {
-                    FSMMetaManager.clearReplicaHistory(stateMachine, false);
-                    FSMMetaManager.updateReplicaConfig(stateMachine, replicaMeta, true, false);
-                } else {
-                    rplLogger.info("receive change master for channel: {}, update old fsm without new position "
-                        + "from config: {}", params.get(RplConstants.CHANNEL), replicaMeta);
-                    FSMMetaManager.updateReplicaConfig(stateMachine, replicaMeta, false, false);
-                }
+                streamPositions = Collections.singletonList(CommonUtil.getBinaryLatestPosition(connection));
             }
-            setRpcRplCommandResponse(responseObserver, 0, "");
-        } catch (Throwable e) {
-            rplLogger.error("change master occurs exception:", e);
-            setRpcRplCommandResponse(responseObserver, 1, e.getMessage());
-        }
-    }
-
-    public static void changeReplicationFilter(ChangeReplicationFilterRequest request,
-                                               StreamObserver<RplCommandResponse> responseObserver) {
-        try {
-
-            Map<String, String> params = parseRequest(request.getRequest());
-            rplLogger.info("receive change replication filter for channel: {}, params: {}",
-                params.get(RplConstants.CHANNEL), params);
-            List<RplStateMachine> stateMachines = listRplStateMachine(params.get(RplConstants.CHANNEL));
-
-            if (!checkSlaveRunning(params, responseObserver) || !checkSlaveExist(params, responseObserver) ||
-                !checkSchemaTableName(params, responseObserver)) {
-                return;
+            List<RplTask> tasks = DbTaskMetaManager.listTaskByStateMachine(stateMachine.getId());
+            for (int i = 0; i < tasks.size(); i++) {
+                RplTask task = tasks.get(i);
+                ReplicaMeta replicaMeta = RplServiceManager.extractMetaFromTaskConfig(task);
+                replicaMeta.setPosition(streamPositions.get(i));
+                FSMMetaManager.updateReplicaTaskConfig(tasks.get(i), replicaMeta, true);
             }
 
-            for (RplStateMachine stateMachine : stateMachines) {
-                ReplicaMeta replicaMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
-                rplLogger.info("receive change replication filter for stateMachine id: {}, old config: {}",
-                    stateMachine.getId(), replicaMeta);
-                if (params.containsKey(RplConstants.REPLICATE_DO_DB)) {
-                    // origin: (full_src_1, rpl)  d
-                    // in db: full_src_1,rpl
-                    replicaMeta.setDoDb(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_DO_DB)));
-                }
-                if (params.containsKey(RplConstants.REPLICATE_IGNORE_DB)) {
-                    // origin: (full_src_1, gbktest)
-                    // in db: full_src_1,gbktest
-                    replicaMeta.setIgnoreDb(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_IGNORE_DB)));
-                }
-                if (params.containsKey(RplConstants.REPLICATE_DO_TABLE)) {
-                    // origin: (full_src_1.t1, full_src_1.t2)
-                    // in db: full_src_1.t1,full_src_1.t2
-                    replicaMeta.setDoTable(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_DO_TABLE)));
-                }
-                if (params.containsKey(RplConstants.REPLICATE_IGNORE_TABLE)) {
-                    // origin: (full_src_1.t2, full_src_1.t3)
-                    // in db: full_src_1.t3,full_src_1.t2
-                    replicaMeta
-                        .setIgnoreTable(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_IGNORE_TABLE)));
-                }
-                if (params.containsKey(RplConstants.REPLICATE_WILD_DO_TABLE)) {
-                    // origin: ('d%.tb\_charset%', 'd%.col\_charset%')
-                    // in db: d%.tb\_charset%,d%.col\_charset%
-                    String replicateWildDoTable = CommonUtil
-                        .removeBracket(params.get(RplConstants.REPLICATE_WILD_DO_TABLE));
-                    replicateWildDoTable = replicateWildDoTable.replace("'", "");
-                    replicaMeta.setWildDoTable(replicateWildDoTable);
-                }
-                if (params.containsKey(RplConstants.REPLICATE_WILD_IGNORE_TABLE)) {
-                    // origin: ('d%.tb\\_charset%', 'd%.col\\_charset%')
-                    // in db: d%.tb\_charset%,d%.col\_charset%
-                    String replicateWildIgnoreTable = CommonUtil
-                        .removeBracket(params.get(RplConstants.REPLICATE_WILD_IGNORE_TABLE));
-                    replicateWildIgnoreTable = replicateWildIgnoreTable.replace("'", "");
-                    replicaMeta.setWildIgnoreTable(replicateWildIgnoreTable);
-                }
-                if (params.containsKey(RplConstants.REPLICATE_REWRITE_DB)) {
-                    // origin: ((full_src_1, full_dst_1), (full_src_2, full_dst_2))
-                    // in db: (full_src_1,full_dst_1),(full_src_2,full_dst_2)
-                    replicaMeta.setRewriteDb(CommonUtil.removeBracket(params.get(RplConstants.REPLICATE_REWRITE_DB)));
-                }
-                rplLogger.info("receive change replication filter for stateMachine id: {}, new config: {}",
-                    stateMachine.getId(), replicaMeta);
-                // update config in task context
-                FSMMetaManager.updateReplicaConfig(stateMachine, replicaMeta, false, true);
-            }
-            setRpcRplCommandResponse(responseObserver, 0, "");
-        } catch (Throwable e) {
-            rplLogger.error("change replication filter occurs exception:", e);
-            setRpcRplCommandResponse(responseObserver, 1, e.getMessage());
-        }
-    }
-
-    public static boolean checkSchemaTableName(Map<String, String> params,
-                                        StreamObserver<RplCommandResponse> responseObserver) {
-        for (Map.Entry<String, String> entry : params.entrySet()) {
-            String paramName = entry.getKey();
-            String paramValue = entry.getValue();
-            if (!StringUtils.equals(paramName, RplConstants.REPLICATE_WILD_DO_TABLE) &&
-                !StringUtils.equals(paramName, RplConstants.REPLICATE_WILD_IGNORE_TABLE)) {
-                entry.setValue(SQLUtils.normalize(paramValue));
-            }
-        }
-        return true;
-    }
-
-    private static Map<String, String> parseRequest(String request) {
-        return JSON.parseObject(request, new TypeReference<HashMap<String, String>>() {});
-    }
-
-    private static void setRpcRplCommandResponse(StreamObserver<RplCommandResponse> responseObserver, int resultCode,
-                                                 String error) {
-        responseObserver.onNext(RplCommandResponse.newBuilder().setResultCode(resultCode).setError(error).build());
-        responseObserver.onCompleted();
-    }
-
-    private static RplTask findSlowestTask(List<RplTask> tasks) {
-        if (tasks.size() == 0) {
-            return null;
-        }
-
-        // if pos of one task is blank, return this task as slowest task
-        for (RplTask task:tasks) {
-            if (StringUtils.isBlank(task.getPosition())) {
-                return task;
-            }
-        }
-
-        RplTask slowest = tasks.get(0);
-        for (int i = 1; i < tasks.size(); i++) {
-            int compare = CommonUtil.comparePosition(slowest.getPosition(), tasks.get(i).getPosition());
-            if (compare > 0) {
-                slowest = tasks.get(i);
-            } else if (compare == 0 && StringUtils.isNotBlank(tasks.get(i).getLastError())) {
-                slowest = tasks.get(i);
-            }
-        }
-        return slowest;
-    }
-
-    private static List<RplStateMachine> listRplStateMachine(String channel) {
-        List<RplStateMachine> stateMachines = new ArrayList<>();
-
-        if (StringUtils.isNotBlank(channel)) {
-            RplStateMachine stateMachine = DbTaskMetaManager.getRplStateMachine(channel);
-            if (stateMachine != null) {
-                stateMachines.add(stateMachine);
-            }
-        } else {
-            stateMachines = DbTaskMetaManager.listRplStateMachine();
-        }
-        return stateMachines;
-    }
-
-
-    private static boolean checkSlaveExist(Map<String, String> params,
-                                           StreamObserver<RplCommandResponse> responseObserver) {
-        List<RplStateMachine> stateMachines = listRplStateMachine(params.get(RplConstants.CHANNEL));
-        if (StringUtils.isNotBlank(params.get(RplConstants.CHANNEL)) && stateMachines.isEmpty()) {
-            setRpcRplCommandResponse(responseObserver, 1, CHANNEL_NOT_EXIST);
-            rplLogger.error("replica fsm not exist for this channel name : {}", params.get(RplConstants.CHANNEL));
-            return false;
-        }
-        return true;
-    }
-
-    private static boolean checkSlaveRunning(Map<String, String> params,
-                                             StreamObserver<RplCommandResponse> responseObserver) {
-        List<RplStateMachine> stateMachines = listRplStateMachine(params.get(RplConstants.CHANNEL));
-        for (RplStateMachine stateMachine : stateMachines) {
-            if (stateMachine.getStatus() == StateMachineStatus.RUNNING.getValue()) {
-                rplLogger.error("replica fsm is running thus not support this action, channel name: {}",
-                    params.get(RplConstants.CHANNEL));
-                setRpcRplCommandResponse(responseObserver, 1, OPERATION_ON_RUNNING_SLAVE_ERROR);
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // return first replica cluster
-    private static String findActiveReplicaCluster() {
-        List<NodeInfo> nodeInfoList = DbTaskMetaManager.listActiveClusterNode(ClusterTypeEnum.REPLICA.name());
-        if (CollectionUtils.isEmpty(nodeInfoList)) {
-            return "";
-        } else {
-            return nodeInfoList.get(0).getClusterId();
+        } catch (SQLException e) {
+            throw new PolardbxException("connect to master failed ", e);
         }
     }
 }

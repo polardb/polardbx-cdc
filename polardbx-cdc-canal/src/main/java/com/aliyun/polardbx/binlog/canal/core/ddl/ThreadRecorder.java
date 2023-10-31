@@ -32,8 +32,8 @@ public class ThreadRecorder {
     private long logPos;
     private long when;
     private long queuedTransSizeInSorter;
-    private String firstTransInSorter;
-    private String firstTransXidInSorter;
+    private String firstTransPosInSorter;
+    private String firstTransKeyInSorter;
     private String storageInstanceId;
     private long mergeSourceQueueSize;
     private long mergeSourcePassCount;
@@ -161,20 +161,20 @@ public class ThreadRecorder {
         this.queuedTransSizeInSorter = queuedTransSizeInSorter;
     }
 
-    public String getFirstTransInSorter() {
-        return firstTransInSorter;
+    public String getFirstTransPosInSorter() {
+        return firstTransPosInSorter;
     }
 
-    public void setFirstTransInSorter(String firstTransInSorter) {
-        this.firstTransInSorter = firstTransInSorter;
+    public void setFirstTransPosInSorter(String firstTransPosInSorter) {
+        this.firstTransPosInSorter = firstTransPosInSorter;
     }
 
-    public String getFirstTransXidInSorter() {
-        return firstTransXidInSorter;
+    public String getFirstTransKeyInSorter() {
+        return firstTransKeyInSorter;
     }
 
-    public void setFirstTransXidInSorter(String firstTransXidInSorter) {
-        this.firstTransXidInSorter = firstTransXidInSorter;
+    public void setFirstTransKeyInSorter(String firstTransKeyInSorter) {
+        this.firstTransKeyInSorter = firstTransKeyInSorter;
     }
 
     public long getMergeSourceQueueSize() {

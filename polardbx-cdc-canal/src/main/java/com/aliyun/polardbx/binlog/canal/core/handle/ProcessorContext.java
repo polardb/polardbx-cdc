@@ -15,13 +15,13 @@
 package com.aliyun.polardbx.binlog.canal.core.handle;
 
 import com.alibaba.fastjson.JSON;
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.TranPosition;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.Maps;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -87,22 +87,6 @@ public class ProcessorContext {
         return findPos;
     }
 
-    public void setPreSelected() {
-        this.findPos = unCompleteTranMap.getMinPos(lastTSO);
-        preSelected = true;
-    }
-
-    public void setFind() {
-        if (this.findPos == null) {
-            this.findPos = unCompleteTranMap.getMinPos(lastTSO);
-            log.warn("set pos : " + this.findPos);
-        }
-        // 如果当前设置有效位点时，发现pos为null，则可能是在整个binlog刚开始的位置，应该以下一个pos为位点返回。
-        if (findPos != null) {
-            this.find = true;
-        }
-    }
-
     public void onFileComplete() {
         // 忽略素有为complete的事务
         this.unCompleteTranMap.clear();
@@ -125,12 +109,9 @@ public class ProcessorContext {
         if (inQuickMode) {
             return;
         }
-        if (lastTSO == null) {
-            return;
-        }
         if (searchTSO != null && searchTSO > 0) {
             // 搜索tso ， 小于searchTSO ，不需要mark
-            if (lastTSO <= searchTSO) {
+            if (lastTSO != null && lastTSO <= searchTSO) {
                 return;
             }
         } else {
@@ -148,33 +129,39 @@ public class ProcessorContext {
         if (baseTSO != null && baseTSO > 0 && curTso < baseTSO) {
             return;
         }
+        String rtso = tranPosition.buildRTso();
         // 场景1
         if (curTso < searchTSO) {
-            setPreSelected();
+            setPreSelected(rtso);
             if (inQuickMode) {
-                setFind();
+                setFind(rtso);
                 //快速模式，如果当前TSo > searchTSO，直接返回.
                 setInterrupt(true);
             }
         } else if (isPreSelected()) {
-            setFind();
+            setFind(rtso);
             if (inQuickMode) {
                 //快速模式，如果当前TSo > searchTSO，直接返回.
                 setInterrupt(true);
             }
         } else {
             //收到 cdc DDL 还没有找到command 或者tso ，可能是情况4， 直接返回。
-            //TODO 需要加入storage判断
             if (isReceivedCreateCdcPhyDbEvent()) {
-                setFind();
+                setFind(rtso);
                 onFileComplete();
                 log.info("find receive crate cdc db position, start pos @ " + getPosition());
                 setInterrupt(true);
             }
+
+            if (inQuickMode) {
+                //快速模式，如果当前TSo > searchTSO，直接返回.
+                setInterrupt(true);
+            }
+
         }
     }
 
-    private void searchCmd(TranPosition tranPosition) {
+    private void searchCmd() {
 
         TranPosition commandTran = getCommandTran();
         if (commandTran == null) {
@@ -183,16 +170,21 @@ public class ProcessorContext {
 
         if (commandTran.isCdcStartCmd() && CommonUtils.isCdcStartCommandIdMatch(commandTran.getCommandId())) {
             long commitTSO = commandTran.getTso();
-            setFind();
+            if (commitTSO <= 0) {
+                // command tran not commit,will return
+                return;
+            }
+            setFind(commandTran.buildRTso());
             // 比command tso 还小的commit ，就不记录了.
-            commitXidMap.entrySet().removeIf(entry -> entry.getValue() <= commitTSO);
+            // 如果tso为null ，考虑可能有xa_start < cmd < xa_command, 那么这个事务和cmd后的事务没有偏序关系，可以忽略
+            commitXidMap.entrySet().removeIf(entry -> entry.getValue() == null || entry.getValue() <= commitTSO);
             log.warn("remove tso less than  commit TSO , commit size : + " + commitXidMap.size());
             StringBuilder sb = new StringBuilder();
             for (Map.Entry<String, Long> stringLongEntry : commitXidMap.entrySet()) {
                 sb.append("xid:").append(stringLongEntry.getKey()).append(",tso:")
                     .append(stringLongEntry.getValue()).append("\n");
             }
-            log.warn("block transaction: " + sb.toString());
+            log.warn("block transaction: " + sb);
             log.info("find cdc start pos @ " + getPosition());
         }
 
@@ -210,7 +202,7 @@ public class ProcessorContext {
         if (searchTSO != null && searchTSO != -1) {
             searchTSO(tranPosition);
         } else {
-            searchCmd(tranPosition);
+            searchCmd();
         }
     }
 
@@ -329,8 +321,24 @@ public class ProcessorContext {
         return find;
     }
 
+    public void setFind(String rtso) {
+        if (this.findPos == null) {
+            this.findPos = unCompleteTranMap.getMinPos(rtso);
+            log.warn("set pos : " + this.findPos);
+        }
+        // 如果当前设置有效位点时，发现pos为null，则可能是在整个binlog刚开始的位置，应该以下一个pos为位点返回。
+        if (findPos != null) {
+            this.find = true;
+        }
+    }
+
     public boolean isPreSelected() {
         return preSelected;
+    }
+
+    public void setPreSelected(String rtso) {
+        this.findPos = unCompleteTranMap.getMinPos(rtso);
+        preSelected = true;
     }
 
     public boolean isInterrupt() {

@@ -78,18 +78,24 @@ public class EventDataSinkHandler implements EventHandler<EventData>, LifecycleA
     }
 
     private void processSingleEventToken(EventData event, SingleEventToken eventToken) throws IOException {
-        if (eventToken.getType() == HEARTBEAT) {
-            handleContext.getLogFileGenerator().tryFlush4ParallelWrite(eventToken.getNextPosition(),
-                eventToken.getTso(), eventToken.getTsoTimeSecond(), false);
-        } else {
-            BinlogFile binlogFile = handleContext.getLogFileGenerator().getBinlogFile();
-            if (eventToken.isUseTokenData()) {
-                byte[] data = eventToken.getData();
-                binlogFile.writeEvent(data, 0, data.length, false);
+        try {
+            if (eventToken.getType() == HEARTBEAT) {
+                handleContext.getLogFileGenerator().tryFlush4ParallelWrite(eventToken.getNextPosition(),
+                    eventToken.getTso(), eventToken.getTsoTimeSecond(), false);
             } else {
-                binlogFile.writeEvent(event.getData(), eventToken.getOffset(), eventToken.getLength(), false);
+                BinlogFile binlogFile = handleContext.getLogFileGenerator().getBinlogFile();
+                if (eventToken.isUseTokenData()) {
+                    byte[] data = eventToken.getData();
+                    binlogFile.writeEvent(data, 0, data.length, false, eventToken.getCheckServerId());
+                } else {
+                    binlogFile.writeEvent(event.getData(), eventToken.getOffset(), eventToken.getLength(), false,
+                        eventToken.getCheckServerId());
+                }
+                afterWrite(eventToken);
             }
-            afterWrite(eventToken);
+        } catch (Throwable t) {
+            log.error("process singe event token error , token content is {}!", eventToken.toString(), t);
+            throw t;
         }
     }
 

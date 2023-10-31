@@ -14,14 +14,11 @@
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
-import com.alibaba.polardbx.druid.DbType;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
-import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
-import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 
-import static com.aliyun.polardbx.binlog.util.FastSQLConstant.FEATURES;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
  * created by ziyang.lb
@@ -40,9 +37,7 @@ public class CreateDropTableWithExistFilter {
     }
 
     private static boolean isCreateTableWithIfNotExist(String sql) {
-        SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FEATURES);
-        SQLStatement stmt = parser.parseStatementList().get(0);
+        SQLStatement stmt = parseSQLStatement(sql);
 
         if (stmt instanceof MySqlCreateTableStatement) {
             MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) stmt;
@@ -52,9 +47,7 @@ public class CreateDropTableWithExistFilter {
     }
 
     private static boolean isDropTableWithIfExist(String sql) {
-        SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FEATURES);
-        SQLStatement stmt = parser.parseStatementList().get(0);
+        SQLStatement stmt = parseSQLStatement(sql);
 
         if (stmt instanceof SQLDropTableStatement) {
             SQLDropTableStatement dropTableStatement = (SQLDropTableStatement) stmt;

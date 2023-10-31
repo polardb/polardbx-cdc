@@ -14,12 +14,15 @@
  */
 package com.aliyun.polardbx.binlog.format.field;
 
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import org.apache.commons.lang.math.NumberUtils;
 import org.apache.commons.lang3.ArrayUtils;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.util.Arrays;
 
 /**
@@ -62,9 +65,9 @@ public class NumberField extends Field {
     }
 
     private String processData4Boolean(String data) {
-        if ("true".equalsIgnoreCase(data)) {
+        if (CommonConstants.TRUE.equalsIgnoreCase(data)) {
             return "1";
-        } else if ("false".equalsIgnoreCase(data)) {
+        } else if (CommonConstants.FALSE.equalsIgnoreCase(data)) {
             return "0";
         } else {
             return data;
@@ -104,6 +107,18 @@ public class NumberField extends Field {
         data = processForNumber(data);
         long v;
         BigDecimal decimal = NumberUtils.createBigDecimal(data);
+        if (typeNames != null && typeNames.length == 2 && NumberUtils.isNumber(typeNames[0]) && NumberUtils.isNumber(
+            typeNames[1])) {
+            int intSize = (decimal.intValue() + "").length();
+            int defineTotal = NumberUtils.createInteger(typeNames[0]);
+            int defineAfter = NumberUtils.createInteger(typeNames[1]);
+            int defineIntSize = defineTotal - defineAfter;
+            if (defineIntSize < intSize) {
+                StringBuilder newValueBuilder = getNewValueBuilder(decimal, defineIntSize, defineAfter);
+                decimal = NumberUtils.createBigDecimal(newValueBuilder.toString());
+            }
+            decimal = decimal.round(new MathContext(intSize + defineAfter, RoundingMode.HALF_UP));
+        }
         switch (mysqlType) {
         case MYSQL_TYPE_LONG: {
             v = decimal.longValue();
@@ -154,6 +169,23 @@ public class NumberField extends Field {
         default:
             throw new UnsupportedOperationException("unsupport type " + mysqlType + " , value : " + data);
         }
+    }
+
+    private static StringBuilder getNewValueBuilder(BigDecimal decimal, int defineIntSize, int defineAfter) {
+        StringBuilder newValueBuilder = new StringBuilder();
+        if (decimal.intValue() < 0) {
+            newValueBuilder.append("-");
+        }
+        for (int i = 0; i < defineIntSize; i++) {
+            newValueBuilder.append("9");
+        }
+        if (defineAfter > 0) {
+            newValueBuilder.append(".");
+        }
+        for (int i = 0; i < defineAfter; i++) {
+            newValueBuilder.append("9");
+        }
+        return newValueBuilder;
     }
 
     @Override

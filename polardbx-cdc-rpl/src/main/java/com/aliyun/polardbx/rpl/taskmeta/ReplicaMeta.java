@@ -31,6 +31,10 @@ public class ReplicaMeta {
     String masterPassword;
     HostType masterType;
     String position;
+    /*
+     * 写入server id
+     */
+    String serverId;
     String ignoreServerIds;
 
     String doDb;
@@ -42,6 +46,16 @@ public class ReplicaMeta {
     String rewriteDb;
     String extra;
     boolean imageMode;
+    String skipTso;
+    String skipUntilTso;
 
     String clusterId;
+
+    /*
+     * 多流新增参数
+     * enable ddl: default true
+     */
+    boolean enableDdl = true;
+    boolean enableDynamicMasterHost;
+    String streamGroup;
 }

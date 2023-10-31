@@ -271,21 +271,21 @@ public class Transaction {
 
                 events = new LinkedList<>();
                 ArrayList<Future<DBMSEvent>> futures = new ArrayList<>(2000);
-                for (Pair<byte[], byte[]> one: pairList) {
+                for (Pair<byte[], byte[]> one : pairList) {
                     futures.add(executorForDeserialize.submit(() -> SerializationUtils.deserialize(one.getValue())));
                 }
-                for (Future<DBMSEvent> future: futures) {
+                for (Future<DBMSEvent> future : futures) {
                     events.add(future.get());
                 }
                 repoUnit.deleteRange(beginKeyBytes, endKeyBytes);
                 // todo by jiyue 能否合并compactRange
                 executorForCompact.submit(() -> {
-                    try {
-                        repoUnit.compactRange(beginKeyBytes, endKeyBytes);
-                    } catch (RocksDBException e) {
-                        throw new PolardbxException("compact range failed !", e);
+                        try {
+                            repoUnit.compactRange(beginKeyBytes, endKeyBytes);
+                        } catch (RocksDBException e) {
+                            throw new PolardbxException("compact range failed !", e);
+                        }
                     }
-                }
                 );
 
             } catch (InterruptedException | ExecutionException | RocksDBException e) {

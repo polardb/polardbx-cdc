@@ -155,7 +155,7 @@ public abstract class AbstractEventParser implements BinlogEventParser {
         // 启动工作线程
         parseThread = new Thread(() -> {
             ErosaConnection erosaConnection = null;
-            ThreadRecorder recorder = new ThreadRecorder(runningInfo.getStorageInstId());
+            ThreadRecorder recorder = new ThreadRecorder(runningInfo.getStorageMasterInstId());
             recorder.init();
 
             while (running) {
@@ -180,7 +180,8 @@ public abstract class AbstractEventParser implements BinlogEventParser {
 
                     if (startPosition == null) {
                         throw new PositionNotFoundException(
-                            "storageInstance:" + master.getStorageInstId() + ",search pos:" + position.toString());
+                            "storageInstance:" + master.getStorageMasterInstId() + ",search pos:"
+                                + position.toString());
                     }
                     logger.warn("find start position : " + startPosition.toString() + " cost : " + (
                         System.currentTimeMillis() - begin) + "ms");
@@ -397,6 +398,10 @@ public abstract class AbstractEventParser implements BinlogEventParser {
 
     public void setPolarxInstanceId(String polarxInstanceId) {
         this.polarxInstanceId = polarxInstanceId;
+    }
+
+    public void setNeedTransactionPosition(AtomicBoolean needTransactionPosition) {
+        this.needTransactionPosition = needTransactionPosition;
     }
 
     private class DefaultTailEventFilter implements LogEventFilter {

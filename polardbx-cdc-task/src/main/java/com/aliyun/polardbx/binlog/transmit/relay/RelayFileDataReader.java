@@ -32,7 +32,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.LinkedList;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_READ_FILE_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_FILE_BUFFER_SIZE;
 import static com.aliyun.polardbx.binlog.transmit.relay.RelayFile.HEADER_SIZE;
 
 /**
@@ -40,8 +40,8 @@ import static com.aliyun.polardbx.binlog.transmit.relay.RelayFile.HEADER_SIZE;
  **/
 @Slf4j
 public class RelayFileDataReader extends RelayDataReaderBase {
-    private final static int READ_BUFFER_SIZE =
-        DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_READ_FILE_BUFFER_SIZE);
+    private static final int READ_BUFFER_SIZE =
+        DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_READ_FILE_BUFFER_SIZE);
 
     private final RelayFileStoreEngine fileStoreEngine;
     private MetaInfo metaInfo;

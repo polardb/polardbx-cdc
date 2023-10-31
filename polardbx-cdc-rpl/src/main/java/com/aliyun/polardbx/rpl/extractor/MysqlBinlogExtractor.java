@@ -16,12 +16,11 @@ package com.aliyun.polardbx.rpl.extractor;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSOption;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionBegin;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSXATransaction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultOption;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.XATransactionType;
 import com.aliyun.polardbx.binlog.canal.core.AbstractEventParser;
@@ -36,6 +35,7 @@ import com.aliyun.polardbx.rpl.storage.RplEventRepository;
 import com.aliyun.polardbx.rpl.storage.RplStorage;
 import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
+import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -61,7 +61,7 @@ public class MysqlBinlogExtractor extends BaseExtractor {
     protected HostInfo srcHostInfo;
     protected HostInfo metaHostInfo;
     protected BaseFilter filter;
-    protected int extracterType;
+    protected int extractorType;
 
     protected AuthenticationInfo srcAuthInfo;
     protected AuthenticationInfo metaAuthInfo;
@@ -78,25 +78,21 @@ public class MysqlBinlogExtractor extends BaseExtractor {
     }
 
     @Override
-    public boolean init() {
-        return true;
-    }
-
-    @Override
-    public void start() {
+    public void start() throws Exception {
         try {
             parser = new MysqlEventParser(extractorConfig.getEventBufferSize(),
                 new RplEventRepository(pipeline.getPipeLineConfig().getPersistConfig()));
             LogEventConvert logEventConvert =
                 new LogEventConvert(metaHostInfo, filter, position, srcHostInfo.getType());
             logEventConvert.init();
+            ((MysqlEventParser) parser).setPolarx(srcHostInfo.getType() == HostType.POLARX2);
             ((MysqlEventParser) parser).setBinlogParser(logEventConvert);
             log.warn("connecting to : " + srcAuthInfo.getAddress() + " with : " + srcAuthInfo.getUsername());
             parser.start(srcAuthInfo, position, new CanalBinlogEventSink());
             running = true;
         } catch (Exception e) {
             log.error("extractor start error: ", e);
-            stop();
+            throw e;
         }
     }
 
@@ -106,11 +102,6 @@ public class MysqlBinlogExtractor extends BaseExtractor {
         parser.stop();
         log.warn("extractor stopped");
         running = false;
-    }
-
-    @Override
-    public boolean isDone() {
-        return false;
     }
 
     protected void initAuthInfo() {
@@ -157,7 +148,7 @@ public class MysqlBinlogExtractor extends BaseExtractor {
                 DBMSEvent dbmsEvent = event.getDbMessageWithEffect();
                 if (dbmsEvent instanceof DBMSTransactionBegin) {
                     // 只处理正常的数据,事务头和尾就忽略了,避免占用ringbuffer空间
-                    DBMSTransactionBegin begin = (DBMSTransactionBegin)dbmsEvent;
+                    DBMSTransactionBegin begin = (DBMSTransactionBegin) dbmsEvent;
                     tid = begin.getThreadId() + "";
                     continue;
                 }
@@ -247,7 +238,7 @@ public class MysqlBinlogExtractor extends BaseExtractor {
                     e.setDbmsEvent(dbmsEvent);
                     e.setPosition(event.getPosition().toString());
                     e.setSourceTimestamp(new Timestamp(event.getPosition().getTimestamp() * 1000));
-                    if (dbmsEvent instanceof DBMSQueryLog) {
+                    if (dbmsEvent instanceof DefaultQueryLog) {
                         dbmsEvent.putOption(
                             new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
                         dbmsEvent

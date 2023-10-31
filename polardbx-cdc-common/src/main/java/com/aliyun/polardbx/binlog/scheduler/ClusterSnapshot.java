@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.scheduler;
 
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import lombok.ToString;
 import org.apache.commons.lang.StringUtils;
@@ -50,11 +50,11 @@ public class ClusterSnapshot {
             throw new PolardbxException("storages can not be null or empty.");
         }
         if (version != 1L && StringUtils.isBlank(dumperMaster) && StringUtils
-            .equals(clusterType, ClusterTypeEnum.BINLOG.name())) {
+            .equals(clusterType, ClusterType.BINLOG.name())) {
             throw new PolardbxException("dumperMaster can not be null or empty.");
         }
         if (version != 1L && StringUtils.isBlank(dumperMasterNode) && StringUtils
-            .equals(clusterType, ClusterTypeEnum.BINLOG.name())) {
+            .equals(clusterType, ClusterType.BINLOG.name())) {
             throw new PolardbxException("dumperNode can not be null or empty.");
         }
         if (version != 1L && StringUtils.isBlank(storageHistoryTso)) {
@@ -70,6 +70,9 @@ public class ClusterSnapshot {
         this.storageHistoryTso = storageHistoryTso;
     }
 
+    /**
+     * todo isNew 代表什么含义?
+     */
     public boolean isNew() {
         return version == 1L;
     }

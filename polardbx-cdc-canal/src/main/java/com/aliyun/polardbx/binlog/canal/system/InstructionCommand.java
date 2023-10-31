@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.canal.system;
 
+import com.aliyun.polardbx.binlog.InstructionType;
 import lombok.Data;
 import lombok.ToString;
 

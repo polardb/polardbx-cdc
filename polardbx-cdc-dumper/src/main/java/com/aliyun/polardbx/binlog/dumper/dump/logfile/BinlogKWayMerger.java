@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -50,10 +50,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.aliyun.polardbx.binlog.CommonUtils.getActualTso;
-import static com.aliyun.polardbx.binlog.CommonUtils.parsePureTso;
-import static com.aliyun.polardbx.binlog.CommonUtils.parseStreamSeq;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_KWAY_SOURCE_QUEUE_SIZE;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.getActualTso;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.parsePureTso;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.parseStreamSeq;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_KWAY_SOURCE_QUEUE_SIZE;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_LOOP_ERROR;
 
 /**
@@ -290,7 +290,7 @@ public class BinlogKWayMerger {
         public BinlogXMergeSource(String dispatcherName, String target) {
             this.dispatcherName = dispatcherName;
             this.target = target;
-            this.queue = new ArrayBlockingQueue<>(DynamicApplicationConfig.getInt(BINLOG_X_KWAY_SOURCE_QUEUE_SIZE));
+            this.queue = new ArrayBlockingQueue<>(DynamicApplicationConfig.getInt(BINLOGX_KWAY_SOURCE_QUEUE_SIZE));
         }
 
         public void push(TxnMessage message) throws InterruptedException {

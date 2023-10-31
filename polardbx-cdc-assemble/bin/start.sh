@@ -37,7 +37,7 @@ Linux)
 esac
 BASE_DIR=${BASE_DIR}/../
 logback_configurationFile=$BASE_DIR/conf/logback.xml
-export LD_LIBRARY_PATH=${BASE_DIR}/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=${BASE_DIR}/lib/native:${LD_LIBRARY_PATH}
 export NLS_LANG=AMERICAN_AMERICA.ZHS16GBK
 export LANG=zh_CN.GB18030
 

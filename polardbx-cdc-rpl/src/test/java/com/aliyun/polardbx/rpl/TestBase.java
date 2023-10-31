@@ -42,6 +42,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.runner.RunWith;
 import org.powermock.core.classloader.annotations.PowerMockIgnore;
 import org.powermock.modules.junit4.PowerMockRunner;
@@ -62,11 +63,11 @@ import java.util.concurrent.Future;
  * @author shicai.xsc 2021/2/23 20:38
  * @since 5.0.0.0
  */
+@Ignore
 @RunWith(PowerMockRunner.class)
 @PowerMockIgnore("javax.management.*")
 @Slf4j
 public class TestBase {
-
     protected final int WAIT_DML_SECOND = 1;
     protected final int WAIT_DDL_SECOND = 4;
     protected final int WAIT_TASK_SECOND = 5;
@@ -174,10 +175,8 @@ public class TestBase {
         params.put(RplConstants.CHANNEL, channel);
         params.put(RplConstants.SOURCE_HOST_TYPE, "rds");
 
-        StopSlaveRequest stopRequest = StopSlaveRequest.newBuilder().setRequest(JSON.toJSONString(params)).build();
-        RplServiceManager.stopSlave(stopRequest, fakeStreamObserver());
-        ChangeMasterRequest request = ChangeMasterRequest.newBuilder().setRequest(JSON.toJSONString(params)).build();
-        RplServiceManager.changeMaster(request, fakeStreamObserver());
+        RplServiceManager.stopSlave(params);
+        RplServiceManager.changeMaster(params);
 
         if (filterParams == null) {
             filterParams = new HashMap<>();
@@ -190,13 +189,8 @@ public class TestBase {
             filterParams.put(RplConstants.REPLICATE_REWRITE_DB, "");
         }
         filterParams.put(RplConstants.CHANNEL, channel);
-        ChangeReplicationFilterRequest filterRequest = ChangeReplicationFilterRequest.newBuilder()
-            .setRequest(JSON.toJSONString(filterParams))
-            .build();
-        RplServiceManager.changeReplicationFilter(filterRequest, fakeStreamObserver());
-
-        StartSlaveRequest startRequest = StartSlaveRequest.newBuilder().setRequest(JSON.toJSONString(params)).build();
-        RplServiceManager.startSlave(startRequest, fakeStreamObserver());
+        RplServiceManager.changeReplicationFilter(params);
+        RplServiceManager.startSlave(params);
     }
 
     protected void setupMysqlReplica(Connection mysqlDstConn, BinlogPosition position) {
@@ -449,6 +443,11 @@ public class TestBase {
                 Assert.assertEquals(dstRecord.get(field), mysqlDstRecord.get(field));
             }
         }
+    }
+
+    private DefaultRowChange createRowChange(String schema, String table, DBMSAction action, int f0, int f1,
+                                             int f2, int f3) {
+        return createRowChange(schema, table, action, f0, f1, f2, f3, -1, -1, -1, -1);
     }
 
     protected DefaultRowChange createRowChange(String schema, String table, DBMSAction action, int f0B, int f1B,

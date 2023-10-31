@@ -25,8 +25,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_FILE_BUFFER_DIRECT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_FILE_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_FILE_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_FILE_BUFFER_USE_DIRECT_MEM;
 import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getInt;
 
@@ -35,9 +35,9 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getInt;
  **/
 @Slf4j
 public class RelayFileManager {
-    private final static String RELAY_FILE_PREFIX = "relay.";
-    private final static int RELAY_FILE_SUFFIX_LENGTH = 10;
-    private final static long MAX_SUFFIX_NUM = 9999999999L;
+    private static final String RELAY_FILE_PREFIX = "relay.";
+    private static final int RELAY_FILE_SUFFIX_LENGTH = 10;
+    private static final long MAX_SUFFIX_NUM = 9999999999L;
     private final String bathPath;
     private File baseFileDirectory;
 
@@ -69,8 +69,8 @@ public class RelayFileManager {
     public RelayFile openAndSeekRelayFile(String fileName, long filePos) {
         try {
             File file = new File(bathPath + "/" + fileName);
-            RelayFile relayFile = new RelayFile(file, getInt(BINLOG_X_TRANSMIT_WRITE_FILE_BUFFER_SIZE),
-                getBoolean(BINLOG_X_TRANSMIT_WRITE_FILE_BUFFER_DIRECT));
+            RelayFile relayFile = new RelayFile(file, getInt(BINLOGX_TRANSMIT_WRITE_FILE_BUFFER_SIZE),
+                getBoolean(BINLOGX_TRANSMIT_WRITE_FILE_BUFFER_USE_DIRECT_MEM));
             relayFile.seekTo(filePos);
             relayFile.tryTruncate();
             cleanRelayFilesAfter(file);
@@ -84,8 +84,8 @@ public class RelayFileManager {
         try {
             String preFileName = preFile.getName();
             File nextFile = new File(bathPath + "/" + nextFileName(preFileName));
-            return new RelayFile(nextFile, getInt(BINLOG_X_TRANSMIT_WRITE_FILE_BUFFER_SIZE),
-                getBoolean(BINLOG_X_TRANSMIT_WRITE_FILE_BUFFER_DIRECT));
+            return new RelayFile(nextFile, getInt(BINLOGX_TRANSMIT_WRITE_FILE_BUFFER_SIZE),
+                getBoolean(BINLOGX_TRANSMIT_WRITE_FILE_BUFFER_USE_DIRECT_MEM));
         } catch (FileNotFoundException e) {
             throw new PolardbxException("rotate relay file failed , " + preFile.getName(), e);
         }
@@ -122,6 +122,7 @@ public class RelayFileManager {
         allRelayFiles.forEach(f -> {
             if (f.getName().compareTo(fileName) < 0) {
                 deleteFile(f);
+                log.info("clean relay file:{}", f.getName());
             }
         });
     }

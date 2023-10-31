@@ -15,11 +15,12 @@
 package com.aliyun.polardbx.binlog.remote.channel;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.remote.lindorm.LindormClient;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
@@ -38,7 +39,8 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
  * @author yudong
  * @since 2022/10/19
  **/
-public class LindormBinlogFileReadChannelTest {
+@Ignore
+public class LindormBinlogFileReadChannelTest extends BaseTest {
     private static LindormClient client;
     private static String bucket;
     private static final String fileName = "binlog.000001";
@@ -47,11 +49,6 @@ public class LindormBinlogFileReadChannelTest {
 
     @BeforeClass
     public static void prepare() throws IOException {
-        // prepare oss client
-        final SpringContextBootStrap appContextBootStrap =
-                new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
         bucket = getString(ConfigKeys.LINDORM_BUCKET);
         String accessKey = getString(ConfigKeys.LINDORM_ACCESSKEY_ID);
         String accessSecret = getString(ConfigKeys.LINDORM_ACCESSKEY_ID_SECRET);

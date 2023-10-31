@@ -14,6 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.LogHeader;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogBuffer;
@@ -44,7 +46,6 @@ public class RowsLogEventRebuilder {
     public static List<RowEventBuilder> convert(RowsLogEvent rowsLogEvent, LogicTableMeta tableMeta, long serverId,
                                                 boolean split,
                                                 boolean extractPk) throws IOException {
-        List<LogicTableMeta.FieldMetaExt> fieldMetaExtList = tableMeta.getLogicFields();
         List<RowEventBuilder> rowEventBuilderList = Lists.newArrayList();
         LogHeader lg = rowsLogEvent.getHeader();
 
@@ -56,8 +57,12 @@ public class RowsLogEventRebuilder {
             (int) rowsLogEvent.getWhen(),
             serverId);
         rowEvent.setTimestamp((int) lg.getWhen());
-        rowEvent.setFlags((short) 0);
-        rowEvent.set_flags(rowsLogEvent.getFlags());
+        rowEvent.setFlags((short) lg.getFlags());
+        int flags = rowsLogEvent.getFlags();
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_REFORMAT_NO_FOREIGN_KEY_CHECK)) {
+            flags = flags | RowsLogEvent.NO_FOREIGN_KEY_CHECKS_F;
+        }
+        rowEvent.set_flags(flags);
         rowEvent.setColumnCount(columnLen);
         rowEvent.setEventType(lg.getType());
 
@@ -85,8 +90,9 @@ public class RowsLogEventRebuilder {
             }
             rowEvent.addRowData(rowData);
             if (split) {
-                rowEvent.set_flags(0);
                 rowEventBuilderList.add(rowEvent);
+                // 如果需要做拆分处理，则需要将END_F标记去掉， 在com.aliyun.polardbx.binlog.transmit.relay.RelayLogEventTransmitter flush操作中，会为最后一个event补上END_F标记
+                rowEvent.set_flags(flags & ~RowsLogEvent.STMT_END_F);
                 rowEvent = rowEvent.duplicateHeader();
             }
         }
@@ -196,4 +202,5 @@ public class RowsLogEventRebuilder {
         returnBuilderList.add(delete);
         returnBuilderList.add(insert);
     }
+
 }

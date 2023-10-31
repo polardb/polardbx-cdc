@@ -25,7 +25,7 @@ BASE_DIR=${BASE_DIR}/../
 CONF_DIR=${BASE_DIR}/conf
 PID_FILE=${BASE_DIR}/bin/daemon.pid
 
-export LD_LIBRARY_PATH=${BASE_DIR}/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=${BASE_DIR}/lib/native:${LD_LIBRARY_PATH}
 export LANG=zh_CN.GB18030
 
 JAVA_OPTS="-Djava.net.preferIPv4Stack=true"
@@ -35,6 +35,8 @@ JAVA_OPTS="${JAVA_OPTS} -XX:+UseParallelGC"
 JAVA_OPTS="${JAVA_OPTS} -XX:ParallelGCThreads=2"
 JAVA_OPTS="${JAVA_OPTS} -XX:+HeapDumpOnOutOfMemoryError"
 JAVA_OPTS="${JAVA_OPTS} -XX:HeapDumpPath=${HOME}/logs"
+JAVA_OPTS="${JAVA_OPTS} -XX:+CrashOnOutOfMemoryError"
+JAVA_OPTS="${JAVA_OPTS} -XX:ErrorFile=${HOME}/hs_err_pid%p.log"
 JAVA_OPTS="${JAVA_OPTS} -XX:+DisableExplicitGC"
 JAVA_OPTS="${JAVA_OPTS} -Xlog:gc*:${HOME}/logs/polardbx-binlog/Daemon/gc.log:time"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs"
@@ -70,7 +72,6 @@ start()
 			echo "daemon Server Already Running..............!"
 			exit 1;
 		fi
-
 
 		LOG_PATH=${HOME}/logs
 		DAEMON_LOG_PATH=${LOG_PATH}/polardbx-binlog/Daemon

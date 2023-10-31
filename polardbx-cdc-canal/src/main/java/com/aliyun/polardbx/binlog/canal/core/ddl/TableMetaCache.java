@@ -14,12 +14,13 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
-import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.ConsoleTableMetaTSDB;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
+import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.PolarxTableMetaProxy;
+import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.TableMetaTSDB;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,22 +39,26 @@ import java.util.List;
 public class TableMetaCache {
 
     private static final Logger logger = LoggerFactory.getLogger(TableMetaCache.class);
-    private DataSource dataSource;
-    private MysqlConnection connection;
-    private MemoryTableMeta memoryTableMeta;
     private static final String SHOW_CREATE_TABLE = "SHOW CREATE TABLE `%s`.`%s`";
     private static final String DESC = "DESC `%s`.`%s`";
+    private final DataSource dataSource;
+    private MysqlConnection connection;
+    private final TableMetaTSDB memoryTableMeta;
+    private final int MAX_RETRY = 3;
 
-    private int MAX_RETRY = 3;
-
-    public void reset() {
-        memoryTableMeta.destory();
+    public TableMetaCache(DataSource dataSource, boolean isPolarx) {
+        this.dataSource = dataSource;
+        if (isPolarx) {
+            this.memoryTableMeta = new PolarxTableMetaProxy(dataSource);
+        } else {
+            this.memoryTableMeta = new MemoryTableMeta(logger, true);
+        }
+        this.memoryTableMeta.init(null);
+        resetMysqlConnection();
     }
 
-    public TableMetaCache(DataSource dataSource) {
-        this.dataSource = dataSource;
-        this.memoryTableMeta = new MemoryTableMeta(logger, true);
-        resetMysqlConnection();
+    public void reset() {
+        memoryTableMeta.destroy();
     }
 
     public void resetMysqlConnection() {
@@ -112,14 +117,14 @@ public class TableMetaCache {
                 TableMeta tableMeta = connection.query(
                     String.format(SHOW_CREATE_TABLE, CommonUtils.escape(schema), CommonUtils.escape(table)), rs -> {
 
-                    String createDDL = null;
-                    while (rs.next()) {
-                        createDDL = rs.getString(2);
-                    }
+                        String createDDL = null;
+                        while (rs.next()) {
+                            createDDL = rs.getString(2);
+                        }
 
-                    memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, schema, createDDL, null);
-                    return memoryTableMeta.find(schema, table);
-                });
+                        memoryTableMeta.apply(TableMetaTSDB.INIT_POSITION, schema, createDDL, null);
+                        return memoryTableMeta.find(schema, table);
+                    });
 
                 if (tableMeta != null) {
                     return tableMeta;
@@ -128,20 +133,21 @@ public class TableMetaCache {
                 // fallback
                 return connection.query(String.format(DESC, CommonUtils.escape(schema), CommonUtils.escape(table)),
                     rs -> {
-                    List<FieldMeta> metas = new ArrayList<FieldMeta>();
-                    while (rs.next()) {
-                        FieldMeta meta = new FieldMeta();
-                        // 做一个优化，使用String.intern()，共享String对象，减少内存使用
-                        meta.setColumnName(rs.getString("Field"));
-                        meta.setColumnType(rs.getString("Type"));
-                        meta.setNullable(StringUtils.equalsIgnoreCase(rs.getString("Null"), "YES"));
-                        meta.setKey("PRI".equalsIgnoreCase(rs.getString("Key")));
-                        meta.setUnique("UNI".equalsIgnoreCase(rs.getString("Key")));
-                        meta.setDefaultValue(rs.getString("Default"));
-                        metas.add(meta);
-                    }
-                    return new TableMeta(schema, table, metas);
-                });
+                        List<FieldMeta> metas = new ArrayList<FieldMeta>();
+                        while (rs.next()) {
+                            FieldMeta meta = new FieldMeta();
+                            // 做一个优化，使用String.intern()，共享String对象，减少内存使用
+                            meta.setColumnName(rs.getString("Field"));
+                            meta.setColumnType(rs.getString("Type"));
+                            meta.setNullable(StringUtils.equalsIgnoreCase(rs.getString("Null"), "YES"));
+                            meta.setKey("PRI".equalsIgnoreCase(rs.getString("Key")));
+                            meta.setUnique("UNI".equalsIgnoreCase(rs.getString("Key")));
+                            meta.setDefaultValue(rs.getString("Default"));
+                            meta.setGenerated(rs.getString("Extra").contains("GENERATED"));
+                            metas.add(meta);
+                        }
+                        return new TableMeta(schema, table, metas);
+                    });
             } catch (Throwable e) {
                 logger.error("getTableMetaFromDb failed", e);
                 resetMysqlConnection();
@@ -160,8 +166,10 @@ public class TableMetaCache {
                     "SELECT default_character_set_name FROM information_schema.SCHEMATA WHERE schema_name = '%s'",
                     schema);
                 return connection.query(sql, rs -> {
-                    rs.next();
-                    return rs.getString("default_character_set_name");
+                    if (rs.next()) {
+                        return rs.getString("default_character_set_name");
+                    }
+                    return null;
                 });
             } catch (Throwable e) {
                 logger.error("getDbCharset failed", e);
@@ -171,5 +179,12 @@ public class TableMetaCache {
                 }
             }
         }
+    }
+
+    public boolean rollback(BinlogPosition position) {
+        if (memoryTableMeta instanceof PolarxTableMetaProxy) {
+            return memoryTableMeta.rollback(position);
+        }
+        return true;
     }
 }

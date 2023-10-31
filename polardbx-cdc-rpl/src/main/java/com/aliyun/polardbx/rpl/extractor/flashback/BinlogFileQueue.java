@@ -91,7 +91,8 @@ public class BinlogFileQueue implements IBinlogFileQueue {
             }
             File firstFile = new File(directory + File.separator + binlogList.get(0));
             while (!firstFile.exists()) {
-                log.warn("wait first file downloaded: {}, {}", binlogList.get(0), directory + File.separator + binlogList.get(0));
+                log.warn("wait first file downloaded: {}, {}", binlogList.get(0),
+                    directory + File.separator + binlogList.get(0));
                 Thread.sleep(2000L);
             }
             return firstFile;

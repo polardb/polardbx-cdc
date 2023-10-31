@@ -14,9 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.Constants;
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.api.BinlogProcessor;
@@ -67,10 +67,10 @@ public class BinlogBackupResource {
     public Map<String, String> generateLink(List<String> fileNames) {
         Map<String, String> linkMap = Maps.newHashMap();
         String clusterType = DynamicApplicationConfig.getClusterType();
-        ClusterTypeEnum clusterTypeEnum = ClusterTypeEnum.valueOf(clusterType);
-        if (ClusterTypeEnum.BINLOG == clusterTypeEnum) {
+        ClusterType clusterTypeEnum = ClusterType.valueOf(clusterType);
+        if (ClusterType.BINLOG == clusterTypeEnum) {
             generateGlobalBinlog(fileNames, linkMap);
-        } else if (ClusterTypeEnum.BINLOG_X == clusterTypeEnum) {
+        } else if (ClusterType.BINLOG_X == clusterTypeEnum) {
             generateBinlogXBinlog(fileNames, linkMap);
         }
 
@@ -78,14 +78,14 @@ public class BinlogBackupResource {
     }
 
     private void generateBinlogXBinlog(List<String> fileNames, Map<String, String> linkMap) {
-        String groupName = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_X_STREAM_GROUP_NAME);
+        String groupName = DynamicApplicationConfig.getString(ConfigKeys.BINLOGX_STREAM_GROUP_NAME);
         try {
             for (String f : fileNames) {
                 String subStreamBinlogName = f.substring(groupName.length() + 1);
                 String streamName = StringUtils.substringBefore(subStreamBinlogName, "_binlog.");
                 String partName = MessageFormat.format("{0}/{1}_{2}/", groupName, groupName, streamName);
                 String link = RemoteBinlogProxy.getInstance().prepareDownLink(partName + f,
-                    DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DOWNLOAD_LINK_AVAILABLE_INTERVAL));
+                    DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_LINK_PRESERVE_SECONDS));
                 linkMap.put(f, link);
             }
         } catch (Exception e) {
@@ -97,7 +97,7 @@ public class BinlogBackupResource {
         try {
             for (String f : fileNames) {
                 String link = RemoteBinlogProxy.getInstance().prepareDownLink(f,
-                    DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DOWNLOAD_LINK_AVAILABLE_INTERVAL));
+                    DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_LINK_PRESERVE_SECONDS));
                 linkMap.put(f, link);
             }
         } catch (Exception e) {
@@ -114,11 +114,12 @@ public class BinlogBackupResource {
         LinkedList<BinlogFile> binlogFileQueue = new LinkedList<>();
         BinlogDownloader downloader = BinlogDownloader.getInstance();
         String rdsBinlogTestDir =
-            DynamicApplicationConfig.getString(ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_DIR) + File.separator + "__test__";
+            DynamicApplicationConfig.getString(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR) + File.separator
+                + "__test__";
         downloader.init(rdsBinlogTestDir, 3);
         downloader.start();
 
-        long recallInterval = DynamicApplicationConfig.getInt(ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_RECALLDAYS);
+        long recallInterval = DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_RECALL_DAYS_LIMIT);
 
         String uid = DynamicApplicationConfig.getString(ConfigKeys.RDS_UID);
         String bid = DynamicApplicationConfig.getString(ConfigKeys.RDS_BID);
@@ -189,10 +190,10 @@ public class BinlogBackupResource {
         BinlogListResponse response = new BinlogListResponse();
 
         String groupName;
-        if (DynamicApplicationConfig.getClusterType().equals(ClusterTypeEnum.BINLOG.name())) {
-            groupName = Constants.GROUP_NAME_GLOBAL;
+        if (DynamicApplicationConfig.getClusterType().equals(ClusterType.BINLOG.name())) {
+            groupName = CommonConstants.GROUP_NAME_GLOBAL;
         } else {
-            groupName = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_X_STREAM_GROUP_NAME);
+            groupName = DynamicApplicationConfig.getString(ConfigKeys.BINLOGX_STREAM_GROUP_NAME);
         }
 
         BinlogOssRecordMapperExtend binlogOssRecordMapperExtend =
@@ -204,23 +205,23 @@ public class BinlogBackupResource {
         List<BinlogListResponse.BinlogInfo> binlogInfoList =
             binlogOssRecordMapperExtend.selectList(begin, end, groupName, (pageNum - 1) * countPerSize, countPerSize)
                 .stream().map((r) -> {
-                BinlogListResponse.BinlogInfo bi = new BinlogListResponse.BinlogInfo();
-                bi.setBinlogFile(r.getBinlogFile());
-                bi.setGmtCreated(r.getGmtCreated());
-                bi.setGmtModified(r.getGmtModified());
-                bi.setId(r.getId().longValue());
-                bi.setLogBegin(r.getLogBegin());
-                bi.setLogEnd(r.getLogEnd());
-                bi.setLogSize(r.getLogSize());
-                bi.setPurgeStatus(r.getPurgeStatus());
-                bi.setUploadHost(r.getUploadHost());
-                bi.setUploadStatus(r.getUploadStatus());
-                if (backupOn) {
-                    bi.setDownloadLink(RemoteBinlogProxy.getInstance().prepareDownLink(r.getBinlogFile(),
-                        DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DOWNLOAD_LINK_AVAILABLE_INTERVAL)));
-                }
-                return bi;
-            }).collect(Collectors.toList());
+                    BinlogListResponse.BinlogInfo bi = new BinlogListResponse.BinlogInfo();
+                    bi.setBinlogFile(r.getBinlogFile());
+                    bi.setGmtCreated(r.getGmtCreated());
+                    bi.setGmtModified(r.getGmtModified());
+                    bi.setId(r.getId().longValue());
+                    bi.setLogBegin(r.getLogBegin());
+                    bi.setLogEnd(r.getLogEnd());
+                    bi.setLogSize(r.getLogSize());
+                    bi.setPurgeStatus(r.getPurgeStatus());
+                    bi.setUploadHost(r.getUploadHost());
+                    bi.setUploadStatus(r.getUploadStatus());
+                    if (backupOn) {
+                        bi.setDownloadLink(RemoteBinlogProxy.getInstance().prepareDownLink(r.getBinlogFile(),
+                            DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_LINK_PRESERVE_SECONDS)));
+                    }
+                    return bi;
+                }).collect(Collectors.toList());
 
         response.setBinlogInfoList(binlogInfoList);
         response.setTotalCount(totalCount);

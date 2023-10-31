@@ -39,7 +39,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RECOVER_TSO_TESTING_ENABLE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
 import static com.aliyun.polardbx.cdc.qatest.random.SqlConstants.T_RANDOM_CREATE_SQL;
 import static com.aliyun.polardbx.cdc.qatest.random.SqlConstants.T_RANDOM_INSERT_SQL;
 import static com.aliyun.polardbx.cdc.qatest.random.SqlConstants.T_RANDOM_TABLE_PREFIX;
@@ -195,7 +195,7 @@ public class TestModeTwo extends RplBaseTestCase {
             Statement stmt = connection.createStatement();
             stmt.executeUpdate(String.format(
                 "replace into binlog_system_config(config_key,config_value)values('%s','%s')",
-                TOPOLOGY_RECOVER_TSO_TESTING_ENABLE, "false"));
+                TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED, "false"));
         }
     }
 

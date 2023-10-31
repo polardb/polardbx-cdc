@@ -35,8 +35,8 @@ import java.util.stream.Collectors;
 
 /**
  * Validation SQL generator per table
+ *
  * @author siyu.yusi
- * @date 03/03/2022
  **/
 @Builder
 @Slf4j
@@ -72,25 +72,31 @@ public class ValSQLGenerator {
         // c_w_id, c_d_id, c_id
         String keyCols = keyColList.stream().collect(Collectors.joining("`,`", "`", "`"));
 
-        return String.format("/*+TDDL:IN_SUB_QUERY_THRESHOLD=2*/ SELECT CAST(CRC32(%s) AS UNSIGNED) AS checksum, %s FROM `%s`.`%s`", concatWs, keyCols, ctx.getSrcPhyDB(), srcTable.getName());
+        return String.format(
+            "/*+TDDL:IN_SUB_QUERY_THRESHOLD=2*/ SELECT CAST(CRC32(%s) AS UNSIGNED) AS checksum, %s FROM `%s`.`%s`",
+            concatWs, keyCols, ctx.getSrcPhyDB(), srcTable.getName());
     }
 
     public SqlContext formatSelectSQL(TableInfo table, List<Serializable> keyValList) {
         List<Serializable> params = new ArrayList<>(table.getKeyList().size());
         String where = getWhereString(keyValList, table.getKeyList(), params);
-        String columns = table.getColumns().stream().map(ColumnInfo::getName).collect(Collectors.joining("`,`", "`", "`"));
-        String sql = String.format("SELECT %s FROM `%s`.`%s` WHERE %s", columns, ctx.getSrcPhyDB(), table.getName(), where);
+        String columns =
+            table.getColumns().stream().map(ColumnInfo::getName).collect(Collectors.joining("`,`", "`", "`"));
+        String sql =
+            String.format("SELECT %s FROM `%s`.`%s` WHERE %s", columns, ctx.getSrcPhyDB(), table.getName(), where);
         return new SqlContext(sql, null, null, params);
     }
 
     // replace into `%s`.`%s` (%s) values (?,?,?)
-    public PreparedStatement formatInsertStatement(Connection conn, TableInfo dstTable, Record...records) throws SQLException {
+    public PreparedStatement formatInsertStatement(Connection conn, TableInfo dstTable, Record... records)
+        throws SQLException {
         if (records.length < 1) {
-            throw new SQLException(String.format("Records cannot be less than one. db: %s, table: %s", ctx.getDstLogicalDB(), dstTable.getName()));
+            throw new SQLException(
+                String.format("Records cannot be less than one. db: %s, table: %s", ctx.getDstLogicalDB(),
+                    dstTable.getName()));
         }
         List<String> valueList = new ArrayList<>();
         List<String> colList = records[0].getColumnList();
-
 
         for (int k = 0; k < records.length; k++) {
             StringBuilder updateSb = new StringBuilder();
@@ -104,12 +110,13 @@ public class ValSQLGenerator {
             valueList.add(updateSb.toString());
         }
 
-
         // (`a`=?,`b`=?),(`a`=?,`b`=?)
         String values = valueList.stream().collect(Collectors.joining("),(", "(", ")"));
         String columns = colList.stream().collect(Collectors.joining("`,`", "`", "`"));
 
-        String sql = String.format("REPLACE INTO `%s`.`%s` (%s) VALUES %s", ctx.getDstLogicalDB(), dstTable.getName(), columns, values);
+        String sql =
+            String.format("REPLACE INTO `%s`.`%s` (%s) VALUES %s", ctx.getDstLogicalDB(), dstTable.getName(), columns,
+                values);
         PreparedStatement preparedStatement = conn.prepareStatement(sql);
         int pos = 1;
         for (Record r : records) {
@@ -124,7 +131,8 @@ public class ValSQLGenerator {
     /**
      * e.g. SELECT BIT_XOR(CAST(CRC32(CONCAT_WS(',', C1, C2, C3, C4, C5, C6, C7, C8, C9, CONCAT(ISNULL(C1), ISNULL(C2), ISNULL(C3), ISNULL(C4), ISNULL(C5), ISNULL(C6), ISNULL(C7), ISNULL(C8), ISNULL(C9)))) AS UNSIGNED)) AS checksum FROM `tpch.orders`;
      */
-    public SqlContext generateChecksumSQL(TableInfo srcTable, Map<String, List<Serializable>> keyValMap, boolean isDst) {
+    public SqlContext generateChecksumSQL(TableInfo srcTable, Map<String, List<Serializable>> keyValMap,
+                                          boolean isDst) {
         // ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`)
         String db = isDst ? ctx.getDstLogicalDB() : ctx.getSrcPhyDB();
         TableInfo table = isDst ? ctx.getMappingTable().get(srcTable.getName()) : srcTable;
@@ -173,10 +181,10 @@ public class ValSQLGenerator {
             }
             if (hasNotNull && hasNull) {
                 predicate.add(String.format("(`%s` IN (%s) or `%s` IS NULL)", key,
-                    StringUtils.repeat("?",",",thisKeyParams.size()), key));
+                    StringUtils.repeat("?", ",", thisKeyParams.size()), key));
             } else if (hasNotNull) {
                 predicate.add(String.format("(`%s` IN (%s))", key,
-                    StringUtils.repeat("?",",",thisKeyParams.size())));
+                    StringUtils.repeat("?", ",", thisKeyParams.size())));
             } else if (hasNull) {
                 predicate.add(String.format("`%s` IS NULL", key));
             } else {
@@ -219,8 +227,9 @@ public class ValSQLGenerator {
         String concatWs = String.format("CONCAT_WS(%s)", concatWsSb);
         List<Serializable> params = new ArrayList<>(dstTable.getKeyList().size());
         String where = getWhereString(keyValList, dstTable.getKeyList(), params);
-        String sql =  String.format("/*+TDDL:IN_SUB_QUERY_THRESHOLD=2*/ SELECT BIT_XOR(CAST(CRC32(%s) AS UNSIGNED)) AS checksum FROM `%s`.`%s` WHERE %s",
-                concatWs, ctx.getDstLogicalDB(), dstTable.getName(), where);
+        String sql = String.format(
+            "/*+TDDL:IN_SUB_QUERY_THRESHOLD=2*/ SELECT BIT_XOR(CAST(CRC32(%s) AS UNSIGNED)) AS checksum FROM `%s`.`%s` WHERE %s",
+            concatWs, ctx.getDstLogicalDB(), dstTable.getName(), where);
         return new SqlContext(sql, null, null, params);
     }
 

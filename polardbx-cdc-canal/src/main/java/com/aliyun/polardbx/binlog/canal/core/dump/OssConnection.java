@@ -15,7 +15,7 @@
 package com.aliyun.polardbx.binlog.canal.core.dump;
 
 import com.alibaba.fastjson.JSON;
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.api.BinlogProcessor;
@@ -108,7 +108,7 @@ public class OssConnection implements ErosaConnection {
     }
 
     private void cleanDir() throws IOException {
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_OLDMODE)) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_IN_DOWNLOAD_MODE)) {
             FileUtils.deleteDirectory(new File(localBinlogDir));
         }
     }
@@ -119,7 +119,7 @@ public class OssConnection implements ErosaConnection {
             return;
         }
         BinlogProcessor.test = test;
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_OLDMODE)) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_IN_DOWNLOAD_MODE)) {
             try {
                 FileUtils.forceMkdir(new File(this.localBinlogDir));
             } catch (IOException e) {
@@ -229,7 +229,7 @@ public class OssConnection implements ErosaConnection {
         }
         lastConnectFile = binlogfilename;
 
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_OLDMODE)) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_IN_DOWNLOAD_MODE)) {
             return providerLocalFetcher(ossBinlogFile, binlogPosition, search);
         } else {
             return providerRemoteUrlFetcher(ossBinlogFile, binlogPosition);
@@ -288,7 +288,7 @@ public class OssConnection implements ErosaConnection {
         if (endFile == null) {
             endFile = binlogFileQueue.get(binlogFileQueue.size() - 1);
         }
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_OLDMODE)) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_IN_DOWNLOAD_MODE)) {
             File f = new File(localBinlogDir + File.separator + endFile.getLogname());
             return new BinlogPosition(endFile.getLogname(), f.exists() ? f.length() : Long.MAX_VALUE, -1, -1);
         }

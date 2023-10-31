@@ -27,6 +27,7 @@ import com.amazonaws.services.s3.model.S3ObjectInputStream;
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -84,8 +85,8 @@ public class LindormManager implements IRemoteManager {
 
     private LindormClient getLindormClient() {
         return new LindormClient(lindormConfig.getAccessKey(),
-                lindormConfig.getAccessSecret(), lindormConfig.getIp(),
-                lindormConfig.getThriftPort(), lindormConfig.getS3Port());
+            lindormConfig.getAccessSecret(), lindormConfig.getIp(),
+            lindormConfig.getThriftPort(), lindormConfig.getS3Port());
     }
 
     @Override
@@ -95,7 +96,9 @@ public class LindormManager implements IRemoteManager {
         }
     }
 
-    /** get crc64 of file content */
+    /**
+     * get crc64 of file content
+     */
     @Override
     public String getMd5(String fileName) {
         try (LindormClient client = getLindormClient()) {
@@ -127,7 +130,9 @@ public class LindormManager implements IRemoteManager {
         }
     }
 
-    /** return pure file name list */
+    /**
+     * return pure file name list
+     */
     @Override
     public List<String> listFiles(String path) {
         try (LindormClient client = getLindormClient()) {
@@ -210,6 +215,11 @@ public class LindormManager implements IRemoteManager {
     }
 
     @Override
+    public boolean supportMultiAppend() {
+        return false;
+    }
+
+    @Override
     public boolean useMultiAppender(long size) {
         return false;
     }
@@ -264,7 +274,7 @@ public class LindormManager implements IRemoteManager {
                 // todo @yudong 可能能够使用direct buffer优化
                 ByteBuffer buffer = ByteBuffer.wrap(data, 0, len);
                 nextOffset = client.writeFile(outputStreamId, provider.getBucket(),
-                        lindormFileName, buffer, 0, len, nextOffset, crc64.getValue()).getNextOffset();
+                    lindormFileName, buffer, 0, len, nextOffset, crc64.getValue()).getNextOffset();
                 return nextOffset;
             } catch (Exception e) {
                 logger.error("lindorm append file {} error", lindormFileName, e);

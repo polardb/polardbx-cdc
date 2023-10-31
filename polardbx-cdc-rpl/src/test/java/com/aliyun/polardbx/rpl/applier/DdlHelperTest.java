@@ -15,16 +15,32 @@
 package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
+import com.aliyun.polardbx.binlog.relay.DdlRouteMode;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
 
 import java.sql.Timestamp;
+
+import static com.aliyun.polardbx.rpl.applier.DdlHelper.getDdlRouteMode;
 
 /**
  * @author shicai.xsc 2021/4/19 11:18
  * @since 5.0.0.0
  */
 public class DdlHelperTest {
+
+    @Test
+    public void testGetDdlRoutMode() {
+        String sql = "# POLARX_DDL_ROUTE_MODE=SINGLE\n"
+            + "# POLARX_ORIGIN_SQL=ALTER TABLE t7 ADD COLUMN c1 bigint\n"
+            + "# POLARX_TSO=709124912370522528016223143392496885760000000000000000";
+        Assert.assertEquals(DdlRouteMode.SINGLE, getDdlRouteMode(sql));
+
+        String sql2 = "# POLARX_ORIGIN_SQL=ALTER TABLE t7 ADD COLUMN c1 bigint\n"
+            + "# POLARX_TSO=709124912370522528016223143392496885760000000000000000";
+        Assert.assertEquals(DdlRouteMode.BROADCAST, getDdlRouteMode(sql2));
+    }
 
     @Test
     public void getOriginalSql() {
@@ -42,8 +58,11 @@ public class DdlHelperTest {
             + "# POLARX_TSO=699138551269084371215224507282353070080000000000000000\n"
             + "CREATE DATABASE BalancerTestBase CHARACTER SET utf8mb4";
         DefaultQueryLog queryLog = new DefaultQueryLog("", sql, new Timestamp(12345), 0);
-        SqlContext context = ApplyHelper.getDdlSqlContext(queryLog, "699138551269084371215224507282353070080000000000000000", true);
-        Assert.assertEquals(context.getSql(), "CREATE DATABASE BalancerTestBase MODE 'auto'");
+        SqlContext context =
+            ApplyHelper.getDdlSqlContext(queryLog, "699138551269084371215224507282353070080000000000000000");
+        Assert.assertTrue(
+            StringUtils
+                .endsWithIgnoreCase(context.getSql(), "create database if not exists BalancerTestBase MODE 'auto'"));
     }
 
     @Test
@@ -53,7 +72,7 @@ public class DdlHelperTest {
             + "ALTER TABLE `cdc_datatype`.`numeric`\n"
             + "  DROP COLUMN _NUMERIC_";
         String tso = DdlHelper.getTso(sql, new Timestamp(1666843560), "binlog.000004:0000021718#1769892875.1666843560");
-        Assert.assertEquals(tso, "678700134612901433613180665615960145920000000000000000");
+        Assert.assertEquals(tso, "699124861471450732815223138302086389760000000000000000");
     }
 
     @Test
@@ -66,6 +85,6 @@ public class DdlHelperTest {
             + "int, INDEX `auto_shard_key_id` USING BTREE(`ID`) ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = "
             + "utf8mb4_general_ci";
         String tso = DdlHelper.getTso(sql, new Timestamp(1618802638), "");
-        Assert.assertEquals("-3519920771618802638", tso);
+        Assert.assertEquals("-35199207716188026380", tso);
     }
 }

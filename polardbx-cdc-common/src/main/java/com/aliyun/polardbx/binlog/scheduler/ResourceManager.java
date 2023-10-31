@@ -31,14 +31,15 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
+import com.aliyun.polardbx.binlog.enums.NodeStatus;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.dao.BinlogNodeInfoMapper;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.Resource;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.joda.time.DateTime;
 import org.mybatis.dynamic.sql.SqlBuilder;
 
 import java.util.HashSet;
@@ -60,6 +61,7 @@ public class ResourceManager {
     private final BinlogTaskInfoMapper taskInfoMapper;
     private final DumperInfoMapper dumperInfoMapper;
     private final BinlogTaskConfigMapper taskConfigMapper;
+    private final BinlogNodeInfoMapper binlogNodeInfoMapper;
     private Set<String> topologyExcludeNodes;
 
     public ResourceManager(String clusterId) {
@@ -68,6 +70,7 @@ public class ResourceManager {
         this.taskInfoMapper = SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
         this.dumperInfoMapper = SpringContextHolder.getObject(DumperInfoMapper.class);
         this.taskConfigMapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
+        this.binlogNodeInfoMapper = SpringContextHolder.getObject(BinlogNodeInfoMapper.class);
     }
 
     /**
@@ -75,9 +78,9 @@ public class ResourceManager {
      */
     public Set<String> allContainers() {
         return nodeInfoMapper.select(s ->
-            s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                .and(NodeInfoDynamicSqlSupport.status, SqlBuilder.isEqualTo(0))
-                .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isNotInWhenPresent(getTopologyExcludeNodes())))
+                s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
+                    .and(NodeInfoDynamicSqlSupport.status, SqlBuilder.isEqualTo(NodeStatus.AVAILABLE.getValue()))
+                    .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isNotInWhenPresent(getTopologyExcludeNodes())))
             .stream().map(NodeInfo::getContainerId).collect(Collectors.toSet());
     }
 
@@ -128,8 +131,7 @@ public class ResourceManager {
 
         boolean isOk = true;
         for (BinlogTaskConfig config : allConfig) {
-            if (TaskType.Final.name().equals(config.getRole()) || TaskType.Relay.name().equals(config.getRole())
-                || TaskType.Dispatcher.name().equals(config.getRole())) {
+            if (TaskType.isTask(config.getRole())) {
                 BinlogTaskInfo taskInfo = getTaskInfo(config.getTaskName());
                 boolean valid = checkValid(config.getGmtModified().getTime(),
                     taskInfo == null ? -1L : taskInfo.getGmtHeartbeat().getTime(), taskInfo == null);
@@ -141,8 +143,7 @@ public class ResourceManager {
                     taskInfo == null ?
                         String.format("The task [%s] was not started at the specified time.", config.getTaskName()) :
                         String.format("The task [%s] heartbeat is timeout.", config.getTaskName())));
-            } else if (TaskType.Dumper.name().equals(config.getRole())
-                || TaskType.DumperX.name().equals(config.getRole())) {
+            } else if (TaskType.isDumper(config.getRole())) {
                 DumperInfo dumperInfo = getDumperInfo(config.getTaskName());
                 boolean valid = checkValid(config.getGmtModified().getTime(),
                     dumperInfo == null ? -1L : dumperInfo.getGmtHeartbeat().getTime(), dumperInfo == null);
@@ -180,12 +181,12 @@ public class ResourceManager {
 
     public boolean isHeartbeatTimeOut(long timeMills) {
         return System.currentTimeMillis() - timeMills > DynamicApplicationConfig
-            .getInt(ConfigKeys.TOPOLOGY_HEARTBEAT_TIMEOUT_MS);
+            .getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS);
     }
 
     public boolean isStartTimeOut(long timeMills) {
         return System.currentTimeMillis() - timeMills > DynamicApplicationConfig
-            .getInt(ConfigKeys.TOPOLOGY_START_TIMEOUT_MS);
+            .getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_WAIT_START_TIMEOUT_MS);
     }
 
     private boolean checkValid(long configTimeMills, long heartbeatTimeMills, boolean isNull) {
@@ -197,25 +198,17 @@ public class ResourceManager {
     }
 
     private List<NodeInfo> getAliveNodes() {
-        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_HEARTBEAT_TIMEOUT_MS);
-        return nodeInfoMapper.select(s ->
-            s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                .and(NodeInfoDynamicSqlSupport.status, SqlBuilder.isEqualTo(0))
-                .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isNotInWhenPresent(getTopologyExcludeNodes()))
-                .and(NodeInfoDynamicSqlSupport.gmtHeartbeat,
-                    SqlBuilder.isGreaterThan(DateTime.now().minusMillis(timeoutThresholdMs).toDate()))
-                .orderBy(NodeInfoDynamicSqlSupport.id));
+        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS);
+        Set<String> excludeNodes = getTopologyExcludeNodes();
+        List<NodeInfo> aliveNodes = binlogNodeInfoMapper.getAliveNodes(clusterId, timeoutThresholdMs);
+        return aliveNodes.stream().filter(r -> !excludeNodes.contains(r.getContainerId())).collect(Collectors.toList());
     }
 
     private List<NodeInfo> getDeadNodes() {
-        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_HEARTBEAT_TIMEOUT_MS);
-        return nodeInfoMapper.select(s ->
-            s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                .and(NodeInfoDynamicSqlSupport.status, SqlBuilder.isEqualTo(0))
-                .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isNotInWhenPresent(getTopologyExcludeNodes()))
-                .and(NodeInfoDynamicSqlSupport.gmtHeartbeat,
-                    SqlBuilder.isLessThanOrEqualTo(DateTime.now().minusMillis(timeoutThresholdMs).toDate()))
-                .orderBy(NodeInfoDynamicSqlSupport.id));
+        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS);
+        Set<String> excludeNodes = getTopologyExcludeNodes();
+        List<NodeInfo> deadNodes = binlogNodeInfoMapper.getDeadNodes(clusterId, timeoutThresholdMs);
+        return deadNodes.stream().filter(r -> !excludeNodes.contains(r.getContainerId())).collect(Collectors.toList());
     }
 
     private Set<String> getTopologyExcludeNodes() {

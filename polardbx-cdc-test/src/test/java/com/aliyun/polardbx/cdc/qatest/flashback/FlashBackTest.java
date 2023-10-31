@@ -415,7 +415,7 @@ public class FlashBackTest extends BaseTestCase {
     }
 
     public static class DataSourceUtil {
-        private final static int QUERY_TIMEOUT = 7200;
+        private static final int QUERY_TIMEOUT = 7200;
 
         public static void closeQuery(ResultSet rs, Statement stmt, Connection conn) {
             JdbcUtils.closeResultSet(rs);

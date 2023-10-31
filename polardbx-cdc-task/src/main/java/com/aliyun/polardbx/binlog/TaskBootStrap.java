@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog;
 
 import com.aliyun.polardbx.binlog.task.TaskHeartbeat;
+import com.aliyun.polardbx.binlog.util.LabEventType;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +25,7 @@ import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS;
 
 /**
  * Created by ziyang.lb
@@ -68,6 +69,7 @@ public class TaskBootStrap {
 
             // try process compatibility
             TableCompatibilityProcessor.process();
+            TableCompatibilityProcessorWithTask.process();
 
             // do start
             logger.info("## starting the task, with name {}.", taskName);
@@ -76,8 +78,9 @@ public class TaskBootStrap {
             final TaskHeartbeat taskHeartbeat =
                 new TaskHeartbeat(DynamicApplicationConfig.getString(CLUSTER_ID),
                     DynamicApplicationConfig.getClusterType(), taskName,
-                    DynamicApplicationConfig.getInt(TOPOLOGY_TASK_HEARTBEAT_INTERVAL),
+                    DynamicApplicationConfig.getInt(TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS),
                     taskConfigProvider.getTaskRuntimeConfig().getBinlogTaskConfig());
+            LabEventManager.logEvent(LabEventType.FINAL_TASK_START);
             taskHeartbeat.start();
             controller.start();
 
@@ -85,6 +88,7 @@ public class TaskBootStrap {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
                     logger.info("## stop the task");
+                    LabEventManager.logEvent(LabEventType.FINAL_TASK_STOP);
                     taskHeartbeat.stop();
                     controller.stop();
                     appContextBootStrap.close();

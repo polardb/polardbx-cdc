@@ -22,7 +22,7 @@ import org.springframework.context.EmbeddedValueResolverAware;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringValueResolver;
 
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Created by ziyang.lb
@@ -32,6 +32,7 @@ public class SpringContextHolder implements ApplicationContextAware, EmbeddedVal
 
     private static volatile ApplicationContext applicationContext;
     private static StringValueResolver stringValueResolver;
+    private static ConcurrentHashMap<Object, Object> objectMap = new ConcurrentHashMap<>();
 
     @Override
     public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
@@ -45,15 +46,20 @@ public class SpringContextHolder implements ApplicationContextAware, EmbeddedVal
 
     @SuppressWarnings("unchecked")
     public static <T> T getObject(String name) {
-        return (T) applicationContext.getBean(name);
+        if (objectMap.containsKey(name)) {
+            return (T) objectMap.get(name);
+        } else {
+            return (T) applicationContext.getBean(name);
+        }
     }
 
+    @SuppressWarnings("unchecked")
     public static <T> T getObject(Class<? extends T> clazz) {
-        return (T) applicationContext.getBean(clazz);
-    }
-
-    public static <T> Map<String, T> getBeansOfType(Class<T> clazz) {
-        return applicationContext.getBeansOfType(clazz);
+        if (objectMap.containsKey(clazz)) {
+            return (T) objectMap.get(clazz);
+        } else {
+            return (T) applicationContext.getBean(clazz);
+        }
     }
 
     public static String getPropertiesValue(String name) {

@@ -27,11 +27,14 @@ import java.util.Set;
  */
 
 public class BaseFilter {
-    public boolean init() {
-        return true;
+    public void init() {
     }
 
     public boolean ignoreEvent(String schema, String tbName, DBMSAction action, long serverId) {
+        return false;
+    }
+
+    public boolean ignoreEventByTso(String tso) {
         return false;
     }
 
@@ -46,7 +49,7 @@ public class BaseFilter {
     protected Set<String> initFilterSet(String filterStr) {
         Set<String> filters = new HashSet<>();
         if (StringUtils.isNotBlank(filterStr)) {
-            for (String token : filterStr.trim().toLowerCase().split(RplConstants.COMMA)) {
+            for (String token : filterStr.trim().split(RplConstants.COMMA)) {
                 filters.add(token.trim());
             }
         }
@@ -57,7 +60,7 @@ public class BaseFilter {
         Set<String> tmpIgnoreServerIds = initFilterSet(filterStr);
         Set<Long> ignoreServerIds = new HashSet<>();
         for (String serverId : tmpIgnoreServerIds) {
-            ignoreServerIds.add(new Long(Math.abs(Long.valueOf(serverId).intValue())));
+            ignoreServerIds.add(Long.valueOf(serverId));
         }
         return ignoreServerIds;
     }

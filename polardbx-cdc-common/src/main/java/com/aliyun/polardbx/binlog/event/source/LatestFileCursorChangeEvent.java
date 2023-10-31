@@ -15,7 +15,7 @@
 package com.aliyun.polardbx.binlog.event.source;
 
 import com.aliyun.polardbx.binlog.event.BaseEvent;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
@@ -25,5 +25,5 @@ import lombok.Data;
 @Data
 @AllArgsConstructor
 public class LatestFileCursorChangeEvent extends BaseEvent {
-    private Cursor cursor;
+    private BinlogCursor cursor;
 }

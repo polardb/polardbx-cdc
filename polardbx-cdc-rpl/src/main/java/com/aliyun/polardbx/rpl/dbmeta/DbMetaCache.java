@@ -14,8 +14,9 @@
  */
 package com.aliyun.polardbx.rpl.dbmeta;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
-import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import lombok.Data;
@@ -42,9 +43,11 @@ public class DbMetaCache {
 
     private int minPoolSize = 1;
     private int maxPoolSize = 30;
-    private final static String POLARX_DEFAULT_SCHEMA = "polardbx";
-    private final static String SET_POLARX_SERVER_ID = "set polardbx_server_id=%d";
-    private final static String SET_MYSQL_SERVER_ID = "set global server_id=%d";
+    private static final String POLARX_DEFAULT_SCHEMA = "polardbx";
+    private static final String SET_POLARX_SERVER_ID = "set polardbx_server_id=%d";
+    private static final String SET_MYSQL_SERVER_ID = "set global server_id=%d";
+    private static final String SET_SQL_MODE = "set sql_mode='%s'";
+    String sqlMode = DynamicApplicationConfig.getString(ConfigKeys.RPL_DEFAULT_SQL_MODE);
 
     public DbMetaCache(HostInfo hostInfo, int maxPoolSize) {
         this.hostInfo = hostInfo;
@@ -54,20 +57,19 @@ public class DbMetaCache {
     public DataSource getDataSource(String schema) throws Exception {
         try {
             if (!dataSources.containsKey(schema)) {
-                List<String> connectionInitSQLs = new ArrayList<>();
+                List<String> connectionInitSqls = new ArrayList<>();
                 log.warn("set server id: {}", Math.abs(new Long(hostInfo.getServerId()).intValue()));
                 String setServerIdSql;
                 if (hostInfo.getType() == HostType.POLARX2 || hostInfo.getType() == HostType.POLARX1) {
                     setServerIdSql = String.format(SET_POLARX_SERVER_ID,
                         Math.abs(new Long(hostInfo.getServerId()).intValue()));
-                    connectionInitSQLs.add(setServerIdSql);
+                    connectionInitSqls.add(setServerIdSql);
                 }
-                // 可能没有set global 权限，不考虑实现环状复制，因此不需要set server id
-//                else {
-//                    setServerIdSql = String.format(SET_MYSQL_SERVER_ID,
-//                        Math.abs(new Long(hostInfo.getServerId()).intValue()));
-//                }
-//                connectionInitSQLs.add(setServerIdSql);
+                if (hostInfo.getType() == HostType.POLARX2) {
+                    connectionInitSqls.add("set foreign_key_checks = 0");
+                }
+                connectionInitSqls.add(String.format(SET_SQL_MODE, sqlMode));
+                // RDS/mysql 可能没有set global 权限，不考虑实现环状复制，因此不需要set server id
                 DataSource dataSource = DataSourceUtil.createDruidMySqlDataSource(hostInfo.isUsePolarxPoolCN(),
                     hostInfo.getHost(),
                     hostInfo.getPort(),
@@ -78,7 +80,7 @@ public class DbMetaCache {
                     minPoolSize,
                     maxPoolSize,
                     null,
-                    connectionInitSQLs);
+                    connectionInitSqls);
                 dataSources.put(schema, dataSource);
             }
             return dataSources.get(schema);
@@ -118,7 +120,7 @@ public class DbMetaCache {
         tableInfos.remove(key);
     }
 
-    public TableInfo getTableInfo(String schema, String tbName) throws Throwable {
+    public TableInfo getTableInfo(String schema, String tbName) throws Exception {
         String key = schema + "." + tbName;
         try {
             TableInfo dstTableInfo = tableInfos.get(key);
@@ -127,7 +129,7 @@ public class DbMetaCache {
                 dstTableInfo = DbMetaManager.getTableInfo(dataSource, schema, tbName, hostInfo.getType());
                 tableInfos.put(key, dstTableInfo);
             }
-        } catch (Throwable e) {
+        } catch (Exception e) {
             log.error("failed in getTableInfo, host: {}, port: {}, schema: {}, tbName: {}",
                 hostInfo.getHost(), hostInfo.getPort(), schema, tbName);
             throw e;

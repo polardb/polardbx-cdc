@@ -19,6 +19,7 @@ import com.aliyun.polardbx.binlog.format.field.Field;
 import com.aliyun.polardbx.binlog.format.field.MakeFieldFactory;
 import com.aliyun.polardbx.binlog.relay.HashLevel;
 import com.aliyun.polardbx.cdc.qatest.base.CheckParameter;
+import com.aliyun.polardbx.cdc.qatest.base.ColumnType;
 import com.aliyun.polardbx.cdc.qatest.base.JdbcUtil;
 import com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil;
 import com.aliyun.polardbx.cdc.qatest.base.RplBaseTestCase;
@@ -38,8 +39,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -47,6 +50,7 @@ import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.zip.CRC32;
 
 import static com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil.usingBinlogX;
 
@@ -60,12 +64,15 @@ public class DataConsistencyTest extends RplBaseTestCase {
     private static final String CALCULATE_CHECKSUM_SQL_FORMAT =
         "SELECT BIT_XOR( "
             + "CAST( CRC32( CONCAT_WS( %s ) ) AS UNSIGNED )"
-            + ") AS checksum FROM `%s`.`%s`";
+            + ") AS checksum FROM "
+            + "( SELECT %s FROM `%s`.`%s` )t";
     private static final String CALCULATE_CHECKSUM_WITH_IN_SQL_FORMAT =
-        "SELECT BIT_XOR( "
-            + "CAST( CRC32( CONCAT_WS( %s ) ) AS UNSIGNED )"
-            + ") AS checksum FROM `%s`.`%s` "
-            + "WHERE (%s) IN (%s)";
+        "SELECT BIT_XOR( CAST( CRC32( CONCAT_WS( %s ) ) AS UNSIGNED ) ) AS checksum FROM "
+            + "( SELECT %s FROM `%s`.`%s` WHERE (%s) IN (%s) ORDER BY %s )t";
+
+    private static final String SELECT_WITH_IN_FORMAT =
+        "SELECT %s FROM (SELECT * FROM( SELECT %s FROM `%s`.`%s`)t1 WHERE (%s) IN (%s))t2 ORDER BY %s";
+    private static final String SELECT_FORMAT = "SELECT %s FROM `%s`.`%s` ORDER BY %s";
 
     private static final int STREAM_NUM = 3;
     private static final int SOURCE_DS = 0;
@@ -177,6 +184,19 @@ public class DataConsistencyTest extends RplBaseTestCase {
         }
     }
 
+    private Set<String> getIgnoreTableSet() throws SQLException {
+        Set<String> sets = new HashSet<>();
+        Connection metaConn = getMetaConnection();
+        ResultSet rs =
+            JdbcUtil.executeQuery("select table_schema, table_name from tables where engine != 'InnoDB'", metaConn);
+        while (rs.next()) {
+            String schema = rs.getString("table_schema");
+            String tableName = rs.getString("table_name");
+            sets.add(schema.toLowerCase() + "." + tableName.toLowerCase());
+        }
+        return sets;
+    }
+
     /**
      * 获得所有需要校验的表名
      *
@@ -205,6 +225,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
         List<String> filteredTables = new ArrayList<>();
         List<String> databases = getDatabaseList(srcDs);
+        Set<String> ignoreTableSet = getIgnoreTableSet();
         for (String db : databases) {
             if (filterDatabase(db)) {
                 log.info("database [{}] is filtered for check", db);
@@ -214,11 +235,18 @@ public class DataConsistencyTest extends RplBaseTestCase {
             List<String> tables = getTableList(db, srcDs);
             for (String tb : tables) {
                 Pair<String, String> tablePair = Pair.of(db, tb);
+                String fullTableName = StringUtils.lowerCase(
+                    tablePair.getKey() + "." + tablePair.getValue());
                 if (filterTable(tablePair)) {
                     log.info("table [{}.{}] is filtered for check",
                         tablePair.getKey(), tablePair.getValue());
-                    filteredTables.add(StringUtils.lowerCase(
-                        tablePair.getKey() + "." + tablePair.getValue()));
+                    filteredTables.add(fullTableName);
+                    continue;
+                }
+                if (ignoreTableSet.contains(fullTableName)) {
+                    log.info("table [{}.{}] is filtered for check",
+                        tablePair.getKey(), tablePair.getValue());
+                    filteredTables.add(fullTableName);
                     continue;
                 }
                 testTables.add(tablePair);
@@ -305,11 +333,11 @@ public class DataConsistencyTest extends RplBaseTestCase {
      */
     private boolean checkColumnsHelper(String db, String tb, int destDs)
         throws SQLException {
-        List<String> srcColumns = getSrcColumnList(db, tb);
-        srcColumns = srcColumns.stream().map(String::toLowerCase)
+        List<Pair<String, String>> srcColumnPairs = getSrcColumnList(db, tb);
+        List<String> srcColumns = srcColumnPairs.stream().map(c -> c.getLeft().toLowerCase())
             .collect(Collectors.toList());
-        List<String> dstColumns = getDstColumnsList(destDs, db, tb);
-        dstColumns = dstColumns.stream().map(String::toLowerCase)
+        List<Pair<String, String>> dstColumnPairs = getDstColumnsList(destDs, db, tb);
+        List<String> dstColumns = dstColumnPairs.stream().map(c -> c.getLeft().toLowerCase())
             .collect(Collectors.toList());
         return ListUtils.isEqualList(srcColumns, dstColumns);
     }
@@ -323,8 +351,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
      * @return 数据是否一致
      */
     private boolean checkRows(String db, String table) throws Exception {
-        List<String> srcCheckSum = calculateSrcCheckSum(db, table);
-        List<String> dstCheckSum = calculateDstCheckSum(db, table);
+        List<String> srcCheckSum = calculateSrcCheckSum(db, table, false);
+        List<String> dstCheckSum = calculateDstCheckSum(db, table, false);
         DetailReport report = threadLocalReport.get();
         report.setSrcChecksum(srcCheckSum);
         report.setDstChecksum(dstCheckSum);
@@ -345,7 +373,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
      * @param table 待校验表的表名
      * @return 表中数据的哈希值
      */
-    private List<String> calculateSrcCheckSum(String db, String table)
+    private List<String> calculateSrcCheckSum(String db, String table, boolean pushDown)
         throws Exception {
         List<String> result = new ArrayList<>();
         DetailReport report = threadLocalReport.get();
@@ -356,27 +384,44 @@ public class DataConsistencyTest extends RplBaseTestCase {
                 hashKeys.add("_drds_implicit_id_");
             }
             List<String> inList = splitTable(db, table, hashKeys);
-            List<String> columns = getSrcColumnList(db, table);
+            List<Pair<String, String>> columnPairs = getSrcColumnList(db, table);
             try (Connection conn = getPolardbxConnection()) {
                 for (String in : inList) {
                     if ("NULL".equals(in)) {
                         result.add("0");
                         report.addSrcChecksumSQL("0");
                     } else {
-                        String calculateSql = buildCheckSumWithInSql(db, table, hashKeys, columns, in);
-                        report.addSrcChecksumSQL(calculateSql);
-                        String checksum = calculateCheckSumHelper(conn, calculateSql);
+                        String checksum;
+                        if (pushDown) {
+                            String calculateSql = buildCheckSumWithInSql(db, table, hashKeys, columnPairs, in);
+                            report.addSrcChecksumSQL(calculateSql);
+                            checksum = calculateCheckSumHelper(conn, db, calculateSql);
+                        } else {
+                            String selectSql = buildSelectHexValueWithInSql(db, table, hashKeys, columnPairs, in);
+                            report.addSrcChecksumSQL(selectSql);
+                            checksum = calculateCheckSumInMemoryHelper(conn, db, selectSql);
+                        }
                         result.add(checksum);
                     }
                 }
             }
         } else {
-            List<String> columns = getSrcColumnList(db, table);
-            String calculateSql = buildCheckSumSql(db, table, columns);
-            report.addSrcChecksumSQL(calculateSql);
-            try (Connection conn = getPolardbxConnection()) {
-                String checksum = calculateCheckSumHelper(conn, calculateSql);
-                result.add(checksum);
+            List<Pair<String, String>> columnPairs = getSrcColumnList(db, table);
+            if (pushDown) {
+                String calculateSql = buildCheckSumSql(db, table, columnPairs);
+                report.addSrcChecksumSQL(calculateSql);
+                try (Connection conn = getPolardbxConnection()) {
+                    String checksum = calculateCheckSumHelper(conn, db, calculateSql);
+                    result.add(checksum);
+                }
+            } else {
+                List<String> primaryKeys = getSrcPrimaryKeys(db, table);
+                String selectSql = buildSelectHexValueSql(db, table, columnPairs, primaryKeys);
+                report.addSrcChecksumSQL(selectSql);
+                try (Connection conn = getPolardbxConnection()) {
+                    String checksum = calculateCheckSumInMemoryHelper(conn, db, selectSql);
+                    result.add(checksum);
+                }
             }
         }
         return result;
@@ -389,7 +434,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
      * @param table 待校验表
      * @return 哈希值，如果是多流场景，下游有三个mysql，对每个mysql计算出一个哈希值
      */
-    private List<String> calculateDstCheckSum(String db, String table)
+    private List<String> calculateDstCheckSum(String db, String table, boolean pushDown)
         throws Exception {
         List<String> result = new ArrayList<>();
         DetailReport report = threadLocalReport.get();
@@ -397,51 +442,110 @@ public class DataConsistencyTest extends RplBaseTestCase {
         if (usingBinlogX) {
             if (StreamHashUtil.getHashLevel(db, table) != HashLevel.RECORD) {
                 int streamSeq = StreamHashUtil.getHashStreamSeq(db, table);
-                List<String> columns = getDstColumnsList(getSyncDbByStreamSeq(streamSeq), db, table);
-                String calculateSql = buildCheckSumSql(db, table, columns);
-                report.addDstChecksumSQL(calculateSql);
-                try (Connection conn = getDruidConnection(getSyncDbByStreamSeq(streamSeq))) {
-                    String checksum = calculateCheckSumHelper(conn, calculateSql);
-                    result.add(checksum);
+                List<Pair<String, String>> columnPairs = getDstColumnsList(getSyncDbByStreamSeq(streamSeq), db, table);
+                if (pushDown) {
+                    String calculateSql = buildCheckSumSql(db, table, columnPairs);
+                    report.addDstChecksumSQL(calculateSql);
+                    try (Connection conn = getDruidConnection(getSyncDbByStreamSeq(streamSeq))) {
+                        String checksum = calculateCheckSumHelper(conn, db, calculateSql);
+                        result.add(checksum);
+                    }
+                } else {
+                    List<String> primaryKeys = getDstPrimaryKeys(getSyncDbByStreamSeq(streamSeq), db, table);
+                    String calculateSql = buildSelectHexValueSql(db, table, columnPairs, primaryKeys);
+                    report.addDstChecksumSQL(calculateSql);
+                    try (Connection conn = getDruidConnection(getSyncDbByStreamSeq(streamSeq))) {
+                        String checksum = calculateCheckSumInMemoryHelper(conn, db, calculateSql);
+                        result.add(checksum);
+                    }
                 }
             } else {
-                List<String> columns = getDstColumnsList(SYNC_FIRST_DS, db, table);
-                String calculateSql = buildCheckSumSql(db, table, columns);
-                report.addDstChecksumSQL(calculateSql);
-                try (Connection conn = getCdcSyncDbConnectionFirst()) {
-                    String checksum = calculateCheckSumHelper(conn, calculateSql);
-                    result.add(checksum);
-                }
-                try (Connection conn = getCdcSyncDbConnectionSecond()) {
-                    String checksum = calculateCheckSumHelper(conn, calculateSql);
-                    result.add(checksum);
-                }
-                try (Connection conn = getCdcSyncDbConnectionThird()) {
-                    String checksum = calculateCheckSumHelper(conn, calculateSql);
-                    result.add(checksum);
+                List<Pair<String, String>> columnPairs = getDstColumnsList(SYNC_FIRST_DS, db, table);
+                if (pushDown) {
+                    String calculateSql = buildCheckSumSql(db, table, columnPairs);
+                    report.addDstChecksumSQL(calculateSql);
+                    try (Connection conn = getCdcSyncDbConnectionFirst()) {
+                        String checksum = calculateCheckSumHelper(conn, db, calculateSql);
+                        result.add(checksum);
+                    }
+                    try (Connection conn = getCdcSyncDbConnectionSecond()) {
+                        String checksum = calculateCheckSumHelper(conn, db, calculateSql);
+                        result.add(checksum);
+                    }
+                    try (Connection conn = getCdcSyncDbConnectionThird()) {
+                        String checksum = calculateCheckSumHelper(conn, db, calculateSql);
+                        result.add(checksum);
+                    }
+                } else {
+                    List<String> primaryKeys = getDstPrimaryKeys(SYNC_FIRST_DS, db, table);
+                    String calculateSql = buildSelectHexValueSql(db, table, columnPairs, primaryKeys);
+                    report.addDstChecksumSQL(calculateSql);
+                    try (Connection conn = getCdcSyncDbConnectionFirst()) {
+                        String checksum = calculateCheckSumInMemoryHelper(conn, db, calculateSql);
+                        result.add(checksum);
+                    }
+                    try (Connection conn = getCdcSyncDbConnectionSecond()) {
+                        String checksum = calculateCheckSumInMemoryHelper(conn, db, calculateSql);
+                        result.add(checksum);
+                    }
+                    try (Connection conn = getCdcSyncDbConnectionThird()) {
+                        String checksum = calculateCheckSumInMemoryHelper(conn, db, calculateSql);
+                        result.add(checksum);
+                    }
                 }
             }
         } else {
-            List<String> columns = getDstColumnsList(SYNC_DS, db, table);
-            String calculateSql = buildCheckSumSql(db, table, columns);
-            report.addSrcChecksumSQL(calculateSql);
-            try (Connection conn = getPolardbxConnection()) {
-                String checksum = calculateCheckSumHelper(conn, calculateSql);
-                result.add(checksum);
+            List<Pair<String, String>> columnPairs = getDstColumnsList(SYNC_DS, db, table);
+            if (pushDown) {
+                String calculateSql = buildCheckSumSql(db, table, columnPairs);
+                report.addSrcChecksumSQL(calculateSql);
+                try (Connection conn = getPolardbxConnection()) {
+                    String checksum = calculateCheckSumHelper(conn, db, calculateSql);
+                    result.add(checksum);
+                }
+            } else {
+                List<String> primaryKeys = getSrcPrimaryKeys(db, table);
+                String calculateSql = buildSelectHexValueSql(db, table, columnPairs, primaryKeys);
+                report.addSrcChecksumSQL(calculateSql);
+                try (Connection conn = getPolardbxConnection()) {
+                    String checksum = calculateCheckSumInMemoryHelper(conn, db, calculateSql);
+                    result.add(checksum);
+                }
             }
         }
 
         return result;
     }
 
-    private String calculateCheckSumHelper(Connection conn, String calculateSql)
+    private String calculateCheckSumHelper(Connection conn, String db, String calculateSql)
         throws SQLException {
+        JdbcUtil.useDb(conn, db);
         try (ResultSet rs = JdbcUtil.executeQuerySuccess(conn, calculateSql)) {
             if (rs.next()) {
                 return rs.getString(1);
             }
         }
         return null;
+    }
+
+    private String calculateCheckSumInMemoryHelper(Connection conn, String db, String calculateSql) {
+        try {
+            JdbcUtil.useDb(conn, db);
+            CRC32 crc32 = new CRC32();
+            try (ResultSet rs = JdbcUtil.executeQuerySuccess(conn, calculateSql)) {
+                int columnCount = rs.getMetaData().getColumnCount();
+                while (rs.next()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < columnCount; i++) {
+                        sb.append(rs.getString(i + 1));
+                    }
+                    crc32.update(sb.toString().getBytes("utf8"));
+                }
+            }
+            return crc32.getValue() + "";
+        } catch (Throwable t) {
+            throw new PolardbxException("calculate checksum in memory error, with sql : " + calculateSql, t);
+        }
     }
 
     /**
@@ -467,20 +571,21 @@ public class DataConsistencyTest extends RplBaseTestCase {
         String hashKeysStr = getEscapedColumns(hashKeys);
         String selectSql =
             String.format("SELECT %s FROM `%s`.`%s` ORDER by %s", hashKeysStr, escape(db), escape(table), hashKeysStr);
-        Map<String, String> name2Type = getSrcColumnTypeMap(db, table);
+        Map<String, ColumnType> name2Type = getSrcColumnTypeMap(db, table);
         Map<String, String> name2Charset = getSrcColumnCharsetMap(db, table);
         String defaultCharset = getDefaultCharset(db, table);
-
-        try (Connection conn = getPolardbxConnection();
-            ResultSet rs = JdbcUtil.executeQuerySuccess(conn, selectSql)) {
+        try (Connection conn = getPolardbxConnection()) {
+            JdbcUtil.useDb(conn, db);
+            ResultSet rs = JdbcUtil.executeQuerySuccess(conn, selectSql);
             while (rs.next()) {
                 baos.reset();
                 StringBuilder hashKeysValues = new StringBuilder("(");
                 for (String name : hashKeys) {
-                    String type = name2Type.get(name);
+                    ColumnType columnType = name2Type.get(name);
+                    String type = "bigint(20)";
                     // 隐藏主键类型bigint(20)
-                    if (type == null) {
-                        type = "bigint(20)";
+                    if (columnType != null) {
+                        type = columnType.getType();
                     }
                     boolean unsigned = StringUtils.containsIgnoreCase(type, "unsigned");
                     String charset = name2Charset.get(name);
@@ -488,6 +593,9 @@ public class DataConsistencyTest extends RplBaseTestCase {
                         charset = defaultCharset;
                     }
                     String data = rs.getString(name);
+                    if (data == null && columnType != null && !columnType.canNull) {
+                        data = columnType.getDefaultValue();
+                    }
                     hashKeysValues.append("'").append(data).append("'").append(",");
                     Field field = MakeFieldFactory.makeField(
                         type, data, charset, false, unsigned);
@@ -557,15 +665,15 @@ public class DataConsistencyTest extends RplBaseTestCase {
         return conn;
     }
 
-    private List<String> getSrcColumnList(String db, String tb) throws SQLException {
+    private List<Pair<String, String>> getSrcColumnList(String db, String tb) throws SQLException {
         return getColumnsListHelper(SOURCE_DS, db, tb);
     }
 
-    private List<String> getDstColumnsList(int ds, String db, String tb) throws SQLException {
+    private List<Pair<String, String>> getDstColumnsList(int ds, String db, String tb) throws SQLException {
         return getColumnsListHelper(ds, db, tb);
     }
 
-    private List<String> getColumnsListHelper(int ds, String db, String tb) throws SQLException {
+    private List<Pair<String, String>> getColumnsListHelper(int ds, String db, String tb) throws SQLException {
         try (Connection conn = getDruidConnection(ds)) {
             return JdbcUtil.getColumnNamesByDesc(conn, db, tb);
         }
@@ -585,7 +693,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
         }
     }
 
-    private Map<String, String> getSrcColumnTypeMap(
+    private Map<String, ColumnType> getSrcColumnTypeMap(
         String db, String tb) throws SQLException {
         try (Connection conn = getPolardbxConnection()) {
             return JdbcUtil.getColumnTypesByDesc(conn, db, tb);
@@ -611,10 +719,12 @@ public class DataConsistencyTest extends RplBaseTestCase {
         return Math.abs(Arrays.hashCode(bytes) % STREAM_NUM);
     }
 
-    private String buildCheckSumSql(String db, String table, List<String> columns) {
+    private String buildCheckSumSql(String db, String table, List<Pair<String, String>> columnPairs) {
+        List<String> columns = columnPairs.stream().map(Pair::getLeft).collect(Collectors.toList());
         String concatStr = buildConcatString(columns);
+        String concatHexStr = buildHexString(columnPairs);
         return String.format(CALCULATE_CHECKSUM_SQL_FORMAT,
-            concatStr, escape(db), escape(table));
+            concatStr, concatHexStr, escape(db), escape(table));
     }
 
     private String buildConcatString(List<String> columns) {
@@ -641,16 +751,138 @@ public class DataConsistencyTest extends RplBaseTestCase {
         return concatWsSb.toString();
     }
 
+    private String buildHexConcatString(List<String> columns) {
+        StringBuilder concatWsSb = new StringBuilder();
+        concatWsSb.append("',', ");
+        for (String column : columns) {
+            String escapeColumn = escape(column);
+            if (needConvertToByte()) {
+                concatWsSb.append(String.format("convert(HEX(`%s`) using byte), ", escapeColumn));
+            } else {
+                concatWsSb.append(String.format("HEX(`%s`), ", escapeColumn));
+            }
+        }
+
+        StringBuilder concatSb = new StringBuilder();
+        for (int i = 0; i < columns.size(); i++) {
+            String escapeColumn = escape(columns.get(i));
+            if (i == 0) {
+                concatSb.append(String.format("ISNULL(`%s`)", escapeColumn));
+            } else {
+                concatSb.append(String.format(", ISNULL(`%s`)", escapeColumn));
+            }
+        }
+
+        concatWsSb.append(concatSb);
+        return concatWsSb.toString();
+    }
+
+    private String buildResetHexColumnString(List<String> columns) {
+        StringBuilder concatSb = new StringBuilder();
+        for (int i = 0; i < columns.size(); i++) {
+            String escapeName = escape(columns.get(i));
+            if (i == 0) {
+                concatSb.append(String.format("`hex%s`", escapeName));
+            } else {
+                concatSb.append(String.format(", `hex%s`", escapeName));
+            }
+        }
+        return concatSb.toString();
+    }
+
+    private String buildHexWithHexPrefixString(List<Pair<String, String>> columns, List<String> pks) {
+        StringBuilder concatSb = new StringBuilder();
+        for (int i = 0; i < columns.size(); i++) {
+            Pair<String, String> pair = columns.get(i);
+            String escapeName = escape(pair.getLeft());
+            String wrapName = wrapColumnBeforeHexPrefixString(pair.getRight(), escapeName);
+
+            if (i == 0) {
+                concatSb.append(String.format("HEX(%s) as `hex%s`", wrapName, escapeName));
+            } else {
+                concatSb.append(String.format(", HEX(%s) as `hex%s`", wrapName, escapeName));
+            }
+        }
+        if (CollectionUtils.isNotEmpty(pks)) {
+            for (int i = 0; i < pks.size(); i++) {
+                concatSb.append(String.format(", `%s`", escape(pks.get(i))));
+            }
+        }
+        return concatSb.toString();
+    }
+
+    private String wrapColumnBeforeHexPrefixString(String columnType, String escapeName) {
+        String result;
+        String lowerCaseColumnType = columnType.toLowerCase();
+        if (StringUtils.startsWith(lowerCaseColumnType, "timestamp") ||
+            StringUtils.startsWith(lowerCaseColumnType, "date")) {
+            result = "cast(unix_timestamp(`" + escapeName + "`) as char)";
+        } else if (StringUtils.contains(lowerCaseColumnType, "int") ||
+            StringUtils.contains(lowerCaseColumnType, "dec") ||
+            StringUtils.startsWith(lowerCaseColumnType, "float") ||
+            StringUtils.startsWith(lowerCaseColumnType, "double")) {
+            result = "cast(`" + escapeName + "` as char)";
+        } else {
+            result = "`" + escapeName + "`";
+        }
+        return result;
+    }
+
+    private String buildHexString(List<Pair<String, String>> columns) {
+        StringBuilder concatSb = new StringBuilder();
+        for (int i = 0; i < columns.size(); i++) {
+            Pair<String, String> pair = columns.get(i);
+            String escapeName = escape(pair.getLeft());
+            String wrapName;
+            if (StringUtils.startsWithIgnoreCase(pair.getRight(), "timestamp") ||
+                StringUtils.startsWithIgnoreCase(pair.getRight(), "date")) {
+                wrapName = "unix_timestamp(`" + escapeName + "`)";
+            } else {
+                wrapName = "`" + escapeName + "`";
+            }
+            if (i == 0) {
+                concatSb.append(String.format("HEX(%s) as `%s`", wrapName, escapeName));
+            } else {
+                concatSb.append(String.format(", HEX(%s) as `%s`", wrapName, escapeName));
+            }
+        }
+        return concatSb.toString();
+    }
+
     private boolean needConvertToByte() {
         // todo @yudong
         return false;
     }
 
-    private String buildCheckSumWithInSql(String db, String table, List<String> pks, List<String> columns, String in) {
+    private String buildCheckSumWithInSql(String db, String table, List<String> pks,
+                                          List<Pair<String, String>> columnPairs, String in) {
         String pksStr = getEscapedColumns(pks);
+        List<String> columns = columnPairs.stream().map(c -> c.getLeft()).collect(Collectors.toList());
         String concatStr = buildConcatString(columns);
+        String hexConcatStr = buildHexString(columnPairs);
         return String.format(CALCULATE_CHECKSUM_WITH_IN_SQL_FORMAT,
-            concatStr, escape(db), escape(table), pksStr, in);
+            concatStr, hexConcatStr, escape(db), escape(table), pksStr, in, pksStr);
+    }
+
+    private String buildSelectHexValueWithInSql(String db, String table, List<String> pks,
+                                                List<Pair<String, String>> columnPairs, String in) {
+        String pksStr = getEscapedColumns(pks);
+        List<String> columnList = columnPairs.stream().map(Pair::getLeft).collect(Collectors.toList());
+        String hexConcatStr = buildHexWithHexPrefixString(columnPairs, pks);
+        String resetColumnNameStr = buildResetHexColumnString(columnList);
+        return String.format(SELECT_WITH_IN_FORMAT,
+            resetColumnNameStr, hexConcatStr, escape(db), escape(table), pksStr, in,
+            (pks.isEmpty() || pks.contains("_drds_implicit_id_")) ? resetColumnNameStr :
+                buildResetHexColumnString(pks));
+    }
+
+    private String buildSelectHexValueSql(String db, String table, List<Pair<String, String>> columnPairs,
+                                          List<String> primaryKeys) {
+        String pksStr = buildResetHexColumnString(primaryKeys.isEmpty() ?
+            columnPairs.stream().map(Pair::getLeft).collect(Collectors.toList()) : primaryKeys);
+        String concatHexStr = buildHexWithHexPrefixString(columnPairs, null);
+        return String.format(SELECT_FORMAT,
+            concatHexStr, escape(db), escape(table), pksStr);
     }
 
     /**
@@ -659,6 +891,12 @@ public class DataConsistencyTest extends RplBaseTestCase {
      */
     private String getEscapedColumns(List<String> columns) {
         List<String> escapedColumns = columns.stream().map(c -> '`' + escape(c) + '`').collect(Collectors.toList());
+        return String.join(",", escapedColumns);
+    }
+
+    private String getEscapedColumnsForString(List<String> columns) {
+        List<String> escapedColumns =
+            columns.stream().map(c -> "CONVERT(`" + escape(c) + "`,VARCHAR)").collect(Collectors.toList());
         return String.join(",", escapedColumns);
     }
 
@@ -695,10 +933,10 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
     @Data
     private static class SummaryReport {
-        private int totalTableCount;
-        private int failedTableCount = 0;
         List<String> failedTables = new ArrayList<>();
         List<DetailReport> failedTableReports = new ArrayList<>();
+        private int totalTableCount;
+        private int failedTableCount = 0;
 
         public void addFailedTableCount() {
             failedTableCount++;
@@ -712,4 +950,5 @@ public class DataConsistencyTest extends RplBaseTestCase {
             failedTables.add(table);
         }
     }
+
 }

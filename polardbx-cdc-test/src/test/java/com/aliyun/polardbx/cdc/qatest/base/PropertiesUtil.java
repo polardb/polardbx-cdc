@@ -119,10 +119,14 @@ public class PropertiesUtil {
         return String.valueOf(configProp.getProperty("mysqlDb2", "andor_qatest_polarx2"));
     }
 
-    public static String getConnectionProperties() {
-        return configProp
-            .getProperty("connProperties",
-                "allowMultiQueries=true&rewriteBatchedStatements=true&characterEncoding=utf-8");
+    public static String getConnectionProperties(boolean isMysql) {
+        String connProp = configProp.getProperty("connProperties",
+            "allowMultiQueries=true&rewriteBatchedStatements=true&characterEncoding=utf-8");
+        if (isMysql) {
+            return connProp.replace("&sessionVariables=polardbx_server_id=181818", "");
+        } else {
+            return connProp;
+        }
     }
 
     public static int getCompareDetailParallelism() {
@@ -143,7 +147,7 @@ public class PropertiesUtil {
     }
 
     public static String getCdcCheckTableWhiteList() {
-        String str =  configProp.getProperty("cdcCheckTableWhiteList", "");
+        String str = configProp.getProperty("cdcCheckTableWhiteList", "");
         // 表名可能有中文
         return new String(str.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
     }
@@ -154,11 +158,11 @@ public class PropertiesUtil {
         configProp.getProperty(ConfigConstant.META_DB, "polardbx_meta_db_polardbx");
 
     public static boolean usePrepare() {
-        return getConnectionProperties().contains("useServerPrepStmts=true");
+        return getConnectionProperties(false).contains("useServerPrepStmts=true");
     }
 
     public static boolean useSSL() {
-        return getConnectionProperties().contains("useSSL=true");
+        return getConnectionProperties(false).contains("useSSL=true");
     }
 
     public static final boolean useDruid = Boolean.parseBoolean(configProp.getProperty("useDruid", "false"));

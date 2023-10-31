@@ -28,8 +28,8 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.WriteRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.XaPrepareLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.XidLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
-import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.ConsoleTableMetaTSDB;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
+import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.TableMetaTSDB;
 import com.aliyun.polardbx.binlog.format.BinlogBuilder;
 import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
 import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
@@ -88,7 +88,7 @@ public class BinlogGenerator extends LogBuffer {
         super(new byte[1024], 0, 1024);
         this.tableDDL = tableDDL;
         MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
-        memoryTableMeta.apply(ConsoleTableMetaTSDB.INIT_POSITION, db, tableDDL, null);
+        memoryTableMeta.apply(TableMetaTSDB.INIT_POSITION, db, tableDDL, null);
         tableMeta = memoryTableMeta.find(db, tb);
         this.db = db;
         this.tb = tb;
@@ -141,7 +141,7 @@ public class BinlogGenerator extends LogBuffer {
     public RowsQueryLogEvent generateRowQueryLogEvent() throws Exception {
         RowsQueryEventBuilder builder = new RowsQueryEventBuilder((int) (System.currentTimeMillis() / 1000),
             1,
-            "/*DRDS /127.0.0.1/11aaba16c1800000-2/2/XXXXXXXXXXXXXXXXXXXXXXXXX/ */");
+            "/*DRDS /127.0.0.1/11aaba16c1800000-2/2/1024 */");
         return new RowsQueryLogEvent(rebuild(builder), this, fde);
     }
 
@@ -167,7 +167,7 @@ public class BinlogGenerator extends LogBuffer {
             CollationCharset.utf8mb4Charset.getId(),
             false,
             (int) (System.currentTimeMillis() / 1000),
-            1);
+            1, 0);
         return new QueryLogEvent(rebuild(queryEventBuilder), this, fde);
     }
 
@@ -179,7 +179,7 @@ public class BinlogGenerator extends LogBuffer {
             CollationCharset.utf8mb4Charset.getId(),
             false,
             (int) (System.currentTimeMillis() / 1000),
-            1);
+            1, 0);
         return new QueryLogEvent(rebuild(queryEventBuilder), this, fde);
     }
 
@@ -191,7 +191,7 @@ public class BinlogGenerator extends LogBuffer {
             CollationCharset.utf8mb4Charset.getId(),
             false,
             (int) (System.currentTimeMillis() / 1000),
-            1);
+            1, 0);
         return new QueryLogEvent(rebuild(queryEventBuilder), this, fde);
     }
 

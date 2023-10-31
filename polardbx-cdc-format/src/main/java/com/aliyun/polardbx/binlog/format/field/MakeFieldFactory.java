@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.format.field;
 
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 import lombok.SneakyThrows;
@@ -37,8 +38,14 @@ public class MakeFieldFactory {
     @SneakyThrows
     public static Field makeField(String typefunc, Serializable data, String charset, boolean nullable,
                                   boolean unsigned) {
-        CreateField createField = CreateField.parse(typefunc, data, charset, nullable, unsigned);
-        return makeFieldInternal(createField);
+        try {
+            CreateField createField = CreateField.parse(typefunc, data, charset, nullable, unsigned);
+            return makeFieldInternal(createField);
+        } catch (Throwable t) {
+            throw new PolardbxException(
+                "make filed error! type:" + typefunc + ", data:" + data + ", charset" + charset + ", nullable:"
+                    + nullable + ",unsigned:" + unsigned, t);
+        }
     }
 
     private static Field makeFieldInternal(CreateField createField) throws InvalidInputDataException {

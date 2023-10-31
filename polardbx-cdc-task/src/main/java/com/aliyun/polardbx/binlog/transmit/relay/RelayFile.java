@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.transmit.relay;
 
-import com.aliyun.polardbx.binlog.BufferUtil;
+import com.aliyun.polardbx.binlog.util.BufferUtil;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import lombok.extern.slf4j.Slf4j;
@@ -33,7 +33,7 @@ import java.nio.channels.FileChannel;
 @Slf4j
 public class RelayFile {
     //前4个byte代表长度，最后一个byte代表标记为(保留)
-    public final static int HEADER_SIZE = 5;
+    public static final int HEADER_SIZE = 5;
 
     private final File file;
     private final RandomAccessFile raf;

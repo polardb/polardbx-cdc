@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.extractor;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.merge.MergeSource;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
@@ -24,6 +23,7 @@ import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnBufferItem;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.aliyun.polardbx.binlog.stress.BaseStressSimulator;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.ByteString;
 import org.slf4j.Logger;
@@ -92,13 +92,13 @@ public class MockExtractor implements Extractor {
                     .build(), false);
 
                 long tso;
-                String txnId;
+                long txnId;
 
                 // send heartbeat
                 tso = ++TSO_SEED;
-                txnId = String.valueOf(++TXNID_SEED);
+                txnId = ++TXNID_SEED;
                 mergeSource.push(TxnToken.newBuilder()
-                    .setTso(CommonUtils.generateTSO(tso, txnId, partitionId))
+                    .setTso(CommonUtils.generateTSO(tso, String.valueOf(txnId), partitionId))
                     .setTxnId(txnId)
                     .setPartitionId(partitionId)
                     .setType(TxnType.META_HEARTBEAT)
@@ -109,9 +109,9 @@ public class MockExtractor implements Extractor {
 
                 // send heartbeat
                 tso = ++TSO_SEED;
-                txnId = String.valueOf(++TXNID_SEED);
+                txnId = ++TXNID_SEED;
                 mergeSource.push(TxnToken.newBuilder()
-                    .setTso(CommonUtils.generateTSO(tso, txnId, partitionId))
+                    .setTso(CommonUtils.generateTSO(tso, String.valueOf(txnId), partitionId))
                     .setTxnId(txnId)
                     .setPartitionId(partitionId)
                     .setType(TxnType.META_HEARTBEAT)
@@ -124,7 +124,7 @@ public class MockExtractor implements Extractor {
                 while (true) {
                     int traceId = 1111;
                     tso = ++TSO_SEED;
-                    txnId = String.valueOf(++TXNID_SEED);
+                    txnId = ++TXNID_SEED;
 
                     boolean isXA;
                     if (txnType == 0) {
@@ -151,7 +151,7 @@ public class MockExtractor implements Extractor {
                         }
                     }
                     mergeSource.push(TxnToken.newBuilder()
-                        .setTso(CommonUtils.generateTSO(tso, txnId, partitionId))
+                        .setTso(CommonUtils.generateTSO(tso, String.valueOf(txnId), partitionId))
                         .setTxnId(txnId)
                         .setPartitionId(partitionId)
                         .setType(TxnType.DML)

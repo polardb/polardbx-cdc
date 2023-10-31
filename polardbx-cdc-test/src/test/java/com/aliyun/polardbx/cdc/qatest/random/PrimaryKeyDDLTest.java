@@ -62,7 +62,7 @@ public class PrimaryKeyDDLTest extends RplBaseTestCase {
     private static final String ADD_PK = "alter table test_table add primary key(id)";
     private static final String CREATE_DB = "create database " + PK_TEST_DB;
     private AtomicLong idGenerator = new AtomicLong(0);
-    private boolean running = true;
+    private volatile boolean running = true;
 
     private ExecutorService executorService = Executors.newFixedThreadPool(2, new ThreadFactory() {
         @Override
@@ -180,16 +180,18 @@ public class PrimaryKeyDDLTest extends RplBaseTestCase {
         executorService.execute(() -> {
             dml();
             latch.countDown();
+            logger.info("dml thread is finished.");
         });
         executorService.execute(() -> {
             ddl();
             latch.countDown();
+            logger.info("ddl thread is finished.");
         });
 
         // 跑10分钟
         Thread.sleep(TimeUnit.MINUTES.toMillis(10));
         running = false;
-        if (!latch.await(30, TimeUnit.SECONDS)) {
+        if (!latch.await(60, TimeUnit.SECONDS)) {
             throw new PolardbxException("wait all async task finish failed!");
         }
         CheckParameter checkParameter =

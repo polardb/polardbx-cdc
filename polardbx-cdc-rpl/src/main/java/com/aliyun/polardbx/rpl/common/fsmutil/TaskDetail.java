@@ -27,8 +27,5 @@ public class TaskDetail {
     private Integer progress;
     private Long delay;
     private Long rps;
-    // arguably should not return following config
-//    private String taskExtractorConfig;
-//    private String taskPipelineConfig;
-//    private String taskApplierConfig;
+    private Long lastCommitSec;
 }

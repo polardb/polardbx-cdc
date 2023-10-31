@@ -23,7 +23,7 @@ public class XARollbackEventProcessor implements ILogEventProcessor<QueryLogEven
     @Override
     public void handle(QueryLogEvent event, ProcessorContext context) {
         String xid = LogEventUtil.getXid(event);
-        if (xid != null) {
+        if (xid != null && LogEventUtil.isValidXid(xid)) {
             context.completeTranPos(xid);
         }
     }

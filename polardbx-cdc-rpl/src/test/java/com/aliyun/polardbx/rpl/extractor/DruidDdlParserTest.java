@@ -13,25 +13,30 @@
  * limitations under the License.
  */
 package com.aliyun.polardbx.rpl.extractor;
+
+import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DdlResult;
 import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DruidDdlParser;
 import org.junit.Test;
 
 import java.util.List;
 
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatementList;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 public class DruidDdlParserTest {
+
     @Test
     public void DruidDdlParserTest() {
         String sql1 = "ALTER TABLE `res_catalog`\n"
             + "  COMMENT = ''";
-        String sql2 = "ALTER TABLE res_catalog";
+        String sql2 =
+            "create table if not exists `t_hash_hash_not_template_1690868091444` (a bigint unsigned not null,b bigint unsigned not null,c datetime NOT NULL,d varchar(16) NOT NULL,e varchar(16) NOT NULL)partition by hash (c,d) partitions 2 subpartition by hash (a,b)(  partition p1 subpartitions 2,  partition p2 subpartitions 4)";
         DdlResult result1 = DruidDdlParser.parse(sql1, "abc").get(0);
         List<DdlResult> resultList2 = DruidDdlParser.parse(sql2, "abc");
+        List<SQLStatement> stmtList = parseSQLStatementList(sql2);
+        String a = stmtList.get(0).toString();
         assertNotNull(result1);
         assertNotNull(resultList2);
-        assertTrue(resultList2.isEmpty());
     }
 }

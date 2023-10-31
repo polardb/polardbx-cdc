@@ -42,10 +42,9 @@ esac
 BASE_HOME=${BASE_HOME}/../
 
 
-export LD_LIBRARY_PATH=${BASE_HOME}/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=${BASE_HOME}/lib/native:${LD_LIBRARY_PATH}
 export NLS_LANG=AMERICAN_AMERICA.ZHS16GBK
 export LANG=zh_CN.GB18030
-
 
 logback_configurationFile=${BASE_HOME}/conf/rpl-logback.xml
 
@@ -88,6 +87,8 @@ fi
 
 JAVA_OPTS="${JAVA_OPTS} -XX:+HeapDumpOnOutOfMemoryError"
 JAVA_OPTS="${JAVA_OPTS} -XX:HeapDumpPath=${HOME}/logs"
+JAVA_OPTS="${JAVA_OPTS} -XX:+CrashOnOutOfMemoryError"
+JAVA_OPTS="${JAVA_OPTS} -XX:ErrorFile=${HOME}/hs_err_pid%p.log"
 
 JAVA_OPTS="${JAVA_OPTS} ${JVM_PARAMS}"
 

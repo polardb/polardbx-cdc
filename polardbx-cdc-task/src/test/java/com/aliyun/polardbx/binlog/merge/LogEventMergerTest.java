@@ -17,23 +17,19 @@ package com.aliyun.polardbx.binlog.merge;
 import com.aliyun.polardbx.binlog.collect.Collector;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 
-/**
- *
- **/
-public class LogEventMergerTest {
-
-    @Test
-    public void correctnessTest() {
-        System.out.println(System.currentTimeMillis());
-    }
+public class LogEventMergerTest extends BaseTest {
 
     // 单纯测merge算法的性能
     @Test
+    @Ignore
     public void testPureMergePerformance() {
         int sourceCount = 4;
         int tokenCount = 1000000;
@@ -101,22 +97,29 @@ public class LogEventMergerTest {
 
     private List<MergeSource> generateMergeSource(LogEventMerger merger, int sourceCount, int tokenCount) {
         List<MergeSource> sources = new ArrayList<>();
-        /*
-         * for (int i = 0; i < sourceCount; i++) { String sourceId = "S" + i;
-         * MergeSource source = new MergeSource(sourceId, generateQueue(tokenCount,
-         * sourceId)); merger.addMergeSource(source); sources.add(source); }
-         */
+        for (int i = 0; i < sourceCount; i++) {
+            String sourceId = "S" + i;
+            MergeSource source = new MergeSource(sourceId, generateQueue(tokenCount, sourceId), null);
+            merger.addMergeSource(source);
+            sources.add(source);
+        }
         return sources;
     }
 
-    /*
-     * private Queue<TxnToken> generateQueue(int tokenCount, String suffix) { long
-     * seed = System.currentTimeMillis(); ArrayBlockingQueue<TxnToken> queue = new
-     * ArrayBlockingQueue<>(tokenCount); for (int i = 0; i < tokenCount; i++) {
-     * TxnToken t = new TxnToken(); t.setTso(addZeroForNum(String.valueOf(seed), 32)
-     * + "-" + suffix); // t.setTso(seed + "-" + suffix); queue.add(t); seed++; }
-     * return queue; }
-     */
+    private ArrayBlockingQueue<MergeItem> generateQueue(int tokenCount, String suffix) {
+        long
+            seed = System.currentTimeMillis();
+        ArrayBlockingQueue<MergeItem> queue = new
+            ArrayBlockingQueue<>(tokenCount);
+        for (int i = 0; i < tokenCount; i++) {
+            TxnToken t = TxnToken.newBuilder()
+                .setTso(addZeroForNum(String.valueOf(seed), 32) + "-" + suffix)
+                .build();
+            queue.add(new MergeItem(suffix, t));
+            seed++;
+        }
+        return queue;
+    }
 
     private String addZeroForNum(String str, int strLength) {
         int strLen = str.length();

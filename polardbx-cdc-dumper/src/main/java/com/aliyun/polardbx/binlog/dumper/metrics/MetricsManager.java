@@ -24,10 +24,14 @@ import com.aliyun.polardbx.binlog.metrics.format.TableFormat;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.monitor.MonitorValue;
+import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
+import com.aliyun.polardbx.binlog.proc.ProcUtils;
 import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
 import com.aliyun.polardbx.binlog.util.MetricsReporter;
 import com.google.common.collect.Lists;
 import lombok.SneakyThrows;
+import org.apache.commons.lang3.time.DateFormatUtils;
+import org.hyperic.sigar.CpuPerc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.CollectionUtils;
@@ -40,16 +44,18 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.ALARM_DELAY_THRESHOLD;
-import static com.aliyun.polardbx.binlog.ConfigKeys.ALARM_NODATA_THRESHOLD;
+import static com.aliyun.polardbx.binlog.ConfigKeys.ALARM_DELAY_THRESHOLD_SECOND;
+import static com.aliyun.polardbx.binlog.ConfigKeys.ALARM_NODATA_THRESHOLD_SECOND;
 import static com.aliyun.polardbx.binlog.ConfigKeys.PRINT_METRICS;
 import static com.aliyun.polardbx.binlog.util.CommonMetricsHelper.addJvmMetrics;
+import static com.aliyun.polardbx.binlog.util.CommonMetricsHelper.addProcMetrics;
 
 /**
  * Created by ziyang.lb
@@ -66,6 +72,8 @@ public class MetricsManager {
     private final boolean leader;
     private MetricsSnapshot lastSnapshot;
     private long startTime;
+
+    private final Map<String, DumpClientMetric> dumpClientMetricsMap = new ConcurrentHashMap<>();
 
     public MetricsManager(String taskName, TaskType taskType) {
         this.taskType = taskType;
@@ -116,7 +124,7 @@ public class MetricsManager {
         boolean doAlarm;
         long noDataTime;
 
-        int threshold = DynamicApplicationConfig.getInt(ALARM_NODATA_THRESHOLD);
+        int threshold = DynamicApplicationConfig.getInt(ALARM_NODATA_THRESHOLD_SECOND);
         if (streamMetrics.getLatestDataReceiveTime() == 0L) {
             noDataTime = System.currentTimeMillis() - startTime;
             doAlarm = noDataTime > threshold * 2 * 1000;
@@ -139,7 +147,7 @@ public class MetricsManager {
     }
 
     private void tryAlarmDelay(StreamMetrics streamMetrics) {
-        int threshold = DynamicApplicationConfig.getInt(ALARM_DELAY_THRESHOLD) * 1000;
+        int threshold = DynamicApplicationConfig.getInt(ALARM_DELAY_THRESHOLD_SECOND) * 1000;
         long delayTime = streamMetrics.getLatestDelayTimeOnCommit();
         if (delayTime > threshold) {
             if (leader) {
@@ -164,13 +172,47 @@ public class MetricsManager {
         contactStreamAvgMetrics(snapshot, sb);
         contactStreamInstantMetrics(snapshot, sb);
         contactJvmMetrics(snapshot, sb);
-
+        contactProcMetrics(snapshot, sb);
+        contactDumpClientMetrics(sb);
         sb.append("\r\n");
         sb.append(
             "######################################################## dumper metrics end ########################################################");
         sb.append("\r\n");
 
         METRICS_LOGGER.info(sb.toString());
+    }
+
+    private void contactDumpClientMetrics(StringBuilder sb) {
+        if (dumpClientMetricsMap.isEmpty()) {
+            return;
+        }
+        TableFormat dumperClientFormat = new TableFormat("Dumper Client Metrics");
+        dumperClientFormat.addColumn(
+            "ip",
+            "port",
+            "fileName",
+            "position",
+            "delay(s)",
+            "bps",
+            "lastSyncTimestamp",
+            "alive(s)"
+        );
+        long now = System.currentTimeMillis();
+        for (DumpClientMetric metric : dumpClientMetricsMap.values()) {
+            long delay = TimeUnit.MILLISECONDS.toSeconds(now) - metric.getTimestamp();
+            long alive = TimeUnit.MILLISECONDS.toSeconds(now - metric.getDumpStartTimestamp());
+            dumperClientFormat.addRow(
+                metric.getRemoteIp(),
+                metric.getRemotePort(),
+                metric.getFileName(),
+                metric.getPosition(),
+                delay,
+                metric.getDumpBps(),
+                DateFormatUtils.format(metric.getLastSyncTimestamp(), "yyyy-MM-dd HH:mm:ss"),
+                alive
+            );
+        }
+        sb.append(dumperClientFormat);
     }
 
     private void contactStreamTotalMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
@@ -180,18 +222,28 @@ public class MetricsManager {
         TableFormat streamTotalFormatInfo = new TableFormat("Stream Total Metrics");
         streamTotalFormatInfo.addColumn(
             "streamId",
-            "revEventCount",
+            "revEventCnt",
             "revEventBytes",
-            "writeEventCount",
+            "writeEventCnt",
+            "wrDmlCnt",
+            "wrDmlCnt(M)",
+            "wrDmlCnt(I)",
+            "wrDmlCnt(U)",
+            "wrDmlCnt(D)",
             "writeEventBytes",
-            "writeTxnCount",
-            "writeFlushCount");
+            "writeTxnCnt",
+            "writeFlushCnt");
         for (StreamMetrics metrics : snapshot.streamMetrics.values()) {
             streamTotalFormatInfo.addRow(
                 metrics.getStreamId(),
                 metrics.getTotalRevEventCount(),
                 metrics.getTotalRevEventBytes(),
                 metrics.getTotalWriteEventCount(),
+                metrics.getTotalWriteDmlEventCount(),
+                metrics.getTotalWriteDmlTabMapEventCount(),
+                metrics.getTotalWriteDmlInsertEventCount(),
+                metrics.getTotalWriteDmlUpdateEventCount(),
+                metrics.getTotalWriteDmlDeleteEventCount(),
                 metrics.getTotalWriteEventBytes(),
                 metrics.getTotalWriteTxnCount(),
                 metrics.getTotalWriteFlushCount());
@@ -203,24 +255,35 @@ public class MetricsManager {
         if (snapshot.periodAverage.isEmpty()) {
             return;
         }
-        TableFormat streamAvgFormatInfo = new TableFormat("Stream Average Metrics");
+        TableFormat streamAvgFormatInfo =
+            new TableFormat("Stream Average Metrics (wt = write time ; PT = Per Txn ; PE = Per Event)");
         streamAvgFormatInfo.addColumn(
             "streamId",
             "revEps",
             "revBps",
             "writeEps",
+            "wrDmlEps",
+            "wrDmlEps(M)",
+            "wrDmlEps(I)",
+            "wrDmlEps(U)",
+            "wrDmlEps(D)",
             "writeTps",
             "writeBps",
             "uploadBps",
             "dumpBps",
-            "writeTimePerTxn(ms)",
-            "writeTimePerEvent(ms)");
+            "wtPT(ms)",
+            "wtPE(ms)");
         for (StreamMetricsAverage metrics : snapshot.periodAverage.values()) {
             streamAvgFormatInfo.addRow(
                 metrics.streamId,
                 metrics.avgRevEps,
                 metrics.avgRevBps,
                 metrics.avgWriteEps,
+                metrics.avgWriteDmlEps,
+                metrics.avgWriteDmlTabMapEps,
+                metrics.avgWriteDmlInsertEps,
+                metrics.avgWriteDmlUpdateEps,
+                metrics.avgWriteDmlDeleteEps,
                 metrics.avgWriteTps,
                 metrics.avgWriteBps,
                 metrics.avgUploadBps,
@@ -283,20 +346,49 @@ public class MetricsManager {
         sb.append(jvmFormatInfo);
     }
 
+    private void contactProcMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
+        if (snapshot.procSnapshot == null) {
+            return;
+        }
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        TableFormat osFormatInfo = new TableFormat("Proc Metrics");
+        osFormatInfo.addColumn(
+            "pid",
+            "startTime",
+            "cpuPercent",
+            "cpuTotal",
+            "cpuUser",
+            "cpuSys",
+            "memSize",
+            "fdNum");
+        osFormatInfo.addRow(
+            snapshot.procSnapshot.getPid(),
+            sdf.format(new Date(snapshot.procSnapshot.getStartTime())),
+            CpuPerc.format(snapshot.procSnapshot.getCpuPercent()),
+            snapshot.procSnapshot.getCpuTotal(),
+            snapshot.procSnapshot.getCpuUser(),
+            snapshot.procSnapshot.getCpuSys(),
+            snapshot.procSnapshot.getMemSize(),
+            snapshot.procSnapshot.getFdNum());
+        sb.append(osFormatInfo);
+    }
+
     private void sendMetrics(MetricsSnapshot snapshot) {
         if (taskType == TaskType.Dumper) {
             // 只会有一个流
             for (StreamMetrics metrics : snapshot.streamMetrics.values()) {
-                sendMetrics4Dumper(metrics, snapshot.periodAverage.get(metrics.getStreamId()), snapshot.jvmSnapshot);
+                sendMetrics4Dumper(metrics, snapshot.periodAverage.get(metrics.getStreamId()), snapshot.jvmSnapshot,
+                    snapshot.procSnapshot);
             }
         } else {
             DumperXMetrics dumperXMetrics = buildDumperXMetrics(snapshot);
-            sendMetrics4DumperX(dumperXMetrics, snapshot.jvmSnapshot);
+            sendMetrics4DumperX(dumperXMetrics, snapshot.jvmSnapshot, snapshot.procSnapshot);
         }
     }
 
     @SneakyThrows
-    private void sendMetrics4DumperX(DumperXMetrics dumperXMetrics, JvmSnapshot jvmSnapshot) {
+    private void sendMetrics4DumperX(DumperXMetrics dumperXMetrics, JvmSnapshot jvmSnapshot,
+                                     ProcSnapshot procSnapshot) {
         List<CommonMetrics> commonMetrics = Lists.newArrayList();
         Field[] metricsFields = DumperXMetrics.class.getDeclaredFields();
         for (Field f : metricsFields) {
@@ -316,13 +408,18 @@ public class MetricsManager {
             addJvmMetrics(commonMetrics, jvmSnapshot, prefix);
         }
 
+        if (procSnapshot != null) {
+            addProcMetrics(commonMetrics, procSnapshot, "polardbx_cdc_dumper_x_");
+        }
+
         if (!CollectionUtils.isEmpty(commonMetrics)) {
             MetricsReporter.report(commonMetrics);
         }
     }
 
     @SneakyThrows
-    private void sendMetrics4Dumper(StreamMetrics metrics, StreamMetricsAverage average, JvmSnapshot jvmSnapshot) {
+    private void sendMetrics4Dumper(StreamMetrics metrics, StreamMetricsAverage average, JvmSnapshot jvmSnapshot,
+                                    ProcSnapshot procSnapshot) {
         List<CommonMetrics> commonMetrics = Lists.newArrayList();
         Field[] metricsFields = StreamMetrics.class.getDeclaredFields();
         for (Field f : metricsFields) {
@@ -380,6 +477,10 @@ public class MetricsManager {
             addJvmMetrics(commonMetrics, jvmSnapshot, prefix);
         }
 
+        if (procSnapshot != null) {
+            addProcMetrics(commonMetrics, procSnapshot, "polardbx_cdc_dumper_");
+        }
+
         if (!CollectionUtils.isEmpty(commonMetrics)) {
             MetricsReporter.report(commonMetrics);
         }
@@ -389,7 +490,7 @@ public class MetricsManager {
         MetricsSnapshot snapshot = new MetricsSnapshot(snapshotSeq.incrementAndGet());
         snapshot.timestamp = System.currentTimeMillis();
         snapshot.jvmSnapshot = JvmUtils.buildJvmSnapshot();
-
+        snapshot.procSnapshot = ProcUtils.buildProcSnapshot();
         snapshot.streamMetrics = new HashMap<>();
         for (StreamMetrics metrics : StreamMetrics.getMetricsMap().values()) {
             snapshot.streamMetrics.put(metrics.getStreamId(), metrics.snapshot());
@@ -409,6 +510,11 @@ public class MetricsManager {
             long periodRevEventCount;
             long periodRevEventBytes;
             long periodWriteEventCount;
+            long periodWriteDmlEventCount;
+            long periodWriteDmlTabMapEventCount;
+            long periodWriteDmlInsertEventCount;
+            long periodWriteDmlUpdateEventCount;
+            long periodWriteDmlDeleteEventCount;
             long periodWriteTxnCount;
             long periodWriteEventBytes;
             double periodWriteTxnTime;
@@ -420,6 +526,11 @@ public class MetricsManager {
                 periodRevEventCount = latestMetrics.getTotalRevEventCount();
                 periodRevEventBytes = latestMetrics.getTotalRevEventBytes();
                 periodWriteEventCount = latestMetrics.getTotalWriteEventCount();
+                periodWriteDmlEventCount = latestMetrics.getTotalWriteDmlEventCount();
+                periodWriteDmlTabMapEventCount = latestMetrics.getTotalWriteDmlTabMapEventCount();
+                periodWriteDmlInsertEventCount = latestMetrics.getTotalWriteDmlInsertEventCount();
+                periodWriteDmlUpdateEventCount = latestMetrics.getTotalWriteDmlUpdateEventCount();
+                periodWriteDmlDeleteEventCount = latestMetrics.getTotalWriteDmlDeleteEventCount();
                 periodWriteTxnCount = latestMetrics.getTotalWriteTxnCount();
                 periodWriteEventBytes = latestMetrics.getTotalWriteEventBytes();
                 periodWriteTxnTime = (double) (latestMetrics.getTotalWriteTxnTime());
@@ -433,6 +544,16 @@ public class MetricsManager {
                     .get(latestMetrics.getStreamId()).getTotalRevEventBytes();
                 periodWriteEventCount = latestMetrics.getTotalWriteEventCount() - lastSnapshot.streamMetrics
                     .get(latestMetrics.getStreamId()).getTotalWriteEventCount();
+                periodWriteDmlEventCount = latestMetrics.getTotalWriteDmlEventCount() - lastSnapshot.streamMetrics
+                    .get(latestMetrics.getStreamId()).getTotalWriteDmlEventCount();
+                periodWriteDmlTabMapEventCount = latestMetrics.getTotalWriteDmlTabMapEventCount() - lastSnapshot
+                    .streamMetrics.get(latestMetrics.getStreamId()).getTotalWriteDmlTabMapEventCount();
+                periodWriteDmlInsertEventCount = latestMetrics.getTotalWriteDmlInsertEventCount() - lastSnapshot
+                    .streamMetrics.get(latestMetrics.getStreamId()).getTotalWriteDmlInsertEventCount();
+                periodWriteDmlUpdateEventCount = latestMetrics.getTotalWriteDmlUpdateEventCount() - lastSnapshot
+                    .streamMetrics.get(latestMetrics.getStreamId()).getTotalWriteDmlUpdateEventCount();
+                periodWriteDmlDeleteEventCount = latestMetrics.getTotalWriteDmlDeleteEventCount() - lastSnapshot
+                    .streamMetrics.get(latestMetrics.getStreamId()).getTotalWriteDmlDeleteEventCount();
                 periodWriteTxnCount = latestMetrics.getTotalWriteTxnCount() - lastSnapshot.streamMetrics
                     .get(latestMetrics.getStreamId()).getTotalWriteTxnCount();
                 periodWriteEventBytes = latestMetrics.getTotalWriteEventBytes() - lastSnapshot.streamMetrics
@@ -457,6 +578,11 @@ public class MetricsManager {
                 new BigDecimal(periodWriteTxnTime).divide(new BigDecimal(periodWriteEventCount), 2,
                     BigDecimal.ROUND_HALF_UP);
             periodAverage.avgWriteEps = periodWriteEventCount / period;
+            periodAverage.avgWriteDmlEps = periodWriteDmlEventCount / period;
+            periodAverage.avgWriteDmlTabMapEps = periodWriteDmlTabMapEventCount / period;
+            periodAverage.avgWriteDmlInsertEps = periodWriteDmlInsertEventCount / period;
+            periodAverage.avgWriteDmlUpdateEps = periodWriteDmlUpdateEventCount / period;
+            periodAverage.avgWriteDmlDeleteEps = periodWriteDmlDeleteEventCount / period;
             periodAverage.avgWriteBps = periodWriteEventBytes / period;
             periodAverage.avgWriteTps = periodWriteTxnCount / period;
             periodAverage.avgUploadBps = periodUploadBytes / period;
@@ -484,6 +610,51 @@ public class MetricsManager {
             .mapToLong(s -> s.avgWriteEps).min().orElse(0);
         xMetrics.sumWriteEps = snapshot.periodAverage.values().stream()
             .mapToLong(s -> s.avgWriteEps).sum();
+
+        xMetrics.avgWriteDmlEps = Double.valueOf(snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlEps).average().orElse(0)).longValue();
+        xMetrics.maxWriteDmlEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlEps).max().orElse(0);
+        xMetrics.minWriteDmlEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlEps).min().orElse(0);
+        xMetrics.sumWriteDmlEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlEps).sum();
+
+        xMetrics.avgWriteDmlTabMapEps = Double.valueOf(snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlTabMapEps).average().orElse(0)).longValue();
+        xMetrics.maxWriteDmlTabMapEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlTabMapEps).max().orElse(0);
+        xMetrics.minWriteDmlTabMapEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlTabMapEps).min().orElse(0);
+        xMetrics.sumWriteDmlTabMapEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlTabMapEps).sum();
+
+        xMetrics.avgWriteDmlInsertEps = Double.valueOf(snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlInsertEps).average().orElse(0)).longValue();
+        xMetrics.maxWriteDmlInsertEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlInsertEps).max().orElse(0);
+        xMetrics.minWriteDmlInsertEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlInsertEps).min().orElse(0);
+        xMetrics.sumWriteDmlInsertEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlInsertEps).sum();
+
+        xMetrics.avgWriteDmlUpdateEps = Double.valueOf(snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlUpdateEps).average().orElse(0)).longValue();
+        xMetrics.maxWriteDmlUpdateEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlUpdateEps).max().orElse(0);
+        xMetrics.minWriteDmlUpdateEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlUpdateEps).min().orElse(0);
+        xMetrics.sumWriteDmlUpdateEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlUpdateEps).sum();
+
+        xMetrics.avgWriteDmlDeleteEps = Double.valueOf(snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlDeleteEps).average().orElse(0)).longValue();
+        xMetrics.maxWriteDmlDeleteEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlDeleteEps).max().orElse(0);
+        xMetrics.minWriteDmlDeleteEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlDeleteEps).min().orElse(0);
+        xMetrics.sumWriteDmlDeleteEps = snapshot.periodAverage.values().stream()
+            .mapToLong(s -> s.avgWriteDmlDeleteEps).sum();
 
         xMetrics.avgRevEps = Double.valueOf(snapshot.periodAverage.values().stream()
             .mapToLong(s -> s.avgRevEps).average().orElse(0)).longValue();
@@ -513,7 +684,7 @@ public class MetricsManager {
             .mapToLong(s -> s.avgWriteBps).sum();
 
         xMetrics.avgWriteTimePerEvent = BigDecimal.valueOf(snapshot.periodAverage.values().stream()
-            .mapToDouble(s -> s.avgWriteTimePerEvent.doubleValue()).average().orElse(0))
+                .mapToDouble(s -> s.avgWriteTimePerEvent.doubleValue()).average().orElse(0))
             .setScale(3, BigDecimal.ROUND_HALF_UP).doubleValue();
         xMetrics.maxWriteTimePerEvent = snapshot.periodAverage.values().stream()
             .mapToDouble(s -> s.avgWriteTimePerEvent.doubleValue()).max().orElse(0);
@@ -521,7 +692,7 @@ public class MetricsManager {
             .mapToDouble(s -> s.avgWriteTimePerEvent.doubleValue()).min().orElse(0);
 
         xMetrics.avgWriteTimePerTxn = BigDecimal.valueOf(snapshot.periodAverage.values().stream()
-            .mapToDouble(s -> s.avgWriteTimePerTxn.doubleValue()).average().orElse(0))
+                .mapToDouble(s -> s.avgWriteTimePerTxn.doubleValue()).average().orElse(0))
             .setScale(3, BigDecimal.ROUND_HALF_UP).doubleValue();
         xMetrics.maxWriteTimePerTxn = snapshot.periodAverage.values().stream()
             .mapToDouble(s -> s.avgWriteTimePerTxn.doubleValue()).max().orElse(0);
@@ -568,6 +739,7 @@ public class MetricsManager {
         Map<String, StreamMetrics> streamMetrics;
         Map<String, StreamMetricsAverage> periodAverage;
         JvmSnapshot jvmSnapshot;
+        ProcSnapshot procSnapshot;
     }
 
     static class StreamMetricsAverage {
@@ -592,6 +764,11 @@ public class MetricsManager {
          * 所有事件写入binlog文件的平均tps
          */
         long avgWriteEps;
+        long avgWriteDmlEps;
+        long avgWriteDmlTabMapEps;
+        long avgWriteDmlInsertEps;
+        long avgWriteDmlUpdateEps;
+        long avgWriteDmlDeleteEps;
         /**
          * 完成一个事务写入的平均耗时
          */
@@ -619,6 +796,31 @@ public class MetricsManager {
         long maxWriteEps;
         long minWriteEps;
         long sumWriteEps;
+
+        long avgWriteDmlEps;
+        long maxWriteDmlEps;
+        long minWriteDmlEps;
+        long sumWriteDmlEps;
+
+        long avgWriteDmlTabMapEps;
+        long maxWriteDmlTabMapEps;
+        long minWriteDmlTabMapEps;
+        long sumWriteDmlTabMapEps;
+
+        long avgWriteDmlInsertEps;
+        long maxWriteDmlInsertEps;
+        long minWriteDmlInsertEps;
+        long sumWriteDmlInsertEps;
+
+        long avgWriteDmlUpdateEps;
+        long maxWriteDmlUpdateEps;
+        long minWriteDmlUpdateEps;
+        long sumWriteDmlUpdateEps;
+
+        long avgWriteDmlDeleteEps;
+        long maxWriteDmlDeleteEps;
+        long minWriteDmlDeleteEps;
+        long sumWriteDmlDeleteEps;
 
         long avgRevEps;
         long maxRevEps;
@@ -657,5 +859,13 @@ public class MetricsManager {
         long maxWriteQueueSize;
         long minWriteQueueSize;
         long sumWriteQueueSize;
+    }
+
+    public void addClientMetric(DumpClientMetric metric) {
+        this.dumpClientMetricsMap.put(metric.getDestination(), metric);
+    }
+
+    public void removeClientMetric(DumpClientMetric metric) {
+        this.dumpClientMetricsMap.remove(metric.getDestination());
     }
 }

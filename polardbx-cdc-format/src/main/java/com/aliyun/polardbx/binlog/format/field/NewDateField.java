@@ -29,7 +29,7 @@ public class NewDateField extends Field {
         String value = buildDataStr();
         MDate date = new MDate();
         date.parse(value);
-        long tmp = date.getDay() + date.getMonth() * 32 + date.getYear() * 16 * 32;
+        long tmp = date.getDay() + date.getMonth() * 32L + (long) date.getYear() * 16 * 32;
         return toByte(tmp, 3);
     }
 

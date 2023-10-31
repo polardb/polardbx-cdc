@@ -20,9 +20,9 @@ import com.alibaba.fastjson.JSONException;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.canal.binlog.JsonConversion;
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
+import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 
-import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Map;
 
@@ -46,15 +46,14 @@ public class JsonField extends BlobField {
         if (!isNull()) {
             // parse and build
             String value = buildDataStr();
-            ByteBuffer buffer = ByteBuffer.allocate(1024);
+            Object jsonObject = JSON.parse(value);
+            AutoExpandBuffer buffer = new AutoExpandBuffer(1024, 1024);
             buffer.order(ByteOrder.LITTLE_ENDIAN);
-            JSON jsonObject = (JSON) JSON.parse(value);
             buffer.put((byte) 0);
             serialJsonValue(buffer, 0, jsonObject);
             int pos = buffer.position();
-            buffer.flip();
             contents = new byte[pos];
-            buffer.get(contents);
+            buffer.writeTo(contents);
             fieldLength = pos;
         }
         calculatePackLength();
@@ -79,11 +78,27 @@ public class JsonField extends BlobField {
         return MySQLType.MYSQL_TYPE_JSON;
     }
 
-    private void serialJsonValue(ByteBuffer buffer, int typeOffset, Object o) {
+    private void serialJsonValue(AutoExpandBuffer buffer, int typeOffset, Object o) {
+
+        if (o instanceof Long) {
+            Long i = (Long) o;
+            if (i < Short.MAX_VALUE) {
+                o = i.shortValue();
+            } else if (i < Integer.MAX_VALUE) {
+                o = i.intValue();
+            }
+        }
+
+        if (o instanceof Integer) {
+            Integer i = (Integer) o;
+            if (i < Short.MAX_VALUE) {
+                o = i.shortValue();
+            }
+        }
+
         if (o instanceof JSONObject) {
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_SMALL_OBJECT);
             serialJsonObject(buffer, (JSONObject) o);
-
         } else if (o instanceof JSONArray) {
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_SMALL_ARRAY);
             serialJsonArray(buffer, (JSONArray) o);
@@ -109,6 +124,9 @@ public class JsonField extends BlobField {
         } else if (o instanceof Integer) {
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_INT32);
             buffer.putInt((Integer) o);
+        } else if (o instanceof Short) {
+            buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_INT16);
+            buffer.putShort((Short) o);
         } else if (o instanceof Double) {
             buffer.putDouble((Double) o);
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_DOUBLE);
@@ -121,7 +139,7 @@ public class JsonField extends BlobField {
         }
     }
 
-    private void serialJsonObject(ByteBuffer buffer, JSONObject object) {
+    private void serialJsonObject(AutoExpandBuffer buffer, JSONObject object) {
         int size = object.values().size();
         int startPosition = buffer.position();
         buffer.putShort((short) size);
@@ -137,6 +155,7 @@ public class JsonField extends BlobField {
             first_key_offset += len;
         }
         int mark = buffer.position();
+        // value entry
         for (Map.Entry<String, Object> entry : object.entrySet()) {
             buffer.put((byte) 0);
             buffer.putShort((short) 0);
@@ -147,13 +166,49 @@ public class JsonField extends BlobField {
         int i = 0;
         for (Map.Entry<String, Object> entry : object.entrySet()) {
             int typeOffset = mark + i++ * VALUE_ENTRY_SIZE_SMALL;
-            buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
-            serialJsonValue(buffer, typeOffset, entry.getValue());
+            if (!attemptInlineValue(entry.getValue(), buffer, typeOffset)) {
+                buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
+                serialJsonValue(buffer, typeOffset, entry.getValue());
+            }
         }
         buffer.putShort(sizePos, (byte) (buffer.position() - startPosition));
     }
 
-    private void serialJsonArray(ByteBuffer buffer, JSONArray array) {
+    private static boolean attemptInlineValue(Object o, AutoExpandBuffer buffer,
+                                              int typeOffset) {
+        if (o instanceof Long) {
+            long i = (Long) o;
+            if (i < Short.MAX_VALUE) {
+                o = (short) i;
+            } else if (i < Integer.MAX_VALUE) {
+                o = (int) i;
+            }
+        }
+
+        if (o instanceof Integer) {
+            Integer i = (Integer) o;
+            if (i < Short.MAX_VALUE) {
+                o = i.shortValue();
+            }
+        }
+        if (o instanceof Short) {
+            buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_INT16);
+            buffer.putShort(typeOffset + 1, (Short) o);
+        } else if (o instanceof Boolean) {
+            buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_LITERAL);
+            buffer.putShort(typeOffset + 1,
+                (byte) (((Boolean) o) ? JsonConversion.JSONB_TRUE_LITERAL : JsonConversion.JSONB_FALSE_LITERAL));
+        } else if (o == null) {
+            buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_LITERAL);
+            buffer.putShort(typeOffset + 1, (byte) JsonConversion.JSONB_NULL_LITERAL);
+        } else {
+            return false;
+        }
+
+        return true;
+    }
+
+    private void serialJsonArray(AutoExpandBuffer buffer, JSONArray array) {
         int size = array.size();
         int startPosition = buffer.position();
         buffer.putShort((short) size);
@@ -169,8 +224,10 @@ public class JsonField extends BlobField {
         for (int i = 0; i < size; i++) {
             Object o = array.get(i);
             int typeOffset = mark + i * VALUE_ENTRY_SIZE_SMALL;
-            buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
-            serialJsonValue(buffer, typeOffset, o);
+            if (!attemptInlineValue(o, buffer, typeOffset)) {
+                buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
+                serialJsonValue(buffer, typeOffset, o);
+            }
         }
         buffer.putShort(sizePos, (short) (buffer.position() - startPosition));
     }

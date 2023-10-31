@@ -20,9 +20,6 @@ import org.junit.Test;
 
 import java.lang.management.ManagementFactory;
 
-/**
- *
- */
 public class TestResource {
     @Test
     public void t1() {

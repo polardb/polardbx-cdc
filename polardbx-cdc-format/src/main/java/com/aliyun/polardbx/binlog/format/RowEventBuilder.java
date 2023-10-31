@@ -61,12 +61,6 @@ public class RowEventBuilder extends BinlogBuilder {
         this._flags = ROW_FLAG_END_STATMENT;
     }
 
-    public static void main(String[] args) {
-        System.out.println(FormatDescriptionEvent.EVENT_HEADER_LENGTH[BinlogEventType.DELETE_ROWS_EVENT.getType() - 1]);
-        System.out
-            .println(FormatDescriptionEvent.EVENT_HEADER_LENGTH[BinlogEventType.DELETE_ROWS_EVENT_V1.getType() - 1]);
-    }
-
     public RowEventBuilder duplicateHeader() {
         RowEventBuilder rowEventBuilder = new RowEventBuilder(tableId, columnCount, eventType, timestamp, serverId);
         rowEventBuilder.set_flags(_flags);

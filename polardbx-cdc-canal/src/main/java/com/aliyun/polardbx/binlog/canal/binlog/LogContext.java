@@ -68,7 +68,7 @@ public final class LogContext {
     }
 
     public final void putTable(TableMapLogEvent mapEvent) {
-        mapOfTable.put(Long.valueOf(mapEvent.getTableId()), mapEvent);
+        mapOfTable.put(mapEvent.getTableId(), mapEvent);
     }
 
     public final TableMapLogEvent getTable(final long tableId) {

@@ -23,7 +23,7 @@ public class ExtractorBuilder {
     public static BinlogExtractor buildExtractor(BinlogParameter parameter, Storage storage, MergeSource mergeSource,
                                                  String rdsBinlogPath) {
         BinlogExtractor extractor = new BinlogExtractor();
-        extractor.init(parameter, storage, rdsBinlogPath);
+        extractor.init(parameter, rdsBinlogPath);
         DefaultOutputMergeSourceHandler logEventHandler = new DefaultOutputMergeSourceHandler(mergeSource, storage);
         extractor.setLogEventHandler(logEventHandler);
         return extractor;

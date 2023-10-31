@@ -14,12 +14,12 @@
  */
 package com.aliyun.polardbx.binlog.task;
 
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 
 /**
- * Created by ziyang.lb
+ * @author ziyang.lb
  **/
 public interface ICursorProvider {
 
-    Cursor getLatestFileCursor();
+    BinlogCursor getLatestFileCursor();
 }

@@ -64,6 +64,14 @@ public class LogPosition implements Cloneable, Comparable<LogPosition> {
         return position;
     }
 
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
+    }
+
+    public void setPosition(long position) {
+        this.position = position;
+    }
+
     /* Clone binlog position without CloneNotSupportedException */
     public LogPosition clone() {
         try {

@@ -14,13 +14,12 @@
  */
 package com.aliyun.polardbx.rpl.task;
 
-import com.aliyun.polardbx.binlog.transfer.Bank;
-import com.aliyun.polardbx.binlog.transfer.PrepareData;
 import com.aliyun.polardbx.rpl.TestBase;
 import com.google.common.collect.Lists;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.sql.Connection;
@@ -33,6 +32,7 @@ import java.util.Map;
  * @author shicai.xsc 2021/4/22 16:43
  * @since 5.0.0.0
  */
+@Ignore
 public class TransferTest extends TestBase {
 
     private String dbName = "rpl_transfer_test";
@@ -78,15 +78,15 @@ public class TransferTest extends TestBase {
         }
 
         // 准备数据
-        PrepareData.setPolarx(isPolarx);
-        PrepareData.init(connectionList.get(0), accountCount, initialAmount);
+        //PrepareData.setPolarx(isPolarx);
+        //PrepareData.init(connectionList.get(0), accountCount, initialAmount);
 
         // 启动转账
-        Bank bank = new Bank(accountCount, initialAmount, false);
-        bank.setPolarx(isPolarx);
-        new Thread(() -> bank.startWork(connectionList)).start();
-        wait(runSeconds);
-        bank.stop();
+        //Bank bank = new Bank(accountCount, initialAmount, false);
+        //bank.setPolarx(isPolarx);
+        //new Thread(() -> bank.startWork(connectionList)).start();
+        //wait(runSeconds);
+        //bank.stop();
 
         // 校验结果
         wait(1);

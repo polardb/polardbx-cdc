@@ -14,38 +14,25 @@
  */
 package com.aliyun.polardbx.rpl.dbmeta;
 
-import javax.sql.DataSource;
-
-import com.aliyun.polardbx.rpl.TestBase;
+import com.aliyun.polardbx.rpl.RplWithGmsTablesBaseTest;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import org.junit.Assert;
 import org.junit.Test;
 
-import com.aliyun.polardbx.rpl.common.DataSourceUtil;
-
-import java.util.List;
+import javax.sql.DataSource;
 
 /**
  * @author shicai.xsc 2021/3/25 16:48
  * @since 5.0.0.0
  */
-public class DbMetaManagerTest extends TestBase {
+public class DbMetaManagerTest extends RplWithGmsTablesBaseTest {
 
     @Test
     public void metaTest() throws Throwable {
-        String schema = "rpl";
-        String tbName = "no_pk";
-        DataSource dataSource = DataSourceUtil.createDruidMySqlDataSource(srcHostInfo.getHost(),
-            srcHostInfo.getPort(),
-            schema,
-            srcHostInfo.getUserName(),
-            srcHostInfo.getPassword(),
-            "",
-            1,
-            16,
-            null,
-            null);
-        TableInfo tableInfo = DbMetaManager.getTableInfo(dataSource, schema, tbName, HostType.RDS);
+        String schema = "polardbx_meta_db";
+        String tbName = "rpl_task";
+        DataSource dataSource = getGmsDataSource();
+        TableInfo tableInfo = DbMetaManager.getTableInfo(dataSource, schema, tbName, HostType.RDS, false);
         Assert.assertNotNull(tableInfo);
     }
 }

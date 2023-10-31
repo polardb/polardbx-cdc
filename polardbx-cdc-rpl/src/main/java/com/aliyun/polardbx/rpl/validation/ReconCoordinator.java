@@ -16,6 +16,7 @@ package com.aliyun.polardbx.rpl.validation;
 
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.validation.reconciliation.Migrator;
 import com.aliyun.polardbx.rpl.validation.reconciliation.TableMigrator;
 import lombok.extern.slf4j.Slf4j;
@@ -39,10 +40,11 @@ public class ReconCoordinator {
             Migrator migrator = new TableMigrator(ctx);
             migrator.reSync();
             log.debug("Full load recon phase finished. State machine id: {}, Src phy db: {}, DST logical db: {}",
-                    ctx.getStateMachineId(), ctx.getSrcPhyDB(), ctx.getDstLogicalDB());
+                ctx.getStateMachineId(), ctx.getSrcPhyDB(), ctx.getDstLogicalDB());
 
         } catch (Exception e) {
-            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR, ctx.getTaskId(), e.getMessage());
+            StatisticalProxy.getInstance()
+                .triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR, ctx.getTaskId(), e.getMessage());
             log.error("Full recon phase exception: ", e);
         }
     }

@@ -4,7 +4,7 @@
        xsi:schemaLocation="http://www.springframework.org/schema/beans
         http://www.springframework.org/schema/beans/spring-beans-4.1.xsd">
 
-    <bean id="polarxDataSource" class="com.aliyun.polardbx.binlog.DataSourceWrapper" destroy-method="close"
+    <bean id="polarxDataSource" class="com.aliyun.polardbx.binlog.CnDataSource" destroy-method="close"
           lazy-init="true" init-method="init">
         <constructor-arg name="dnPasswordKey" value="${dnPasswordKey}"/>
         <constructor-arg name="useEncryptedPassword" value="${useEncryptedPassword}"/>

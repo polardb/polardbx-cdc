@@ -18,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -28,7 +27,6 @@ import javax.sql.DataSource;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.domain.po.RplDbFullPosition;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.RplConstants;
@@ -71,7 +69,6 @@ public class MysqlFullProcessor {
     private String orderKey;
     private Object orderKeyStart;
 
-
     public void preStart() {
         fullTableName = schema + "." + tbName;
         initFullPositionIfNotExist();
@@ -79,12 +76,19 @@ public class MysqlFullProcessor {
 
     public void start() {
         try {
+            RplDbFullPosition fullPosition =
+                DbTaskMetaManager.getDbFullPosition(TaskContext.getInstance().getTaskId(), fullTableName);
+            if (fullPosition.getFinished() == RplConstants.FINISH) {
+                log.info("full copy done, position is finished. schema:{}, tbName:{}", schema, tbName);
+                return;
+            }
+
             tableInfo = DbMetaManager.getTableInfo(dataSource, schema, tbName, hostInfo.getType());
             orderKey = null;
-            if (tableInfo.getPks() != null && tableInfo.getPks().size() != 0) {
+            if (tableInfo.getPks() != null && !tableInfo.getPks().isEmpty()) {
                 orderKey = tableInfo.getPks().get(0);
-            } else if (tableInfo.getUks() != null && tableInfo.getUks().size() != 0) {
-                for (ColumnInfo column: tableInfo.getColumns()) {
+            } else if (tableInfo.getUks() != null && !tableInfo.getUks().isEmpty()) {
+                for (ColumnInfo column : tableInfo.getColumns()) {
                     if (column.getName().equals(tableInfo.getUks().get(0))) {
                         if (!column.isNullable()) {
                             orderKey = tableInfo.getUks().get(0);
@@ -96,14 +100,7 @@ public class MysqlFullProcessor {
             if (orderKey == null) {
                 // 暂不支持不含主键或非空uk的表，会直接忽略并标识成功
                 log.error("can't find orderKey for schema:{}, tbName:{}", schema, tbName);
-                updateDbFullPosition(fullTableName, 0, null,  RplConstants.FINISH);
-                return;
-            }
-
-            RplDbFullPosition fullPosition =
-                DbTaskMetaManager.getDbFullPosition(TaskContext.getInstance().getTaskId(), fullTableName);
-            if (fullPosition.getFinished() == RplConstants.FINISH) {
-                log.info("full copy done, position is finished. schema:{}, tbName:{}", schema, tbName);
+                updateDbFullPosition(fullTableName, 0, null, RplConstants.FINISH);
                 return;
             }
             orderKeyStart = null;
@@ -114,15 +111,17 @@ public class MysqlFullProcessor {
             }
             if (orderKeyStart == null) {
                 if (getTotalCount() == 0) {
-                    updateDbFullPosition(fullTableName, 0, null,  RplConstants.FINISH);
+                    updateDbFullPosition(fullTableName, 0, null, RplConstants.FINISH);
                     log.info("full transfer done, 0 record in table, schema:{}, tbName:{}", schema, tbName);
                 }
             }
             fetchData();
-        } catch (Throwable e) {
-            log.error("failed to start com.aliyun.polardbx.extractor", e);
-            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_FULL_ERROR,
+        } catch (Exception e) {
+            log.error("failed to start full processor", e);
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_FULL_ERROR,
                 TaskContext.getInstance().getTaskId(), e.getMessage());
+            StatisticalProxy.getInstance().recordLastError(e.toString());
+            TaskContext.getInstance().getPipeline().stop();
         }
     }
 
@@ -140,8 +139,11 @@ public class MysqlFullProcessor {
             StatisticalProxy.getInstance().heartbeat();
             log.info("init full position for: {}, totalCount:{}", fullTableName, totalCount);
         } catch (SQLException e) {
-            log.error("failed to init full position for: {} because of :{}", fullTableName, e);
-            System.exit(1);
+            log.error("failed to init full position for: {} because of : ", fullTableName, e);
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_FULL_ERROR,
+                TaskContext.getInstance().getTaskId(), e.getMessage());
+            StatisticalProxy.getInstance().recordLastError(e.toString());
+            TaskContext.getInstance().getPipeline().stop();
         }
     }
 
@@ -164,7 +166,7 @@ public class MysqlFullProcessor {
         return String.format("select %s from `%s` order by `%s`", nameSqlSb, tbName, orderKey);
     }
 
-    private void fetchData() throws Throwable {
+    private void fetchData() throws Exception {
         log.info("starting fetching Data, tbName:{}", fullTableName);
 
         PreparedStatement stmt = null;
@@ -209,16 +211,16 @@ public class MysqlFullProcessor {
             }
             updateDbFullPosition(fullTableName, resiSize, null, RplConstants.FINISH);
             log.info("fetching data done, dbName:{} tbName:{}, last orderKeyValue:{}", schema, tbName, orderKeyStart);
-        } catch (Throwable e) {
+            DataSourceUtil.closeQuery(rs, stmt, conn);
+        } catch (Exception e) {
             log.error("fetching data failed, schema:{}, tbName:{}, sql:{}", schema, tbName,
                 fetchSql, e);
-            throw e;
-        } finally {
             DataSourceUtil.closeQuery(rs, stmt, conn);
+            throw e;
         }
     }
 
-    private void transfer(List<DBMSEvent> events) {
+    private void transfer(List<DBMSEvent> events) throws Exception {
         physicalToLogical(events);
         pipeline.directApply(events);
     }
@@ -226,17 +228,12 @@ public class MysqlFullProcessor {
     private void physicalToLogical(List<DBMSEvent> events) {
         for (DBMSEvent event : events) {
             event.setSchema(logicalSchema);
-            ((DefaultRowChange)event).setTable(logicalTbName);
+            ((DefaultRowChange) event).setTable(logicalTbName);
         }
     }
 
     private Object getMinOrderKey() throws SQLException {
         String sql = String.format("select min(`%s`) from `%s`", orderKey, tbName);
-        return getMetaInfo(sql);
-    }
-
-    private Object getMaxOrderKey() throws SQLException {
-        String sql = String.format("select max(`%s`) from `%s`", orderKey, tbName);
         return getMetaInfo(sql);
     }
 
@@ -246,7 +243,7 @@ public class MysqlFullProcessor {
         if (res == null) {
             return -1;
         }
-        return Long.valueOf(String.valueOf(res));
+        return Long.parseLong(String.valueOf(res));
     }
 
     private Object getMetaInfo(String sql) throws SQLException {
@@ -271,15 +268,14 @@ public class MysqlFullProcessor {
         return null;
     }
 
-    public static synchronized RplDbFullPosition initDbFullPosition(String fullTableName, long totalCount,
-                                                                    String endPosition) {
-        return DbTaskMetaManager
-            .addDbFullPosition(TaskContext.getInstance().getStateMachineId(), TaskContext.getInstance().getServiceId(),
-                TaskContext.getInstance().getTaskId(), fullTableName, totalCount, endPosition);
+    public static synchronized void initDbFullPosition(String fullTableName, long totalCount,
+                                                       String endPosition) {
+        DbTaskMetaManager.addDbFullPosition(TaskContext.getInstance().getStateMachineId(), TaskContext.getInstance()
+            .getServiceId(), TaskContext.getInstance().getTaskId(), fullTableName, totalCount, endPosition);
     }
 
-    public static synchronized RplDbFullPosition updateDbFullPosition(String fullTableName, long incFinishedCount,
-                                                                      String position, int finished) {
+    public static synchronized void updateDbFullPosition(String fullTableName, long incFinishedCount,
+                                                         String position, int finished) {
         RplDbFullPosition record =
             DbTaskMetaManager.getDbFullPosition(TaskContext.getInstance().getTaskId(), fullTableName);
         RplDbFullPosition newRecord = new RplDbFullPosition();
@@ -287,7 +283,6 @@ public class MysqlFullProcessor {
         newRecord.setFinishedCount(record.getFinishedCount() + incFinishedCount);
         newRecord.setPosition(position);
         newRecord.setFinished(finished);
-        return DbTaskMetaManager
-            .updateDbFullPosition(newRecord);
+        DbTaskMetaManager.updateDbFullPosition(newRecord);
     }
 }

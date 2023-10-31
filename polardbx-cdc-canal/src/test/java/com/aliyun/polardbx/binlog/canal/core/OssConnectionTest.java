@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.canal.core;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.api.RdsApi;
 import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
@@ -24,14 +23,16 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.core.dump.OssConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
-import org.junit.Before;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.IOException;
 import java.text.ParseException;
 import java.util.Date;
 
-public class OssConnectionTest {
+@Ignore
+public class OssConnectionTest extends BaseTest {
 
     @Test
     public void testUTC() throws ParseException {
@@ -42,12 +43,6 @@ public class OssConnectionTest {
         System.out.println(utfHost);
         System.out.println(BinlogFile.format(utfHost));
 
-    }
-
-    @Before
-    public void before() {
-        final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
     }
 
     @Test

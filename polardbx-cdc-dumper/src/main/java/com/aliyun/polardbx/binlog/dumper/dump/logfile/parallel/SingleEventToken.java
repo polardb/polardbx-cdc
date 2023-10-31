@@ -41,6 +41,7 @@ public class SingleEventToken extends EventToken {
     private int length;
     private boolean useTokenData;
     private int offset;
+    private Boolean checkServerId;
 
     public enum Type {
         /**
@@ -74,5 +75,24 @@ public class SingleEventToken extends EventToken {
             throw new PolardbxException(
                 "invalide length value ,this value is " + this.length + " , that value is " + length);
         }
+    }
+
+    @Override
+    public String toString() {
+        return "SingleEventToken{" +
+            "tso='" + tso + '\'' +
+            ", tsoTimeSecond=" + tsoTimeSecond +
+            ", nextPosition=" + nextPosition +
+            ", type=" + type +
+            ", serverId=" + serverId +
+            ", xid=" + xid +
+            ", rowsQuery='" + rowsQuery + '\'' +
+            ", cts='" + cts + '\'' +
+            ", forceFlush=" + forceFlush +
+            ", length=" + length +
+            ", useTokenData=" + useTokenData +
+            ", offset=" + offset +
+            ", checkServerId=" + checkServerId +
+            '}';
     }
 }

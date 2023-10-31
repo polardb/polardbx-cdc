@@ -17,26 +17,26 @@ package com.aliyun.polardbx.binlog.cdc.repository;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObjectStore;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObjectStoreInMemory;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObjectStoreProvider;
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.storage.RepoUnit;
 import org.apache.commons.io.FileUtils;
 
 import java.io.File;
-import java.util.Random;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.IS_REPLICA;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_BASE_PATH;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_SCHEMA_OBJECT_SWITCH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PERSIST_SCHEMA_META_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 
 /**
  * created by ziyang.lb
  **/
 public class CdcSchemaStoreProvider implements SchemaObjectStoreProvider {
-    private final static String SWITCH_ON = "ON";
-    private final static String SWITCH_OFF = "OFF";
-    private final static String SWITCH_RANDOM = "RANDOM";//for test
-    private final static CdcSchemaStoreProvider INSTANCE = new CdcSchemaStoreProvider();
+
+    private static final CdcSchemaStoreProvider INSTANCE = new CdcSchemaStoreProvider();
     private final RepoUnit repoUnit;
 
     private CdcSchemaStoreProvider() {
@@ -49,29 +49,15 @@ public class CdcSchemaStoreProvider implements SchemaObjectStoreProvider {
 
     @Override
     public SchemaObjectStore get() {
-        if (shouldPersist()) {
+        if (getMetaPersistEnabled()) {
             return new PersistentSchemaStore(repoUnit);
         } else {
             return new SchemaObjectStoreInMemory();
         }
     }
 
-    private boolean shouldPersist() {
-        String sw = DynamicApplicationConfig.getString(META_PERSIST_SCHEMA_OBJECT_SWITCH);
-        if (SWITCH_ON.equals(sw)) {
-            return true;
-        } else if (SWITCH_OFF.equals(sw)) {
-            return false;
-        } else if (SWITCH_RANDOM.equals(sw)) {
-            return new Random().nextBoolean();
-        } else {
-            throw new PolardbxException("invalid schema object persist switch : " + sw);
-        }
-    }
-
     private RepoUnit buildRepoUnit() {
-        String sw = DynamicApplicationConfig.getString(META_PERSIST_SCHEMA_OBJECT_SWITCH);
-        if (SWITCH_OFF.equals(sw)) {
+        if (!getMetaPersistEnabled()) {
             return null;
         }
 
@@ -81,15 +67,25 @@ public class CdcSchemaStoreProvider implements SchemaObjectStoreProvider {
                 basePath = basePath + "/";
             }
 
-            FileUtils.forceMkdir(new File(basePath));
-            FileUtils.cleanDirectory(new File(basePath));
-
             String taskName = DynamicApplicationConfig.getString(TASK_NAME);
-            RepoUnit repoUnit = new RepoUnit(basePath + taskName, true, false, true);
+            String taskPath = basePath + DynamicApplicationConfig.getClusterType() + "/" + taskName;
+
+            FileUtils.forceMkdir(new File(taskPath));
+            FileUtils.cleanDirectory(new File(taskPath));
+
+            RepoUnit repoUnit = new RepoUnit(taskPath, true, false, true);
             repoUnit.open();
             return repoUnit;
         } catch (Throwable t) {
             throw new PolardbxException("build repo unit failed", t);
+        }
+    }
+
+    private boolean getMetaPersistEnabled() {
+        if (CommonConstants.TRUE.equals(System.getProperty(IS_REPLICA))) {
+            return DynamicApplicationConfig.getBoolean(RPL_PERSIST_SCHEMA_META_ENABLED);
+        } else {
+            return DynamicApplicationConfig.getBoolean(META_PERSIST_ENABLED);
         }
     }
 }

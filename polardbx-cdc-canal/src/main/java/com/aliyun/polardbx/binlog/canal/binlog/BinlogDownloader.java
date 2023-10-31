@@ -59,10 +59,10 @@ public class BinlogDownloader {
     }
 
     public void init(String path, final int storageCount) {
-        logger.warn("init downloader with : " + storageCount);
+        logger.warn("init downloader with dn count : " + storageCount);
 
         this.path = path;
-        int downloadNum = DynamicApplicationConfig.getInt(ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_NUM);
+        int downloadNum = DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_THREAD_INIT_NUM);
         this.executorService = new ThreadPoolExecutor(downloadNum, downloadNum, 1, TimeUnit.HOURS,
             new LinkedBlockingQueue<>(5), r -> {
             Thread t = new Thread(r, "rds_binlog_download_thread");

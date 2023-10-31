@@ -14,28 +14,23 @@
  */
 package com.aliyun.polardbx.rpl.applier;
 
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
-import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
-import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
@@ -45,27 +40,14 @@ import java.util.concurrent.Future;
 @Slf4j
 public class MergeApplier extends MergeTransactionApplier {
 
-    ExecutorService mergeAndTranExecutorService;
-    MergeTransactionApplier mergeTransactionApplier;
-
     public MergeApplier(ApplierConfig applierConfig, HostInfo hostInfo) {
         super(applierConfig, hostInfo);
     }
 
     @Override
-    public boolean init() {
-        super.init();
-        mergeTransactionApplier = new MergeTransactionApplier(applierConfig, hostInfo);
-        mergeTransactionApplier.init();
-        mergeTransactionApplier.dbMetaCache = dbMetaCache;
-        mergeAndTranExecutorService = ThreadPoolUtil.createExecutorWithFixedNum(2, "MergeApplier");
-        return true;
-    }
-
-    @Override
-    protected boolean dmlApply(List<DBMSEvent> dbmsEvents) throws Throwable {
-        if (dbmsEvents == null || dbmsEvents.size() == 0) {
-            return true;
+    protected void dmlApply(List<DBMSEvent> dbmsEvents) throws Exception {
+        if (dbmsEvents == null || dbmsEvents.isEmpty()) {
+            return;
         }
 
         // Map<fullTableName, Map<rowPk/rowUk, RowChange>>
@@ -77,80 +59,66 @@ public class MergeApplier extends MergeTransactionApplier {
         // 如果任务发生故障重启，需采取safe mode写入
         // 这里采用lazy处理，对于执行失败的采取safe mode写入
 
-        return parallelExecSqlContexts(deleteRowChanges)
-            && parallelExecSqlContexts(insertRowChanges);
+        parallelExecSqlContexts(deleteRowChanges);
+        parallelExecSqlContexts(insertRowChanges);
     }
 
-    private boolean parallelExecSqlContexts(Map<String, Map<RowKey, DefaultRowChange>> allRowChanges) throws Throwable {
+    private void parallelExecSqlContexts(Map<String, Map<RowKey, DefaultRowChange>> allRowChanges) throws Exception {
         List<MergeDmlSqlContext> mergeDmlSqlContexts = new ArrayList<>();
-
         for (String tbName : allRowChanges.keySet()) {
             Collection<DefaultRowChange> tbRowChanges = allRowChanges.get(tbName).values();
-            if (tbRowChanges.size() == 0) {
+            if (tbRowChanges.isEmpty()) {
                 continue;
             }
-
             int insertMode = safeMode ?
-                RplConstants.INSERT_MODE_REPLACE: RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE;
+                RplConstants.INSERT_MODE_REPLACE : RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE;
             // merge
             List<MergeDmlSqlContext> sqlContexts = getMergeDmlSqlContexts(tbRowChanges, insertMode);
             mergeDmlSqlContexts.addAll(sqlContexts);
         }
 
-        List<Future<Boolean>> futures = new ArrayList<>();
+        List<Future<Void>> futures = new ArrayList<>();
 
         // parallel execute, each table cost a thread
         for (MergeDmlSqlContext sqlContext : mergeDmlSqlContexts) {
-            Callable<Boolean> task = () -> {
-                boolean succeed = execSqlContexts(Collections.singletonList(sqlContext));
-                sqlContext.setSucceed(succeed);
-                return succeed;
+            Callable<Void> task = () -> {
+                execSqlContexts(Collections.singletonList(sqlContext));
+                sqlContext.setSucceed(true);
+                return null;
             };
             futures.add(executorService.submit(task));
             // record merge size
-            StatisticalProxy.getInstance().addMergeBatchSize(sqlContext.getOriginRowChanges().size());
+            StatMetrics.getInstance().addMergeBatchSize(sqlContext.getOriginRowChanges().size());
         }
-        return checkResultAndReRun(futures, mergeDmlSqlContexts);
-
+        checkResultAndReRun(futures, mergeDmlSqlContexts);
     }
 
-    protected boolean checkResultAndReRun(List<Future<Boolean>> futures,
-                                          List<MergeDmlSqlContext> mergeDmlSqlContexts) throws Exception {
-        boolean res = true;
-        // get result
-        for (Future<Boolean> future : futures) {
-            res &= future.get();
-        }
-        // return res;
-        if (res) {
-            return true;
+    protected void checkResultAndReRun(List<Future<Void>> futures, List<MergeDmlSqlContext> mergeDmlSqlContexts) {
+        PolardbxException exception = CommonUtil.waitAllTaskFinishedAndReturn(futures);
+        if (exception == null) {
+            return;
         }
         // for those failed sqlContext, excute the originRowChanges with the sql to be
         // REPLACE INTO
         futures.clear();
-        res = true;
         for (final MergeDmlSqlContext sqlContext : mergeDmlSqlContexts) {
             if (sqlContext.isSucceed()) {
                 continue;
             }
             log.error("merge execute failed for: {}, try serial execute", sqlContext.getDstTable());
             for (DefaultRowChange rowChange : sqlContext.getOriginRowChanges()) {
-                final Callable<Boolean> task = () -> {
+                final Callable<Void> task = () -> {
                     // when failed, use safe mode to forcibly write
                     List<SqlContext> newSqlContexts = getSqlContexts(rowChange, true);
-                    return newSqlContexts != null && execSqlContexts(newSqlContexts);
+                    execSqlContexts(newSqlContexts);
+                    return null;
                 };
                 futures.add(executorService.submit(task));
             }
         }
-        for (Future<Boolean> future : futures) {
-            res &= future.get();
+        exception = CommonUtil.waitAllTaskFinishedAndReturn(futures);
+        if (exception != null) {
+            throw exception;
         }
-        if (!res) {
-            log.error("single execute failed");
-        }
-        return res;
     }
-
-
 }

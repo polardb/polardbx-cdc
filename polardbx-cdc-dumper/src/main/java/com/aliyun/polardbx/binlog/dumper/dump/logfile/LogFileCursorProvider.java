@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.event.IEventListener;
 import com.aliyun.polardbx.binlog.event.source.LatestFileCursorChangeEvent;
 import com.aliyun.polardbx.binlog.remote.io.IFileCursorProvider;
@@ -27,7 +27,7 @@ import java.util.Map;
 @Component
 public class LogFileCursorProvider implements IFileCursorProvider, IEventListener<LatestFileCursorChangeEvent> {
 
-    private final Map<String, Cursor> cursorMap = Maps.newConcurrentMap();
+    private final Map<String, BinlogCursor> cursorMap = Maps.newConcurrentMap();
 
     public LogFileCursorProvider() {
     }
@@ -35,12 +35,12 @@ public class LogFileCursorProvider implements IFileCursorProvider, IEventListene
     @Override
     @Subscribe
     public void onEvent(LatestFileCursorChangeEvent event) {
-        Cursor cursor = event.getCursor();
+        BinlogCursor cursor = event.getCursor();
         cursorMap.put(cursor.getStream(), cursor);
     }
 
     @Override
-    public Cursor getCursor(String stream) {
+    public BinlogCursor getCursor(String stream) {
         return cursorMap.get(stream);
     }
 }

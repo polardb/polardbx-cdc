@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.collect.handle;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.domain.TaskType;
@@ -29,6 +28,7 @@ import com.aliyun.polardbx.binlog.storage.PersistAllChecker;
 import com.aliyun.polardbx.binlog.storage.Storage;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
 import com.lmax.disruptor.LifecycleAware;
@@ -43,7 +43,7 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_COLLECTOR_BUILD_PACKET_THRESHOLD;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_COLLECT_BUILD_PACKET_SIZE_LIMIT;
 import static com.aliyun.polardbx.binlog.domain.TaskType.Dispatcher;
 import static com.aliyun.polardbx.binlog.transmit.MessageBuilder.buildTxnMessage;
 import static com.aliyun.polardbx.binlog.transmit.MessageBuilder.packetMode;
@@ -89,6 +89,9 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
             } else if (token.getType() == TxnType.META_CONFIG_ENV_CHANGE) {
                 logger.info("receive a meta_config_env_change token with tso {}", token.getTso());
                 processMetaToken(event, token);
+            } else if (token.getType() == TxnType.FLUSH_LOG) {
+                logger.info("receive a flush_log token with tso {}", token.getTso());
+                processFlushLogToken(event, token);
             } else {
                 throw new PolardbxException("invalid txn token type: " + token.getType());
             }
@@ -119,6 +122,14 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
             event.setMerged(true);
         } else {
             throw new PolardbxException("Meta TxnToken must be XaTxn and with tso transaction policy.");
+        }
+    }
+
+    private void processFlushLogToken(MessageEvent event, TxnToken token) {
+        if (token.getXaTxn() && token.getTsoTransaction()) {
+            event.setMerged(true);
+        } else {
+            throw new PolardbxException("FlushLog TxnToken must be XaTxn and with tso transaction policy.");
         }
     }
 
@@ -157,7 +168,7 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
     }
 
     private TxnMessage tryBuildTxnMessageObject(MessageEvent messageEvent) {
-        long threshold = DynamicApplicationConfig.getLong(TASK_COLLECTOR_BUILD_PACKET_THRESHOLD);
+        long threshold = DynamicApplicationConfig.getLong(TASK_COLLECT_BUILD_PACKET_SIZE_LIMIT);
         if (taskType != Dispatcher && messageEvent.getMemSize() <= threshold) {
             return buildTxnMessage(messageEvent.getToken(), taskType, messageEvent.getTxnBuffers().get(0));
         }
@@ -165,7 +176,7 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
     }
 
     private ByteString tryBuildTxnMessageBytes(MessageEvent messageEvent) {
-        long threshold = DynamicApplicationConfig.getLong(TASK_COLLECTOR_BUILD_PACKET_THRESHOLD);
+        long threshold = DynamicApplicationConfig.getLong(TASK_COLLECT_BUILD_PACKET_SIZE_LIMIT);
         if (taskType != Dispatcher && messageEvent.getMemSize() <= threshold) {
             return buildTxnMessage(messageEvent.getToken(), taskType,
                 messageEvent.getTxnBuffers().get(0)).toByteString();

@@ -15,18 +15,30 @@
 package com.aliyun.polardbx.binlog.transmit.relay;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
+import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
+import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
+import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
+import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
+import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogEvent;
+import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
 import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.XStreamMapper;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ReformatContext;
+import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
+import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.metrics.TransmitMetrics;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
 import com.aliyun.polardbx.binlog.protocol.EventData;
@@ -36,6 +48,7 @@ import com.aliyun.polardbx.binlog.protocol.TxnMessage;
 import com.aliyun.polardbx.binlog.protocol.TxnTag;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
+import com.aliyun.polardbx.binlog.relay.DdlRouteMode;
 import com.aliyun.polardbx.binlog.relay.HashLevel;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.binlog.storage.Storage;
@@ -43,11 +56,13 @@ import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.aliyun.polardbx.binlog.transmit.Transmitter;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.DirectByteOutput;
 import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.UnsafeByteOperations;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.ObjectUtils;
@@ -77,29 +92,31 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.BinlogUploadStatusEnum.IGNORE;
-import static com.aliyun.polardbx.binlog.BinlogUploadStatusEnum.SUCCESS;
-import static com.aliyun.polardbx.binlog.CommonUtils.parsePureTso;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_ROCKS_BASE_PATH;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_COUNT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_GROUP_NAME;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_READ_BATCH_BYTE_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_READ_BATCH_ITEM_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_READ_LOG_DETAIL_ENABLE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_BATCH_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_WAIT_LATEST_TSO_TIMEOUT;
+import static com.aliyun.polardbx.binlog.CommonConstants.VERSION_PATH_PREFIX;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_ROCKSDB_BASE_PATH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_COUNT;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_BATCH_BYTE_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_BATCH_ITEM_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_LOG_DETAIL_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_BATCH_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_WAIT_LATEST_TSO_TIMEOUT_SECOND;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMITTER_DRYRUN;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMITTER_DRYRUN_MODE;
-import static com.aliyun.polardbx.binlog.Constants.VERSION_PATH_PREFIX;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_DRY_RUN;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_DRY_RUN_MODE;
+import static com.aliyun.polardbx.binlog.Constants.MDC_STREAM_SEQ;
+import static com.aliyun.polardbx.binlog.Constants.RELAY_DATA_FORCE_CLEAN_FLAG;
+import static com.aliyun.polardbx.binlog.CommonConstants.VERSION_PATH_PREFIX;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.TABLE_MAP_EVENT;
-import static com.aliyun.polardbx.binlog.format.utils.BinlogGenerateUtil.getTableIdLength;
+import static com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet.loadCharactorSetFromCN;
+import static com.aliyun.polardbx.binlog.enums.BinlogUploadStatus.IGNORE;
+import static com.aliyun.polardbx.binlog.enums.BinlogUploadStatus.SUCCESS;
+import static com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil.getTableIdLength;
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
-import static com.aliyun.polardbx.binlog.transmit.relay.Constants.MDC_STREAM_SEQ;
-import static com.aliyun.polardbx.binlog.transmit.relay.Constants.RELAY_DATA_FORCE_CLEAN_FLAG;
 import static com.aliyun.polardbx.binlog.transmit.relay.RelayKeyUtil.buildMinRelayKeyStr;
 import static com.aliyun.polardbx.binlog.transmit.relay.RelayKeyUtil.buildPrimaryKeyString;
 import static com.aliyun.polardbx.binlog.transmit.relay.WriteItem.buildTxnMergedToken;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.parsePureTso;
 import static com.aliyun.polardbx.binlog.util.TxnTokenUtil.cleanTxnBuffer4Token;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
@@ -134,7 +151,7 @@ public class RelayLogEventTransmitter implements Transmitter {
     private volatile TxnToken latestFormatDescToken;
 
     public RelayLogEventTransmitter(Storage storage, long runtimeVersion, Map<String, String> recoverTsoMap) {
-        String basePath = DynamicApplicationConfig.getString(BINLOG_X_ROCKS_BASE_PATH);
+        String basePath = DynamicApplicationConfig.getString(BINLOGX_ROCKSDB_BASE_PATH);
 
         this.taskName = DynamicApplicationConfig.getString(TASK_NAME);
         this.storage = storage;
@@ -145,10 +162,10 @@ public class RelayLogEventTransmitter implements Transmitter {
         this.storeEngineMap = new HashMap<>();
         this.streamMaxTsoMap = new ConcurrentHashMap<>();
         this.writeBuffer = new WriteBuffer();
-        this.dryRun = DynamicApplicationConfig.getBoolean(TASK_TRANSMITTER_DRYRUN);
-        this.dryRunMode = DynamicApplicationConfig.getInt(TASK_TRANSMITTER_DRYRUN_MODE);
+        this.dryRun = DynamicApplicationConfig.getBoolean(TASK_TRANSMIT_DRY_RUN);
+        this.dryRunMode = DynamicApplicationConfig.getInt(TASK_TRANSMIT_DRY_RUN_MODE);
         this.running = new AtomicBoolean(false);
-        this.streamCount = DynamicApplicationConfig.getInt(BINLOG_X_STREAM_COUNT);
+        this.streamCount = DynamicApplicationConfig.getInt(BINLOGX_STREAM_COUNT);
         this.hashLogEventCleaner = new RelayLogEventCleaner(this);
         this.parallelDataWriter = new ParallelDataWriter(i -> {
             if (dryRun && dryRunMode == 1) {
@@ -194,7 +211,7 @@ public class RelayLogEventTransmitter implements Transmitter {
     }
 
     private void buildStartTso() {
-        String streamGroupName = DynamicApplicationConfig.getString(BINLOG_X_STREAM_GROUP_NAME);
+        String streamGroupName = DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME);
         List<String> streamsList = X_STREAM_MAPPER.select(
             s -> s.where(XStreamDynamicSqlSupport.groupName, isEqualTo(streamGroupName))
                 .orderBy(XStreamDynamicSqlSupport.streamName)).stream().map(
@@ -329,8 +346,8 @@ public class RelayLogEventTransmitter implements Transmitter {
 
         final int streamSeq = outputStream.getStreamSeq();
         byte[] searchFromKey = RelayKeyUtil.buildMinRelayKey(startTSO);
-        int transmitReadItemSize = DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_READ_BATCH_ITEM_SIZE);
-        long transmitReadByteSize = DynamicApplicationConfig.getLong(BINLOG_X_TRANSMIT_READ_BATCH_BYTE_SIZE);
+        int transmitReadItemSize = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_READ_BATCH_ITEM_SIZE);
+        long transmitReadByteSize = DynamicApplicationConfig.getLong(BINLOGX_TRANSMIT_READ_BATCH_BYTE_SIZE);
         RelayDataReader relayDataReader = storeEngineMap.get(streamSeq).newRelayDataReader(searchFromKey);
 
         try {
@@ -402,7 +419,7 @@ public class RelayLogEventTransmitter implements Transmitter {
             if (optional.isPresent()) {
                 String cursorStr = optional.get().getLatestCursor();
                 if (StringUtils.isNotBlank(cursorStr)) {
-                    Cursor cursor = JSONObject.parseObject(optional.get().getLatestCursor(), Cursor.class);
+                    BinlogCursor cursor = JSONObject.parseObject(optional.get().getLatestCursor(), BinlogCursor.class);
                     if (cursor.getVersion() != null && cursor.getVersion() == runtimeVersion) {
                         log.info("successfully get latest tso {} for stream {}", cursor.getTso(), streamName);
                         return cursor.getTso() == null ? "" : cursor.getTso();
@@ -411,7 +428,7 @@ public class RelayLogEventTransmitter implements Transmitter {
             }
 
             try {
-                long timeout = DynamicApplicationConfig.getLong(BINLOG_X_WAIT_LATEST_TSO_TIMEOUT);
+                long timeout = DynamicApplicationConfig.getLong(BINLOGX_WAIT_LATEST_TSO_TIMEOUT_SECOND);
                 if (System.currentTimeMillis() - start > 1000 * timeout) {
                     log.warn("wait for latest tso timeout with stream " + streamName
                         + " , will switch to get checkpoint tso");
@@ -470,7 +487,7 @@ public class RelayLogEventTransmitter implements Transmitter {
     }
 
     private void logReadDetail(int streamSeq, String keyStr, TxnMessage txnMessage) {
-        boolean logDetailEnable = DynamicApplicationConfig.getBoolean(BINLOG_X_TRANSMIT_READ_LOG_DETAIL_ENABLE);
+        boolean logDetailEnable = DynamicApplicationConfig.getBoolean(BINLOGX_TRANSMIT_READ_LOG_DETAIL_ENABLED);
         if (logDetailEnable) {
             if (txnMessage.getType() == MessageType.WHOLE) {
                 List<TxnItem> txnItems = txnMessage.getTxnData().getTxnItemsList();
@@ -586,6 +603,8 @@ public class RelayLogEventTransmitter implements Transmitter {
             // 某个库的HashLevel是DATABASE，但是其中某张表的HashLevel是RECORD或者TABLE，需要保证对应流上有对应的库
             if (hashLevel != HashLevel.RECORD && StringUtils.isNotBlank(token.getTable())) {
                 int streamSeq = HashConfig.getStreamSeq(token.getSchema(), token.getTable(), -1);
+                byte[] newPayload = rewriteDdlEvent(token, streamSeq, token.getPayload().toByteArray());
+                token = token.toBuilder().setPayload(ByteString.copyFrom(newPayload)).build();
                 parallelDataWriter.write(new WriteItem(streamSeq, token, null, null, null));
                 return;
             }
@@ -617,6 +636,39 @@ public class RelayLogEventTransmitter implements Transmitter {
         });
     }
 
+    @SneakyThrows
+    private byte[] rewriteDdlEvent(TxnToken token, int streamSeq, byte[] data) {
+        log.info("rewrite ddl event , stream seq is {}, txn token is {}", streamSeq, token);
+        LogDecoder logDecoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
+        LogContext logContext = new LogContext();
+        logContext.setFormatDescription(new FormatDescriptionLogEvent(4, LogEvent.BINLOG_CHECKSUM_ALG_CRC32));
+        logContext.setServerCharactorSet(loadCharactorSetFromCN());
+        logContext.setLogPosition(new LogPosition("", -1L));
+
+        LogEvent event = logDecoder.decode(new LogBuffer(data, 0, data.length), logContext);
+        QueryLogEvent ddlEvent = (QueryLogEvent) event;
+        assert ddlEvent != null;
+
+        String newDdlSql = CommonUtils.PRIVATE_DDL_DDL_ROUTE_PREFIX
+            + DdlRouteMode.SINGLE.name() + "\n" + ddlEvent.getQuery();
+        ServerCharactorSet serverCharactorSet = logContext.getServerCharactorSet();
+        Integer clientCharsetId = CharsetConversion.getCharsetId(serverCharactorSet.getCharacterSetClient());
+        Integer connectionCharsetId = CharsetConversion.getCharsetId(serverCharactorSet.getCharacterSetConnection());
+        Integer serverCharsetId = CharsetConversion.getCharsetId(serverCharactorSet.getCharacterSetServer());
+        QueryEventBuilder queryEventBuilder = new QueryEventBuilder(ddlEvent.getDbName(),
+            newDdlSql,
+            clientCharsetId,
+            connectionCharsetId,
+            serverCharsetId,
+            true,
+            (int) ddlEvent.getHeader().getWhen(),
+            ddlEvent.getServerId(),
+            ddlEvent.getSqlMode(),
+            (int) ddlEvent.getExecTime(),
+            ddlEvent.getFlags2());
+        return ReformatContext.toByte(queryEventBuilder);
+    }
+
     public String getStartTso() {
         return startTso;
     }
@@ -632,7 +684,7 @@ public class RelayLogEventTransmitter implements Transmitter {
         WriteBuffer() {
             this.bufferMap = new TreeMap<>();
             this.currentTableMapTxnItems = new ArrayList<>();
-            this.batchSize = DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_WRITE_BATCH_SIZE);
+            this.batchSize = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_BATCH_SIZE);
         }
 
         void putRowEvent(String traceId, TxnItem txnItem) {
@@ -724,10 +776,12 @@ public class RelayLogEventTransmitter implements Transmitter {
             int flag = 1;
             int tableIdLen = getTableIdLength();
             int pos = 19 + tableIdLen;
-            for (int i = 0; i < 2; ++i) {
-                byte b = ((byte) ((flag >> (i << 3)) & 0xff));
-                bytes[pos++] = b;
-            }
+            ByteArray byteArray = new ByteArray(bytes);
+            byteArray.skip(pos);
+            int oldFlag = byteArray.readInteger(2);
+            byteArray.reset();
+            byteArray.skip(pos);
+            byteArray.writeLong(oldFlag | RowsLogEvent.STMT_END_F, 2);
         }
 
         int calcStreamSeq(TxnItem txnItem) {

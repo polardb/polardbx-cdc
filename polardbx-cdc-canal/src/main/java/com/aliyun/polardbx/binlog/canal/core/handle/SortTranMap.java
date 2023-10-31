@@ -14,13 +14,12 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.handle;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.ITranStatChangeListener;
 import com.aliyun.polardbx.binlog.canal.core.model.TranPosition;
 import com.google.common.collect.Maps;
 import lombok.Data;
-import org.apache.commons.lang3.StringUtils;
 
 import java.util.Map;
 
@@ -122,14 +121,9 @@ public class SortTranMap implements ITranStatChangeListener {
         return head;
     }
 
-    public BinlogPosition getMinPos(Long tso) {
+    public BinlogPosition getMinPos(String rtso) {
         Node n = findMin();
-        if (n.tranPosition.getTso() < 0 && tso != null) {
-            n.tranPosition.setTso(tso);
-        }
-        if (n.tranPosition.getTso() < 0) {
-            return null;
-        }
+        n.tranPosition.setRtso(rtso);
         return n.getPosition();
     }
 
@@ -154,13 +148,7 @@ public class SortTranMap implements ITranStatChangeListener {
          * 返回加入链表时,head的position， tso可以用当前的，这里的tso只是用来回溯schema信息，空洞阶段理解应该没有ddl。
          */
         public BinlogPosition getPosition() {
-            long tso = tranPosition.getTso();
-            if (baseTSO != null && baseTSO > tso) {
-                tso = baseTSO;
-            }
-            position.setTso(tso);
-            position.setRtso(
-                CommonUtils.generateTSO(tso, StringUtils.rightPad(tranPosition.getTransId() + "", 29, "0"), null));
+            position.setRtso(tranPosition.getRtso());
             return position;
         }
 

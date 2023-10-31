@@ -34,16 +34,10 @@ public interface TxnTokenOrBuilder extends
       getTsoBytes();
 
   /**
-   * <code>string txnId = 2;</code>
+   * <code>int64 txnId = 2;</code>
    * @return The txnId.
    */
-  java.lang.String getTxnId();
-  /**
-   * <code>string txnId = 2;</code>
-   * @return The bytes for txnId.
-   */
-  com.google.protobuf.ByteString
-      getTxnIdBytes();
+  long getTxnId();
 
   /**
    * <code>string partitionId = 3;</code>

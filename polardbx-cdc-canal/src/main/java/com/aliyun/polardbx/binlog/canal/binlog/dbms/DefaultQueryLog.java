@@ -35,6 +35,9 @@ public class DefaultQueryLog extends DBMSQueryLog {
     protected String query;
     protected Timestamp timestamp;
     protected int errorCode;
+    // binlog保证每一个ddl均带有sql mode
+    // 因此不需要区分没有sql mode和sql mode = ''
+    protected long sqlMode;
     protected List<DBMSOption> options;
 
     /**
@@ -50,11 +53,13 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Create new <code>DefaultQueryLog</code> object.
      */
-    public DefaultQueryLog(String schema, String query, Timestamp timestamp, int errorCode, DBMSAction action) {
+    public DefaultQueryLog(String schema, String query, Timestamp timestamp, int errorCode, long sqlMode,
+                           DBMSAction action) {
         this.schema = schema;
         this.query = query;
         this.timestamp = timestamp;
         this.errorCode = errorCode;
+        this.sqlMode = sqlMode;
         this.action = action;
     }
 
@@ -72,6 +77,7 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Return the schema of query log. For notice, query may change the table in another schema.
      */
+    @Override
     public String getSchema() {
         return schema;
     }
@@ -79,6 +85,7 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Change the schema of query log.
      */
+    @Override
     public void setSchema(String schema) {
         this.schema = schema;
     }
@@ -86,6 +93,7 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Return the logging query.
      */
+    @Override
     public String getQuery() {
         return query;
     }
@@ -93,6 +101,7 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Change the logging query.
      */
+    @Override
     public void setQuery(String query) {
         this.query = query;
     }
@@ -100,6 +109,7 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Return the timestamp of query log according.
      */
+    @Override
     public Timestamp getTimestamp() {
         return timestamp;
     }
@@ -114,8 +124,17 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Return the errorCode of query log executing.
      */
+    @Override
     public int getErrorCode() {
         return errorCode;
+    }
+
+    /**
+     * Return the value of query sql mode in binlog.
+     */
+    @Override
+    public long getSqlMode() {
+        return sqlMode;
     }
 
     /**
@@ -128,6 +147,7 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Returns the session options.
      */
+    @Override
     public List<? extends DBMSOption> getOptions() {
         if (options != null) {
             return options;
@@ -138,6 +158,7 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Set the session option.
      */
+    @Override
     public void setOptionValue(String name, Serializable value) {
         DBMSOption option = getOption(name);
         if (option != null) {
@@ -151,6 +172,7 @@ public class DefaultQueryLog extends DBMSQueryLog {
     /**
      * Add the session option.
      */
+    @Override
     public DBMSOption putOption(DBMSOption option) {
         if (options == null) {
             options = new ArrayList<DBMSOption>(4);

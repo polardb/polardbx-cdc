@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.storage;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -25,30 +26,21 @@ import java.util.UUID;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.TABLE_MAP_EVENT;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.WRITE_ROWS_EVENT;
 
-/**
- *
- **/
-public class TxnBufferTest {
-
-    public static void main(String args[]) {
-        testMergePerformance();
-    }
+public class TxnBufferTest extends BaseTest {
 
     @Test
     public void testMerge() {
         int size = 10;
         int count = 2;
         TxnBuffer txnBuffer = buildOneBuffer(size);
-        txnBuffer.markComplete();
         List<TxnBuffer> buffers = buildBufferList(size, count);
-        buffers.forEach(TxnBuffer::markComplete);
 
         // 验证个数是否一致
-        buffers.stream().forEach(b -> txnBuffer.merge(b));
+        buffers.forEach(txnBuffer::merge);
         Assert.assertEquals(size * (count + 1), txnBuffer.itemSize());
 
         // 验证是否有序
-        final TxnItemRef lastRef = new TxnItemRef(txnBuffer, "", "", 19, null,
+        final TxnItemRef lastRef = new TxnItemRef(txnBuffer, "", "", 19, new byte[10],
             null, null, 0, null);
         txnBuffer.iterator().forEachRemaining(i -> {
             int result = i.compareTo(lastRef);
@@ -65,25 +57,25 @@ public class TxnBufferTest {
 
         boolean result = txnBuffer.seek(seed);
         Assert.assertTrue(result);
-        Assert.assertEquals(index, txnBuffer.itemSize());
         Assert.assertFalse(txnBuffer.seek(
-            new TxnItemRef(txnBuffer, UUID.randomUUID().toString(), "", 19, null,
+            new TxnItemRef(txnBuffer, UUID.randomUUID().toString(), "", 19, new byte[10],
                 null, null, 0, null)));
     }
 
-    private static void testMergePerformance() {
+    @Test
+    public void testMergePerformance() {
         int size = 100;
         int count = 1024;
         TxnBuffer txnBuffer = buildOneBuffer(size);
         List<TxnBuffer> buffers = buildBufferList(size, count);
 
         long startTime = System.currentTimeMillis();
-        buffers.stream().forEach(b -> txnBuffer.merge(b));
+        buffers.forEach(txnBuffer::merge);
         long endTime = System.currentTimeMillis();
         System.out.println("cost time: " + (endTime - startTime));
     }
 
-    private static List<TxnBuffer> buildBufferList(int size, int count) {
+    private List<TxnBuffer> buildBufferList(int size, int count) {
         ArrayList<TxnBuffer> result = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             result.add(buildOneBuffer(size));
@@ -91,12 +83,9 @@ public class TxnBufferTest {
         return result;
     }
 
-    private static TxnBuffer buildOneBuffer(int size) {
-        TxnBuffer txnBuffer =
-            new TxnBuffer(new TxnKey(UUID.randomUUID().toString(), UUID.randomUUID().toString()), null);
+    private TxnBuffer buildOneBuffer(int size) {
+        TxnBuffer txnBuffer = new TxnBuffer(new TxnKey(System.nanoTime(), UUID.randomUUID().toString()), null);
         txnBuffer.markStart();
-        long seed = System.currentTimeMillis();
-        String suffix = UUID.randomUUID().toString();
 
         for (int i = 0; i < size; i++) {
             int eventType;

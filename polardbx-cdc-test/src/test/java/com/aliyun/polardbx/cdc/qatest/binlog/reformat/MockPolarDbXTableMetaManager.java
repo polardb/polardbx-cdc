@@ -15,7 +15,6 @@
 package com.aliyun.polardbx.cdc.qatest.binlog.reformat;
 
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
-import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicBasicInfo;
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +30,7 @@ public class MockPolarDbXTableMetaManager extends PolarDbXTableMetaManager {
     private final LogicBasicInfo logicBasicInfo;
 
     public MockPolarDbXTableMetaManager(TableMeta phyTableMeta, TableMeta logicTableMeta) {
-        super("storageInstId", new AuthenticationInfo());
+        super("storageInstId");
         this.phyTableMeta = phyTableMeta;
         this.logicTableMeta = logicTableMeta;
         logicBasicInfo = new LogicBasicInfo();

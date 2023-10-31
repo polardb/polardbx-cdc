@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.rpl;
 
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
@@ -28,6 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.IS_REPLICA;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 
 /**
@@ -45,6 +47,7 @@ public class RplTaskEngine {
             TaskBasedDiscriminator.put(RplConstants.TASK_ID, String.valueOf(taskId));
             TaskBasedDiscriminator.put(RplConstants.TASK_NAME, taskName);
             System.setProperty(TASK_NAME, taskName);
+            System.setProperty(IS_REPLICA, CommonConstants.TRUE);
 
             // spring context
             log.info("Spring context loading");
@@ -52,7 +55,7 @@ public class RplTaskEngine {
             appContextBootStrap.boot();
             log.info("Spring context loaded");
 
-            if (!RuntimeLeaderElector.isLeader("RplTaskEngine_" + taskId)) {
+            if (!RuntimeLeaderElector.isLeader(RplConstants.RPL_TASK_LEADER_LOCK_PREFIX + taskId)) {
                 log.error("another process is already running, exit");
                 return;
             }
@@ -84,6 +87,8 @@ public class RplTaskEngine {
             log.info("RplTaskEngine end");
         } catch (Throwable e) {
             log.error("RplTaskEngine exit by exception", e);
+            // 执行到这里，说明出现了一些非预期的情况，直接强制退出
+            Runtime.getRuntime().halt(1);
         }
     }
 }

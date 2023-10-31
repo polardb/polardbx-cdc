@@ -42,7 +42,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.List;
 import java.util.Properties;
 
 /**
@@ -73,6 +72,7 @@ public class MysqlConnection implements ErosaConnection {
     private ServerCharactorSet serverCharactorSet;
     private int lowerCaseTableNames;
     private int binlogChecksum = LogEvent.BINLOG_CHECKSUM_ALG_OFF;
+    private String sqlMode;
 
     public MysqlConnection(AuthenticationInfo authInfo) {
         this.authInfo = authInfo;
@@ -173,9 +173,10 @@ public class MysqlConnection implements ErosaConnection {
     public void dump(String binlogfilename, Long binlogPosition, Long startTimestampMills,
                      SinkFunction func) throws Exception {
         loadBinlogChecksum();
+        getDefaultDatabaseCharset();
         reconnect();
         updateSettings();
-        try(DirectLogFetcher fetcher = new DirectLogFetcher(bufferSize)) {
+        try (DirectLogFetcher fetcher = new DirectLogFetcher(bufferSize)) {
             fetcher.open(conn, binlogfilename, binlogPosition, (int) generateUniqueServerId());
             LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
             decoder.setNeedFixRotate(false);
@@ -348,6 +349,22 @@ public class MysqlConnection implements ErosaConnection {
         return binlogChecksum;
     }
 
+    public String loadSqlMode() {
+        query("select @@global.sql_mode", new ProcessJdbcResult<String>() {
+            @Override
+            public String process(ResultSet rs) throws SQLException {
+                while (rs.next()) {
+                    sqlMode = rs.getString(1);
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("default sql mode : " + sqlMode);
+                    }
+                }
+                return sqlMode;
+            }
+        });
+        return sqlMode;
+    }
+
     private void loadServerDatabaseCharset() {
         query("show variables like '%character%'", new ProcessJdbcResult<String>() {
 
@@ -357,21 +374,7 @@ public class MysqlConnection implements ErosaConnection {
                 while (rs.next()) {
                     String variableName = rs.getString(1);
                     String charset = rs.getString(2);
-                    if ("utf8mb3".equalsIgnoreCase(charset)) {
-                        charset = "utf8";
-                    }
-                    if (logger.isDebugEnabled()) {
-                        logger.debug(variableName + " : " + charset);
-                    }
-                    if ("character_set_client".equalsIgnoreCase(variableName)) {
-                        set.setCharacterSetClient(charset);
-                    } else if ("character_set_connection".equalsIgnoreCase(variableName)) {
-                        set.setCharacterSetConnection(charset);
-                    } else if ("character_set_database".equalsIgnoreCase(variableName)) {
-                        set.setCharacterSetDatabase(charset);
-                    } else if ("character_set_server".equalsIgnoreCase(variableName)) {
-                        set.setCharacterSetServer(charset);
-                    }
+                    ServerCharactorSet.commonSet(set, variableName, charset);
                 }
                 serverCharactorSet = set;
                 return null;

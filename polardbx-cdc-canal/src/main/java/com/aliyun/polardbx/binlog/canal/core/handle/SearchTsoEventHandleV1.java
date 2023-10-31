@@ -14,12 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.handle;
 
-import com.alibaba.polardbx.druid.DbType;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
-import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
-import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
@@ -37,7 +34,6 @@ import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogPolarxCommand;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.util.FastSQLConstant;
 import com.google.common.collect.Maps;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -50,15 +46,16 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static com.aliyun.polardbx.binlog.CommonUtils.getTsoTimestamp;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.POLARX_INST_ID;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_SEARCH_TSO_CHECK_PRE_STORAGE_CHANGE;
-import static com.aliyun.polardbx.binlog.canal.system.SystemDB.LOGIC_SCHEMA;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RECOVER_CHECK_PREVIOUS_DN_CHANGE;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.LOGIC_SCHEMA;
 import static com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandDynamicSqlSupport.cmdId;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.clusterId;
 import static com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport.tso;
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.getTsoTimestamp;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static com.aliyun.polardbx.binlog.util.StorageUtil.buildExpectedStorageTso;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
@@ -335,7 +332,7 @@ public class SearchTsoEventHandleV1 implements ISearchTsoEventHandle {
         if (test) {
             return true;
         }
-        boolean needCheck = DynamicApplicationConfig.getBoolean(TASK_SEARCH_TSO_CHECK_PRE_STORAGE_CHANGE);
+        boolean needCheck = DynamicApplicationConfig.getBoolean(TASK_RECOVER_CHECK_PREVIOUS_DN_CHANGE);
         if (needCheck) {
             return lastTso >= preStorageChangeTso;
         }
@@ -372,10 +369,7 @@ public class SearchTsoEventHandleV1 implements ISearchTsoEventHandle {
                 QueryLogEvent queryLogEvent = (QueryLogEvent) event;
                 String ddlSql = queryLogEvent.getQuery();
                 try {
-                    SQLStatementParser parser =
-                        SQLParserUtils.createSQLStatementParser(ddlSql, DbType.mysql, FastSQLConstant.FEATURES);
-                    List<SQLStatement> statementList = parser.parseStatementList();
-                    SQLStatement statement = statementList.get(0);
+                    SQLStatement statement = parseSQLStatement(ddlSql);
 
                     if (statement instanceof SQLCreateDatabaseStatement) {
                         SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) statement;
@@ -433,9 +427,10 @@ public class SearchTsoEventHandleV1 implements ISearchTsoEventHandle {
     private String getCdcPhyDbNameByStorageInstId() {
         JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
         List<String> list = jdbcTemplate.queryForList(String.format(
-            "select g.phy_db_name from db_group_info g,group_detail_info d where "
-                + "d.group_name = g.group_name and d.inst_id = '%s' and d.storage_inst_id = '%s' and d.db_name = '%s'",
-            DynamicApplicationConfig.getString(POLARX_INST_ID), authenticationInfo.getStorageInstId(), LOGIC_SCHEMA),
+                "select g.phy_db_name from db_group_info g,group_detail_info d where "
+                    + "d.group_name = g.group_name and d.inst_id = '%s' and d.storage_inst_id = '%s' and d.db_name = '%s'",
+                DynamicApplicationConfig.getString(POLARX_INST_ID), authenticationInfo.getStorageMasterInstId(),
+                LOGIC_SCHEMA),
             String.class);
         return list.isEmpty() ? "" : list.get(0);
     }

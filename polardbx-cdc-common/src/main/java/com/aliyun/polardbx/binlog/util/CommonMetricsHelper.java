@@ -16,6 +16,7 @@ package com.aliyun.polardbx.binlog.util;
 
 import com.aliyun.polardbx.binlog.CommonMetrics;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
+import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
 import com.google.common.collect.Maps;
 import com.google.common.io.Resources;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -54,7 +56,10 @@ public class CommonMetricsHelper {
         try {
             lines = FileUtils.readLines(
                 new File(Resources.getResource("metrics.txt").getFile()), StandardCharsets.UTF_8);
-            log.info("init metrics lines {}", lines);
+            if (log.isDebugEnabled()) {
+                log.debug("init metrics lines {}", lines);
+            }
+
             for (String line : lines) {
                 String[] ss = StringUtils.split(line, "|");
                 if (ss.length < 5) {
@@ -87,10 +92,13 @@ public class CommonMetricsHelper {
                 ALL.put(ss[0], CommonMetrics.builder().key(ss[0]).desc(ss[4])
                     .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
             }
-            log.info("init metrics done DUMPER_M {}", DUMPER_M);
-            log.info("init metrics done DUMPER_S {}", DUMPER_S);
-            log.info("init metrics done DUMPER {}", DUMPER);
-            log.info("init metrics done TASK {}", TASK);
+
+            if (log.isDebugEnabled()) {
+                log.debug("init metrics done DUMPER_M {}", DUMPER_M);
+                log.debug("init metrics done DUMPER_S {}", DUMPER_S);
+                log.debug("init metrics done DUMPER {}", DUMPER);
+                log.debug("init metrics done TASK {}", TASK);
+            }
         } catch (IOException e) {
             log.error("prepare metrics fail", e);
         }
@@ -153,11 +161,11 @@ public class CommonMetricsHelper {
             .type(1)
             .value(
                 BigDecimal.valueOf(
-                    100 * (jvmSnapshot.getYoungUsed() + jvmSnapshot.getOldUsed() + jvmSnapshot.getMetaUsed()))
+                        100 * (jvmSnapshot.getYoungUsed() + jvmSnapshot.getOldUsed() + jvmSnapshot.getMetaUsed()))
                     .divide(BigDecimal.valueOf(
-                        (jvmSnapshot.getYoungMax() + jvmSnapshot.getOldMax() + jvmSnapshot.getMetaMax())),
+                            (jvmSnapshot.getYoungMax() + jvmSnapshot.getOldMax() + jvmSnapshot.getMetaMax())),
                         2,
-                        BigDecimal.ROUND_HALF_UP).doubleValue())
+                        RoundingMode.HALF_UP).doubleValue())
             .build());
         commonMetrics.add(CommonMetrics.builder()
             .key(prefix + "youngCollectionCount")
@@ -183,6 +191,14 @@ public class CommonMetricsHelper {
             .key(prefix + "currentThreadCount")
             .type(1)
             .value(jvmSnapshot.getCurrentThreadCount())
+            .build());
+    }
+
+    public static void addProcMetrics(List<CommonMetrics> commonMetrics, ProcSnapshot procSnapshot, String prefix) {
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "cpu_percent")
+            .type(1)
+            .value(Double.valueOf(procSnapshot.getCpuPercent() * 100.0D).longValue())
             .build());
     }
 }

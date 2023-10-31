@@ -21,28 +21,28 @@ import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class InstConfigDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-09-22T09:50:34.058+08:00", comments="Source Table: inst_config")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.95+08:00", comments="Source Table: inst_config")
     public static final InstConfig instConfig = new InstConfig();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-09-22T09:50:34.058+08:00", comments="Source field: inst_config.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.95+08:00", comments="Source field: inst_config.id")
     public static final SqlColumn<Long> id = instConfig.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-09-22T09:50:34.059+08:00", comments="Source field: inst_config.gmt_created")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.95+08:00", comments="Source field: inst_config.gmt_created")
     public static final SqlColumn<Date> gmtCreated = instConfig.gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-09-22T09:50:34.059+08:00", comments="Source field: inst_config.gmt_modified")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.95+08:00", comments="Source field: inst_config.gmt_modified")
     public static final SqlColumn<Date> gmtModified = instConfig.gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-09-22T09:50:34.059+08:00", comments="Source field: inst_config.inst_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.95+08:00", comments="Source field: inst_config.inst_id")
     public static final SqlColumn<String> instId = instConfig.instId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-09-22T09:50:34.059+08:00", comments="Source field: inst_config.param_key")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.95+08:00", comments="Source field: inst_config.param_key")
     public static final SqlColumn<String> paramKey = instConfig.paramKey;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-09-22T09:50:34.059+08:00", comments="Source field: inst_config.param_val")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.95+08:00", comments="Source field: inst_config.param_val")
     public static final SqlColumn<String> paramVal = instConfig.paramVal;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-09-22T09:50:34.058+08:00", comments="Source Table: inst_config")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.95+08:00", comments="Source Table: inst_config")
     public static final class InstConfig extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

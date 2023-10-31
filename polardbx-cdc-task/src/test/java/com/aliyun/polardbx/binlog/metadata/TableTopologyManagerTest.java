@@ -15,25 +15,17 @@
 package com.aliyun.polardbx.binlog.metadata;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import org.apache.commons.lang3.StringUtils;
-import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.Map;
 
-/**
- *
- **/
-public class TableTopologyManagerTest {
-
-    @Before
-    public void before() {
-        SpringContextBootStrap bootStrap = new SpringContextBootStrap("spring/spring.xml");
-        bootStrap.boot();
-    }
+public class TableTopologyManagerTest extends BaseTestWithGmsTables {
 
     @Test
+    @Ignore
     public void testBuildCache() {
         TableTopology value = TableTopologyManager.buildCache();
         for (Map.Entry<String, String> entry : value.getPhysicalTablesMap().entrySet()) {

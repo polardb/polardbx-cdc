@@ -19,6 +19,10 @@ import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
+import com.aliyun.polardbx.rpl.applier.BaseApplier;
+import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
+import com.aliyun.polardbx.rpl.filter.BaseFilter;
+import com.aliyun.polardbx.rpl.pipeline.BasePipeline;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta.PhysicalMeta;
 import lombok.Data;
 
@@ -38,6 +42,10 @@ public class TaskContext {
     private static TaskContext instance;
     private int physicalNum;
     private PhysicalMeta physicalMeta;
+    private BaseExtractor extractor;
+    private BasePipeline pipeline;
+    private BaseApplier applier;
+    private BaseFilter filter;
 
     private TaskContext() {
     }
@@ -61,15 +69,8 @@ public class TaskContext {
         return service.getId();
     }
 
-    public RplStateMachine getStateMachine() {
-        return stateMachine;
-    }
-
     public long getStateMachineId() {
         return stateMachine.getId();
     }
 
-    public String getConfig() {
-        return config;
-    }
 }

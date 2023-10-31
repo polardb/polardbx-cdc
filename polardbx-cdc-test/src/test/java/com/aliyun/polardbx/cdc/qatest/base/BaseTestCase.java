@@ -276,7 +276,7 @@ public class BaseTestCase implements BaseTestMode {
         try {
             checkClosedPolardbxConnections();
             String url = String.format(
-                ConfigConstant.URL_PATTERN + getConnectionProperties(), server, polardbxPort);
+                ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(false), server, polardbxPort);
             Properties prop = new Properties();
             prop.setProperty("user", user);
             if (password != null) {
@@ -297,7 +297,7 @@ public class BaseTestCase implements BaseTestMode {
         try {
             checkClosedPolardbxConnections();
             String url = String.format(
-                ConfigConstant.URL_PATTERN_WITH_DB + getConnectionProperties(), server, polardbxPort, dbName);
+                ConfigConstant.URL_PATTERN_WITH_DB + getConnectionProperties(false), server, polardbxPort, dbName);
             Properties prop = new Properties();
             prop.setProperty("user", user);
             if (password != null) {

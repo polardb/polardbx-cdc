@@ -14,11 +14,11 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog;
 
+import com.alibaba.polardbx.druid.sql.SQLUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.charset.Charset;
 import java.util.HashMap;
 
 /**
@@ -421,42 +421,14 @@ public final class CharsetConversion {
         if (StringUtils.isBlank(mysqlCharset)) {
             return mysqlCharset;
         }
-
-        //https://dev.mysql.com/doc/refman/8.0/en/charset-unicode-utf8mb3.html
-        if ("utf8mb3".equalsIgnoreCase(mysqlCharset)) {
-            mysqlCharset = "utf8";
-        }
+        mysqlCharset = SQLUtils.normalize(mysqlCharset);
 
         Entry entry = mysqlCharsetMap.get(mysqlCharset.toUpperCase());
         if (entry == null) {
-            return mysqlCharset;
+            logger.warn("Unexpect mysql charset: " + mysqlCharset);
+            return null;
         }
         return entry.javaCharset;
-
-    }
-
-    public static void main(String[] args) {
-        for (int i = 0; i < entries.length; i++) {
-            Entry entry = entries[i];
-
-            System.out.print(i);
-            System.out.print(',');
-            System.out.print(' ');
-            if (entry != null) {
-                System.out.print(entry.mysqlCharset);
-                System.out.print(',');
-                System.out.print(' ');
-                System.out.print(entry.javaCharset);
-                if (entry.javaCharset != null) {
-                    System.out.print(',');
-                    System.out.print(' ');
-                    System.out.print(Charset.forName(entry.javaCharset).name());
-                }
-            } else {
-                System.out.print("null");
-            }
-            System.out.println();
-        }
     }
 
     public static final class Entry {

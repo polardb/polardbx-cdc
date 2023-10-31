@@ -15,11 +15,14 @@
 package com.aliyun.polardbx.cdc.qatest.base;
 
 import com.alibaba.druid.pool.DruidDataSource;
+import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
+import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import org.junit.Assert;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
+import java.net.InetSocketAddress;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -111,19 +114,20 @@ public class ConnectionManager {
     }
 
     public static DruidDataSource getDruidDataSource(String server, String port,
-                                                     String user, String password, String db) {
-        String url = String.format(ConfigConstant.URL_PATTERN_WITH_DB + getConnectionProperties(), server, port,
-            db);
-        return getDruidDataSource(url, user, password);
+                                                     String user, String password, String db, boolean isMysql) {
+        String connProp = getConnectionProperties(isMysql);
+        String url = String.format(ConfigConstant.URL_PATTERN_WITH_DB + connProp, server, port, db);
+        return getDruidDataSourceInternal(url, user, password);
     }
 
-    public static DruidDataSource getDruidDataSource(String server, String port,
-                                                     String user, String password) {
-        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(), server, port);
-        return getDruidDataSource(url, user, password);
+    public static DruidDataSource getDruidDataSourceWithoutDB(String server, String port,
+                                                              String user, String password) {
+        String connProp = getConnectionProperties(true);
+        String url = String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + connProp, server, port);
+        return getDruidDataSourceInternal(url, user, password);
     }
 
-    public static DruidDataSource getDruidDataSource(String url, String user, String password) {
+    private static DruidDataSource getDruidDataSourceInternal(String url, String user, String password) {
         DruidDataSource druidDs = new DruidDataSource();
         druidDs.setUrl(url);
         druidDs.setUsername(user);
@@ -199,13 +203,13 @@ public class ConnectionManager {
         try {
             if (!skipInitDataNode) {
                 this.dnDataSource = getDruidDataSource(
-                    dnMysqlAddress, dnMysqlPort, dnMysqlUser, dnMysqlPassword, PropertiesUtil.mysqlDBName1());
+                    dnMysqlAddress, dnMysqlPort, dnMysqlUser, dnMysqlPassword, PropertiesUtil.mysqlDBName1(), true);
                 setMysqlParameter(dnDataSource);
 
                 if (dnCount > 1) {
                     this.dnDataSourceSecond = getDruidDataSource(
                         dnMysqlAddressSecond, dnMysqlPortSecond, dnMysqlUserSecond, dnMysqlPasswordSecond,
-                        PropertiesUtil.mysqlDBName1());
+                        PropertiesUtil.mysqlDBName1(), true);
                     setMysqlParameter(dnDataSourceSecond);
                 }
                 try (Connection mysqlCon = dnDataSource.getConnection()) {
@@ -215,22 +219,26 @@ public class ConnectionManager {
             }
 
             this.metaDataSource =
-                getDruidDataSource(metaAddress, metaPort, metaUser, metaPassword, getMetaDB);
+                getDruidDataSource(metaAddress, metaPort, metaUser, metaPassword, getMetaDB, true);
 
             this.polardbxDataSource = getDruidDataSource(
-                polardbxAddress, polardbxPort, polardbxUser, polardbxPassword, PropertiesUtil.polardbXDBName1(false));
+                polardbxAddress, polardbxPort, polardbxUser, polardbxPassword, PropertiesUtil.polardbXDBName1(false),
+                false);
 
             if (usingBinlogX) {
                 this.cdcSyncDbDataSourceFirst = getDruidDataSource(
-                    cdcSyncDbAddressFirst, cdcSyncDbPortFirst, cdcSyncDbUserFirst, cdcSyncDbPasswordFirst, "mysql");
+                    cdcSyncDbAddressFirst, cdcSyncDbPortFirst, cdcSyncDbUserFirst, cdcSyncDbPasswordFirst, "mysql",
+                    true);
                 this.cdcSyncDbDataSourceSecond = getDruidDataSource(
-                    cdcSyncDbAddressSecond, cdcSyncDbPortSecond, cdcSyncDbUserSecond, cdcSyncDbPasswordSecond, "mysql");
+                    cdcSyncDbAddressSecond, cdcSyncDbPortSecond, cdcSyncDbUserSecond, cdcSyncDbPasswordSecond, "mysql",
+                    true);
                 this.cdcSyncDbDataSourceThird = getDruidDataSource(
-                    cdcSyncDbAddressThird, cdcSyncDbPortThird, cdcSyncDbUserThird, cdcSyncDbPasswordThird, "mysql");
+                    cdcSyncDbAddressThird, cdcSyncDbPortThird, cdcSyncDbUserThird, cdcSyncDbPasswordThird, "mysql",
+                    true);
             } else {
                 // 去除附加的"mysql"，以兼容polardb-x作为测试下游
-                this.cdcSyncDbDataSource = getDruidDataSource(
-                        cdcSyncDbAddress, cdcSyncDbPort, cdcSyncDbUser, cdcSyncDbPassword);
+                this.cdcSyncDbDataSource = getDruidDataSourceWithoutDB(
+                    cdcSyncDbAddress, cdcSyncDbPort, cdcSyncDbUser, cdcSyncDbPassword);
             }
 
             try (Connection polardbxCon = polardbxDataSource.getConnection()) {
@@ -313,9 +321,8 @@ public class ConnectionManager {
         if (useDruid) {
             return getMetaDataSource().getConnection();
         } else {
-            String url = String
-                .format(ConfigConstant.URL_PATTERN_WITH_DB + getConnectionProperties(), metaAddress, metaPort,
-                    getMetaDB);
+            String connProp = getConnectionProperties(true);
+            String url = String.format(ConfigConstant.URL_PATTERN_WITH_DB + connProp, metaAddress, metaPort, getMetaDB);
             return JdbcUtil.createConnection(url, metaUser, metaPassword);
         }
     }
@@ -326,6 +333,13 @@ public class ConnectionManager {
         } else {
             return newPolarDBXConnection();
         }
+    }
+
+    public MysqlConnection getPolarxConnectionOfMysql() {
+        AuthenticationInfo auth =
+            new AuthenticationInfo(new InetSocketAddress(polardbxAddress, Integer.parseInt(polardbxPort)), polardbxUser,
+                polardbxPassword);
+        return new MysqlConnection(auth);
     }
 
     public Connection getDruidCdcSyncDbConnection() throws SQLException {
@@ -362,13 +376,15 @@ public class ConnectionManager {
 
     public Connection newPolarDBXConnection() {
         String url =
-            String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(), polardbxAddress, polardbxPort);
+            String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(false), polardbxAddress,
+                polardbxPort);
         return JdbcUtil.createConnection(url, polardbxUser, polardbxPassword);
     }
 
     public Connection newPolarDBXConnectionWithExtraParams(String extraParams) {
         String url =
-            String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(), polardbxAddress, polardbxPort);
+            String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(false), polardbxAddress,
+                polardbxPort);
         url += extraParams;
         return JdbcUtil.createConnection(url, polardbxUser, polardbxPassword);
     }
@@ -378,47 +394,52 @@ public class ConnectionManager {
      */
     public Connection newPolarDBXConnection(String user, String password) {
         String url =
-            String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(), polardbxAddress, polardbxPort);
+            String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(false), polardbxAddress,
+                polardbxPort);
         return JdbcUtil.createConnection(url, user, password);
     }
 
     public Connection newMysqlConnection() {
-        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(), dnMysqlAddress, dnMysqlPort);
+        String connProp = getConnectionProperties(true);
+        String url = String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + connProp, dnMysqlAddress, dnMysqlPort);
         return JdbcUtil.createConnection(url, dnMysqlUser, dnMysqlPassword);
     }
 
     public Connection newMysqlConnectionWithExtraParams(String extraParams) {
-        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(), dnMysqlAddress, dnMysqlPort);
+        String url =
+            String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(true), dnMysqlAddress,
+                dnMysqlPort);
         url += extraParams;
         return JdbcUtil.createConnection(url, dnMysqlUser, dnMysqlPassword);
     }
 
     public Connection newMysqlConnectionSecond() {
-        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(),
-            dnMysqlAddressSecond, dnMysqlPortSecond);
+        String connProp = getConnectionProperties(true);
+        String url =
+            String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + connProp, dnMysqlAddressSecond, dnMysqlPortSecond);
         return JdbcUtil.createConnection(url, dnMysqlUserSecond, dnMysqlPasswordSecond);
     }
 
     public Connection newCdcSyncDbConnection() {
-        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(),
+        String url = String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(true),
             cdcSyncDbAddress, cdcSyncDbPort);
         return JdbcUtil.createConnection(url, cdcSyncDbUser, cdcSyncDbPassword);
     }
 
     public Connection newCdcSyncDbConnectionFirst() {
-        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(),
-                cdcSyncDbAddressFirst, cdcSyncDbPortFirst);
+        String url = String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(true),
+            cdcSyncDbAddressFirst, cdcSyncDbPortFirst);
         return JdbcUtil.createConnection(url, cdcSyncDbUserFirst, cdcSyncDbPasswordFirst);
     }
 
     public Connection newCdcSyncDbConnectionSecond() {
-        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(),
+        String url = String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(true),
             cdcSyncDbAddressSecond, cdcSyncDbPortSecond);
         return JdbcUtil.createConnection(url, cdcSyncDbUserSecond, cdcSyncDbPasswordSecond);
     }
 
     public Connection newCdcSyncDbConnectionThird() {
-        String url = String.format(ConfigConstant.URL_PATTERN + getConnectionProperties(),
+        String url = String.format(ConfigConstant.URL_PATTERN_WITHOUT_DB + getConnectionProperties(true),
             cdcSyncDbAddressThird, cdcSyncDbPortThird);
         return JdbcUtil.createConnection(url, cdcSyncDbUserThird, cdcSyncDbPasswordThird);
     }

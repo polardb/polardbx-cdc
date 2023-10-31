@@ -40,9 +40,9 @@ public class SplitApplier extends SplitTransactionApplier {
     }
 
     @Override
-    protected boolean dmlApply(List<DBMSEvent> dbmsEvents) throws Throwable {
-        if (dbmsEvents == null || dbmsEvents.size() == 0) {
-            return true;
+    protected void dmlApply(List<DBMSEvent> dbmsEvents) throws Exception {
+        if (dbmsEvents == null || dbmsEvents.isEmpty()) {
+            return;
         }
 
         Map<String, Map<RowKey, List<DefaultRowChange>>> allSplitRowChanges = new HashMap<>();
@@ -79,23 +79,20 @@ public class SplitApplier extends SplitTransactionApplier {
         }
 
         // 多个队列并行执行，每个队列内部不需要事务
-        boolean res = parallelExecSqlContexts(allQueues, false);
-        if (!res) {
-            return res;
-        }
+        parallelExecSqlContexts(allQueues, false);
 
         // allSerialRowChanges 并行执行，每个队列内需要事务
         for (String fullTbName : allSerialRowChanges.keySet()) {
             log.info("{} changes will be executed by SplitTransactionApplier, rowChanges: {}", fullTbName,
                 allSerialRowChanges.get(fullTbName).size());
         }
-        return parallelExecSqlContexts(allSerialRowChanges, true);
+        parallelExecSqlContexts(allSerialRowChanges, true);
     }
 
     protected void split(List<DBMSEvent> dbmsEvents,
                          Map<String, Map<RowKey, List<DefaultRowChange>>> allSplitRowChanges,
                          Map<String, List<DefaultRowChange>> allSerialRowChanges,
-                         Set<String> changedIdentifyColumnTables) throws Throwable {
+                         Set<String> changedIdentifyColumnTables) throws Exception {
         Map<String, List<Integer>> allTbIdentifyColumns = new HashMap<>();
 
         for (DBMSEvent event : dbmsEvents) {
@@ -119,28 +116,18 @@ public class SplitApplier extends SplitTransactionApplier {
 
             // 发现某表 a.a 某条记录 a.a.1 修改了 identify columns，则 a.a.1 之后所有记录都改为串行
             if (changedIdentifyColumnTables.contains(fullTbName)) {
-                List<DefaultRowChange> tbSerialRowChanges = allSerialRowChanges.get(fullTbName);
-                if (tbSerialRowChanges == null) {
-                    tbSerialRowChanges = new ArrayList<>();
-                    allSerialRowChanges.put(fullTbName, tbSerialRowChanges);
-                }
+                List<DefaultRowChange> tbSerialRowChanges =
+                    allSerialRowChanges.computeIfAbsent(fullTbName, k -> new ArrayList<>());
                 tbSerialRowChanges.add(rowChange);
                 continue;
             }
 
             RowKey key = new RowKey(rowChange, identifyColumns);
-            Map<RowKey, List<DefaultRowChange>> tbSplitRowChanges = allSplitRowChanges.get(fullTbName);
-            if (tbSplitRowChanges == null) {
-                tbSplitRowChanges = new HashMap<>();
-                allSplitRowChanges.put(fullTbName, tbSplitRowChanges);
-            }
+            Map<RowKey, List<DefaultRowChange>> tbSplitRowChanges =
+                allSplitRowChanges.computeIfAbsent(fullTbName, k -> new HashMap<>());
 
             // 保证同一个 key 的变更按照顺序排列
-            List<DefaultRowChange> tbKeyRowChanges = tbSplitRowChanges.get(key);
-            if (tbKeyRowChanges == null) {
-                tbKeyRowChanges = new ArrayList<>();
-                tbSplitRowChanges.put(key, tbKeyRowChanges);
-            }
+            List<DefaultRowChange> tbKeyRowChanges = tbSplitRowChanges.computeIfAbsent(key, k -> new ArrayList<>());
             tbKeyRowChanges.add(rowChange);
         }
     }

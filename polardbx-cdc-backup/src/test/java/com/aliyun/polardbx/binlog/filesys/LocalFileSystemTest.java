@@ -14,14 +14,16 @@
  */
 package com.aliyun.polardbx.binlog.filesys;
 
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.ListUtils;
 import org.apache.commons.io.FileUtils;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
@@ -36,33 +38,28 @@ import java.util.List;
  * @since 2022/8/21
  **/
 @Slf4j
-public class LocalFileSystemTest {
+public class LocalFileSystemTest extends BaseTest {
     private final String group = "group1";
     private final String stream = "stream1";
-    private final String path = BinlogFileUtil.getBinlogFileFullPath("binlog/V1/", group, stream);
-    private final LocalFileSystem fileSystem = new LocalFileSystem(path, group, stream);
+    private static final String rootPath = "local_file_system_test";
+    private final LocalFileSystem fileSystem = new LocalFileSystem(rootPath, group, stream);
 
-    @Before
-    public void before() throws IOException {
-        FileUtils.forceDelete(new File(path));
-        FileUtils.forceMkdir(new File(path));
+    @AfterClass
+    @SneakyThrows
+    public static void deleteDir() {
+        FileUtils.forceDelete(new File(rootPath));
     }
 
     @After
-    public void after() throws IOException {
-        FileUtils.forceDelete(new File(path));
-    }
-
-    private void cleanPath() throws IOException {
-        FileUtils.cleanDirectory(new File(path));
+    @SneakyThrows
+    public void cleanDir() {
+        fileSystem.cleanDir();
     }
 
     @Test
     public void sizeTest() throws IOException {
         String fileName = "size-test.txt";
-        String content = "Clouds come floating into my life, " +
-            "no longer to carry rain or usher storm, " +
-            "but to add color to my sunset sky.";
+        String content = "size_test";
         long expect = -1;
         long actual = fileSystem.size(fileName);
         Assert.assertEquals(expect, actual);
@@ -91,27 +88,25 @@ public class LocalFileSystemTest {
 
     @Test
     public void listFilesTest() throws IOException {
-        cleanPath();
-        String fileNamePrefix = BinlogFileUtil.getBinlogFilePrefix(group, stream);
         List<String> expect = new ArrayList<>();
         List<String> actual = new ArrayList<>();
         int n = 11;
-        for (int i = 0; i < n; i++) {
-            String fileName = fileNamePrefix + String.format("%06d", i);
+        for (int i = 1; i < n; i++) {
+            String fileName = BinlogFileUtil.getBinlogFilePrefix(group, stream) + String.format(".%06d", i);
             expect.add(fileName);
             File f = fileSystem.newFile(fileName);
             f.createNewFile();
         }
 
         // 测试后缀不匹配场景
-        String fileName = fileNamePrefix + String.format("%06d", 10) + ".tmp";
+        String fileName = String.format("%06d", 10) + ".tmp";
         File f = fileSystem.newFile(fileName);
         f.createNewFile();
-        fileName = fileNamePrefix + String.format("%05d", 10);
+        fileName = String.format("%05d", 10);
         f = fileSystem.newFile(fileName);
         f.createNewFile();
         // 测试前缀不匹配场景
-        fileName = "random" + fileNamePrefix + String.format("%06d", 10);
+        fileName = "random" + String.format("%06d", 10);
         f = fileSystem.newFile(fileName);
         f.createNewFile();
 

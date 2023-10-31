@@ -19,20 +19,15 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.ValidationDiffMapper;
 import com.aliyun.polardbx.binlog.domain.po.ValidationDiff;
 import com.aliyun.polardbx.binlog.domain.po.ValidationTask;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.SqlContext;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
-import com.aliyun.polardbx.rpl.dbmeta.DbMetaManager;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.extractor.full.ExtractorUtil;
-import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.validation.ValidationContext;
 import com.aliyun.polardbx.rpl.validation.common.Record;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +35,6 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.Serializable;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -53,20 +47,13 @@ import java.util.stream.Collectors;
 @Slf4j
 @Data
 public class TableMigrator implements Migrator {
+
     private final ValidationDiffMapper validationDiffMapper = SpringContextHolder.getObject(ValidationDiffMapper.class);
     private final ValidationContext ctx;
-    private CacheLoader<String, TableInfo> loader;
     private LoadingCache<String, TableInfo> dstTableCache;
 
     public TableMigrator(ValidationContext ctx) {
         this.ctx = ctx;
-        this.loader = new CacheLoader<String, TableInfo>() {
-            @Override
-            public TableInfo load(String tableName) throws Exception {
-                return DbMetaManager.getTableInfo(ctx.getDstDs(), ctx.getDstLogicalDB(), tableName, HostType.POLARX2);
-            }
-        };
-        this.dstTableCache = CacheBuilder.newBuilder().maximumSize(5000).build(this.loader);
     }
 
     @Override
@@ -94,21 +81,22 @@ public class TableMigrator implements Migrator {
         int startIndex = 0;
         int step = 1;
         for (int i = 0, len = diffList.size(); i < len; i++) {
-            ValidationDiff diff = diffList.get(i);
-            TableInfo dstTable = ctx.getMappingTable().get(srcTable.getName());
-            // dst table contains partition keys
-            List<String> colList = dstTable.getColumns().stream().map(ColumnInfo::getName).collect(Collectors.toList());
-            List<Serializable> keyValList = JSONObject.parseArray(diff.getSrcKeyColVal(), Serializable.class);
-            SqlContext selectSQLContext = ctx.getValSQLGenerator().formatSelectSQL(srcTable, keyValList);
-            try (Connection conn = ctx.getSrcDs().getConnection();){
+            try (Connection conn = ctx.getSrcDs().getConnection()) {
+                ValidationDiff diff = diffList.get(i);
+                TableInfo dstTable = ctx.getMappingTable().get(srcTable.getName());
+                // dst table contains partition keys
+                List<String> colList =
+                    dstTable.getColumns().stream().map(ColumnInfo::getName).collect(Collectors.toList());
+                List<Serializable> keyValList = JSONObject.parseArray(diff.getSrcKeyColVal(), Serializable.class);
+                SqlContext selectSQLContext = ctx.getValSQLGenerator().formatSelectSQL(srcTable, keyValList);
                 log.info("Get 1.0 data. SQL: {}", selectSQLContext);
                 List<Serializable> valList;
-                valList = DataSourceUtil.query(conn, selectSQLContext, 1,1, rs -> {
+                valList = DataSourceUtil.query(conn, selectSQLContext, 1, 1, rs -> {
                     List<Serializable> valListInner = new ArrayList<>();
                     while (rs.next()) {
                         for (ColumnInfo column : srcTable.getColumns()) {
                             Object val = ExtractorUtil.getColumnValue(rs, column.getName(), column.getType());
-                            valListInner.add((Serializable)val);
+                            valListInner.add((Serializable) val);
                         }
                     }
                     return valListInner;
@@ -135,7 +123,7 @@ public class TableMigrator implements Migrator {
                 }
             } catch (Exception e) {
                 log.error("Validator migration phase exception");
-                MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR, ctx.getTaskId(),
+                StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR, ctx.getTaskId(),
                     e.getMessage());
                 throw e;
             }
@@ -150,36 +138,25 @@ public class TableMigrator implements Migrator {
     }
 
     private void persistToDstTable(ValidationDiff diff, List<Record> recordList)
-    throws Exception {
+        throws Exception {
         Connection conn = null;
         PreparedStatement stmt = null;
         ValidationTask task = ctx.getRepository().getValTaskByRefId(diff.getValidationTaskId());
-        TableInfo dstTable = dstTableCache.getUnchecked(task.getDstLogicalTable());
-//        try {
-//            conn = ctx.getDstDs().getConnection();
-//            stmt = ctx.getValSQLGenerator().formatInsertStatement(conn, dstTable, recordList.stream().toArray(Record[]::new));
-//            int ret = stmt.executeUpdate();
-//            log.info("Insert into destination table. Ret: {}", ret);
-//        } catch (Exception e) {
-//            log.error("Bulk persist records to destination table exception. Try insert one by one.", e);
-            Connection newConn = null;
-            PreparedStatement newStmt = null;
-            try {
-                for (Record r : recordList) {
-                    newConn = ctx.getDstDs().getConnection();
-                    newStmt = ctx.getValSQLGenerator().formatInsertStatement(newConn, dstTable, r);
-                    int ret = newStmt.executeUpdate();
-                    log.info("Replace into destination table. Ret: {}", ret);
-                }
-            } catch (Exception ee) {
-                log.error("Replace into destination table failed. SQL: {}", newStmt.toString());
-                throw new Exception(ee);
-            } finally {
-                DataSourceUtil.closeQuery(null, newStmt, newConn);
+        TableInfo dstTable = ctx.getMappingTable().get(task.getSrcPhyTable());
+        Connection newConn = null;
+        PreparedStatement newStmt = null;
+        try {
+            for (Record r : recordList) {
+                newConn = ctx.getDstDs().getConnection();
+                newStmt = ctx.getValSQLGenerator().formatInsertStatement(newConn, dstTable, r);
+                int ret = newStmt.executeUpdate();
+                log.info("Replace into destination table. Ret: {}", ret);
             }
-//        }
-//        finally {
-//            DataSourceUtil.closeQuery(null, stmt, conn);
-//        }
+        } catch (Exception ee) {
+            log.error("Replace into destination table failed. SQL: {}", newStmt.toString());
+            throw new Exception(ee);
+        } finally {
+            DataSourceUtil.closeQuery(null, newStmt, newConn);
+        }
     }
 }

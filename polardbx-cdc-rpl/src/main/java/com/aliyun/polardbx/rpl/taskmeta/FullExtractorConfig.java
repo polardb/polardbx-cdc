@@ -26,8 +26,8 @@ import lombok.Data;
  */
 @Data
 public class FullExtractorConfig extends ExtractorConfig {
-    private int fetchBatchSize;
-    private int parallelCount;
+    private int fetchBatchSize = RplConstants.DEFAULT_FETCH_BATCH_SIZE;
+    private int parallelCount = RplConstants.PRODUCER_DEFAULT_PARALLEL_COUNT;
 
     public void mergeFrom(FullExtractorConfig other) {
         this.fetchBatchSize = other.fetchBatchSize;

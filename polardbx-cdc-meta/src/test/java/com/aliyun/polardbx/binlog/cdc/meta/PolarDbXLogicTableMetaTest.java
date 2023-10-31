@@ -14,57 +14,57 @@
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.MockData;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-public class PolarDbXLogicTableMetaTest {
-    SpringContextBootStrap appContextBootStrap;
-    Gson gson = new GsonBuilder().create();
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_ENABLED;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
+import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 
+public class PolarDbXLogicTableMetaTest extends BaseTestWithGmsTables {
     @Before
-    public void init() {
-        appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
+    public void before() {
+        setConfig(META_PERSIST_ENABLED, "OFF");
+        setConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
     }
 
     @Test
     public void apply() {
-
-        LogicMetaTopology x = gson.fromJson(MockData.BASE, LogicMetaTopology.class);
-        PolarDbXLogicTableMeta logicTableMeta = new PolarDbXLogicTableMeta(new TopologyManager());
+        LogicMetaTopology x =
+            buildTopology(ORIGIN_TSO, () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
+        PolarDbXLogicTableMeta logicTableMeta = new PolarDbXLogicTableMeta(new TopologyManager(), "5.7");
         logicTableMeta.init("Final");
         logicTableMeta.applyBase(new BinlogPosition(null, "1"), x, "000");
+        LogicMetaTopology logicMetaTopology = logicTableMeta.getTopologyManager().getTopology();
+        logicMetaTopology.getLogicDbMetas().forEach(d -> {
+            d.getLogicTableMetas().forEach(t -> {
+                TableMeta tableMeta = logicTableMeta.find(d.getSchema(), t.getTableName());
+                Assert.assertNotNull(tableMeta);
+            });
+        });
 
-        System.out.println(logicTableMeta.find("transfer_test", "accounts"));
         logicTableMeta.apply(new BinlogPosition(null, "2"),
             DDLRecord.builder().sqlKind("CREATE_DATABASE").schemaName("d1").ddlSql("create database d1")
-                .metaInfo(MockData.CREATE_D1).build(), null, "000");
+                .metaInfo(MockData.CREATE_D1).build(), "000");
 
         logicTableMeta.apply(new BinlogPosition(null, "3"),
-            DDLRecord.builder().sqlKind("CREATE_TABLE").schemaName("d1").tableName("t1").ddlSql(
-                "create PARTITION table d1.t1 (id int) dbpartition by hash(id) tbpartition by hash(id) tbpartitions 2")
-                .metaInfo(MockData.CREATE_D1_T1).build(), null, "000");
-
-        System.out.println(logicTableMeta.find("d1", "t1"));
-
-    }
-
-    @Test
-    public void rollback() {
-        LogicMetaTopology x = gson.fromJson(MockData.BASE, LogicMetaTopology.class);
-        PolarDbXLogicTableMeta logicTableMeta = new PolarDbXLogicTableMeta(new TopologyManager());
-        logicTableMeta.init("Final");
-
-        logicTableMeta.rollback(new BinlogPosition(null, "3"));
-        System.out.println(logicTableMeta.find("d1", "t1"));
-
+            DDLRecord.builder()
+                .sqlKind("CREATE_TABLE")
+                .schemaName("d1")
+                .tableName("t1")
+                .ddlSql(
+                    "create PARTITION table d1.t1 (id int) dbpartition by hash(id) tbpartition by hash(id) tbpartitions 2")
+                .metaInfo(MockData.CREATE_D1_T1).build(), "000");
+        Assert.assertNotNull(logicTableMeta.find("d1", "t1"));
     }
 }

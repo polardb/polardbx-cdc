@@ -66,6 +66,14 @@ public class DmlSqlBuilder {
         this.useStringMode4TimeType = useStringMode4TimeType;
     }
 
+    private static Object buildRandomText(String columnType) {
+        if (columnType.startsWith("tinytext") || columnType.startsWith("tinyblob")) {
+            return RandomStringUtils.randomAlphabetic(128);
+        } else {
+            return RandomStringUtils.randomAscii(1024);
+        }
+    }
+
     Pair<String, List<Pair<String, Object>>> buildInsertSql(boolean useRandomColumn4Dml) {
         Map<String, String> randomMapping = buildRandomColumnMapping(useRandomColumn4Dml);
 
@@ -349,14 +357,6 @@ public class DmlSqlBuilder {
         }
     }
 
-    private static Object buildRandomText(String columnType) {
-        if (columnType.startsWith("tinytext") || columnType.startsWith("tinyblob")) {
-            return RandomStringUtils.randomAlphabetic(128);
-        } else {
-            return RandomStringUtils.randomAscii(1024);
-        }
-    }
-
     // 当需要对上下游数据进行校验时，需要对部分时间类型进行字符串格式化处理，否则当触发整形时，可能会出现上下游数据不一致的情况，如
     // 1) timestamp类型转换为mediumtext类型时，上游部分物理表已经变更为mediumtext类型，此时直接插入new Date(),
     //    表中保存的数据格式为yyyy-MM-dd HH:mm:ss.SSS，这些数据被整形为yyyy-MM-dd HH:mm:ss的形式，导致上下游数据不一致
@@ -437,7 +437,7 @@ public class DmlSqlBuilder {
     }
 
     private String buildRandomGeometry() {
-        return "GeomFromText('POINT(" + RandomUtils.nextFloat() + " " + RandomUtils.nextFloat() + ")')";
+        return "ST_GeomFromText('POINT(" + RandomUtils.nextFloat() + " " + RandomUtils.nextFloat() + ")')";
     }
 
     private double buildRandomDouble(String columnType) {

@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.cdc.topology;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicDbTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicTableMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyDbTopology;
@@ -22,7 +23,6 @@ import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
-import com.google.gson.Gson;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
@@ -54,11 +54,10 @@ import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.needShar
  */
 @Slf4j
 public class TopologyManager {
-    private static final Gson GSON = new Gson();
-    public static final Map<String, TopologyRecord> TOPOLOGY_RECORD_CACHE = new ConcurrentHashMap<>();
 
-    private LogicMetaTopology topology;
+    public static final Map<String, TopologyRecord> TOPOLOGY_RECORD_CACHE = new ConcurrentHashMap<>();
     private final Map<Pair<String, String>, LogicBasicInfo> cache = Maps.newHashMap();
+    private LogicMetaTopology topology;
 
     public TopologyManager() {
     }
@@ -91,8 +90,8 @@ public class TopologyManager {
                 } else {
                     //update all groups
                     //以group为准，更新phyDbName, storageInstId
-                    Map<String, PhyDbTopology> groupDetail = record.getLogicDbMeta().getPhySchemas().stream().collect(
-                        Collectors.toMap(PhyDbTopology::getGroup, Function.identity()));
+                    Map<String, PhyDbTopology> groupDetail = record.getLogicDbMeta().getPhySchemas().stream()
+                        .collect(Collectors.toMap(PhyDbTopology::getGroup, Function.identity()));
                     origin.setPhySchemas(record.getLogicDbMeta().getPhySchemas());
                     origin.getLogicTableMetas().stream().flatMap(logicSchema -> logicSchema.getPhySchemas().stream())
                         .forEach(phySchema -> {
@@ -102,7 +101,8 @@ public class TopologyManager {
                         });
                 }
             } catch (Exception e) {
-                log.error("update logic db meta fail {} {} {}", tso, GSON.toJson(origin), GSON.toJson(record));
+                log.error("update logic db meta fail {} {} {}", tso, JSONObject.toJSONString(origin),
+                    JSONObject.toJSONString(record));
                 throw new RuntimeException(e);
             }
         } else if (record.getLogicTableMeta() != null) {
@@ -122,9 +122,8 @@ public class TopologyManager {
                 origin.setTableType(meta.getTableType());
                 origin.setPhySchemas(meta.getPhySchemas());
             }
-        } else {
-            // do nothing
         }
+
     }
 
     public LogicDbTopology getTopology(String schema) {
@@ -209,8 +208,9 @@ public class TopologyManager {
                                                Set<String> excludeLogicDbs,
                                                Set<String> excludeLogicTables) {
         Preconditions.checkNotNull(storageInstId);
-        return topology.getLogicDbMetas().stream().flatMap(
-            l -> l.getLogicTableMetas().stream()
+        return topology.getLogicDbMetas().stream()
+            .flatMap(l -> l.getLogicTableMetas()
+                .stream()
                 .filter(d -> !excludeLogicDbs.contains(l.getSchema()))
                 .filter(t -> !excludeLogicTables.contains(l.getSchema() + "." + t.getTableName()))
                 .flatMap(p -> p.getPhySchemas().stream())
@@ -233,13 +233,20 @@ public class TopologyManager {
         return topology;
     }
 
+    public void setTopology(LogicMetaTopology topology) {
+        this.checkTopology(topology);
+        this.topology = topology;
+    }
+
     private void invalidCache(String tso, String schema, String table) {
         Iterator<Entry<Pair<String, String>, LogicBasicInfo>> iterator = cache.entrySet().iterator();
         while (iterator.hasNext()) {
             Entry<Pair<String, String>, LogicBasicInfo> c = iterator.next();
             LogicBasicInfo t = c.getValue();
             if (t.getSchemaName().equals(schema) && (StringUtils.isEmpty(table) || t.getTableName().equals(table))) {
-                log.warn("TSO {}: remove topology of {}.{}", tso, schema, table);
+                if (log.isDebugEnabled()) {
+                    log.debug("TSO {}: remove topology of {}.{}", tso, schema, table);
+                }
                 iterator.remove();
             }
         }
@@ -257,11 +264,6 @@ public class TopologyManager {
                 topology.removeTable(schema, table);
             }
         }
-    }
-
-    public void setTopology(LogicMetaTopology topology) {
-        this.checkTopology(topology);
-        this.topology = topology;
     }
 
     private void checkTopology(LogicMetaTopology topology) {

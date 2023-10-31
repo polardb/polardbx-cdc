@@ -67,11 +67,11 @@ public class RowChangeBuilder {
      */
     protected Map<String, String> separatorMap = new HashMap<>();
 
-    private final static int DEFAULT_ORDINAL_INDEX = -1;
-    private final static boolean DEFAULT_SIGNED = true;
-    private final static boolean DEFAULT_NULLABLE = true;
-    private final static boolean DEFAULT_PRIMARYKEY = false;
-    private final static boolean DEFAULT_UNIQUEKEY = false;
+    private static final int DEFAULT_ORDINAL_INDEX = -1;
+    private static final boolean DEFAULT_SIGNED = true;
+    private static final boolean DEFAULT_NULLABLE = true;
+    private static final boolean DEFAULT_PRIMARYKEY = false;
+    private static final boolean DEFAULT_UNIQUEKEY = false;
 
     private int currentFieldIndex = 1;
 
@@ -501,8 +501,10 @@ public class RowChangeBuilder {
         boolean nullable = dbmsColumn.isNullable();
         boolean primaryKey = dbmsColumn.isPrimaryKey();
         boolean uniqueKey = dbmsColumn.isUniqueKey();
-        DBMSColumn newColumn = new DefaultColumn(name, ordinalIndex, sqlType, signed, nullable, primaryKey, uniqueKey);
-        return newColumn;
+        boolean generated = dbmsColumn.isGenerated();
+        boolean implicitPk = dbmsColumn.isRdsImplicitPk();
+        return new DefaultColumn(name, ordinalIndex, sqlType, signed, nullable, primaryKey, uniqueKey,
+            generated, implicitPk);
     }
 
     public DBMSAction getAction() {

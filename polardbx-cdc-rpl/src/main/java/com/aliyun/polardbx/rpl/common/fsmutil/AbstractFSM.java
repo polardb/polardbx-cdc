@@ -69,6 +69,8 @@ public abstract class AbstractFSM<T> {
         synchronized (this) {
             DbTaskMetaManager.updateStateMachineState(FSMId, state);
             FSMMetaManager.startServiceByState(FSMId);
+            // 立即distribute一次，防止running进入ready导致重启
+            FSMMetaManager.distributeTasks();
         }
     }
 

@@ -17,19 +17,20 @@ package com.aliyun.polardbx.binlog.daemon.rest.resources;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.rest.resources.check.ClusterStatusChecker;
 import com.aliyun.polardbx.binlog.dao.InstConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.InstConfigMapper;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.ServerInfoMapper;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.po.InstConfig;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
+import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
+import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.google.common.collect.Maps;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.sun.jersey.spi.resource.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -52,7 +53,6 @@ import java.util.stream.Collectors;
 @Path("/")
 @Singleton
 public class RootResource {
-    private final static Gson GSON = new GsonBuilder().create();
     private static final Logger logger = LoggerFactory.getLogger(RootResource.class);
 
     @GET
@@ -75,8 +75,8 @@ public class RootResource {
         return nodeInfoList.stream()
             .map(n -> {
                 Map<String, Object> map = new HashMap<>();
-                Cursor cursor = StringUtils.isNotBlank(n.getLatestCursor()) ?
-                    JSONObject.parseObject(n.getLatestCursor(), Cursor.class) : null;
+                BinlogCursor cursor = StringUtils.isNotBlank(n.getLatestCursor()) ?
+                    JSONObject.parseObject(n.getLatestCursor(), BinlogCursor.class) : null;
                 map.put("fileName", cursor != null ? cursor.getFileName() : "");
                 map.put("filePosition", cursor != null ? cursor.getFilePosition() : "");
                 map.put("containerId", n.getContainerId());
@@ -95,11 +95,21 @@ public class RootResource {
     @GET
     @Path("/checkSupportBinlogX")
     public boolean checkSupportBinlogX() {
-        // 先检查server是否支持
+        // 先检查master server是否支持 binlog_x
+        ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
+        Optional<ServerInfo> serverInfoOptional = serverInfoMapper
+            .selectOne(s -> s.where(ServerInfoDynamicSqlSupport.instType, SqlBuilder.isEqualTo(0)).limit(1));
         InstConfigMapper instConfigMapper = SpringContextHolder.getObject(InstConfigMapper.class);
+        String pxcId = DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID);
+        if (serverInfoOptional.isPresent()) {
+            pxcId = serverInfoOptional.get().getInstId();
+        }
+        String finalPxcId = pxcId;
         Optional<InstConfig> instConfigOptional =
             instConfigMapper.selectOne(s -> s.where(InstConfigDynamicSqlSupport.paramKey, SqlBuilder
-                .isEqualTo(ConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT)));
+                    .isEqualTo(ConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT))
+                .and(InstConfigDynamicSqlSupport.instId, SqlBuilder.isEqualTo(finalPxcId)).limit(1));
+
         return instConfigOptional.isPresent() && Boolean
             .parseBoolean(instConfigOptional.get().getParamVal());
     }
@@ -121,7 +131,7 @@ public class RootResource {
         retVal.put("ServerId", serverID + "");
         retVal.put("CheckSumSwitch", "ON");
         retVal.put("BinlogPersistTime",
-            DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_FILE_EXPIRE_DAYS) + "");
+            DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_FILE_PRESERVE_DAYS) + "");
         retVal.put("BinlogSize", binlogSize + "");
         retVal.put("VersionSupportMultiCdc", supportBinlogX + "");
         return retVal;

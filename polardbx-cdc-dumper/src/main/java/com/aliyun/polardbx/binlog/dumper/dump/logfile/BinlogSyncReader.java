@@ -40,13 +40,14 @@ public class BinlogSyncReader extends BinlogDumpReader {
                             int maxPacketSize, int readBufferSize)
         throws IOException {
         super(logFileManager, fileName, pos, maxPacketSize, readBufferSize);
+        super.init();
         this.eventSplitMode = eventSplitMode;
         log.info("event split mode for binlog sync is " + eventSplitMode);
     }
 
     public ByteString nextSyncPacks() {
         ByteString result = ByteString.EMPTY;
-        for (; hasNext(); ) {
+        while (hasNext()) {
             result = result.concat(nextSyncPack());
             if (result.size() >= PACKAGE_LENGTH_LIMIT) {
                 break;
@@ -68,7 +69,8 @@ public class BinlogSyncReader extends BinlogDumpReader {
             if (buffer.remaining() == 0) {
                 buffer.clear();
                 if (fp == channel.size() && hasNext()) {
-                    log.info("transfer, buffer={}, {}, {}<->{}", buffer, hasNext(), channel.position(), channel.size());
+                    log.info("transfer, buffer={}, {}, {}<->{}, {}", buffer, hasNext(), channel.position(),
+                        channel.size(), logFileManager.getLatestFileCursor());
                     rotate();
                 } else {
                     this.read();

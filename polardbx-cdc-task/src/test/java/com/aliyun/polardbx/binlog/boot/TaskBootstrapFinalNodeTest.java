@@ -25,9 +25,6 @@ import com.aliyun.polardbx.binlog.domain.TaskType;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- *
- **/
 public class TaskBootstrapFinalNodeTest {
 
     // 根据自己的测试需求进行调整

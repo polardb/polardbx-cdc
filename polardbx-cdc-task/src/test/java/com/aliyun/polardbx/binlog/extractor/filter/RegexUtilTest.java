@@ -14,6 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.binlog.util.RegexUtil;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -22,7 +25,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Pattern;
 
-public class RegexUtilTest {
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX;
+
+public class RegexUtilTest extends BaseTest {
 
     private static final String REGEX_PATTERNS = "pattern";
     private static final String REGEX_STRING = "regex_string";
@@ -30,6 +35,19 @@ public class RegexUtilTest {
 
     static void printSplitLine() {
         System.out.println("---------------------------------------");
+    }
+
+    @Test
+    public void testAlterUser() {
+        String config = DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX);
+        String sql1 = "alter user ";
+        String sql2 = "alter \n user";
+        String sql3 = "alter       user ";
+        String sql4 = "Alter UsEr";
+        Assert.assertTrue(RegexUtil.match(config, sql1));
+        Assert.assertTrue(RegexUtil.match(config, sql2));
+        Assert.assertTrue(RegexUtil.match(config, sql3));
+        Assert.assertTrue(RegexUtil.match(config, sql4));
     }
 
     @Test

@@ -29,8 +29,9 @@ import java.util.Map;
  */
 public abstract class DBMSEvent implements Serializable {
     private static final long serialVersionUID = 6951115875657148365L;
-
     protected transient Map<String, DBMSOption> optionDict;
+    private Long sourceTimeStamp;
+    private long eventSize;
 
     /**
      * Build option information as needed.
@@ -110,6 +111,22 @@ public abstract class DBMSEvent implements Serializable {
      * @param value session option value.
      */
     public abstract void setOptionValue(String name, Serializable value);
+
+    public Long getSourceTimeStamp() {
+        return sourceTimeStamp;
+    }
+
+    public void setSourceTimeStamp(long sourceTimeStamp) {
+        this.sourceTimeStamp = sourceTimeStamp;
+    }
+
+    public long getEventSize() {
+        return eventSize;
+    }
+
+    public void setEventSize(long eventSize) {
+        this.eventSize = eventSize;
+    }
 
     /**
      * {@inheritDoc}

@@ -14,8 +14,11 @@
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
 
+import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.daemon.constant.ClusterRebalanceInstruction;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
@@ -37,9 +40,8 @@ import com.aliyun.polardbx.binlog.scheduler.ExecutionSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.StorageUtil;
+import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Lists;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -51,11 +53,11 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_GROUP_NAME;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_REFRESH_INTERVAL_MINUTE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_SUPPORT_REBUILD_ONLY_DAEMON_DOWN;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_FORCE_REFRESH_TOPOLOGY_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_SUPPORT_REFRESH_TOPOLOGY_ONLY_DAEMON_DOWN;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
@@ -70,8 +72,6 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
  **/
 @Slf4j
 public class TopologyServiceHelper {
-    private static final Gson GSON = new GsonBuilder().create();
-
     private static final DumperInfoMapper dumperInfoMapper = getObject(DumperInfoMapper.class);
 
     private static final BinlogTaskInfoMapper taskInfoMapper = getObject(BinlogTaskInfoMapper.class);
@@ -80,7 +80,7 @@ public class TopologyServiceHelper {
 
     private static long lastForceRefreshTime = System.currentTimeMillis();
 
-    public static void checkContainers(ResourceManager resourceManager) {
+    public static void checkContainerStatus(ResourceManager resourceManager) {
         Set<String> set = resourceManager.allOfflineContainers();
         if (!set.isEmpty()) {
             MonitorManager.getInstance().triggerAlarm(MonitorType.DAEMON_PROCESS_DEAD_ERROR, set);
@@ -88,7 +88,7 @@ public class TopologyServiceHelper {
         }
     }
 
-    public static void clearStaleInfos(long currentVersion) {
+    public static void clearStaleMetaData(long currentVersion) {
         //忽略版本号为0的记录，兼容老版调度算法，保证顺利平滑升级
         taskInfoMapper.delete(s ->
             s.where(BinlogTaskInfoDynamicSqlSupport.version, SqlBuilder.isLessThan(currentVersion))
@@ -118,6 +118,9 @@ public class TopologyServiceHelper {
         }
     }
 
+    /**
+     * 根据expected storage tso，查询出在这个tso所对应的DN信息
+     */
     public static StorageHistoryInfo buildStorageHistoryInfo(String expectedStorageTso) {
         StorageHistoryInfoMapper storageHistoryMapper = getObject(StorageHistoryInfoMapper.class);
         List<StorageHistoryInfo> storageHistoryInfos = storageHistoryMapper.select(s -> s.where(
@@ -138,12 +141,20 @@ public class TopologyServiceHelper {
     public static boolean shouldRefreshTopology(ResourceManager resourceManager, ClusterSnapshot preClusterSnapshot,
                                                 List<StorageInfo> storages, ExecutionSnapshot executionSnapshot,
                                                 StorageHistoryInfo storageHistoryInfo) {
+        if (SystemDbConfig.getSystemDbConfig(ConfigKeys.CLUSTER_REBALANCE_INSTRUCTION).equals(
+            ClusterRebalanceInstruction.SET_REBALANCE_INSTRUCTION)) {
+            SystemDbConfig.updateSystemDbConfig(ConfigKeys.CLUSTER_REBALANCE_INSTRUCTION,
+                ClusterRebalanceInstruction.UNSET_REBALANCE_INSTRUCTION);
+            log.info("cluster rebalance instruction is set, topology will rebuild");
+            return true;
+        }
+
         if (preClusterSnapshot.isNew()) {
             log.info("cluster snapshot is new, topology will rebuild.");
             return true;
         }
 
-        int forceRefreshInterval = DynamicApplicationConfig.getInt(TOPOLOGY_FORCE_REFRESH_INTERVAL_MINUTE);
+        int forceRefreshInterval = DynamicApplicationConfig.getInt(DAEMON_FORCE_REFRESH_TOPOLOGY_INTERVAL);
         if (forceRefreshInterval > 0) {
             long intervalMillis = TimeUnit.MINUTES.toMillis(forceRefreshInterval);
             if (System.currentTimeMillis() - lastForceRefreshTime >= intervalMillis) {
@@ -153,36 +164,44 @@ public class TopologyServiceHelper {
             }
         }
 
-        Set<String> latestContainers = resourceManager.allOnlineContainers();
         Set<String> latestStorages = storages.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toSet());
-        Set<String> newlyAddContainers = latestContainers.stream().filter(
-            c -> !preClusterSnapshot.getContainers().contains(c)).collect(Collectors.toSet());
-        Set<String> newlyRemovedContainers = preClusterSnapshot.getContainers().stream().filter(
-            c -> !latestContainers.contains(c)).collect(Collectors.toSet());
         boolean isStorageChange =
             !(latestStorages.equals(preClusterSnapshot.getStorages())
                 && StringUtils.equals(storageHistoryInfo.getTso(), preClusterSnapshot.getStorageHistoryTso()));
-
         if (isStorageChange) {
             log.info("detected storage changing ,will rebuild topology.");
             return true;
         }
+
+        Set<String> latestContainers = resourceManager.allOnlineContainers();
+        Set<String> newlyAddContainers = latestContainers.stream().filter(
+            c -> !preClusterSnapshot.getContainers().contains(c)).collect(Collectors.toSet());
         if (!newlyAddContainers.isEmpty()) {
             log.info("detected newly add containers ,will rebuild topology, {}.", newlyAddContainers);
             return true;
         }
 
-        if (!newlyRemovedContainers.isEmpty()) {
-            boolean supportRebuild = DynamicApplicationConfig.getBoolean(TOPOLOGY_SUPPORT_REBUILD_ONLY_DAEMON_DOWN);
+        // 如果上一个拓扑中有 a b c三个容器，而现在之后a b两个容器
+        // 那么可能有两种情况：
+        // 1. c容器中的daemon不正常，导致心跳超时，但是其中的Task和Dumper还是有可能正常运行的
+        // 2. c容器被删除了
+        Set<String> missedContainers = preClusterSnapshot.getContainers().stream().filter(
+            c -> !latestContainers.contains(c)).collect(Collectors.toSet());
+        if (!missedContainers.isEmpty()) {
+            boolean supportRebuild =
+                DynamicApplicationConfig.getBoolean(DAEMON_SUPPORT_REFRESH_TOPOLOGY_ONLY_DAEMON_DOWN);
             if (supportRebuild) {
                 return true;
             }
 
+            // 有某个Task或者Dumper运行不正常
             if (!executionSnapshot.isAllRunningOk()) {
-                boolean flag = !resourceManager.isAllContainerExist(newlyRemovedContainers);
-                flag |= !newlyRemovedContainers.stream().allMatch(executionSnapshot::isRunningOk4Container);
+                // 容器被删除了
+                boolean flag = !resourceManager.isAllContainerExist(missedContainers);
+                // 容器宕机
+                flag |= !missedContainers.stream().allMatch(executionSnapshot::isRunningOk4Container);
                 if (flag) {
-                    log.info("detected newly removed containers ,will rebuild topology, {}.", newlyRemovedContainers);
+                    log.info("detected newly removed containers ,will rebuild topology, {}.", missedContainers);
                     return true;
                 }
             }
@@ -196,7 +215,7 @@ public class TopologyServiceHelper {
         String snapshotInDbStr = jdbcTemplate.queryForObject(
             String.format("select config_value from binlog_system_config where config_key = '%s' for update",
                 CLUSTER_SNAPSHOT_VERSION_KEY), String.class);
-        ClusterSnapshot snapshotInDb = GSON.fromJson(snapshotInDbStr, ClusterSnapshot.class);
+        ClusterSnapshot snapshotInDb = JSONObject.parseObject(snapshotInDbStr, ClusterSnapshot.class);
 
         if (preClusterSnapshot.getVersion() != snapshotInDb.getVersion()) {
             log.info("Topology persisting is ignored because of mismatching versions,"
@@ -211,13 +230,17 @@ public class TopologyServiceHelper {
         final StorageInfoMapper storageInfoMapper = getObject(StorageInfoMapper.class);
         List<StorageInfo> storageInfos;
 
+        // instKind 0:master, 1:slave, 2:metadb
+        // status: 0:storage ready, 1:prepare offline, 2:storage offline
         if (latestStorageHistory != null) {
-            StorageContent content = GSON.fromJson(latestStorageHistory.getStorageContent(), StorageContent.class);
+            StorageContent content =
+                JSONObject.parseObject(latestStorageHistory.getStorageContent(), StorageContent.class);
             storageInfos = storageInfoMapper.select(c ->
                 c.where(storageInstId, isIn(content.getStorageInstIds()))
                     .and(instKind, isEqualTo(0))
                     .and(status, isNotEqualTo(2)).orderBy(id));
 
+            // 去重
             storageInfos = Lists.newArrayList(storageInfos.stream().collect(
                 Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1,
                     (s1, s2) -> s1)).values());
@@ -231,8 +254,8 @@ public class TopologyServiceHelper {
             }
         } else {
             storageInfos = storageInfoMapper.select(c ->
-                c.where(instKind, isEqualTo(0))//0:master, 1:slave, 2:metadb
-                    .and(status, isNotEqualTo(2))//0:storage ready, 1:prepare offline, 2:storage offline
+                c.where(instKind, isEqualTo(0))
+                    .and(status, isNotEqualTo(2))
                     .orderBy(id)
             );
             storageInfos = Lists.newArrayList(storageInfos.stream().collect(
@@ -245,7 +268,7 @@ public class TopologyServiceHelper {
     }
 
     public static List<XStream> getStreamConfig() {
-        String streamGroupName = DynamicApplicationConfig.getString(BINLOG_X_STREAM_GROUP_NAME);
+        String streamGroupName = DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME);
         XStreamMapper mapper = SpringContextHolder.getObject(XStreamMapper.class);
         return mapper.select(s -> s.where(XStreamDynamicSqlSupport.groupName, isEqualTo(streamGroupName))
             .orderBy(XStreamDynamicSqlSupport.streamName));

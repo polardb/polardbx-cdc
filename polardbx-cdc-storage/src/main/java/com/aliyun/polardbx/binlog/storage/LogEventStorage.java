@@ -63,7 +63,6 @@ public class LogEventStorage implements Storage {
     private final AtomicInteger deleteBufferPointer;
     private final AtomicLong lastDeleteTime;
     private final Repository repository;
-    private final int cleanWorkerCount;
     private volatile boolean running;
 
     public LogEventStorage(Repository repository) {
@@ -76,9 +75,8 @@ public class LogEventStorage implements Storage {
             new LinkedBlockingQueue<>(), r -> new Thread(r, "Storage-cleaner-boss-thread"),
             new ThreadPoolExecutor.CallerRunsPolicy());
 
-        this.cleanWorkerCount = cleanWorkerCount;
-        this.cleanWorkers = new CleanWorker[this.cleanWorkerCount];
-        for (int i = 0; i < this.cleanWorkerCount; i++) {
+        this.cleanWorkers = new CleanWorker[cleanWorkerCount];
+        for (int i = 0; i < cleanWorkerCount; i++) {
             cleanWorkers[i] = new CleanWorker("Storage-cleaner-worker-thread-" + i);
         }
 
@@ -203,6 +201,11 @@ public class LogEventStorage implements Storage {
     @Override
     public long getCleanerQueuedSize() {
         return cleanBoss.getQueue().size();
+    }
+
+    @Override
+    public Repository getRepository() {
+        return repository;
     }
 
     private void check() {

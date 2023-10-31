@@ -73,6 +73,9 @@ public class SystemDbConfig {
         @Override
         public String load(String configName) throws Exception {
             String res;
+            if (logger.isDebugEnabled()) {
+                logger.debug("prepare to get config value for config name " + configName);
+            }
 
             try {
                 // step1. read from binlog_system_config by cluster_id:config_name
@@ -82,7 +85,7 @@ public class SystemDbConfig {
                 if (StringUtils.isNotBlank(res)) {
                     return res;
                 }
-                String oldConfigName = ConfigMapUtil.getOldConfigName(configName);
+                String oldConfigName = ConfigNameMap.getOldConfigName(configName);
                 if (StringUtils.isNotBlank(oldConfigName)) {
                     clusterKey = clusterId + ":" + oldConfigName;
                     res = getSystemDbConfig(clusterKey);
@@ -97,8 +100,8 @@ public class SystemDbConfig {
                     return res;
                 }
 
-                // step3. read from SprintContext
-                res = SpringContextHolder.getPropertiesValue(configName);
+                // step3. read from SprintContext，read old config first(compatible with env.properties)
+                res = getConfigValueReverse(configName, SpringContextHolder::getPropertiesValue);
                 if (StringUtils.isNotBlank(res)) {
                     return res;
                 }
@@ -107,7 +110,7 @@ public class SystemDbConfig {
                 res = getConfigValue(configName, SystemDbConfig::getInstConfig);
                 return res;
             } catch (Exception e) {
-                logger.error("read config value error, will try to read from Spring", e);
+                logger.error("read config:{} from db error, will try to read from spring context", configName, e);
                 // 极端情况，如果访问DB出现异常，做个容错处理
                 return getConfigValue(configName, SpringContextHolder::getPropertiesValue);
             }
@@ -117,11 +120,44 @@ public class SystemDbConfig {
             String res;
             res = func.apply(configName);
             if (StringUtils.isNotBlank(res)) {
+                if (logger.isDebugEnabled()) {
+                    logger.debug("[forward] get config value from newly config name, {}:{}", configName, res);
+                }
                 return res;
             }
-            String oldConfigName = ConfigMapUtil.getOldConfigName(configName);
+            String oldConfigName = ConfigNameMap.getOldConfigName(configName);
             if (StringUtils.isNotBlank(oldConfigName)) {
                 res = func.apply(oldConfigName);
+                if (StringUtils.isNotBlank(res) && logger.isDebugEnabled()) {
+                    logger.debug("[forward] get config value from old config name, {}:{}:{}",
+                        configName, oldConfigName, res);
+                }
+            }
+            return res;
+        }
+
+        private String getConfigValueReverse(String configName, Function<String, String> func) {
+            String res;
+
+            String oldConfigName = ConfigNameMap.getOldConfigName(configName);
+            if (StringUtils.isNotBlank(oldConfigName)) {
+                try {
+                    res = func.apply(oldConfigName);
+                } catch (ConfigKeyNotExistException e) {
+                    res = null;
+                }
+                if (StringUtils.isNotBlank(res)) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("[backward] get config value from old config name, {}:{}:{}",
+                            configName, oldConfigName, res);
+                    }
+                    return res;
+                }
+            }
+
+            res = func.apply(configName);
+            if (StringUtils.isNotBlank(res) && logger.isDebugEnabled()) {
+                logger.debug("[backward] get config value from newly config name, {}:{}", configName, res);
             }
             return res;
         }

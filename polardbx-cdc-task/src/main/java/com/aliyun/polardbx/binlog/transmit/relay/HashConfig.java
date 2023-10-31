@@ -14,12 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.transmit.relay;
 
-import com.alibaba.polardbx.druid.DbType;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
-import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
-import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.XTableStreamMappingDynamicSqlSupport;
@@ -43,18 +40,20 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_COUNT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_HASH_LEVEL;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_USE_DB_LEVEL_HASH_DB_LIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_USE_DB_LEVEL_HASH_TABLE_LIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_USE_RECORD_LEVEL_HASH_DB_LIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_USE_RECORD_LEVEL_HASH_TABLE_LIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_USE_TABLE_LEVEL_HASH_DB_LIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_USE_TABLE_LEVEL_HASH_TABLE_LIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_DB_LEVEL_HASH_DB_LIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_DB_LEVEL_HASH_TABLE_LIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_RECORD_LEVEL_HASH_DB_LIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_RECORD_LEVEL_HASH_TABLE_LIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_COUNT;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TABLE_LEVEL_HASH_DB_LIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TABLE_LEVEL_HASH_TABLE_LIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TABLE_LEVEL_HASH_TABLE_LIST_REGEX;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_HASH_LEVEL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
-import static com.aliyun.polardbx.binlog.util.FastSQLConstant.FEATURES;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 /**
@@ -62,22 +61,23 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
  **/
 @Slf4j
 public class HashConfig {
-    private final static XTableStreamMappingMapper TABLE_STREAM_MAPPER =
+    private static final XTableStreamMappingMapper TABLE_STREAM_MAPPER =
         SpringContextHolder.getObject(XTableStreamMappingMapper.class);
-    private final static TransactionTemplate TRANSACTION_TEMPLATE =
+    private static final TransactionTemplate TRANSACTION_TEMPLATE =
         SpringContextHolder.getObject("metaTransactionTemplate");
 
-    private final static HashLevel DEFAULT_HASH_LEVEL = HashLevel.valueOf(getString(BINLOG_X_TRANSMIT_HASH_LEVEL));
-    private final static int STREAM_COUNT = DynamicApplicationConfig.getInt(BINLOG_X_STREAM_COUNT);
-    private final static String MAPPING_KEY = "MAPPING_KEY";
+    private static final HashLevel DEFAULT_HASH_LEVEL = HashLevel.valueOf(getString(BINLOGX_TRANSMIT_HASH_LEVEL));
+    private static final int STREAM_COUNT = DynamicApplicationConfig.getInt(BINLOGX_STREAM_COUNT);
+    private static final String MAPPING_KEY = "MAPPING_KEY";
 
-    private final static Set<String> RECORD_LEVEL_HASH_DB_SET = new HashSet<>();
-    private final static Set<String> RECORD_LEVEL_HASH_TABLE_SET = new HashSet<>();
-    private final static Set<String> DB_LEVEL_HASH_DB_SET = new HashSet<>();
-    private final static Set<String> DB_LEVEL_HASH_TABLE_SET = new HashSet<>();
-    private final static Set<String> TABLE_LEVEL_HASH_DB_SET = new HashSet<>();
-    private final static Set<String> TABLE_LEVEL_HASH_TABLE_SET = new HashSet<>();
-    private final static LoadingCache<String, Map<String, Integer>> TABLE_STREAM_MAPPING =
+    private static final Set<String> RECORD_LEVEL_HASH_DB_SET = new HashSet<>();
+    private static final Set<String> RECORD_LEVEL_HASH_TABLE_SET = new HashSet<>();
+    private static final Set<String> DB_LEVEL_HASH_DB_SET = new HashSet<>();
+    private static final Set<String> DB_LEVEL_HASH_TABLE_SET = new HashSet<>();
+    private static final Set<String> TABLE_LEVEL_HASH_DB_SET = new HashSet<>();
+    private static final Set<String> TABLE_LEVEL_HASH_TABLE_SET = new HashSet<>();
+    private static final Set<Pattern> TABLE_LEVEL_HASH_TABLE_REGEX_PATTERN_SET = new HashSet<>();
+    private static final LoadingCache<String, Map<String, Integer>> TABLE_STREAM_MAPPING =
         CacheBuilder.newBuilder().build(
             new CacheLoader<String, Map<String, Integer>>() {
                 @Override
@@ -148,8 +148,11 @@ public class HashConfig {
     }
 
     private static Pair<String, String> parseRenameSql(String sql) {
-        SQLStatementParser parser = SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FEATURES);
-        SQLStatement stmt = parser.parseStatementList().get(0);
+        SQLStatement stmt = parseSQLStatement(sql);
+        if (stmt == null) {
+            return null;
+        }
+
         if (stmt instanceof MySqlRenameTableStatement) {
             MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) stmt;
             for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
@@ -162,47 +165,13 @@ public class HashConfig {
     }
 
     static {
-        String dbListStr0 = getString(BINLOG_X_USE_RECORD_LEVEL_HASH_DB_LIST);
-        if (StringUtils.isNotBlank(dbListStr0)) {
-            dbListStr0 = dbListStr0.toLowerCase();
-            String[] array = StringUtils.split(dbListStr0, ",");
-            RECORD_LEVEL_HASH_DB_SET.addAll(Arrays.asList(array));
-        }
-
-        String tableListStr0 = getString(BINLOG_X_USE_RECORD_LEVEL_HASH_TABLE_LIST);
-        if (StringUtils.isNotBlank(tableListStr0)) {
-            tableListStr0 = tableListStr0.toLowerCase();
-            String[] array = StringUtils.split(tableListStr0, ",");
-            RECORD_LEVEL_HASH_TABLE_SET.addAll(Arrays.asList(array));
-        }
-
-        String dbListStr1 = getString(BINLOG_X_USE_DB_LEVEL_HASH_DB_LIST);
-        if (StringUtils.isNotBlank(dbListStr1)) {
-            dbListStr1 = dbListStr1.toLowerCase();
-            String[] array = StringUtils.split(dbListStr1, ",");
-            DB_LEVEL_HASH_DB_SET.addAll(Arrays.asList(array));
-        }
-
-        String tableListStr1 = getString(BINLOG_X_USE_DB_LEVEL_HASH_TABLE_LIST);
-        if (StringUtils.isNotBlank(tableListStr1)) {
-            tableListStr1 = tableListStr1.toLowerCase();
-            String[] array = StringUtils.split(tableListStr1, ",");
-            DB_LEVEL_HASH_TABLE_SET.addAll(Arrays.asList(array));
-        }
-
-        String dbListStr2 = getString(BINLOG_X_USE_TABLE_LEVEL_HASH_DB_LIST);
-        if (StringUtils.isNotBlank(dbListStr2)) {
-            dbListStr2 = dbListStr2.toLowerCase();
-            String[] array = StringUtils.split(dbListStr2, ",");
-            TABLE_LEVEL_HASH_DB_SET.addAll(Arrays.asList(array));
-        }
-
-        String tableListStr2 = getString(BINLOG_X_USE_TABLE_LEVEL_HASH_TABLE_LIST);
-        if (StringUtils.isNotBlank(tableListStr2)) {
-            tableListStr2 = tableListStr2.toLowerCase();
-            String[] array = StringUtils.split(tableListStr2, ",");
-            TABLE_LEVEL_HASH_TABLE_SET.addAll(Arrays.asList(array));
-        }
+        setRecordLevelHashDbSet(getString(BINLOGX_RECORD_LEVEL_HASH_DB_LIST));
+        setRecordLevelHashTableSet(getString(BINLOGX_RECORD_LEVEL_HASH_TABLE_LIST));
+        setTableLevelHashDbSet(getString(BINLOGX_TABLE_LEVEL_HASH_DB_LIST));
+        setTableLevelHashTableSet(getString(BINLOGX_TABLE_LEVEL_HASH_TABLE_LIST));
+        setDbLevelHashDbSet(getString(BINLOGX_DB_LEVEL_HASH_DB_LIST));
+        setDbLevelHashTableSet(getString(BINLOGX_DB_LEVEL_HASH_TABLE_LIST));
+        setTableLevelHashTableRegexPatternSet(getString(BINLOGX_TABLE_LEVEL_HASH_TABLE_LIST_REGEX));
     }
 
     public static HashLevel getHashLevel(String dbName, String tableName) {
@@ -219,8 +188,15 @@ public class HashConfig {
         if (TABLE_LEVEL_HASH_DB_SET.contains(dbName)) {
             return HashLevel.TABLE;
         }
-        if (StringUtils.isNotBlank(tableName) && TABLE_LEVEL_HASH_TABLE_SET.contains(fullTableName)) {
-            return HashLevel.TABLE;
+        if (StringUtils.isNotBlank(tableName)) {
+            if (TABLE_LEVEL_HASH_TABLE_SET.contains(fullTableName)) {
+                return HashLevel.TABLE;
+            }
+            for (Pattern pattern : TABLE_LEVEL_HASH_TABLE_REGEX_PATTERN_SET) {
+                if (pattern.matcher(fullTableName).matches()) {
+                    return HashLevel.TABLE;
+                }
+            }
         }
         if (TABLE_STREAM_MAPPING.getUnchecked(MAPPING_KEY).containsKey(fullTableName)) {
             return HashLevel.TABLE;
@@ -259,6 +235,51 @@ public class HashConfig {
             return streamSeq;
         } else {
             return fullTableName.hashCode();
+        }
+    }
+
+    private static void setRecordLevelHashDbSet(String dbList) {
+        setHashLevelSetHelper(dbList, RECORD_LEVEL_HASH_DB_SET);
+    }
+
+    private static void setRecordLevelHashTableSet(String tbList) {
+        setHashLevelSetHelper(tbList, RECORD_LEVEL_HASH_TABLE_SET);
+    }
+
+    private static void setTableLevelHashDbSet(String dbList) {
+        setHashLevelSetHelper(dbList, TABLE_LEVEL_HASH_DB_SET);
+    }
+
+    private static void setTableLevelHashTableSet(String tbList) {
+        setHashLevelSetHelper(tbList, TABLE_LEVEL_HASH_TABLE_SET);
+    }
+
+    private static void setDbLevelHashDbSet(String dbList) {
+        setHashLevelSetHelper(dbList, DB_LEVEL_HASH_DB_SET);
+    }
+
+    private static void setDbLevelHashTableSet(String tbList) {
+        setHashLevelSetHelper(tbList, DB_LEVEL_HASH_TABLE_SET);
+    }
+
+    private static void setHashLevelSetHelper(String list, Set<String> set) {
+        if (StringUtils.isBlank(list)) {
+            return;
+        }
+        set.clear();
+        list = list.toLowerCase();
+        String[] array = StringUtils.split(list, ",");
+        set.addAll(Arrays.asList(array));
+    }
+
+    private static void setTableLevelHashTableRegexPatternSet(String list) {
+        if (StringUtils.isBlank(list)) {
+            return;
+        }
+        TABLE_LEVEL_HASH_TABLE_REGEX_PATTERN_SET.clear();
+        String[] array = StringUtils.split(list, ",");
+        for (String regex : array) {
+            TABLE_LEVEL_HASH_TABLE_REGEX_PATTERN_SET.add(Pattern.compile(regex));
         }
     }
 }

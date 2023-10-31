@@ -32,7 +32,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_HASH_LEVEL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_HASH_LEVEL;
 
 /**
  * created by ziyang.lb
@@ -69,7 +69,7 @@ public class StreamHashUtil {
         try {
             Pair<String, String> pair = getDaemonInfo();
             String url = String.format("http://%s:%s/config/v1/get/%s",
-                pair.getKey(), pair.getValue(), BINLOG_X_TRANSMIT_HASH_LEVEL);
+                pair.getKey(), pair.getValue(), BINLOGX_TRANSMIT_HASH_LEVEL);
             String result = PooledHttpHelper.doGetWithoutParam(url, ContentType.TEXT_PLAIN, 1000);
             return HashLevel.valueOf(result);
         } catch (Throwable t) {
@@ -100,7 +100,7 @@ public class StreamHashUtil {
     }
 
     private static Pair<String, String> getDaemonInfo() throws SQLException {
-        try (Connection connection = ConnectionManager.getInstance().getDruidMetaConnection();) {
+        try (Connection connection = ConnectionManager.getInstance().getDruidMetaConnection()) {
             JdbcUtil.useDb(connection, PropertiesUtil.getMetaDB);
             Statement stmt = connection.createStatement();
             String sql = "select ip,daemon_port from binlog_node_info where cluster_type = 'BINLOG_X'";

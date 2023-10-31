@@ -99,12 +99,12 @@ public class DownloadBarrier implements DownloadTaskListener {
         long binlogFileSize = StorageUnit.bToM(DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_FILE_SIZE));
 
         if (localStorageUseSizeMap.get(storageInstanceId) + atomicInteger.get() * binlogFileSize
-            > DynamicApplicationConfig.getInt(ConfigKeys.TASK_RDSBINLOG_STORAGE_DISK_LIMIT)) {
+            > DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DISK_LIMIT_PER_DN)) {
             logger.info("storage " + storageInstanceId + " reach disk limit, will not download binlog files!");
             return false;
         }
 
-        int diskLimit = DynamicApplicationConfig.getInt(ConfigKeys.TASK_RDSBINLOG_DISK_LIMIT);
+        int diskLimit = DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DISK_LIMIT_TOTAL);
 
         long use = atomicInteger.get() * binlogFileSize + totalUseSize;
         boolean ret = use < diskLimit;
@@ -120,7 +120,8 @@ public class DownloadBarrier implements DownloadTaskListener {
             return;
         }
         lastAdjustTime = now;
-        int maxThreadLimit = DynamicApplicationConfig.getInt(ConfigKeys.TASK_RDSBINLOG_THREAD_LIMIT);
+        int maxThreadLimit =
+            DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_THREAD_MAX_NUM);
         logger.info("poolSize : " + executor.getCorePoolSize() + " , run thread size : " + WgetContext.size());
         long currentSpeed = WgetContext.totalSpeed();
         logger.info(

@@ -17,11 +17,18 @@ package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
+import com.aliyun.polardbx.binlog.dumper.metrics.DumpClientMetric;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
+import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
+import com.aliyun.polardbx.binlog.enums.BinlogUploadStatus;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
+import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
+import com.aliyun.polardbx.binlog.util.LabEventType;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
@@ -33,18 +40,26 @@ import com.google.protobuf.ByteString;
 import io.grpc.Status;
 import io.grpc.stub.ServerCallStreamObserver;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 
+import java.io.File;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_BACK_PRESSURE_SLEEP_TIME_US;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_HEARTBEAT_INTERVAL_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_PACKET_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_READ_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_PACKET_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_READ_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getLong;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
+import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 
 /**
  * Created by ShuGuang
@@ -60,6 +75,13 @@ public class LogFileReader {
         this.metrics = StreamMetrics.getStreamMetrics(logFileManager.getStreamName());
     }
 
+    /**
+     * show binlog events in `log_file` from `pos` limit [`offset`,] `row_count`
+     * log_file: binlog file's name
+     * pos: start position to read
+     * offset: number of events to skip
+     * row_count: number of events to read
+     */
     public void showBinlogEvent(CdcFile cdcFile, long position, long offset, long rowCount,
                                 ServerCallStreamObserver<BinlogEvent> serverCallStreamObserver) {
         log.info("show binlog events in {} from {} limit {}, {}", cdcFile.getName(), position, offset, rowCount);
@@ -81,7 +103,8 @@ public class LogFileReader {
                     if (binlogFileReader.hasNext()) {
                         serverCallStreamObserver.onNext(binlogFileReader.nextBinlogEvent());
                     } else {
-                        log.info("show binlog events in {} from {} limit {}, {} complete", cdcFile.getName(), position,
+                        log.info("show binlog events in {} from {} limit {}, {} complete", cdcFile.getName(),
+                            position,
                             offset,
                             rowCount);
                         serverCallStreamObserver.onCompleted();
@@ -106,6 +129,7 @@ public class LogFileReader {
     public void binlogDump(String fileName, long position, boolean registered, Map<String, String> ext,
                            ServerCallStreamObserver<DumpStream> serverCallStreamObserver) {
         BinlogDumpReader dumpReader = null;
+        BinlogDumpDownloader dumpDownloader = null;
         try {
             log.info("binlogDump from {}@{}, register parameter value is {}, ext parameter value is {}",
                 fileName, position, registered, ext);
@@ -117,30 +141,56 @@ public class LogFileReader {
                 withStopStrategy(StopStrategies.stopAfterAttempt(retryTimesLimit)).
                 retryIfResult(Objects::isNull).
                 build().
-                call(() -> logFileManager.getLatestFileCursor());
+                call(logFileManager::getLatestFileCursor);
 
             dumpReader = new BinlogDumpReader(logFileManager, fileName, position, getInt(BINLOG_DUMP_PACKET_SIZE),
                 getInt(BINLOG_DUMP_READ_BUFFER_SIZE));
+            DumpClientMetric.startDump();
+            if (useDownloadFirstModeForDump(fileName)) {
+                Integer windowSize = getInt(ConfigKeys.BINLOG_DUMP_DOWNLOAD_WINDOW_SIZE);
+                // 解决多个dump请求并发的问题，防止互相干扰
+                String downloadPath = getString(ConfigKeys.BINLOG_DUMP_DOWNLOAD_PATH) + "/" + UUID.randomUUID();
+                dumpDownloader = new BinlogDumpDownloader(logFileManager, downloadPath, windowSize, fileName);
+                dumpDownloader.start();
+                dumpReader.setDumpMode(BinlogDumpReader.DumpMode.QUICK);
+                dumpReader.setBinlogDumpDownloader(dumpDownloader);
+                dumpReader.registerRotateObserver(dumpDownloader);
+            }
+
+            dumpReader.init();
             dumpReader.valid();
 
+            // 在读取binlog中的内容之前，发送一个fake rotate和一个fake format event
             ByteString fakeRotateEvent = dumpReader.fakeRotateEvent();
-            if (StringUtils.equalsIgnoreCase(ext.get("master_binlog_checksum"), "NONE") && StringUtils.equalsIgnoreCase(
-                ext.get("source_binlog_checksum"), "NONE")) {
-                fakeRotateEvent = disableChecksum(fakeRotateEvent);
-                dumpReader.setRotateNext(false);
-            }
             ByteString fakeFormatEvent = dumpReader.fakeFormatEvent();
             serverCallStreamObserver.onNext(DumpStream.newBuilder().setPayload(fakeRotateEvent).build());
             show("FakeRotateEvent", fakeRotateEvent);
             serverCallStreamObserver.onNext(DumpStream.newBuilder().setPayload(fakeFormatEvent).build());
             show("FakeFormatEvent", fakeFormatEvent);
+
             dumpReader.start();
             int timeout = 10, noData = 0;
+            int checkFileStatusInterval = getInt(BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND);
+            long lastCheckTime = System.currentTimeMillis();
+            long backPressureSleepTime = getLong(BINLOG_DUMP_BACK_PRESSURE_SLEEP_TIME_US);
             while (true) {
                 if (serverCallStreamObserver.isCancelled()) {
                     log.warn("remote close...");
                     break;
                 }
+
+                // 必须要check file是否存在，否则如果dump过程中文件被删，hasNext方法会一值返回true
+                // 但是nextPack是空的，导致线程在while循环中无法退出
+                if (System.currentTimeMillis() - lastCheckTime > checkFileStatusInterval * 1000) {
+                    if (!dumpReader.checkFileStatus()) {
+                        log.warn("binlog file {} has been deleted, dump thread will exit.", dumpReader.fileName);
+                        LabEventManager.logEvent(LabEventType.DUMPER_DUMP_LOCAL_FILE_IS_DELETED);
+                        break;
+                    } else {
+                        lastCheckTime = System.currentTimeMillis();
+                    }
+                }
+
                 if (serverCallStreamObserver.isReady()) {
                     if (dumpReader.hasNext()) {
                         ByteString pack = dumpReader.nextDumpPacks();
@@ -148,8 +198,11 @@ public class LogFileReader {
                         if (log.isDebugEnabled()) {
                             show("BinlogDump", pack);
                         }
+
                         serverCallStreamObserver.onNext(
                             DumpStream.newBuilder().setPayload(pack).build());
+                        DumpClientMetric.addDumpBytes(pack.size());
+                        DumpClientMetric.recordPosition(dumpReader.fileName, dumpReader.fp, dumpReader.timestamp);
                     } else {
                         TimeUnit.MILLISECONDS.sleep(timeout);
                         noData += timeout;
@@ -167,7 +220,7 @@ public class LogFileReader {
                         }
                     }
                 } else {
-                    TimeUnit.MILLISECONDS.sleep(10);
+                    TimeUnit.MICROSECONDS.sleep(backPressureSleepTime);
                 }
             }
         } catch (Throwable th) {
@@ -181,6 +234,9 @@ public class LogFileReader {
         } finally {
             if (dumpReader != null) {
                 dumpReader.close();
+            }
+            if (dumpDownloader != null) {
+                dumpDownloader.close();
             }
         }
     }
@@ -199,7 +255,21 @@ public class LogFileReader {
                 getInt(BINLOG_SYNC_PACKET_SIZE), getInt(BINLOG_SYNC_READ_BUFFER_SIZE));
             binlogSyncReader.start();
             int timeout = 100, noData = 0;
+            int checkFileStatusInterval = getInt(BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND);
+            long lastCheckTime = System.currentTimeMillis();
             while (true) {
+                // 必须要check file是否存在，否则如果sync过程中文件被删，hasNext方法会一致返回true
+                // 但是nextPack是空的，导致线程在while循环中无法退出
+                if (System.currentTimeMillis() - lastCheckTime > checkFileStatusInterval * 1000) {
+                    if (!binlogSyncReader.checkFileStatus()) {
+                        LabEventManager.logEvent(LabEventType.DUMPER_SYNC_LOCAL_FILE_IS_DELETED);
+                        log.warn("binlog file {} has been deleted, sync thread will exit.", binlogSyncReader.fileName);
+                        break;
+                    } else {
+                        lastCheckTime = System.currentTimeMillis();
+                    }
+                }
+
                 // 增加反压控制判断
                 if (outputStream.tryWait()) {
                     if (binlogSyncReader.hasNext()) {
@@ -256,4 +326,36 @@ public class LogFileReader {
                 LogEvent.getTypeName(eventType), endPos - eventSize, endPos);
         }
     }
+
+    private boolean useDownloadFirstModeForDump(String startFileName) {
+        if (!getBoolean(ConfigKeys.BINLOG_DUMP_DOWNLOAD_FIRST_MODE)) {
+            return false;
+        }
+
+        BinlogOssRecordService service = getObject(BinlogOssRecordService.class);
+        Optional<BinlogOssRecord> record =
+            service.getRecordByName(logFileManager.getGroupName(), logFileManager.getStreamName(),
+                getString(ConfigKeys.CLUSTER_ID), startFileName);
+        if (!record.isPresent()) {
+            log.info("will not use download first mode because file related record not exist, file:{}", startFileName);
+            return false;
+        }
+        BinlogOssRecord r = record.get();
+        if (r.getUploadStatus() != BinlogUploadStatus.SUCCESS.getValue()) {
+            log.info("will not use download first mode because file not upload to oss success, file:{}", startFileName);
+            return false;
+        }
+        if (r.getPurgeStatus() == BinlogPurgeStatus.COMPLETE.getValue()) {
+            log.info("will not use download first mode because file is purged, file:{}", startFileName);
+            return false;
+        }
+        File f = new File(logFileManager.getBinlogFullPath(), startFileName);
+        if (f.exists()) {
+            log.info("will not use download first mode because file exists in local, file:{}", startFileName);
+            return false;
+        }
+
+        return true;
+    }
+
 }

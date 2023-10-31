@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Created by ziyang.lb
  **/
 public class TxnOutputStream<T> {
-    private final static Logger logger = LoggerFactory.getLogger(TxnOutputStream.class);
+    private static final Logger logger = LoggerFactory.getLogger(TxnOutputStream.class);
     private final ServerCallStreamObserver<T> observer;
     private final AtomicLong onReadyCallBackCount;
     private int streamSeq;

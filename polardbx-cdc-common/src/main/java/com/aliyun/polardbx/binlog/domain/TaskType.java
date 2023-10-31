@@ -37,5 +37,15 @@ public enum TaskType {
     /**
      * DumperX类型，多流模式下的负责逻辑Binlog的罗盘和对外Dump服务
      */
-    DumperX
+    DumperX;
+
+    public static boolean isTask(String taskType) {
+        return Relay.name().equals(taskType) || Final.name().equals(taskType) || Dispatcher.name().equals(taskType);
+    }
+
+    public static boolean isDumper(String taskType) {
+        return Dumper.name().equals(taskType) || DumperX.name().equals(taskType);
+
+    }
+
 }

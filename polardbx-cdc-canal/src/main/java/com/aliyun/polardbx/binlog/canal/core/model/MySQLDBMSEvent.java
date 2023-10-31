@@ -17,6 +17,7 @@ package com.aliyun.polardbx.binlog.canal.core.model;
 import com.aliyun.polardbx.binlog.canal.binlog.EventRepository;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSXATransaction;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.SerializationUtils;
@@ -68,6 +69,7 @@ public class MySQLDBMSEvent {
                 repository.put(persistKey, SerializationUtils.serialize(dbMessage));
                 dbMessage = null;
                 log.info("mysql dbms event is persisted, with key " + persistKey);
+                StatMetrics.getInstance().addPersistEventCount(1);
             } catch (Throwable e) {
                 throw new PolardbxException("persist failed !", e);
             }
@@ -85,6 +87,7 @@ public class MySQLDBMSEvent {
             repository.delete(persistKey);
             log.info("persisted mysql dbms event is released, with key " + persistKey);
             persistKey = null;
+            StatMetrics.getInstance().deletePersistEventCount(1);
         } catch (Throwable e) {
             throw new PolardbxException("release persisted event failed !", e);
         }
@@ -143,4 +146,5 @@ public class MySQLDBMSEvent {
     public void setRepository(EventRepository repository) {
         this.repository = repository;
     }
+
 }

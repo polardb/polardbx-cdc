@@ -14,11 +14,10 @@
  */
 package com.aliyun.polardbx.binlog.cdc.topology;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.google.common.collect.Sets;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import org.hamcrest.CoreMatchers;
 import org.junit.Assert;
 import org.junit.Before;
@@ -27,67 +26,64 @@ import org.junit.Test;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_ENABLED;
 import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCaseLogicMetaTopology;
 
-public class TopologyManagerTest {
-
+public class TopologyManagerTest extends BaseTest {
     @Before
     public void before() {
-        SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
+        setConfig(META_PERSIST_ENABLED, "OFF");
+        setConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
     }
 
     @Test
     public void applyAndCheck() {
-        Gson gson = new GsonBuilder().create();
-        final LogicMetaTopology x = gson.fromJson(MockData.BASE, LogicMetaTopology.class);
+        final LogicMetaTopology x = JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class);
         toLowerCaseLogicMetaTopology(x);
 
         TopologyManager manager = new TopologyManager(x);
 
-        List<LogicMetaTopology.PhyTableTopology> phyTables =
-            manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet());
+        List<LogicMetaTopology.PhyTableTopology> phyTables = manager.getPhyTables(
+            "polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet());
         long count = phyTables.stream().flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList()).stream()
             .filter(i -> i.equals("user_Gvli")).count();
         Assert.assertEquals(16, phyTables.size());
         Assert.assertEquals(4, count);
 
-        phyTables =
-            manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet("transfer_test.user"));
+        phyTables = manager.getPhyTables(
+            "polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet("transfer_test.user"));
         count = phyTables.stream().flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList()).stream()
             .filter(i -> i.equals("user_Gvli")).count();
         Assert.assertEquals(12, phyTables.size());
         Assert.assertEquals(0, count);
 
-        phyTables =
-            manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(),
-                Sets.newHashSet("transfer_test.accounts"));
+        phyTables = manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(),
+            Sets.newHashSet("transfer_test.accounts"));
         count = phyTables.stream().flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList()).stream()
             .filter(i -> i.equals("user_Gvli")).count();
         Assert.assertEquals(12, phyTables.size());
         Assert.assertEquals(4, count);
 
-        phyTables =
-            manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(),
-                Sets.newHashSet("transfer_test.accountsxxx"));
+        phyTables = manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(),
+            Sets.newHashSet("transfer_test.accountsxxx"));
         count = phyTables.stream().flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList()).stream()
             .filter(i -> i.equals("user_Gvli")).count();
         Assert.assertEquals(16, phyTables.size());
         Assert.assertEquals(4, count);
 
-        phyTables =
-            manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet("transfer_test"),
-                Sets.newHashSet("transfer_test.accountsxxx"));
+        phyTables = manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet("transfer_test"),
+            Sets.newHashSet("transfer_test.accountsxxx"));
         count = phyTables.stream().flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList()).stream()
             .filter(i -> i.equals("user_Gvli")).count();
         Assert.assertEquals(8, phyTables.size());
         Assert.assertEquals(0, count);
 
-        TopologyRecord r1 = gson.fromJson(MockData.CREATE_D1, TopologyRecord.class);
-        TopologyRecord r2 = gson.fromJson(MockData.CREATE_D1_T1, TopologyRecord.class);
-        TopologyRecord r3 = gson.fromJson(MockData.MOVE_D1_0001_0, TopologyRecord.class);
-        TopologyRecord r4 = gson.fromJson(MockData.CREATE_D1_T2, TopologyRecord.class);
-        TopologyRecord r5 = gson.fromJson(MockData.MOVE_D1_0001_1, TopologyRecord.class);
+        TopologyRecord r1 = JSONObject.parseObject(MockData.CREATE_D1, TopologyRecord.class);
+        TopologyRecord r2 = JSONObject.parseObject(MockData.CREATE_D1_T1, TopologyRecord.class);
+        TopologyRecord r3 = JSONObject.parseObject(MockData.MOVE_D1_0001_0, TopologyRecord.class);
+        TopologyRecord r4 = JSONObject.parseObject(MockData.CREATE_D1_T2, TopologyRecord.class);
+        TopologyRecord r5 = JSONObject.parseObject(MockData.MOVE_D1_0001_1, TopologyRecord.class);
 
         manager.apply(null, "d1", null, r1);//create db
         Assert.assertEquals("d1", manager.getLogicSchema("d1_000001"));
@@ -99,14 +95,13 @@ public class TopologyManagerTest {
 
         List<String> tables =
             manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet()).stream()
-                .flatMap(p -> p.getPhyTables().stream()).collect(
-                Collectors.toList());
+                .flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList());
         Assert.assertThat(tables, CoreMatchers.hasItems("t1_TRwG_02", "t1_TRwG_03"));
 
         manager.apply(null, "d1", null, r3);//move group
-        tables = manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet()).stream()
-            .flatMap(p -> p.getPhyTables().stream()).collect(
-                Collectors.toList());
+        tables = manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet())
+            .stream()
+            .flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList());
         Assert.assertThat(tables, CoreMatchers.not(CoreMatchers.hasItems("t1_TRwG_02", "t1_TRwG_03")));
 
         manager.apply(null, "d1", "t2", r4);//create table d1.t2
@@ -115,21 +110,17 @@ public class TopologyManagerTest {
         Assert.assertEquals("t2", schema.getTableName());
 
         tables = manager.getPhyTables("polardbx-storage-0-master", Sets.newHashSet(), Sets.newHashSet()).stream()
-            .flatMap(p -> p.getPhyTables().stream()).collect(
-                Collectors.toList());
+            .flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList());
         Assert.assertThat(tables, CoreMatchers.hasItems("t1_TRwG_02", "t1_TRwG_03", "t2_N6ql_02", "t2_N6ql_03"));
 
         manager.apply(null, "d1", null, r5);//move group back
         tables = manager.getPhyTables("polardbx-storage-0-master", Sets.newHashSet(), Sets.newHashSet()).stream()
-            .flatMap(p -> p.getPhyTables().stream()).collect(
-                Collectors.toList());
+            .flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList());
         Assert.assertThat(tables,
             CoreMatchers.not(CoreMatchers.hasItems("t1_TRwG_02", "t1_TRwG_03", "t2_N6ql_02", "t2_N6ql_03")));
 
         tables = manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet()).stream()
-            .flatMap(p -> p.getPhyTables().stream()).collect(
-                Collectors.toList());
+            .flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList());
         Assert.assertThat(tables, CoreMatchers.hasItems("t1_TRwG_02", "t1_TRwG_03", "t2_N6ql_02", "t2_N6ql_03"));
-
     }
 }

@@ -21,76 +21,76 @@ import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class ValidationDiffDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.489+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.946+08:00", comments="Source Table: validation_diff")
     public static final ValidationDiff validationDiff = new ValidationDiff();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.49+08:00", comments="Source field: validation_diff.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.946+08:00", comments="Source field: validation_diff.id")
     public static final SqlColumn<Long> id = validationDiff.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.49+08:00", comments="Source field: validation_diff.state_machine_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.946+08:00", comments="Source field: validation_diff.state_machine_id")
     public static final SqlColumn<String> stateMachineId = validationDiff.stateMachineId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.49+08:00", comments="Source field: validation_diff.service_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.service_id")
     public static final SqlColumn<String> serviceId = validationDiff.serviceId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.49+08:00", comments="Source field: validation_diff.task_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.task_id")
     public static final SqlColumn<String> taskId = validationDiff.taskId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.49+08:00", comments="Source field: validation_diff.validation_task_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.validation_task_id")
     public static final SqlColumn<String> validationTaskId = validationDiff.validationTaskId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.type")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.type")
     public static final SqlColumn<Integer> type = validationDiff.type;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.state")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.state")
     public static final SqlColumn<Integer> state = validationDiff.state;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.src_logical_db")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.src_logical_db")
     public static final SqlColumn<String> srcLogicalDb = validationDiff.srcLogicalDb;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.src_logical_table")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.src_logical_table")
     public static final SqlColumn<String> srcLogicalTable = validationDiff.srcLogicalTable;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.src_logical_key_col")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.src_logical_key_col")
     public static final SqlColumn<String> srcLogicalKeyCol = validationDiff.srcLogicalKeyCol;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.src_phy_db")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.src_phy_db")
     public static final SqlColumn<String> srcPhyDb = validationDiff.srcPhyDb;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.src_phy_table")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.src_phy_table")
     public static final SqlColumn<String> srcPhyTable = validationDiff.srcPhyTable;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.src_phy_key_col")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.src_phy_key_col")
     public static final SqlColumn<String> srcPhyKeyCol = validationDiff.srcPhyKeyCol;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.src_key_col_val")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.src_key_col_val")
     public static final SqlColumn<String> srcKeyColVal = validationDiff.srcKeyColVal;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.dst_logical_db")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.dst_logical_db")
     public static final SqlColumn<String> dstLogicalDb = validationDiff.dstLogicalDb;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.dst_logical_table")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.dst_logical_table")
     public static final SqlColumn<String> dstLogicalTable = validationDiff.dstLogicalTable;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.491+08:00", comments="Source field: validation_diff.dst_logical_key_col")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.dst_logical_key_col")
     public static final SqlColumn<String> dstLogicalKeyCol = validationDiff.dstLogicalKeyCol;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.492+08:00", comments="Source field: validation_diff.dst_key_col_val")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.dst_key_col_val")
     public static final SqlColumn<String> dstKeyColVal = validationDiff.dstKeyColVal;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.492+08:00", comments="Source field: validation_diff.deleted")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.deleted")
     public static final SqlColumn<Boolean> deleted = validationDiff.deleted;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.492+08:00", comments="Source field: validation_diff.create_time")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.create_time")
     public static final SqlColumn<Date> createTime = validationDiff.createTime;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.492+08:00", comments="Source field: validation_diff.update_time")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.update_time")
     public static final SqlColumn<Date> updateTime = validationDiff.updateTime;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.492+08:00", comments="Source field: validation_diff.diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source field: validation_diff.diff")
     public static final SqlColumn<String> diff = validationDiff.diff;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2021-12-28T11:07:16.489+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.946+08:00", comments="Source Table: validation_diff")
     public static final class ValidationDiff extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

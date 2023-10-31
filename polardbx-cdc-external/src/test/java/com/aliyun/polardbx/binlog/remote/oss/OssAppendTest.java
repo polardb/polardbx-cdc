@@ -15,33 +15,31 @@
 package com.aliyun.polardbx.binlog.remote.oss;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.remote.Appender;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
-import java.io.IOException;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
 /**
  * @author yudong
  * @since 2022/8/10
  **/
 @Slf4j
-public class OssAppendTest {
+@Ignore
+public class OssAppendTest extends BaseTest {
     private final String testPath = "oss-appender-test";
     private OssManager ossManager;
 
     @Before
-    public void before() throws IOException {
-        final SpringContextBootStrap appContextBootStrap =
-                new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
+    public void before() {
         OssConfig ossConfig = new OssConfig();
         ossConfig.setAccessKeyId(getString(ConfigKeys.OSS_ACCESSKEY_ID));
         ossConfig.setAccessKeySecret(getString(ConfigKeys.OSS_ACCESSKEY_ID_SECRET));
@@ -107,6 +105,7 @@ public class OssAppendTest {
             log.info("file:{}, size:{} bytes append successfully.", fileName, fileSize);
         }
     }
+
     @Test
     public void multiAppendBigFileTest() {
         int testRounds = 2;

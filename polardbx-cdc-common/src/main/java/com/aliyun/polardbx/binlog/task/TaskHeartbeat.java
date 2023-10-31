@@ -18,16 +18,15 @@ import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogDumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
-import com.aliyun.polardbx.binlog.dao.TaskHeartbeatMapper;
+import com.aliyun.polardbx.binlog.dao.TaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.XStreamMapper;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.DumperType;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
@@ -35,16 +34,14 @@ import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
-import com.google.gson.Gson;
 import lombok.extern.slf4j.Slf4j;
 import org.mybatis.dynamic.sql.SqlBuilder;
 
 import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
-import static com.aliyun.polardbx.binlog.Constants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.GLOBAL_BINLOG_LATEST_CURSOR;
-import static com.aliyun.polardbx.binlog.Constants.STREAM_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 
 /**
  * Created by ziyang.lb
@@ -77,14 +74,14 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
             Runtime.getRuntime().halt(1);
         }
 
-        TaskHeartbeatMapper taskHeartbeatMapper = SpringContextHolder.getObject(TaskHeartbeatMapper.class);
         String role = this.config.getRole();
         if (role.equals(TaskType.Dumper.name())) {
-            Cursor cursor = cursorProviderMap.get(STREAM_NAME_GLOBAL).getLatestFileCursor();
+            BinlogDumperInfoMapper binlogDumperInfoMapper = SpringContextHolder.getObject(BinlogDumperInfoMapper.class);
+            BinlogCursor cursor = cursorProviderMap.get(STREAM_NAME_GLOBAL).getLatestFileCursor();
             final boolean dumperLeader = RuntimeLeaderElector.isDumperLeader(name);
 
-            //更新心跳
-            int result = taskHeartbeatMapper.updateDumperHeartbeat(name,
+            // 更新心跳
+            int result = binlogDumperInfoMapper.updateDumperHeartbeat(name,
                 dumperLeader ? DumperType.MASTER.getName() : DumperType.SLAVE.getName(), clusterId);
             if (result == 0) {
                 log.error("Dumper info has been removed from database, this process will exit");
@@ -114,24 +111,25 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
                             SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.INST_ID)))
                 );
             }
-        } else if (role.equals(TaskType.Final.name()) || role.equals(TaskType.Relay.name()) || role
-            .equals(TaskType.Dispatcher.name())) {
-            int result = taskHeartbeatMapper.updateTaskHeartbeat(name, clusterId);
+        } else if (TaskType.isTask(config.getRole())) {
+            TaskInfoMapper taskInfoMapper = SpringContextHolder.getObject(TaskInfoMapper.class);
+            int result = taskInfoMapper.updateTaskHeartbeat(name, clusterId);
             if (result == 0) {
                 log.error("Task info has been removed from database, this process will exit");
                 Runtime.getRuntime().halt(1);
             }
         } else if (role.equals(TaskType.DumperX.name())) {
+            BinlogDumperInfoMapper binlogDumperInfoMapper = SpringContextHolder.getObject(BinlogDumperInfoMapper.class);
             //更新心跳
-            int result = taskHeartbeatMapper.updateDumperHeartbeat(name, DumperType.XSTREAM.getName(), clusterId);
+            int result = binlogDumperInfoMapper.updateDumperHeartbeat(name, DumperType.XSTREAM.getName(), clusterId);
             if (result == 0) {
                 log.error("Dumper info has been removed from database, this process will exit");
                 Runtime.getRuntime().halt(1);
             }
 
-            ExecutionConfig executionConfig = new Gson().fromJson(config.getConfig(), ExecutionConfig.class);
+            ExecutionConfig executionConfig = JSONObject.parseObject(config.getConfig(), ExecutionConfig.class);
             executionConfig.getStreamNameSet().forEach(streamName -> {
-                Cursor cursor = cursorProviderMap.get(streamName).getLatestFileCursor();
+                BinlogCursor cursor = cursorProviderMap.get(streamName).getLatestFileCursor();
                 if (cursor != null) {
                     xStreamMapper.update(
                         u -> u.set(XStreamDynamicSqlSupport.latestCursor).equalTo(JSONObject.toJSONString(cursor))

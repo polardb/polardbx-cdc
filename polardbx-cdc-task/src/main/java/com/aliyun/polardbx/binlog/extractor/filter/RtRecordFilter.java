@@ -36,7 +36,7 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
     private boolean recordCommit = false;
 
     public RtRecordFilter() {
-        this.recordCommit = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EVENT_COMMITLOG);
+        this.recordCommit = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_LOG_EVENT);
     }
 
     @Override
@@ -49,9 +49,8 @@ public class RtRecordFilter implements LogEventFilter<LogEvent> {
             c = Thread.currentThread();
         }
         if (recordCommit) {
-            logger.info(
-                context.getRuntimeContext().getBinlogFile() + ":" + event.getLogPos() + ":" + event.getWhen() + ":"
-                    + event.getHeader().getType());
+            logger.info(context.getRuntimeContext().getBinlogFile() + ":" + event.getLogPos() + ":"
+                + event.getWhen() + ":" + event.getHeader().getType());
         }
         recorder.doRecord(() -> context.doNext(event));
     }

@@ -14,20 +14,16 @@
  */
 package com.aliyun.polardbx.binlog.filesys;
 
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.Constants;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
-import com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
+import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.ObjectUtils;
-import org.mybatis.dynamic.sql.SqlBuilder;
 
-import java.io.IOException;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -55,143 +51,31 @@ import java.util.TreeSet;
  **/
 @Slf4j
 public class CdcFileSystem {
-    private final ICdcFileSystem localFileSystem;
-    private ICdcFileSystem remoteFileSystem;
+    private final LocalFileSystem localFileSystem;
+    private RemoteFileSystem remoteFileSystem;
 
-    public CdcFileSystem(String binlogFileFullPath, String group, String stream) {
-        localFileSystem = new LocalFileSystem(binlogFileFullPath, group, stream);
+    public CdcFileSystem(String rootPath, String group, String stream) {
+        localFileSystem = new LocalFileSystem(rootPath, group, stream);
         if (RemoteBinlogProxy.getInstance().isBackupOn()) {
             remoteFileSystem = new RemoteFileSystem(group, stream);
         }
     }
 
-    public CdcFile createLocalFile(String fileName) {
-        return localFileSystem.create(fileName);
+    public File newLocalFile(String fileName) {
+        return localFileSystem.newFile(fileName);
     }
 
-    public boolean deleteLocalFile(String fileName) {
-        return localFileSystem.delete(fileName);
-    }
-
-    public boolean deleteRemoteFile(String fileName) {
+    public void deleteRemoteFile(String fileName) {
         if (remoteFileSystem != null) {
             remoteFileSystem.delete(fileName);
         }
-        return true;
-    }
-
-    public boolean delete(String fileName) {
-        boolean res = deleteLocalFile(fileName);
-        if (remoteFileSystem != null) {
-            res &= deleteRemoteFile(fileName);
-        }
-        return res;
-    }
-
-    public boolean existInLocal(String fileName) {
-        return localFileSystem.exist(fileName);
-    }
-
-    public boolean existOnRemote(String fileName) {
-        return remoteFileSystem != null && remoteFileSystem.exist(fileName);
-    }
-
-    public boolean exist(String fileName) {
-        boolean res = existInLocal(fileName);
-        if (!res && remoteFileSystem != null) {
-            res = existOnRemote(fileName);
-        }
-        return res;
-    }
-
-    public CdcFile getLocalFile(String fileName) {
-        return localFileSystem.get(fileName);
-    }
-
-    public CdcFile getRemoteFile(String fileName) {
-        if (remoteFileSystem == null) {
-            return null;
-        }
-        return remoteFileSystem.get(fileName);
-    }
-
-    public CdcFile getBinlogFile(String fileName) {
-        CdcFile res = localFileSystem.get(fileName);
-        if (res == null && remoteFileSystem != null) {
-            res = remoteFileSystem.get(fileName);
-        }
-        return res;
-    }
-
-    public BinlogFileReadChannel getLocalChannel(String fileName) throws IOException {
-        return localFileSystem.getReadChannel(fileName);
-    }
-
-    public BinlogFileReadChannel getRemoteChannel(String fileName) throws IOException {
-        if (remoteFileSystem == null) {
-            return null;
-        }
-        return remoteFileSystem.getReadChannel(fileName);
-    }
-
-    public BinlogFileReadChannel getChannel(String fileName) throws IOException {
-        BinlogFileReadChannel channel;
-
-        Boolean testRemoteChannel =
-            DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_DUMP_REMOTE_CHANNEL_TEST_MODE);
-        boolean preferLocalChannel = true;
-        if (testRemoteChannel) {
-            preferLocalChannel = new Random().nextBoolean();
-        }
-
-        BinlogFileReadChannel localChannel = getLocalChannel(fileName);
-        BinlogFileReadChannel remoteChannel = getRemoteChannel(fileName);
-
-        if (preferLocalChannel) {
-            channel = ObjectUtils.firstNonNull(localChannel, remoteChannel);
-        } else {
-            channel = ObjectUtils.firstNonNull(remoteChannel, localChannel);
-        }
-
-        if (log.isDebugEnabled()) {
-            if (channel == remoteChannel) {
-                log.debug("read {} from remote channel", fileName);
-            } else {
-                log.debug("read {} from local channel", fileName);
-            }
-        }
-
-        return channel;
-    }
-
-    public long getLocalFileSize(String fileName) {
-        return localFileSystem.size(fileName);
-    }
-
-    private long getRemoteFileSize(String fileName) {
-        return remoteFileSystem.size(fileName);
-    }
-
-    public long size(String fileName) {
-        long size = getLocalFileSize(fileName);
-        if (size < 0 && remoteFileSystem != null) {
-            size = getRemoteFileSize(fileName);
-        }
-        return size;
     }
 
     public List<CdcFile> listLocalFiles() {
         return localFileSystem.listFiles();
     }
 
-    public List<CdcFile> listRemoteFiles() {
-        if (remoteFileSystem == null) {
-            return new ArrayList<>();
-        }
-        return remoteFileSystem.listFiles();
-    }
-
-    public List<CdcFile> listBinlogFilesOrdered() {
+    public List<CdcFile> listAllFiles() {
         Map<String, CdcFile> fileMap = getLocalFileMap();
         if (remoteFileSystem != null) {
             List<CdcFile> remoteFiles = listRemoteFiles();
@@ -204,6 +88,70 @@ public class CdcFileSystem {
         return res;
     }
 
+    public CdcFile getBinlogFile(String fileName) {
+        CdcFile localFile;
+        CdcFile remoteFile;
+
+        // used for local develop test
+        Boolean forceConsumeRemoteFile =
+            DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_DUMP_FORCE_STREAMING_CONSUME_ENABLED);
+        if (forceConsumeRemoteFile) {
+            remoteFile = waitRemoteFile(fileName, Long.MAX_VALUE);
+            log.info("get file {} from remote", fileName);
+            return remoteFile;
+        }
+
+        // used for lab test
+        Boolean randomTest =
+            DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_DUMP_TEST_STREAMING_CONSUME_ENABLED);
+        if (randomTest && new Random().nextBoolean()) {
+            remoteFile = waitRemoteFile(fileName, 15 * 1000);
+            if (remoteFile != null) {
+                log.info("get file {} from remote", remoteFile.getName());
+                return remoteFile;
+            } else {
+                log.info("remote file {} is absent", fileName);
+            }
+        }
+
+        // used for production
+        localFile = localFileSystem.get(fileName);
+        if (localFile != null) {
+            log.info("get file {} from local", localFile.getName());
+            return localFile;
+        }
+        remoteFile = remoteFileSystem == null ? null : remoteFileSystem.get(fileName);
+        if (remoteFile != null) {
+            log.info("get file {} from remote", remoteFile.getName());
+            return remoteFile;
+        } else {
+            throw new RuntimeException("can't get file " + fileName + " from local or remote");
+        }
+    }
+
+    /**
+     * 需要增加超时机制，否则实验室链路预检阶段一直卡在最后一个文件，可能导致wait token超时
+     */
+    private CdcFile waitRemoteFile(String fileName, long millisToWait) {
+        CdcFile remoteFile = remoteFileSystem.get(fileName);
+        long start = System.currentTimeMillis();
+        while (remoteFile == null) {
+            try {
+                if (System.currentTimeMillis() - start > millisToWait) {
+                    log.warn("wait for remote file {} upload timeout", fileName);
+                    break;
+                }
+                log.info("waiting for remote file {} upload success", fileName);
+                Thread.sleep(5000);
+            } catch (Exception e) {
+                log.warn("error while waiting for remote file {}", fileName, e);
+                throw new RuntimeException(e);
+            }
+            remoteFile = remoteFileSystem.get(fileName);
+        }
+        return remoteFile;
+    }
+
     private Map<String, CdcFile> getLocalFileMap() {
         Map<String, CdcFile> fileMap = new HashMap<>();
         List<CdcFile> localFiles = listLocalFiles();
@@ -213,39 +161,15 @@ public class CdcFileSystem {
         return fileMap;
     }
 
-    private Map<String, CdcFile> getRemoteFileMap() {
-        Map<String, CdcFile> fileMap = new HashMap<>();
+    private List<CdcFile> listRemoteFiles() {
         if (remoteFileSystem == null) {
-            return fileMap;
+            return new ArrayList<>();
         }
-        List<CdcFile> remoteFiles = listRemoteFiles();
-        for (CdcFile f : remoteFiles) {
-            fileMap.put(f.getName(), f);
-        }
-        return fileMap;
-    }
-
-    public CdcFile getLocalMinFile() {
-        List<CdcFile> files = listLocalFiles();
-        if (files.isEmpty()) {
-            return null;
-        }
-        return files.get(0);
-    }
-
-    public CdcFile getRemoteMinFile() {
-        if (remoteFileSystem == null) {
-            return null;
-        }
-        List<CdcFile> files = listRemoteFiles();
-        if (files.isEmpty()) {
-            return null;
-        }
-        return files.get(0);
+        return remoteFileSystem.listFiles();
     }
 
     public CdcFile getMinFile() {
-        List<CdcFile> files = listBinlogFilesOrdered();
+        List<CdcFile> files = listAllFiles();
         if (files.isEmpty()) {
             return null;
         }
@@ -260,19 +184,8 @@ public class CdcFileSystem {
         return files.get(files.size() - 1);
     }
 
-    public CdcFile getRemoteMaxFile() {
-        if (remoteFileSystem == null) {
-            return null;
-        }
-        List<CdcFile> files = listRemoteFiles();
-        if (files.isEmpty()) {
-            return null;
-        }
-        return files.get(files.size() - 1);
-    }
-
     public CdcFile getMaxFile() {
-        List<CdcFile> files = listBinlogFilesOrdered();
+        List<CdcFile> files = listAllFiles();
         if (files.isEmpty()) {
             return null;
         }
@@ -280,46 +193,23 @@ public class CdcFileSystem {
     }
 
     public String getLocalFullName(String fileName) {
-        return localFileSystem.getName(fileName);
-    }
-
-    public String getRemoteFullName(String fileName) {
-        if (remoteFileSystem == null) {
-            return null;
-        }
-        return remoteFileSystem.getName(fileName);
+        return localFileSystem.getFullName(fileName);
     }
 
     /**
      * SQL闪回专用，列举指定时间范围内的binlog
      * 用TreeSet保证binlog文件名的有序性
      */
-    public static List<String> listGlobalBinlogFilesBetweenTimeRange(long startTime, long endTime) {
+    public static List<String> listFilesInTimeRange(long startTime, long endTime) {
         TreeSet<String> set = new TreeSet<>();
-
         Date startDate = new Date(startTime);
         Date endDate = new Date(endTime);
-        BinlogOssRecordMapper mapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
-
-        List<BinlogOssRecord> unfinishedFiles = mapper.select(s -> s.
-            where(BinlogOssRecordDynamicSqlSupport.groupId, SqlBuilder.isEqualTo(Constants.GROUP_NAME_GLOBAL)).
-            and(BinlogOssRecordDynamicSqlSupport.streamId, SqlBuilder.isEqualTo(Constants.STREAM_NAME_GLOBAL)).
-            and(BinlogOssRecordDynamicSqlSupport.logEnd, SqlBuilder.isNull()).
-            and(BinlogOssRecordDynamicSqlSupport.logBegin, SqlBuilder.isLessThanOrEqualTo(endDate))
-        );
-        List<BinlogOssRecord> finishedFiles = mapper.select(s -> s.
-            where(BinlogOssRecordDynamicSqlSupport.groupId, SqlBuilder.isEqualTo(Constants.GROUP_NAME_GLOBAL)).
-            and(BinlogOssRecordDynamicSqlSupport.streamId, SqlBuilder.isEqualTo(Constants.STREAM_NAME_GLOBAL)).
-            and(BinlogOssRecordDynamicSqlSupport.logEnd, SqlBuilder.isGreaterThanOrEqualTo(startDate)).
-            and(BinlogOssRecordDynamicSqlSupport.logBegin, SqlBuilder.isLessThanOrEqualTo(endDate))
-        );
-        for (BinlogOssRecord record : unfinishedFiles) {
-            set.add(record.getBinlogFile());
-        }
-        for (BinlogOssRecord record : finishedFiles) {
-            set.add(record.getBinlogFile());
-        }
-
+        BinlogOssRecordService service = SpringContextHolder.getObject(BinlogOssRecordService.class);
+        List<BinlogOssRecord> recordsInTimeRange =
+            service.getRecordsInTimeRange(CommonConstants.GROUP_NAME_GLOBAL, CommonConstants.STREAM_NAME_GLOBAL,
+                startDate,
+                endDate);
+        recordsInTimeRange.forEach(r -> set.add(r.getBinlogFile()));
         return new ArrayList<>(set);
     }
 }

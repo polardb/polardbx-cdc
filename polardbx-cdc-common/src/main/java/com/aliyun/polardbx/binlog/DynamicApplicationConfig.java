@@ -14,6 +14,9 @@
  */
 package com.aliyun.polardbx.binlog;
 
+import com.aliyun.polardbx.binlog.enums.ClusterRole;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
+import com.aliyun.polardbx.binlog.util.AddressUtil;
 import com.aliyun.polardbx.binlog.util.PropertyChangeListener;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.base.Preconditions;
@@ -25,6 +28,7 @@ import org.springframework.util.CollectionUtils;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 /**
  * 1、优先从binlog_system_config表获取数据。 <br>
@@ -87,7 +91,16 @@ public class DynamicApplicationConfig {
     }
 
     public static Boolean getBoolean(String key) {
-        return Boolean.parseBoolean(getValue(key));
+        String value = getValue(key);
+        if ("RANDOM".equalsIgnoreCase(value)) {
+            return new Random().nextBoolean();
+        } else if ("ON".equalsIgnoreCase(value)) {
+            return true;
+        } else if ("OFF".equalsIgnoreCase(value)) {
+            return false;
+        } else {
+            return Boolean.parseBoolean(value);
+        }
     }
 
     public static Boolean getBoolean(String key, boolean defaultValue) {
@@ -107,9 +120,17 @@ public class DynamicApplicationConfig {
     public static String getClusterType() {
         String clusterType = getString(ConfigKeys.CLUSTER_TYPE);
         if (StringUtils.isBlank(clusterType)) {
-            clusterType = ClusterTypeEnum.BINLOG.name();
+            clusterType = ClusterType.BINLOG.name();
         }
         return clusterType;
+    }
+
+    public static String getClusterRole() {
+        String result = getString(ConfigKeys.CLUSTER_ROLE);
+        if (StringUtils.isBlank(result)) {
+            result = ClusterRole.master.name();
+        }
+        return result;
     }
 
     public static void addPropListener(String prop, PropertyChangeListener listener) {
