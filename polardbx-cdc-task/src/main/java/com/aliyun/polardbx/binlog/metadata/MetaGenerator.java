@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.metadata;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -23,11 +23,23 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class MetaGenerator {
 
+    private CdcInitCommand initCommand;
+
+    public MetaGenerator() {
+        initCommand = new BinlogInitCommand(CommonUtils.buildStartCmd());
+    }
+
+    public boolean exists() {
+        return initCommand.exists();
+    }
+
     public void tryStart() {
-        CdcInitCommand initCommand = new BinlogInitCommand(CommonUtils.buildStartCmd());
+        if (initCommand.isSuccess()) {
+            return;
+        }
         initCommand.tryStart();
         while (true) {
-            if (initCommand.waitSuccess()) {
+            if (initCommand.isSuccess()) {
                 return;
             }
             log.info(initCommand + " is not finished, will try later.");

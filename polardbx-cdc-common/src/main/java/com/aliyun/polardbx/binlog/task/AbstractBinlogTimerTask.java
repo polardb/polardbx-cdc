@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
  * Created by ziyang.lb
  */
 @Slf4j
-public abstract class AbstractBinlogTimerTask {
+public abstract class AbstractBinlogTimerTask implements IScheduleJob {
     protected String clusterId;
     protected String clusterType;
     protected String name;
@@ -54,16 +54,18 @@ public abstract class AbstractBinlogTimerTask {
                 log.error("exec timer task fail {} {}", name, interval, e);
             }
         }, 0, interval, TimeUnit.MILLISECONDS);
-        
+
         log.info("TimerTask-" + name + " started.");
     }
 
+    @Override
     public void start() {
         new Thread(() -> run(), "Thread-TimerTask-" + name).start();
     }
 
     public abstract void exec();
 
+    @Override
     @SneakyThrows
     public void stop() {
         timer.shutdownNow();

@@ -14,6 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
 
+import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.dao.BinlogScheduleHistoryMapper;
@@ -24,7 +26,7 @@ import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.StorageContent;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogScheduleHistory;
@@ -41,8 +43,6 @@ import com.aliyun.polardbx.binlog.scheduler.ScheduleHistoryContent;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
@@ -62,13 +62,13 @@ import java.util.stream.Collectors;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SUSPEND_TOPOLOGY_REBUILDING;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY;
-import static com.aliyun.polardbx.binlog.Constants.GROUP_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildExpectedStorageTso;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildStorageHistoryInfo;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildStorageInfos;
-import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.checkContainers;
-import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.clearStaleInfos;
+import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.checkContainerStatus;
+import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.clearStaleMetaData;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.lockAndCheck;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.shouldRefreshTopology;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
@@ -78,8 +78,6 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
  */
 @Slf4j
 public class GlobalBinlogTopologyService implements TopologyService {
-    private static final Gson GSON = new GsonBuilder().create();
-
     private final GlobalBinlogTopologyBuilder topologyBuilder;
     private final String clusterId;
     private final String clusterType;
@@ -99,8 +97,6 @@ public class GlobalBinlogTopologyService implements TopologyService {
 
     private final TransactionTemplate transactionTemplate = getObject("metaTransactionTemplate");
 
-    private static long lastForceRefreshTime = System.currentTimeMillis();
-
     public GlobalBinlogTopologyService(String clusterId, String clusterType) {
         this.clusterId = clusterId;
         this.clusterType = clusterType;
@@ -110,25 +106,26 @@ public class GlobalBinlogTopologyService implements TopologyService {
     @Override
     public void tryBuild() throws Throwable {
         String suspendTopologyRebuilding = SystemDbConfig.getSystemDbConfig(CLUSTER_SUSPEND_TOPOLOGY_REBUILDING);
-        if (StringUtils.isNotBlank(suspendTopologyRebuilding) && "true".equals(suspendTopologyRebuilding)) {
+        if (StringUtils.isNotBlank(suspendTopologyRebuilding) && CommonConstants.TRUE.equals(suspendTopologyRebuilding)) {
             log.info("current cluster is in suspend state , skip rebuilding cluster topology");
             return;
         }
 
-        //check and prepare parameter
+        // check and prepare parameter
         log.info("current daemon is leader, do with the cluster's topology project!");
         ResourceManager resourceManager = new ResourceManager(clusterId);
-        checkNode(resourceManager);
-        checkContainers(resourceManager);
-        String preClusterConfigStr = SystemDbConfig.getSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY);
-        ClusterSnapshot preClusterSnapshot = GSON.fromJson(preClusterConfigStr, ClusterSnapshot.class);
-        clearStaleInfos(preClusterSnapshot.getVersion());
-        String expectedStorageTso = buildExpectedStorageTso();
-        ExecutionSnapshot executionSnapshot = resourceManager.getExecutionSnapshot();
+        ensureContainerMinSizeConstrain(resourceManager);
+        checkContainerStatus(resourceManager);
+        String preClusterSnapshotStr = SystemDbConfig.getSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY);
+        ClusterSnapshot preClusterSnapshot = JSONObject.parseObject(preClusterSnapshotStr, ClusterSnapshot.class);
+        clearStaleMetaData(preClusterSnapshot.getVersion());
 
+        ExecutionSnapshot executionSnapshot = resourceManager.getExecutionSnapshot();
+        String expectedStorageTso = buildExpectedStorageTso();
         StorageHistoryInfo storageHistoryInfo = buildStorageHistoryInfo(expectedStorageTso);
         List<StorageInfo> storageInfos = buildStorageInfos(storageHistoryInfo);
 
+        // 为集群计算一个新的运行拓扑
         if (shouldRefreshTopology(resourceManager, preClusterSnapshot, storageInfos, executionSnapshot,
             storageHistoryInfo)) {
             long newVersion = preClusterSnapshot.getVersion() + 1;
@@ -137,17 +134,20 @@ public class GlobalBinlogTopologyService implements TopologyService {
                 containers.stream().map(Container::getContainerId).collect(Collectors.toSet()),
                 preClusterSnapshot);
 
-            List<BinlogTaskConfig> topologyConfigs = topologyBuilder.buildTopology(containers, storageInfos,
+            List<BinlogTaskConfig> newTaskConfigs = topologyBuilder.buildTopology(containers, storageInfos,
                 expectedStorageTso, newVersion, dumperMasterNode);
-            ClusterSnapshot postClusterSnapshot = buildPostClusterSnapshot(topologyConfigs,
+            ClusterSnapshot postClusterSnapshot = buildPostClusterSnapshot(newTaskConfigs,
                 containers, storageInfos, newVersion, dumperMasterNode, storageHistoryInfo);
-            persist(clusterId, storageHistoryInfo, storageInfos, topologyConfigs, preClusterSnapshot,
+            persist(clusterId, storageHistoryInfo, storageInfos, newTaskConfigs, preClusterSnapshot,
                 postClusterSnapshot, executionSnapshot);
             log.info("Topology with version {} is successfully build.", newVersion);
         }
     }
 
-    private void checkNode(ResourceManager resourceManager) throws Throwable {
+    /**
+     * 保证有足够的节点数，否则不进行拓扑计算
+     */
+    private void ensureContainerMinSizeConstrain(ResourceManager resourceManager) throws Throwable {
         //抛异常出去也是继续重试，所以尝试多等一些时间，1min
         RetryTemplate retryTemplate = RetryTemplate.builder()
             .maxAttempts(60)
@@ -155,8 +155,8 @@ public class GlobalBinlogTopologyService implements TopologyService {
             .retryOn(RetryableException.class)
             .build();
 
-        //未达到法定个数，不能进行拓扑计算，避免不必要的的Topology build
-        //nodeCount是数据库中所有合法的node记录的个数，如果出现Node节点宕机，记录还在，所以不影响拓扑重建，即不影响HA
+        // 未达到法定个数，不能进行拓扑计算，避免不必要的的Topology build
+        // nodeCount是数据库中所有合法的node记录的个数，如果出现Node节点宕机，记录还在，所以不影响拓扑重建，即不影响HA
         retryTemplate.execute((RetryCallback<Integer, Throwable>) retryContext -> {
             int nodeCount = resourceManager.allContainers().size();
             int topologyNodeMinSize = DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_NODE_MINSIZE);
@@ -207,13 +207,14 @@ public class GlobalBinlogTopologyService implements TopologyService {
         }
 
         //取位点最大的Container对应的Dumper为MasterDumper
-        Map<Cursor, List<Pair<Cursor, String>>> cursorsMap =
+        Map<BinlogCursor, List<Pair<BinlogCursor, String>>> cursorsMap =
             nodeInfoMapper.select(s -> s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                    .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isIn(containers)))
+                .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isIn(containers)))
                 .stream().filter(d -> StringUtils.isNotBlank(d.getLatestCursor()))
-                .map(s -> new ImmutablePair<>(GSON.fromJson(s.getLatestCursor(), Cursor.class), s.getContainerId()))
+                .map(s -> new ImmutablePair<>(JSONObject.parseObject(s.getLatestCursor(), BinlogCursor.class),
+                    s.getContainerId()))
                 .collect(Collectors.groupingBy(Pair::getLeft));
-        Optional<Cursor> maxCursorOptional = cursorsMap.keySet().stream().max(Comparator.comparing(s -> s));
+        Optional<BinlogCursor> maxCursorOptional = cursorsMap.keySet().stream().max(Comparator.comparing(s -> s));
         if (maxCursorOptional.isPresent()) {
             //如果有多个container的cursor并列最大，则随机取一个
             String selectedContainer = cursorsMap.get(maxCursorOptional.get()).get(0).getRight();
@@ -282,7 +283,7 @@ public class GlobalBinlogTopologyService implements TopologyService {
                 StorageHistoryInfo info = new StorageHistoryInfo();
                 info.setStatus(0);
                 info.setTso(ExecutionConfig.ORIGIN_TSO);
-                info.setStorageContent(GSON.toJson(content));
+                info.setStorageContent(JSONObject.toJSONString(content));
                 info.setInstructionId("-1");
                 info.setClusterId(clusterId);
                 info.setGroupName(GROUP_NAME_GLOBAL);
@@ -290,14 +291,15 @@ public class GlobalBinlogTopologyService implements TopologyService {
             }
 
             //对版本号进行+1并更新
-            SystemDbConfig.updateSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY, GSON.toJson(postClusterSnapshot));
+            SystemDbConfig
+                .updateSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY, JSONObject.toJSONString(postClusterSnapshot));
 
             //记录历史
             BinlogScheduleHistory history = new BinlogScheduleHistory();
             history.setVersion(postClusterSnapshot.getVersion());
             history.setClusterId(clusterId);
-            history.setContent(
-                GSON.toJson(new ScheduleHistoryContent(executionSnapshot, taskConfigs, postClusterSnapshot)));
+            history.setContent(JSONObject
+                .toJSONString(new ScheduleHistoryContent(executionSnapshot, taskConfigs, postClusterSnapshot)));
             scheduleHistoryMapper.insert(history);
             return null;
         });

@@ -64,7 +64,7 @@ public class ConfigConstant {
     public static final String CDC_SYNC_DB_PORT_THIRD = "cdcSyncDbPortThird";
     public static final String CDC_SYNC_DB_ADDRESS_THIRD = "cdcSyncDbAddrThird";
 
-    public static final String URL_PATTERN = "jdbc:mysql://%s:%s?";
+    public static final String URL_PATTERN_WITHOUT_DB = "jdbc:mysql://%s:%s?";
     public static final String URL_PATTERN_WITH_DB = "jdbc:mysql://%s:%s/%s?";
 
     public static final String CDC_WAIT_TOKEN_TIMEOUT_MINUTES = "cdcWaitTokenTimeOutMinute";

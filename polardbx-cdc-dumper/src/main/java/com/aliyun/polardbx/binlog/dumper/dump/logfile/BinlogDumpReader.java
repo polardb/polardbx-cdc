@@ -14,13 +14,13 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.UnsafeByteOperations;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +29,8 @@ import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Created by ShuGuang
@@ -51,16 +53,23 @@ public class BinlogDumpReader {
     // https://dev.mysql.com/doc/refman/5.7/en/replication-options-binary-log.html
     String fileName;
     long pos;
+
     long fp;
+    CdcFile cdcFile;
     BinlogFileReadChannel channel;
     ByteBuffer buffer;
     LogFileManager logFileManager;
     int left = 0;
+
+    long timestamp;
     private byte seq = 1;
     private boolean rotateNext = true;
+    protected List<BinlogDumpRotateObserver> rotateObservers;
+    private DumpMode mode = DumpMode.NORMAL;
+    private BinlogDumpDownloader dumpDownloader = null;
 
     public BinlogDumpReader(LogFileManager logFileManager, String fileName, long pos, int maxPacketSize,
-                            int readBufferSize) throws IOException {
+                            int readBufferSize) {
         if (pos == 0) {
             pos = 4;
         }
@@ -70,21 +79,32 @@ public class BinlogDumpReader {
         this.maxPacketSize = maxPacketSize;
         this.readBufferSize = readBufferSize;
         this.buffer = ByteBuffer.allocate(readBufferSize);
-        this.initChannel();
+        this.rotateObservers = new ArrayList<>();
     }
 
-    private void initChannel() throws IOException {
-        CdcFile cdcFile = logFileManager.getBinlogFileByName(fileName);
+    public void init() throws IOException {
+        if (mode == DumpMode.QUICK) {
+            cdcFile = dumpDownloader.getFile(fileName);
+        } else {
+            cdcFile = logFileManager.getBinlogFileByName(fileName);
+        }
+
         if (cdcFile == null) {
-            throw new PolardbxException("invalid log file");
+            throw new PolardbxException("invalid log file:" + fileName);
         } else {
             channel = cdcFile.getReadChannel();
         }
     }
 
+    /**
+     * 检查event中各个字段的正确性，这里仅是检查，没有读取event的数据
+     * 所以在后续读取的时候需要重新把channel的position重置到pos上
+     */
     public void valid() throws IOException {
         int ret = logFileManager.getLatestFileCursor().getFileName().compareTo(fileName);
+        // dump请求的是最新的binlog文件
         if (ret == 0) {
+            // 请求的位点大于binlog文件的最大位点
             if (pos > logFileManager.getLatestFileCursor().getFilePosition()) {
                 log.info("valid fileName={}, pos={}, cursor={}", fileName, pos, logFileManager.getLatestFileCursor());
                 throw new PolardbxException("invalid log position");
@@ -93,6 +113,7 @@ public class BinlogDumpReader {
                 return;
             }
         } else if (ret < 0) {
+            // dump请求的是还没有生成的binlog文件
             throw new PolardbxException("invalid log file");
         }
 
@@ -100,6 +121,16 @@ public class BinlogDumpReader {
         ByteBuffer buffer = ByteBuffer.wrap(data);
         channel.read(buffer, pos);
         buffer.flip();
+        /*
+          Event Structure:
+          timestamp 0:4
+          type_code 4:1
+          server_id 5:4
+          event_length 9:4
+          next_position 13:4
+          flags 17:2
+          extra_headers 19:x-19
+         */
         ByteArray ba = new ByteArray(data);
         long timestamp = ba.readLong(4);
         int eventType = ba.read();
@@ -108,31 +139,28 @@ public class BinlogDumpReader {
         long endPos = ba.readLong(4);
 
         if (timestamp < 0) {
-            throw new PolardbxException("invalid event timestamp");
+            throw new PolardbxException("invalid event timestamp:" + timestamp);
         }
         if (eventType < 0 || eventType > 0x23) {
-            throw new PolardbxException("invalid event type");
+            throw new PolardbxException("invalid event type:" + eventType);
         }
         if (eventSize != endPos - pos) {
             throw new PolardbxException(
-                "invalid event size [" + fileName + "@" + pos + "#" + endPos + ", timestamp=" + timestamp
-                    + ", eventType=" + eventType + ", eventSize=" + eventSize + "]");
+                "invalid event size! next_position:" + endPos + ", cur_position:" + pos + ", event_size:" + eventSize);
         }
-        channel.position(0);
     }
 
     public ByteString fakeRotateEvent() {
         long length = logFileManager.getLatestFileCursor().getFilePosition();
         Pair<byte[], Integer> rotateEvent = EventGenerator.makeFakeRotate(0L, fileName,
-            pos < length ? pos : length, true);
+            Math.min(pos, length), true);
         ByteArray ba = new ByteArray(new byte[5]);
         ba.writeLong(rotateEvent.getRight() + 1, 3);
         ba.write(seq++);
         ByteString rotateEventStr = ByteString.copyFrom(rotateEvent.getLeft(), 0,
             rotateEvent.getRight());
-        ByteString rotateEventPack = ByteString.copyFrom(
+        return ByteString.copyFrom(
             ArrayUtils.addAll(ba.getData(), rotateEventStr.toByteArray()));
-        return rotateEventPack;
     }
 
     public ByteString fakeFormatEvent() throws IOException {
@@ -166,8 +194,7 @@ public class BinlogDumpReader {
         }
         ba.writeLong(0, 2);
         EventGenerator.updateChecksum(data, 5, length);
-        ByteString bytes = ByteString.copyFrom(data);
-        return bytes;
+        return ByteString.copyFrom(data);
     }
 
     public ByteString heartbeatEvent() {
@@ -177,9 +204,8 @@ public class BinlogDumpReader {
         ba.write(seq++);
         ByteString heartbeat = ByteString.copyFrom(heartBeat.getLeft(), 0,
             heartBeat.getRight());
-        ByteString rotateEventPack = ByteString.copyFrom(
+        return ByteString.copyFrom(
             ArrayUtils.addAll(ba.getData(), heartbeat.toByteArray()));
-        return rotateEventPack;
     }
 
     public ByteString eofEvent() {
@@ -189,8 +215,7 @@ public class BinlogDumpReader {
         ba.write((byte) 0xfe);
         ba.writeLong(0, 2);
         ba.writeLong(0x0002, 2);
-        ByteString eofEventPack = ByteString.copyFrom(ba.getData());
-        return eofEventPack;
+        return ByteString.copyFrom(ba.getData());
     }
 
     public void start() throws IOException {
@@ -201,15 +226,17 @@ public class BinlogDumpReader {
         } else {
             fp = position;
         }
+
         read();
     }
 
-    public int nextDumpPackLength() {
+    private int nextDumpPackLength() {
         if (buffer.remaining() < 13) {
             return 0;
         }
         int cur = buffer.position();
-        buffer.position(cur + 9);//go to length
+        //go to length
+        buffer.position(cur + 9);
         int length = (0xff & buffer.get()) | ((0xff & buffer.get()) << 8) | ((0xff & buffer.get()) << 16)
             | ((buffer.get()) << 24);
         buffer.position(cur);
@@ -220,7 +247,7 @@ public class BinlogDumpReader {
      * @return next dump pack
      * @see <a href="mysqlbinlog.cc">https://github.com/mysql/mysql-server/blob/8.0/client/mysqlbinlog.cc</a>
      */
-    public ByteString nextDumpPack() {
+    protected ByteString nextDumpPack() {
         int length = 0;// length
         try {
             if (buffer.remaining() == 0) {
@@ -268,7 +295,7 @@ public class BinlogDumpReader {
                     this.read();
                 }
             }
-            //2do > 16M 包处理 https://dev.mysql.com/doc/internals/en/sending-more-than-16mbyte.html
+            // TODO > 16M 包处理 https://dev.mysql.com/doc/internals/en/sending-more-than-16mbyte.html
             //packet #n:   3 bytes length + sequence + status + [event_header + (event data - 1)]
             //packet #n+1: 3 bytes length + sequence + last byte of the event data.
             int nrp_len = withStatus ? 5 : 4;
@@ -293,6 +320,16 @@ public class BinlogDumpReader {
             if (log.isDebugEnabled()) {
                 log.debug("dumpPack {}@{}#{}", fileName, fp - length, fp);
             }
+            // try parse event header timestamp
+            try {
+                if (withStatus && data.length > 8) {
+                    timestamp = ((long) (0xff & data[5])) | ((long) (0xff & data[6]) << 8)
+                        | ((long) (0xff & data[7]) << 16) | ((long) (0xff & data[8]) << 24);
+                }
+            } catch (Exception e) {
+                log.error("dump reader parser timestamp failed", e);
+            }
+
             return bytes;
         } catch (Exception e) {
             log.warn("buffer parse fail {}@{} {} {}", fileName, fp, length, buffer, e);
@@ -322,7 +359,8 @@ public class BinlogDumpReader {
         return result;
     }
 
-    void read() throws IOException {
+    protected void read() throws IOException {
+        // binlog文件开头的4个字节是魔法值，可以直接跳过
         if (channel.position() == 0) {
             fp = 4;
             channel.position(4);
@@ -334,6 +372,16 @@ public class BinlogDumpReader {
         }
 
         int read = channel.read(buffer);
+
+        // the file related to current channel may be deleted/renamed/recreated
+        if (read <= 0 && hasNext()) {
+            if (!checkFileStatus() || (channel.size() < cdcFile.size() && (read = channel.read(buffer)) <= 0)) {
+                throw new PolardbxException(String.format(
+                    "unexpected channel stat!! fp = %s , fileName = %s, channel size = %s , buffer = %s.",
+                    fp, fileName, channel.size(), buffer));
+            }
+        }
+
         buffer.flip();
 
         if (log.isDebugEnabled()) {
@@ -341,39 +389,46 @@ public class BinlogDumpReader {
         }
     }
 
+    public boolean checkFileStatus() {
+        return cdcFile.exist();
+    }
+
     public boolean hasNext() {
-        if (rotateNext) {
-            Cursor cursor = logFileManager.getLatestFileCursor();
-            int ret = cursor.getFileName().compareTo(fileName);
-            if (ret == 0) {
-                long latestCursor = cursor.getFilePosition();
-                return fp < latestCursor;
-            } else if (ret > 0) {
-                int seq1 = logFileManager.parseFileNumber(fileName);
-                int seq2 = logFileManager.parseFileNumber(cursor.getFileName());
-                if (seq2 - seq1 == 1) {
-                    return cursor.getFilePosition() > 4;
-                } else {
-                    return true;
-                }
+        BinlogCursor cursor = logFileManager.getLatestFileCursor();
+        int ret = cursor.getFileName().compareTo(fileName);
+        if (ret == 0) {
+            long latestCursor = cursor.getFilePosition();
+            return fp < latestCursor;
+        } else if (ret > 0) {
+            int seq1 = logFileManager.parseFileNumber(fileName);
+            int seq2 = logFileManager.parseFileNumber(cursor.getFileName());
+            if (seq2 - seq1 == 1) {
+                return cursor.getFilePosition() > 4;
             } else {
-                return false;
+                return true;
             }
         } else {
-            try {
-                return fp < channel.size();
-            } catch (Exception e) {
-                log.error("hasNext read fail", e);
-                return false;
-            }
+            return false;
         }
     }
 
-    void rotate() throws IOException {
+    protected void rotate() throws IOException {
+        rotateObservers.forEach(BinlogDumpRotateObserver::onRotate);
         this.close();
         this.fileName = BinlogFileUtil.getNextBinlogFileName(fileName);
         this.pos = 4;
-        CdcFile cdcFile = logFileManager.getBinlogFileByName(fileName);
+
+        if (mode == DumpMode.QUICK) {
+            if (!dumpDownloader.isFinished()) {
+                cdcFile = dumpDownloader.getFile(fileName);
+            } else {
+                switchDumpModeToNormal();
+                cdcFile = logFileManager.getBinlogFileByName(fileName);
+            }
+        } else {
+            cdcFile = logFileManager.getBinlogFileByName(fileName);
+        }
+
         this.channel = cdcFile.getReadChannel();
         log.info("rotate to next file {}", this.fileName);
         this.read();
@@ -394,6 +449,32 @@ public class BinlogDumpReader {
 
     public void setRotateNext(boolean rotateNext) {
         this.rotateNext = rotateNext;
+    }
+
+    public void registerRotateObserver(BinlogDumpRotateObserver observer) {
+        if (observer == null) {
+            return;
+        }
+        rotateObservers.add(observer);
+    }
+
+    public void setDumpMode(DumpMode mode) {
+        this.mode = mode;
+    }
+
+    public void setBinlogDumpDownloader(BinlogDumpDownloader downloader) {
+        this.dumpDownloader = downloader;
+    }
+
+    public enum DumpMode {
+        NORMAL,
+        QUICK
+    }
+
+    private void switchDumpModeToNormal() {
+        log.info("switching to normal mode...");
+        dumpDownloader.close();
+        this.mode = DumpMode.NORMAL;
     }
 
 }

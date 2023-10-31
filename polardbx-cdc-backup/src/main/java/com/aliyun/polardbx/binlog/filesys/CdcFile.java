@@ -15,6 +15,9 @@
 package com.aliyun.polardbx.binlog.filesys;
 
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
+import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.io.File;
 import java.io.IOException;
@@ -24,11 +27,16 @@ import java.io.IOException;
  * @since 2022/8/29
  **/
 public class CdcFile implements Comparable<CdcFile> {
-    /** file name, without any prefix path */
+    /**
+     * file name, without any prefix path
+     */
+    @Getter
     private final String name;
-    private final ICdcFileSystem fileSystem;
+    private final IFileSystem fileSystem;
+    @Setter
+    private BinlogOssRecord record;
 
-    public CdcFile(String name, ICdcFileSystem fileSystem) {
+    public CdcFile(String name, IFileSystem fileSystem) {
         this.name = name;
         this.fileSystem = fileSystem;
     }
@@ -42,11 +50,10 @@ public class CdcFile implements Comparable<CdcFile> {
     }
 
     public long size() {
+        if (record != null) {
+            return record.getLogSize();
+        }
         return fileSystem.size(name);
-    }
-
-    public String getName() {
-        return name;
     }
 
     public File newFile() {
@@ -56,6 +63,10 @@ public class CdcFile implements Comparable<CdcFile> {
 
     @Override
     public int compareTo(CdcFile o) {
-        return new CdcFileNameComparator().compare(name, o.getName());
+        return this.name.compareTo(o.name);
+    }
+
+    public boolean exist() {
+        return fileSystem.exist(name);
     }
 }

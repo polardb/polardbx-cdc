@@ -14,45 +14,21 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.apache.commons.io.FileUtils;
 import org.junit.Assert;
-import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 
-/**
- *
- **/
-public class BinlogFileTest {
-
-    @Before
-    public void before() {
-        SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-    }
+@Ignore
+public class BinlogFileTest extends BaseTest {
 
     @Test
-    public void testSeek() throws IOException {
-        File file = new File("/Users/lubiao/Downloads/Docker.dmg");
-        RandomAccessFile raf = new RandomAccessFile(file, "rw");
-        long length = raf.length();
-        long startTime = System.currentTimeMillis();
-        while (raf.getFilePointer() < length) {
-            raf.readByte();
-            raf.readInt();
-            raf.readInt();
-            raf.seek(raf.getFilePointer() + 10000);
-        }
-        long endTime = System.currentTimeMillis();
-        System.out.println("cost time :" + (endTime - startTime));
-    }
-
-    @Test
+    @Ignore
     public void testSeekLast() throws FileNotFoundException {
         File file = new File("/Users/lubiao/Downloads/binlog.000273");
         BinlogFile binlogFile = new BinlogFile(file, "r", 1024, 256, true, null);

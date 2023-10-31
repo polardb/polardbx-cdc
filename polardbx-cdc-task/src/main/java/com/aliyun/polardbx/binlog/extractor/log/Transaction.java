@@ -15,9 +15,10 @@
 package com.aliyun.polardbx.binlog.extractor.log;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.InstructionType;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.HandlerEvent;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
@@ -32,37 +33,52 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.WriteRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.IXaTransaction;
-import com.aliyun.polardbx.binlog.canal.system.InstructionType;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
 import com.aliyun.polardbx.binlog.canal.system.TxGlobalEvent;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.extractor.TransactionMemoryLeakDectorManager;
+import com.aliyun.polardbx.binlog.extractor.TransactionMemoryLeakDetectorManager;
 import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.storage.AlreadyExistException;
 import com.aliyun.polardbx.binlog.storage.IteratorBuffer;
-import com.aliyun.polardbx.binlog.storage.Storage;
+import com.aliyun.polardbx.binlog.storage.StorageFactory;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnBufferItem;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
-import com.google.common.collect.Sets;
-import com.google.gson.Gson;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
+import com.aliyun.polardbx.binlog.util.LabEventType;
+import lombok.SneakyThrows;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
+import org.apache.commons.lang3.tuple.Pair;
+import org.rocksdb.RocksDBException;
+import org.rocksdb.util.ByteUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.UnsupportedEncodingException;
 import java.util.Iterator;
-import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSACTION_SKIP_WHITELIST;
-import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_DDL_ID;
-import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_DDL_SQL;
-import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_JOB_ID;
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_TXN_ENTITY_ENABLED;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_DDL_ID;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_DDL_SQL;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_EXT;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_JOB_ID;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_META_INFO;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_SCHEMA_NAME;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_SQL_KIND;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_TABLE_NAME;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_VISIBILITY;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.INSTRUCTION_FIELD_INSTRUCTION_CONTENT;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.INSTRUCTION_FIELD_INSTRUCTION_ID;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.INSTRUCTION_FIELD_INSTRUCTION_TYPE;
+import static com.aliyun.polardbx.binlog.extractor.log.TxnKeyBuilder.buildTxnKey;
+import static com.aliyun.polardbx.binlog.extractor.log.TxnKeyBuilder.getTransIdGroupIdPair;
 
 /**
  * 只输出 全局有序唯一TSO，下游合并自己去做 真实TSO+Xid 合并
@@ -71,181 +87,191 @@ import static com.aliyun.polardbx.binlog.canal.system.SystemDB.DDL_RECORD_FIELD_
  * @since 1.0.25
  */
 public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
+    public static final AtomicLong CURRENT_TRANSACTION_COUNT = new AtomicLong(0);
+    public static final AtomicLong CURRENT_TRANSACTION_PERSISTED_COUNT = new AtomicLong(0);
 
     private static final Logger duplicateTransactionLogger = LoggerFactory.getLogger("duplicateTransactionLogger");
     private static final Logger logger = LoggerFactory.getLogger(Transaction.class);
-    private static final Logger skipTranslogger = LoggerFactory.getLogger("SKIP_TRANS_LOG");
-    private static final String encoding = "UTF-8";
+
+    private static final String ENCODING = "UTF-8";
     private static final String ZERO_19_PADDING = StringUtils.leftPad("0", 10, "0");
-    private static final String skipWhiteList = DynamicApplicationConfig.getString(TASK_TRANSACTION_SKIP_WHITELIST);
-    private final RuntimeContext runtimeContext;
-    private final String binlogFileName;
-    private final long startLogPos;
-    //basic component reference
-    private TransactionCommitListener listener;
-    private Storage storage;
-    //common variables
-    private TRANSACTION_STATE state = TRANSACTION_STATE.STATE_START;
-    private Long serverId;
-    private String charset;
-    private boolean ignore = false;
-    private long stopLogPos;
-    private boolean isCdcSingle;
-    private boolean heartbeat = false;
+    private static final String ENTITY_KEY_PREFIX = "TRANS_ENTITY_";
+    private static final AtomicLong ENTITY_KEY_SEQUENCE = new AtomicLong(0);
+    private static final ThreadLocal<TransactionCommitListener> COMMIT_LISTENER = new ThreadLocal<>();
+
+    private TxnBuffer txnBuffer;
     private DDLEvent ddlEvent;
-    private TxnBuffer buffer;
-    private String sourceCdcSchema;
-    private String groupWithReadViewSeq;
-
-    //事务&tso
-    private String xid;
-    private boolean hasRealXid;
-    private Long transactionId;
-    private String virtualTSO;
-    private boolean txGlobal = false;
-    private Long txGlobalTso;
-    private Long txGlobalTid;
-    private boolean xa = false;
-    private boolean tsoTransaction = false;
-    private VirtualTSO virtualTSOModel;
-    private long realTSO = -1;
-
-    //trace id
-    private String nextTraceId;
-    private String originalTraceId;
-    private String lastTraceId;
-    private String lastRowsQuery;
-
-    //format desc event
-    private boolean descriptionEvent = false;
+    private VirtualTSO virtualTsoModel;
+    private Transaction.TRANSACTION_STATE state = Transaction.TRANSACTION_STATE.STATE_START;
     private FormatDescriptionEvent fde;
-    private FormatDescriptionLogEvent fdle;
+    private FormatDescriptionLogEvent fdLogEvent;
 
-    //instruction
-    private InstructionType instructionType = null;
-    private String instructionContent = null;
-    private String instructionId = null;
+    private TransEntity entity = new TransEntity();
+    private volatile boolean entityPersisted = false;
+    private long entityPersistKey;
 
-    public Transaction(FormatDescriptionLogEvent fdle, FormatDescriptionEvent fde, RuntimeContext rc) {
+    public Transaction(FormatDescriptionLogEvent fdLogEvent, FormatDescriptionEvent fde, RuntimeContext rc) {
+        Pair<Long, String> pair = getTransIdGroupIdPair();
         this.fde = fde;
-        this.fdle = fdle;
-        this.runtimeContext = rc;
-        this.descriptionEvent = true;
-        this.transactionId = Math.abs(CommonUtils.randomXid());
-        this.xid = transactionId + rc.getStorageInstId() + "00000-FDE";
-        this.binlogFileName = rc.getBinlogFile();
-        this.startLogPos = 0;
-        TransactionMemoryLeakDectorManager.getInstance().watch(this);
+        this.fdLogEvent = fdLogEvent;
+        this.getEntity().descriptionEvent = true;
+        this.getEntity().transactionId = pair.getKey();
+        this.getEntity().xid = getEntity().transactionId + rc.getStorageInstId() + "00000-FDE";
+        this.getEntity().binlogFileName = rc.getBinlogFile();
+        this.getEntity().startLogPos = 0;
+        this.getEntity().txnKey = buildTxnKey(rc.getStorageHashCode(), pair);
+        TransactionMemoryLeakDetectorManager.getInstance().watch(this);
+        CURRENT_TRANSACTION_COUNT.incrementAndGet();
     }
 
-    public Transaction(QueryLogEvent qwe, RuntimeContext rc, Storage storage) throws AlreadyExistException {
-        this.runtimeContext = rc;
-        this.storage = storage;
-        this.generateKey(qwe, rc);
-        this.binlogFileName = rc.getBinlogFile();
-        this.startLogPos = qwe.getLogPos();
-        buildBuffer();
+    public Transaction(QueryLogEvent qwe, RuntimeContext rc) throws AlreadyExistException {
+        Pair<Long, String> pair = getTransIdGroupIdPair();
+        this.getEntity().transactionId = Math.abs(CommonUtils.randomXid());
+        this.getEntity().xid = getEntity().transactionId + rc.getStorageInstId() + qwe.getLogPos();
+        this.getEntity().binlogFileName = rc.getBinlogFile();
+        this.getEntity().startLogPos = qwe.getLogPos();
+        this.getEntity().when = qwe.getWhen();
+        this.getEntity().txnKey = buildTxnKey(rc.getStorageHashCode(), pair);
+        this.buildBuffer();
         qwe.setTrace(generateFakeTraceId());
-        addTxnBuffer(qwe);
-        TransactionMemoryLeakDectorManager.getInstance().watch(this);
+        this.addTxnBuffer(qwe);
+        TransactionMemoryLeakDetectorManager.getInstance().watch(this);
+        CURRENT_TRANSACTION_COUNT.incrementAndGet();
     }
 
-    public Transaction(LogEvent logEvent, RuntimeContext rc, Storage storage) throws Exception {
-        this.runtimeContext = rc;
-        this.storage = storage;
-        this.xid = LogEventUtil.getXid(logEvent);
+    public Transaction(LogEvent logEvent, RuntimeContext rc) throws Exception {
+        this.getEntity().xid = LogEventUtil.getXid(logEvent);
 
         //rewrite charset
-        this.charset = encoding;
+        this.getEntity().charset = ENCODING;
         if (logEvent.getHeader().getType() == LogEvent.QUERY_EVENT) {
             QueryLogEvent queryLogEvent = (QueryLogEvent) logEvent;
             if (queryLogEvent.getClientCharset() > 0) {
-                this.charset = CharsetConversion.getJavaCharset(queryLogEvent.getClientCharset());
+                this.getEntity().charset = CharsetConversion.getJavaCharset(queryLogEvent.getClientCharset());
             }
         }
+
+        // build transactionId & groupId
+        Pair<Long, String> pair = getTransIdGroupIdPair(this.getEntity().xid);
+        this.getEntity().transactionId = pair.getKey();
+        this.getEntity().groupId = pair.getValue();
 
         // build transaction info
-        if (StringUtils.isNotBlank(this.xid)) {
-            // 真实事务id，如果是tso事务，则参与排序，否则不参与排序
-            this.transactionId = LogEventUtil.getTranIdFromXid(xid, encoding);
-            this.groupWithReadViewSeq = LogEventUtil.getGroupWithReadViewSeqFromXid(xid, encoding);
-            this.xa = true;
-            this.hasRealXid = true;
-            this.isCdcSingle = SystemDB.isCdcSingleGroup(StringUtils.substringBefore(groupWithReadViewSeq, "@"));
+        if (StringUtils.isNotBlank(this.getEntity().xid)) {
+            if (LogEventUtil.isValidXid(getEntity().xid)) {
+                // 真实事务id，如果是tso事务，则参与排序，否则不参与排序
+                this.getEntity().xa = true;
+                this.getEntity().hasRealXid = true;
+                this.getEntity().isCdcSingle = SystemDB.isCdcSingleGroup(
+                    StringUtils.substringBefore(getEntity().groupId, "@"));
+            } else {
+                this.getEntity().ignore = true;
+            }
         } else {
-            // 随机生成一下，不参与排序
-            generateKey(logEvent, rc);
+            this.getEntity().xid = getEntity().transactionId + rc.getStorageInstId() + logEvent.getLogPos();
         }
-        this.startLogPos = logEvent.getLogPos();
-        this.binlogFileName = rc.getBinlogFile();
+        this.getEntity().startLogPos = logEvent.getLogPos();
+        this.getEntity().binlogFileName = rc.getBinlogFile();
+        this.getEntity().when = logEvent.getWhen();
+        this.getEntity().txnKey = buildTxnKey(rc.getStorageHashCode(), pair);
         if (!isCdcSingle()) {
-            buildBuffer();
+            this.buildBuffer();
         }
-        TransactionMemoryLeakDectorManager.getInstance().watch(this);
+        TransactionMemoryLeakDetectorManager.getInstance().watch(this);
+        CURRENT_TRANSACTION_COUNT.incrementAndGet();
     }
 
-    private String generatePartitionId() {
-        try {
-            if (hasRealXid) {
-                return runtimeContext.getStorageHashCode() + "_" + groupWithReadViewSeq;
-            } else {
-                return runtimeContext.getStorageHashCode();
+    @SneakyThrows
+    public void persistEntity() {
+        boolean enablePersistEntity = DynamicApplicationConfig.getBoolean(STORAGE_PERSIST_TXN_ENTITY_ENABLED);
+
+        if (enablePersistEntity && !entityPersisted && isValidStatOfPersistEntity()) {
+            entityPersistKey = ENTITY_KEY_SEQUENCE.incrementAndGet();
+            byte[] key = buildPersistKey();
+            StorageFactory.getStorage().getRepository().selectUnit(entityPersistKey).put(key, entity.serialize());
+            entity = null;
+            entityPersisted = true;
+            CURRENT_TRANSACTION_PERSISTED_COUNT.incrementAndGet();
+
+            if (txnBuffer != null) {
+                txnBuffer.persistEntity();
             }
-        } catch (Exception e) {
-            throw new PolardbxException("generate partition id failed", e);
         }
+    }
+
+    @SneakyThrows
+    public void restoreEntity() {
+        if (entityPersisted) {
+            byte[] key = buildPersistKey();
+            byte[] value = StorageFactory.getStorage().getRepository().selectUnit(entityPersistKey).get(key);
+            entity = TransEntity.deserialize(value);
+            entityPersisted = false;
+            deleteEntity(key);
+
+            if (txnBuffer != null) {
+                txnBuffer.restoreEntity();
+            }
+        }
+    }
+
+    private void deleteEntity(byte[] key) throws RocksDBException {
+        StorageFactory.getStorage().getRepository().selectUnit(entityPersistKey).delete(key);
+        CURRENT_TRANSACTION_PERSISTED_COUNT.decrementAndGet();
+    }
+
+    private boolean isValidStatOfPersistEntity() {
+        return state == TRANSACTION_STATE.STATE_COMMIT || state == TRANSACTION_STATE.STATE_ROLLBACK;
+    }
+
+    private byte[] buildPersistKey() {
+        return ByteUtil.bytes(ENTITY_KEY_PREFIX + StringUtils.leftPad(String.valueOf(entityPersistKey), 19, "0"));
+    }
+
+    private TransEntity getEntity() {
+        if (entityPersisted) {
+            LabEventManager.logEvent(LabEventType.TASK_TRANSACTION_PERSIST_ERROR, CommonUtils.getCurrentStackTrace());
+            throw new PolardbxException("trans entity is persisted, should restore first!");
+        }
+        return entity;
     }
 
     private void buildBuffer() throws AlreadyExistException {
-        if (StringUtils.isNotBlank(skipWhiteList)) {
-            String[] array = StringUtils.split(skipWhiteList, "#");
-            Set<String> sets = Sets.newHashSet(array);
-            if (sets.contains(xid)) {
-                logger.info("hit the whitelist, skip transaction with xid {}.", xid);
-                skipTranslogger.info("skip : " + xid);
-                ignore = true;
-                return;
-            }
+        if (TransactionFilter.shouldFilter(getEntity().txnKey, getEntity().binlogFileName, getEntity().startLogPos)) {
+            getEntity().ignore = true;
         }
 
-        String partitionId = generatePartitionId();
+        if (getEntity().ignore) {
+            return;
+        }
+
         try {
-            TxnKey key = new TxnKey(transactionId + "", partitionId);
-            buffer = storage.create(key);
+            txnBuffer = StorageFactory.getStorage().create(getEntity().txnKey);
         } catch (AlreadyExistException e) {
-            if (!DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXCEPTION_SKIP_DUPLICATE_BUFFER_KEY)) {
+            if (!DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_SKIP_DUPLICATE_TXN_KEY)) {
                 throw e;
             }
-            duplicateTransactionLogger
-                .warn("ignore duplicate txnKey Exception, skip transaction : " + transactionId + " , partition: "
-                    + partitionId + ", binlogFile: " + binlogFileName + ", logPos: " + startLogPos + ", xid: " + xid);
-            buffer = null;
-            ignore = true;
+            duplicateTransactionLogger.warn("ignore duplicate txnKey Exception, will skip it , "
+                + "{ tranId : " + getEntity().transactionId +
+                " , partitionId : " + getEntity().txnKey.getPartitionId()
+                + ", binlogFile: " + getEntity().binlogFileName
+                + ", logPos: " + getEntity().startLogPos
+                + ", xid: " + getEntity().xid + " } "
+            );
+            txnBuffer = null;
+            getEntity().ignore = true;
         }
     }
 
     public boolean isIgnore() {
-        return ignore;
-    }
-
-    public TxnKey getBufferKey() {
-        if (buffer != null) {
-            return buffer.getTxnKey();
-        }
-        return null;
+        return getEntity().ignore;
     }
 
     public boolean isCdcSingle() {
-        return isCdcSingle;
-    }
-
-    private void generateKey(LogEvent logEvent, RuntimeContext rc) {
-        this.transactionId = Math.abs(CommonUtils.randomXid());
-        this.xid = transactionId + rc.getStorageInstId() + logEvent.getLogPos();
+        return getEntity().isCdcSingle;
     }
 
     public void setListener(TransactionCommitListener listener) {
-        this.listener = listener;
+        COMMIT_LISTENER.set(listener);
     }
 
     public void processEvent(LogEvent event, RuntimeContext rc) throws Exception {
@@ -253,15 +279,19 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     private void processEvent_0(LogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
+        if (getEntity().ignore) {
+            return;
+        }
+
         if (LogEventUtil.isRowsQueryEvent(event)) {
             RowsQueryLogEvent queryLogEvent = (RowsQueryLogEvent) event;
             try {
-                originalTraceId = queryLogEvent.getRowsQuery();
+                getEntity().originalTraceId = queryLogEvent.getRowsQuery();
                 String[] results = LogEventUtil.buildTrace(queryLogEvent);
                 if (results != null) {
-                    nextTraceId = results[0];
+                    getEntity().nextTraceId = results[0];
                     if (NumberUtils.isCreatable(results[1])) {
-                        serverId = NumberUtils.createLong(results[1]);
+                        getEntity().serverId = NumberUtils.createLong(results[1]);
                     }
                 }
             } catch (Exception e) {
@@ -269,7 +299,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
                 throw e;
             }
             // 暂存Rows_Query_Event的内容，放到相邻的下一个Table_Map_Event中
-            lastRowsQuery = queryLogEvent.getRowsQuery();
+            getEntity().lastRowsQuery = queryLogEvent.getRowsQuery();
             return;
         }
         if (filter(event)) {
@@ -278,54 +308,56 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         if (processSpecialTableData(event, rc)) {
             return;
         }
-        descriptionEvent = event.getHeader().getType() == LogEvent.FORMAT_DESCRIPTION_EVENT;
+        getEntity().descriptionEvent = event.getHeader().getType() == LogEvent.FORMAT_DESCRIPTION_EVENT;
         if (event.getHeader().getType() == LogEvent.TABLE_MAP_EVENT) {
             //如果nextTraceId为null，说明binlog_rows_query_log_events参数值为OFF，否则物理binlog中肯定会有traceId
-            if (nextTraceId == null) {
-                nextTraceId = generateFakeTraceId();
+            if (getEntity().nextTraceId == null) {
+                getEntity().nextTraceId = generateFakeTraceId();
             }
-            event.setTrace(nextTraceId);
-            lastTraceId = nextTraceId;
-            nextTraceId = null;
+            event.setTrace(getEntity().nextTraceId);
+            getEntity().lastTraceId = getEntity().nextTraceId;
+            getEntity().nextTraceId = null;
         } else {
             //直接使用前面紧邻的TableMapEvent的TraceId
-            event.setTrace(lastTraceId);
+            event.setTrace(getEntity().lastTraceId);
         }
-        if (serverId != null) {
-            event.setTraceServerId(serverId);
+        if (getEntity().serverId != null) {
+            event.setTraceServerId(getEntity().serverId);
         }
         addTxnBuffer(event);
     }
 
     private void addTxnBuffer(LogEvent logEvent) {
-        if (buffer == null) {
+        if (txnBuffer == null) {
             return;
         }
 
-        if (StringUtils.isNotBlank(lastRowsQuery) && !lastRowsQuery.endsWith("*/")) {
-            lastRowsQuery = StringUtils.substringBetween(lastRowsQuery, "/*DRDS", "*/");
-            lastRowsQuery = "/*DRDS" + lastRowsQuery + "*/";
+        if (StringUtils.isNotBlank(getEntity().lastRowsQuery) && !getEntity().lastRowsQuery.endsWith("*/")) {
+            getEntity().lastRowsQuery =
+                StringUtils.substringBetween(getEntity().lastRowsQuery, "/*DRDS", "*/");
+            getEntity().lastRowsQuery = "/*DRDS" + getEntity().lastRowsQuery + "*/";
         }
         TxnBufferItem txnItem = TxnBufferItem.builder()
             .traceId(logEvent.getTrace())
-            .rowsQuery(lastRowsQuery)
+            .rowsQuery(getEntity().lastRowsQuery)
             .payload(logEvent.toBytes())
             .eventType(logEvent.getHeader().getType())
-            .originTraceId(originalTraceId)
-            .binlogFile(binlogFileName)
+            .originTraceId(getEntity().originalTraceId)
+            .binlogFile(getEntity().binlogFileName)
             .binlogPosition(logEvent.getLogPos())
             .build();
 
         // RowsQuery Event后跟紧Table_Map，所以第一个lastRowsQuery不为空
         // 这里将lastRowsQuery设为空之后，后面的Table_Map中的rowsQuery将为空，直到获得下一个RowsQuery中的内容
-        lastRowsQuery = "";
+        getEntity().lastRowsQuery = "";
         try {
-            buffer.push(txnItem);
+            txnBuffer.push(txnItem);
         } catch (Exception e) {
-            logger.error("push to buffer error local trace : " + originalTraceId + " with : " + binlogFileName + ":"
-                + logEvent.getLogPos() + " buffer : " + buffer.getTxnKey() + " " + buffer.itemSize(), e);
+            logger.error("push to buffer error local trace : " + getEntity().originalTraceId + " with : "
+                + getEntity().binlogFileName + ":" + logEvent.getLogPos() + " buffer : " + txnBuffer.getTxnKey()
+                + " " + txnBuffer.itemSize(), e);
             logger.error("buffer cache:");
-            Iterator<TxnItemRef> it = buffer.iterator();
+            Iterator<TxnItemRef> it = txnBuffer.iterator();
             while (it.hasNext()) {
                 TxnItemRef ii = it.next();
                 logger.error("item type : " + ii.getEventType() + " .. trace : " + ii.getTraceId());
@@ -335,7 +367,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     public Long getServerId() {
-        return serverId;
+        return getEntity().serverId;
     }
 
     private boolean processSpecialTableData(LogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
@@ -346,23 +378,23 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             if (SystemDB.isGlobalTxTable(table.getTableName())) {
                 if (event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT
                     || event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT_V1) {
-                    processTxGlobleEvent((WriteRowsLogEvent) rowsLogEvent);
+                    processTxGlobalEvent((WriteRowsLogEvent) rowsLogEvent);
                 }
                 return true;
             }
             if (SystemDB.isHeartbeat(rowsLogEvent.getTable().getDbName(), rowsLogEvent.getTable().getTableName())) {
                 setHeartbeat(true);
-                this.sourceCdcSchema = rowsLogEvent.getTable().getDbName();
-                releaseBuffer();
+                this.getEntity().sourceCdcSchema = rowsLogEvent.getTable().getDbName();
+                releaseTxnBuffer();
                 return true;
             }
             if (SystemDB.isLogicDDL(table.getDbName(), table.getTableName())) {
                 if (event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT
                     || event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT_V1) {
                     processDDL((WriteRowsLogEvent) rowsLogEvent, rc);
-                    this.sourceCdcSchema = rowsLogEvent.getTable().getDbName();
+                    this.getEntity().sourceCdcSchema = rowsLogEvent.getTable().getDbName();
                 }
-                releaseBuffer();
+                releaseTxnBuffer();
                 return true;
             }
             if (SystemDB.isSys(table.getDbName())) {
@@ -370,12 +402,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
                     event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT
                         || event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT_V1)) {
                     processInstruction((WriteRowsLogEvent) rowsLogEvent, rc);
-                    if (isMetadataBuildCommand()) {
-
-                    }
                 }
-                releaseBuffer();
-                this.sourceCdcSchema = rowsLogEvent.getTable().getDbName();
+                releaseTxnBuffer();
+                this.getEntity().sourceCdcSchema = rowsLogEvent.getTable().getDbName();
                 return true;
             }
         }
@@ -384,18 +413,18 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             TableMapLogEvent tableMapLogEvent = (TableMapLogEvent) event;
             if (SystemDB.isHeartbeat(tableMapLogEvent.getDbName(), tableMapLogEvent.getTableName())) {
                 setHeartbeat(true);
-                releaseBuffer();
-                this.sourceCdcSchema = tableMapLogEvent.getDbName();
+                releaseTxnBuffer();
+                this.getEntity().sourceCdcSchema = tableMapLogEvent.getDbName();
                 return true;
             }
             if (SystemDB.isInstruction(tableMapLogEvent.getDbName(), tableMapLogEvent.getTableName())) {
-                releaseBuffer();
-                this.sourceCdcSchema = tableMapLogEvent.getDbName();
+                releaseTxnBuffer();
+                this.getEntity().sourceCdcSchema = tableMapLogEvent.getDbName();
                 return true;
             }
             if (SystemDB.isSys(tableMapLogEvent.getDbName())) {
-                releaseBuffer();
-                this.sourceCdcSchema = tableMapLogEvent.getDbName();
+                releaseTxnBuffer();
+                this.getEntity().sourceCdcSchema = tableMapLogEvent.getDbName();
                 return true;
             }
         }
@@ -405,34 +434,65 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     private void processInstruction(WriteRowsLogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
         BinlogParser binlogParser = new BinlogParser();
-        binlogParser.parse(SystemDB.getInstance().getInstructionTableMeta(), event, "utf8");
-        String instructionType = (String) binlogParser.getField(SystemDB.INSTRUCTION_FIELD_INSTRUCTION_TYPE);
-        String instructionContent = (String) binlogParser.getField(SystemDB.INSTRUCTION_FIELD_INSTRUCTION_CONTENT);
-        String instructionId = (String) binlogParser.getField(SystemDB.INSTRUCTION_FIELD_INSTRUCTION_ID);
-        this.instructionType = InstructionType.valueOf(instructionType);
-        this.instructionContent = instructionContent;
-        this.instructionId = instructionId;
+        binlogParser.parse(SystemDB.getInstructionTableMeta(), event, "utf8");
+        String instructionType = (String) binlogParser.getField(INSTRUCTION_FIELD_INSTRUCTION_TYPE);
+        String instructionContent = (String) binlogParser.getField(INSTRUCTION_FIELD_INSTRUCTION_CONTENT);
+        String instructionId = (String) binlogParser.getField(INSTRUCTION_FIELD_INSTRUCTION_ID);
+        this.getEntity().instructionType = InstructionType.valueOf(instructionType);
+        this.getEntity().instructionContent = instructionContent;
+        this.getEntity().instructionId = instructionId;
+    }
+
+    private void processFlushLog() {
+        this.getEntity().instructionType = InstructionType.FlushLogs;
+    }
+
+    private boolean processCdcInternalDDL(DDLRecord ddlRecord) {
+        // prepare parameters
+
+        String sqlKind = ddlRecord.getSqlKind();
+        if (StringUtils.equals(sqlKind, "FLUSH_LOGS")) {
+            String groupName = ddlRecord.getExtInfo().getGroupName();
+            if (StringUtils.isNotBlank(groupName)) {
+                // check 指令是否是针对当前集群
+                if (StringUtils
+                    .equalsIgnoreCase(DynamicApplicationConfig.getString(ConfigKeys.BINLOGX_STREAM_GROUP_NAME),
+                        groupName)) {
+                    processFlushLog();
+                    return true;
+                }
+
+            } else if (DynamicApplicationConfig.getClusterType().equals(ClusterType.BINLOG.name())) {
+                processFlushLog();
+                return true;
+            }
+            this.getEntity().ignore = true;
+            return true;
+        }
+        return false;
     }
 
     private void processDDL(WriteRowsLogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
         BinlogParser binlogParser = new BinlogParser();
-        binlogParser.parse(SystemDB.getInstance().getDdlTableMeta(), event, "utf8");
+        binlogParser.parse(SystemDB.getDdlTableMeta(), event, "utf8");
         String id = (String) binlogParser.getField(DDL_RECORD_FIELD_DDL_ID);
         String jobId = (String) binlogParser.getField(DDL_RECORD_FIELD_JOB_ID);
         String ddl = (String) binlogParser.getField(DDL_RECORD_FIELD_DDL_SQL);
-        String metaInfo = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_META_INFO);
-        String sqlKind = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_SQL_KIND);
-        String logicSchema = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_SCHEMA_NAME);
-        String tableName = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_TABLE_NAME);
-        String visible = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_VISIBILITY);
-        String ext = (String) binlogParser.getField(SystemDB.DDL_RECORD_FIELD_EXT);
+        String metaInfo = (String) binlogParser.getField(DDL_RECORD_FIELD_META_INFO);
+        String sqlKind = (String) binlogParser.getField(DDL_RECORD_FIELD_SQL_KIND);
+        String logicSchema = (String) binlogParser.getField(DDL_RECORD_FIELD_SCHEMA_NAME);
+        String tableName = (String) binlogParser.getField(DDL_RECORD_FIELD_TABLE_NAME);
+        String visible = (String) binlogParser.getField(DDL_RECORD_FIELD_VISIBILITY);
+        String ext = (String) binlogParser.getField(DDL_RECORD_FIELD_EXT);
+        DDLExtInfo ddlExtInfo = null;
         if (StringUtils.isNotBlank(ext)) {
-            DDLExtInfo ddlExtInfo = JSONObject.parseObject(ext, DDLExtInfo.class);
+            ddlExtInfo = DDLExtInfo.parseExtInfo(ext);
             if (ddlExtInfo != null && StringUtils.isNotBlank(ddlExtInfo.getServerId()) && NumberUtils
                 .isCreatable(ddlExtInfo.getServerId())) {
-                serverId = NumberUtils.createLong(ddlExtInfo.getServerId());
+                getEntity().serverId = NumberUtils.createLong(ddlExtInfo.getServerId());
             }
         }
+
         DDLRecord ddlRecord = DDLRecord.builder()
             .id(Long.valueOf(id))
             .jobId(StringUtils.isBlank(jobId) ? null : Long.valueOf(jobId))
@@ -441,22 +501,26 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             .schemaName(StringUtils.lowerCase(logicSchema))
             .tableName(StringUtils.lowerCase(tableName))
             .metaInfo(metaInfo)
+            .extInfo(ddlExtInfo)
             .build();
+
+        if (processCdcInternalDDL(ddlRecord)) {
+            return;
+        }
         ddlEvent = new DDLEvent();
         ddlEvent.setDdlRecord(ddlRecord);
         ddlEvent.setExt(ext);
-        ddlEvent.setPosition(new BinlogPosition(rc.getBinlogFile(),
-            event.getLogPos(),
-            -1,
+        ddlEvent.setPosition(new BinlogPosition(rc.getBinlogFile(), event.getLogPos(), -1,
             event.getHeader().getWhen()));
-        ddlEvent.setVisible(Integer.parseInt(visible) == 1);
+        ddlEvent.initVisible(Integer.parseInt(visible));
+
         if (logger.isDebugEnabled()) {
-            logger.debug("receive logic ddl " + new Gson().toJson(ddlRecord));
+            logger.debug("receive logic ddl " + JSONObject.toJSONString(ddlRecord));
         }
     }
 
     public void afterCommit(RuntimeContext rc) {
-        stopLogPos = rc.getLogPos();
+        getEntity().stopLogPos = rc.getLogPos();
         if (isTxGlobal()) {
             if (getEventCount() > 0) {
                 // xa事务会有部分分片保存在事务中的情况
@@ -464,9 +528,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             }
         }
 
-        virtualTSO = generateTSO(rc);
+        getEntity().virtualTsoStr = generateTSO(rc);
         if (isDDL()) {
-            ddlEvent.getPosition().setRtso(virtualTSO);
+            ddlEvent.getPosition().setRtso(getEntity().virtualTsoStr);
         }
 
         //尽快释放内存空间
@@ -474,60 +538,62 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     public boolean needRevert() {
-        return isRollback() || StringUtils.isEmpty(virtualTSO);
+        return isRollback() || StringUtils.isEmpty(getEntity().virtualTsoStr) || !isValidTransaction();
     }
 
-    public boolean isVisible() {
-        return getEventCount() > 0 || isDDL() && ddlEvent.isVisible() || isHeartbeat() || isDescriptionEvent()
-            || isInstructionCommand();
+    public boolean isVisibleDdl() {
+        return isDDL() && ddlEvent.isVisible();
     }
 
-    public boolean canNotFilter() {
+    public boolean isValidTransaction() {
         return getEventCount() > 0 || isDDL() || isHeartbeat() || isDescriptionEvent() || isInstructionCommand();
     }
 
-    private boolean isGlobalTxTable(String tableName) {
-        return SystemDB.DRDS_GLOBAL_TX_LOG.equalsIgnoreCase(tableName);
+    private boolean isDrdsGlobalTxLogTable(String tableName) {
+        return SystemDB.isGlobalTxTable(tableName);
+    }
+
+    private boolean isPolarxGlobalTrxLogTable(String tableName) {
+        return SystemDB.isPolarxGlobalTrxLogTable(tableName);
     }
 
     private boolean isDrdsRedoLogTable(String tableName) {
-        return SystemDB.DRDS_REDO_LOG.equalsIgnoreCase(tableName);
+        return SystemDB.isDrdsRedoLogTable(tableName);
     }
 
     private boolean filter(LogEvent event) {
         if (event.getHeader().getType() == LogEvent.TABLE_MAP_EVENT) {
             TableMapLogEvent tableMapLogEvent = (TableMapLogEvent) event;
             String tableName = tableMapLogEvent.getTableName();
-            return isGlobalTxTable(tableName) || isDrdsRedoLogTable(tableName);
+            return isDrdsGlobalTxLogTable(tableName) || isDrdsRedoLogTable(tableName)
+                || isPolarxGlobalTrxLogTable(tableName);
         }
         if (event instanceof RowsLogEvent) {
             RowsLogEvent rowsLogEvent = (RowsLogEvent) event;
             TableMapLogEvent table = rowsLogEvent.getTable();
-            return isDrdsRedoLogTable(table.getTableName());
+            return isDrdsRedoLogTable(table.getTableName()) || isPolarxGlobalTrxLogTable(table.getTableName());
         }
         if (event instanceof QueryLogEvent) {
             QueryLogEvent logEvent = (QueryLogEvent) event;
-            if (StringUtils.startsWithIgnoreCase(logEvent.getQuery(), "savepoint")) {
-                return true;
-            }
+            return StringUtils.startsWithIgnoreCase(logEvent.getQuery(), "savepoint");
         }
         return false;
     }
 
-    private void processTxGlobleEvent(WriteRowsLogEvent rowsLogEvent) {
-        TxGlobalEvent txGlobalEvent = SystemDB.getInstance().parseTxGlobalEvent(rowsLogEvent, charset);
-        this.txGlobalTid = txGlobalEvent.getTxGlobalTid();
-        this.txGlobalTso = txGlobalEvent.getTxGlobalTso();
-        this.transactionId = txGlobalTid;
-        this.txGlobal = true;
-        this.xa = true;
-        if (txGlobalTso != null && txGlobalTso > 0) {
-            this.tsoTransaction = true;
+    private void processTxGlobalEvent(WriteRowsLogEvent rowsLogEvent) {
+        TxGlobalEvent txGlobalEvent = SystemDB.parseTxGlobalEvent(rowsLogEvent, getEntity().charset);
+        this.getEntity().txGlobalTid = txGlobalEvent.getTxGlobalTid();
+        this.getEntity().txGlobalTso = txGlobalEvent.getTxGlobalTso();
+        this.getEntity().transactionId = getEntity().txGlobalTid;
+        this.getEntity().txGlobal = true;
+        this.getEntity().xa = true;
+        if (getEntity().txGlobalTso != null && getEntity().txGlobalTso > 0) {
+            this.getEntity().tsoTransaction = true;
         }
     }
 
     public void resetTranId(Long newTransactionId) {
-        this.transactionId = newTransactionId;
+        this.getEntity().transactionId = newTransactionId;
     }
 
     private String generateTSO(RuntimeContext rc) {
@@ -535,24 +601,24 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         Long currentTso = rc.getMaxTSO();
         String uniqueTxnId;
         long computeTransactionId = 0;
+
         if (isDescriptionEvent()) {
             currentTso = 0L;
             uniqueTxnId = StringUtils.leftPad("0", 29, "0");
         } else {
             if (isTsoTransaction()) {
-                computeTransactionId = transactionId;
-                long tmpCurrentTso = txGlobal ? txGlobalTso : realTSO;
-                if (tmpCurrentTso > currentTso) {
-                    rc.setMaxTSO(tmpCurrentTso, transactionId);
-                }
-                currentTso = tmpCurrentTso;
-                uniqueTxnId = StringUtils.leftPad(String.valueOf(transactionId), 19, "0") + ZERO_19_PADDING;
+                computeTransactionId = getEntity().transactionId;
+                currentTso =
+                    getEntity().txGlobal ? getEntity().txGlobalTso : getEntity().realTso;
+                rc.setMaxTSO(currentTso, getEntity().transactionId);
+                uniqueTxnId = StringUtils.leftPad(
+                    String.valueOf(getEntity().transactionId), 19, "0") + ZERO_19_PADDING;
             } else {
                 long lastTxnId = rc.getMaxTxnId();
                 computeTransactionId = lastTxnId;
                 int nextSeq = rc.nextMaxTxnIdSequence(lastTxnId);
-                uniqueTxnId = StringUtils.leftPad(lastTxnId + "", 19, "0") + StringUtils.leftPad(
-                    nextSeq + "", 10, "0");
+                uniqueTxnId = StringUtils.leftPad(lastTxnId + "", 19, "0") +
+                    StringUtils.leftPad(nextSeq + "", 10, "0");
             }
         }
 
@@ -561,13 +627,12 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         }
 
         String storageInstId = rc.getStorageInstId();
-
         if (isDDL() || isDescriptionEvent() || isInstructionCommand() || isTsoTransaction()) {
             storageInstId = null;
         }
 
         String vto = CommonUtils.generateTSO(currentTso, uniqueTxnId, storageInstId);
-        virtualTSOModel = new VirtualTSO(currentTso, computeTransactionId, Integer.parseInt(vto.substring(38, 48)));
+        virtualTsoModel = new VirtualTSO(currentTso, computeTransactionId, Integer.parseInt(vto.substring(38, 48)));
         return vto;
     }
 
@@ -576,7 +641,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     public boolean isDescriptionEvent() {
-        return descriptionEvent;
+        return getEntity().descriptionEvent;
     }
 
     public boolean isCommit() {
@@ -587,52 +652,50 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         if (isCommit()) {
             throw new PolardbxException("duplicate commit event!");
         }
-        this.state = TRANSACTION_STATE.STATE_COMMIT;
 
+        this.state = TRANSACTION_STATE.STATE_COMMIT;
         afterCommit(rc);
-        if (listener != null) {
-            listener.onCommit(this);
-        }
+        COMMIT_LISTENER.get().onCommit(this);
     }
 
     public boolean isPrepare() {
         return state == TRANSACTION_STATE.STATE_PREPARE;
     }
 
-    public String getVirtualTSO() {
-        return virtualTSO;
+    public String getVirtualTsoStr() {
+        return getEntity().virtualTsoStr;
     }
 
     public void setVirtualTSO(String virtualTSO) {
-        this.virtualTSO = virtualTSO;
+        this.getEntity().virtualTsoStr = virtualTSO;
     }
 
     public VirtualTSO getVirtualTSOModel() {
-        return virtualTSOModel;
+        return virtualTsoModel;
     }
 
     public void setRealTSO(long realTSO) {
-        this.realTSO = realTSO;
+        this.getEntity().realTso = realTSO;
     }
 
     public boolean hasTso() {
-        return StringUtils.isNotBlank(virtualTSO);
+        return StringUtils.isNotBlank(getEntity().virtualTsoStr);
     }
 
     public boolean isXa() {
-        return xa;
+        return getEntity().xa;
     }
 
     public void setXa(boolean xa) {
-        this.xa = xa;
+        this.getEntity().xa = xa;
     }
 
     public String getXid() {
-        return xid;
+        return getEntity().xid;
     }
 
     public void setXid(String xid) {
-        this.xid = xid;
+        this.getEntity().xid = xid;
     }
 
     public void setStart() {
@@ -644,19 +707,19 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     public void setCharset(String charset) {
-        this.charset = charset;
+        this.getEntity().charset = charset;
     }
 
     public Long getTransactionId() {
-        return transactionId;
+        return getEntity().txnKey.getTxnId();
     }
 
     public String getPartitionId() {
-        return generatePartitionId();
+        return getEntity().txnKey.getPartitionId();
     }
 
     public int getEventCount() {
-        return buffer == null ? 0 : buffer.itemSize();
+        return txnBuffer == null ? 0 : txnBuffer.itemSize();
     }
 
     private String generateFakeTraceId() {
@@ -664,23 +727,23 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     public boolean isTxGlobal() {
-        return txGlobal;
+        return getEntity().txGlobal;
     }
 
     public Long getTxGlobalTso() {
-        return txGlobalTso;
+        return getEntity().txGlobalTso;
     }
 
     public Long getTxGlobalTid() {
-        return txGlobalTid;
+        return getEntity().txGlobalTid;
     }
 
     public boolean isTsoTransaction() {
-        return tsoTransaction;
+        return getEntity().tsoTransaction;
     }
 
     public void setTsoTransaction(boolean tsoTransaction) {
-        this.tsoTransaction = tsoTransaction;
+        this.getEntity().tsoTransaction = tsoTransaction;
     }
 
     public boolean isRollback() {
@@ -694,27 +757,33 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     private void rollback(RuntimeContext rc) {
         afterCommit(rc);
-        releaseBuffer();
-        this.listener.onCommit(this);
+        releaseTxnBuffer();
+        COMMIT_LISTENER.get().onCommit(this);
     }
 
-    private void releaseBuffer() {
-        if (buffer != null && !buffer.isCompleted()) {
-            storage.delete(buffer.getTxnKey());
-            buffer = null;
+    private void releaseTxnBuffer() {
+        if (txnBuffer != null && !txnBuffer.isCompleted()) {
+            StorageFactory.getStorage().delete(txnBuffer.getTxnKey());
+            txnBuffer.deleteEntity();
+            txnBuffer = null;
         }
     }
 
     private void clearTraceId() {
-        this.lastTraceId = null;
-        this.nextTraceId = null;
-        this.originalTraceId = null;
-        this.lastRowsQuery = null;
+        this.getEntity().lastTraceId = null;
+        this.getEntity().nextTraceId = null;
+        this.getEntity().originalTraceId = null;
+        this.getEntity().lastRowsQuery = null;
     }
 
+    @SneakyThrows
     public void release() {
-        TransactionMemoryLeakDectorManager.getInstance().unWatch(this);
-        releaseBuffer();
+        TransactionMemoryLeakDetectorManager.getInstance().unWatch(this);
+        releaseTxnBuffer();
+        if (entityPersisted) {
+            deleteEntity(buildPersistKey());
+        }
+        CURRENT_TRANSACTION_COUNT.decrementAndGet();
     }
 
     @Override
@@ -723,11 +792,11 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     public boolean isHeartbeat() {
-        return heartbeat;
+        return getEntity().heartbeat;
     }
 
     public void setHeartbeat(boolean heartbeat) {
-        this.heartbeat = heartbeat;
+        this.getEntity().heartbeat = heartbeat;
     }
 
     public boolean isDDL() {
@@ -736,10 +805,6 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     public DDLEvent getDdlEvent() {
         return ddlEvent;
-    }
-
-    public void setDdlEvent(DDLEvent ddlEvent) {
-        this.ddlEvent = ddlEvent;
     }
 
     public byte[] getDescriptionLogEventData() {
@@ -755,7 +820,11 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     public long getStartLogPos() {
-        return startLogPos;
+        return getEntity().startLogPos;
+    }
+
+    public long getWhen() {
+        return getEntity().when;
     }
 
     public TRANSACTION_STATE getState() {
@@ -764,94 +833,126 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     @Override
     public String toString() {
-        return "Transaction {" + "tso = " + virtualTSO + ", xid = " + xid + ", transactionId = " + transactionId +
-            ", eventCount = " + getEventCount() + ", partitionId = " + generatePartitionId() + ", txGlobal = "
-            + txGlobal + ", txGlobalTso = " + txGlobalTso + ", txGlobalTid = " + txGlobalTid + ", xa = " + xa
-            + ", tsoTransaction = " + tsoTransaction + ", isHeartbeat = " + heartbeat + ", hasBuffer = " +
-            (buffer != null) + ", startLogPos = " + binlogFileName + ":" + startLogPos + ", stopLogPos = " + stopLogPos
-            + ", memSize = " + getMemSize() + ", persisted = " + isBufferPersisted() + ", isDdl = " + isDDL() +
-            ", isStorageChangeCommand = " + isStorageChangeCommand() + ", isDescriptionEvent = " + isDescriptionEvent()
-            + ", virtualTsoModel = " + virtualTSOModel + '}';
+        restoreEntity();
+        return "Transaction {"
+            + "  tso = " + getEntity().virtualTsoStr
+            + ", xid = " + getEntity().xid
+            + ", transactionId = " + getEntity().transactionId
+            + ", eventCount = " + getEventCount()
+            + ", partitionId = " + getEntity().txnKey.getPartitionId()
+            + ", txGlobal = " + getEntity().txGlobal
+            + ", txGlobalTso = " + getEntity().txGlobalTso
+            + ", txGlobalTid = " + getEntity().txGlobalTid
+            + ", xa = " + getEntity().xa
+            + ", tsoTransaction = " + getEntity().tsoTransaction
+            + ", isHeartbeat = " + getEntity().heartbeat
+            + ", hasBuffer = " + (txnBuffer != null)
+            + ", startLogPos = " + getEntity().binlogFileName + ":" + getEntity().startLogPos
+            + ", stopLogPos = " + getEntity().stopLogPos
+            + ", memSize = " + getMemSize()
+            + ", persisted = " + isBufferPersisted()
+            + ", isDdl = " + isDDL()
+            + ", isStorageChangeCommand = " + isStorageChangeCommand()
+            + ", isDescriptionEvent = " + isDescriptionEvent()
+            + ", virtualTsoModel = " + virtualTsoModel
+            + '}';
     }
 
     @Override
     public int compareTo(Transaction o) {
-        return virtualTSOModel.compareTo(o.virtualTSOModel);
+        return virtualTsoModel.compareTo(o.virtualTsoModel);
     }
 
     public String getInstructionContent() {
-        return instructionContent;
+        return getEntity().instructionContent;
     }
 
     public String getInstructionId() {
-        return instructionId;
+        return getEntity().instructionId;
     }
 
     public boolean isInstructionCommand() {
-        return instructionType != null;
+        return getEntity().instructionType != null;
     }
 
     public boolean isStorageChangeCommand() {
-        return instructionType == InstructionType.StorageInstChange;
+        return getEntity().instructionType == InstructionType.StorageInstChange;
     }
 
     public boolean isCDCStartCommand() {
-        return instructionType == InstructionType.CdcStart;
+        return getEntity().instructionType == InstructionType.CdcStart;
     }
 
     public boolean isMetadataBuildCommand() {
-        return instructionType == InstructionType.MetaSnapshot;
+        return getEntity().instructionType == InstructionType.MetaSnapshot;
     }
 
     public boolean isEnvConfigChangeCommand() {
-        return instructionType == InstructionType.CdcEnvConfigChange;
+        return getEntity().instructionType == InstructionType.CdcEnvConfigChange;
+    }
+
+    public boolean isFlushLogCommand() {
+        return this.getEntity().instructionType == InstructionType.FlushLogs;
     }
 
     public String getBinlogFileName() {
-        return binlogFileName;
+        return getEntity().binlogFileName;
     }
 
     public String getSourceCdcSchema() {
-        return sourceCdcSchema;
+        return getEntity().sourceCdcSchema;
     }
 
-    public FormatDescriptionLogEvent getFdle() {
-        return fdle;
+    public FormatDescriptionLogEvent getFdLogEvent() {
+        return fdLogEvent;
     }
 
-    public boolean persistBuffer() {
-        if (buffer != null) {
-            return buffer.persist();
+    public TxnKey getTxnKey() {
+        return getEntity().txnKey;
+    }
+
+    public void persistTxnBuffer() {
+        if (txnBuffer != null) {
+            txnBuffer.persist();
         }
-        return false;
+        if (isValidStatOfPersistEntity()) {
+            persistEntity();
+        }
+        if (!entityPersisted) {
+            getEntity().shouldPersist = true;
+        }
     }
 
     public boolean isBufferPersisted() {
-        if (buffer != null) {
-            return buffer.isPersisted();
+        if (txnBuffer != null) {
+            return txnBuffer.isPersisted();
         }
         return false;
     }
 
     public void markBufferComplete() {
-        if (buffer != null && buffer.itemSize() > 0) {
-            buffer.markComplete();
+        if (txnBuffer != null && txnBuffer.itemSize() > 0) {
+            txnBuffer.markComplete();
         }
     }
 
     public long getMemSize() {
-        return buffer != null ? buffer.memSize() : 0;
+        return txnBuffer != null ? txnBuffer.memSize() : 0;
     }
 
     public IteratorBuffer iterator() {
-        if (buffer == null) {
+        if (txnBuffer == null) {
             return null;
         }
-        return buffer.iteratorWrapper();
+        return txnBuffer.iteratorWrapper();
+    }
+
+    public boolean shouldPersistEntity() {
+        return getEntity() != null && getEntity().shouldPersist;
     }
 
     public boolean isLargeTrans() {
-        return buffer != null && buffer.isLargeTrans();
+        return txnBuffer != null && txnBuffer.isLargeTrans();
     }
 
     public enum TRANSACTION_STATE {

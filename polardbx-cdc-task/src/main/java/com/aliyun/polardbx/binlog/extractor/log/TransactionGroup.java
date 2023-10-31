@@ -44,7 +44,7 @@ public class TransactionGroup implements HandlerEvent {
         StringBuilder sb = new StringBuilder();
         sb.append("TransactionGroup begin :\n");
         transactionList.forEach(t -> {
-            sb.append(t.getVirtualTSO()).append(" pos ： ").append(t.getStartLogPos()).append("\n");
+            sb.append(t.getVirtualTsoStr()).append(" pos ： ").append(t.getStartLogPos()).append("\n");
         });
         sb.append("TransactionGroup end!");
         return sb.toString();

@@ -22,4 +22,5 @@
                                   location="classpath:config.properties,classpath:env.properties"
                                   ignore-resource-not-found="true"/>
 
+
 </beans>

@@ -18,10 +18,14 @@ import com.alibaba.druid.pool.DruidDataSource;
 import com.alibaba.druid.pool.DruidPooledConnection;
 import com.alibaba.druid.pool.vendor.MySqlExceptionSorter;
 import com.alibaba.druid.pool.vendor.MySqlValidConnectionChecker;
+import com.aliyun.polardbx.binlog.CnDataSource;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.dao.PolarxCNodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.ServerInfoMapper;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
@@ -36,6 +40,7 @@ import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -56,7 +61,7 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
  **/
 public class DruidDataSourceWrapper extends DruidDataSource
     implements javax.sql.DataSource, javax.sql.ConnectionPoolDataSource {
-    private static final Logger logger = LoggerFactory.getLogger(com.aliyun.polardbx.binlog.DataSourceWrapper.class);
+    private static final Logger logger = LoggerFactory.getLogger(CnDataSource.class);
     private static final int SERVER_CHECK_INTERVAL = 1000;
     public static Map<String, String> DEFAULT_MYSQL_CONNECTION_PROPERTIES = Maps.newHashMap();
 
@@ -80,7 +85,10 @@ public class DruidDataSourceWrapper extends DruidDataSource
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("tinyInt1isBit", "false");
         // 16MB，兼容一下ADS不支持mysql，5.1.38+的server变量查询为大写的问题，人肉指定一下最大包大小
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("maxAllowedPacket", "1073741824");
+        // net_write_timeout
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("netTimeoutForStreamingResults", "72000");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useServerPrepStmts", "false");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useInformationSchema", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("pedantic", "true");
     }
 
@@ -230,7 +238,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
                         logger.warn("detected abnormal server node with address1 {}", s);
                     }
                 } catch (Throwable t) {
-                    logger.warn("detected abnormal server node with address2 {} {}", s, t);
+                    logger.warn("detected abnormal server node with address2 {}", s, t);
                 }
                 return true;
             }).collect(Collectors.toSet());
@@ -244,22 +252,25 @@ public class DruidDataSourceWrapper extends DruidDataSource
             }
         } catch (Throwable e) {
             logger.error("something goes wrong in server node scan!", e);
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                TaskContext.getInstance().getTaskId(), "something goes wrong in server node scan");
         }
     }
 
     private Set<String> getLatestServerAddress() {
+        String config = DynamicApplicationConfig.getString(ConfigKeys.RPL_POOL_CN_BLACK_IP_LIST);
+        Set<String> blackIpList = new HashSet<>();
+        if (StringUtils.isNotBlank(config)) {
+            for (String token : config.trim().toLowerCase().split(RplConstants.COMMA)) {
+                blackIpList.add(token.trim());
+            }
+        }
         ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
         return serverInfoMapper.select(c ->
-            c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
-                .and(status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
-        ).stream().map(s -> String.format("%s:%s", s.getIp(), s.getPort())).collect(Collectors.toSet());
-    }
-
-    private Set<String> getLatestNodeAddress() {
-        PolarxCNodeInfoMapper cNodeInfoMapper = SpringContextHolder.getObject(PolarxCNodeInfoMapper.class);
-        return cNodeInfoMapper.select(c ->
-            c.where(status, isEqualTo(1))//0:master, 1:read without htap, 2:read with htap
-        ).stream().map(s -> String.format("%s:%s", s.getIp(), s.getPort())).collect(Collectors.toSet());
+                c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
+                    .and(status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
+            ).stream().filter(s -> !blackIpList.contains(s.getIp()))
+            .map(s -> String.format("%s:%s", s.getIp(), s.getPort())).collect(Collectors.toSet());
     }
 
     private void onServerNodeAdd(Set<String> toBeAddedServers) {
@@ -331,7 +342,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
             try {
                 readWriteLock.readLock().lock();
 
-                if (nestedAddresses.size() == 0) {
+                if (nestedAddresses.isEmpty()) {
                     throw new PolardbxException("no server node is ready, please retry later.");
                 }
 
@@ -354,7 +365,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
      */
     @Override
     public javax.sql.PooledConnection getPooledConnection() throws SQLException {
-        return (javax.sql.PooledConnection) getConnection();
+        return getConnection();
     }
 
     /**
@@ -369,7 +380,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
     @Override
     public javax.sql.PooledConnection getPooledConnection(String username,
                                                           String password) throws SQLException {
-        return (javax.sql.PooledConnection) getConnection();
+        return getConnection();
     }
 
     @Override

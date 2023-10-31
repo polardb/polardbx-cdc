@@ -17,15 +17,13 @@ package com.aliyun.polardbx.binlog.leader;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.MetaDbDataSource;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.domain.NodeRole;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
-import com.aliyun.polardbx.binlog.util.PasswdUtil;
-import com.aliyun.polardbx.binlog.util.PropertyChangeListener;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
@@ -45,13 +43,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.INST_IP;
+import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 /**
  * Created by ShuGuang
  */
 @Slf4j
-public class RuntimeLeaderElector implements PropertyChangeListener {
+public class RuntimeLeaderElector {
     private static final AtomicBoolean scannerStarted = new AtomicBoolean(false);
     private static final AtomicBoolean isDaemonLeader = new AtomicBoolean(false);
     private static final ScheduledExecutorService scheduledExecutorService =
@@ -63,19 +62,15 @@ public class RuntimeLeaderElector implements PropertyChangeListener {
     private static volatile Connection connection;
     private static volatile Throwable scannerError;
 
-    static {
-        DynamicApplicationConfig.addPropListener(ConfigKeys.METADB_URL, new RuntimeLeaderElector());
-    }
-
     public static Pair<String, Integer> getDaemonLeaderInfo() {
         if (isDaemonLeader()) {
             return Pair.of(DynamicApplicationConfig.getString(INST_IP),
                 DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_PORT));
         } else {
-            NodeInfoMapper mapper = SpringContextHolder.getObject(NodeInfoMapper.class);
+            NodeInfoMapper mapper = getObject(NodeInfoMapper.class);
             List<NodeInfo> nodeInfoList = mapper.select(
                 s -> s.where(NodeInfoDynamicSqlSupport.clusterId,
-                    isEqualTo(DynamicApplicationConfig.getString(CLUSTER_ID)))
+                        isEqualTo(DynamicApplicationConfig.getString(CLUSTER_ID)))
                     .and(NodeInfoDynamicSqlSupport.role, isEqualTo(NodeRole.MASTER.getName())));
             return nodeInfoList.isEmpty() ? null :
                 Pair.of(nodeInfoList.get(0).getIp(), nodeInfoList.get(0).getDaemonPort());
@@ -158,6 +153,8 @@ public class RuntimeLeaderElector implements PropertyChangeListener {
         }
 
         try (Statement statement = getConnection().createStatement()) {
+            // Tries to obtain a lock with a name given by the string str, using a timeout of timeout seconds.
+            // Returns 1 if the lock was obtained successfully, 0 if the attempt timed out
             ResultSet resultSet = statement.executeQuery(
                 "SELECT GET_LOCK('" + name + "',1)");
             if (resultSet.next()) {
@@ -182,35 +179,11 @@ public class RuntimeLeaderElector implements PropertyChangeListener {
 
     private static void buildConn() {
         try {
-            connection = DriverManager.getConnection(
-                SpringContextHolder.getPropertiesValue(ConfigKeys.METADB_URL),
-                SpringContextHolder.getPropertiesValue(ConfigKeys.METADB_USERNAME),
-                tryDecryptPassword(SpringContextHolder.getPropertiesValue(ConfigKeys.METADB_PASSWORD)));
+            MetaDbDataSource metaDs = getObject("metaDataSource");
+            connection = DriverManager.getConnection(metaDs.getUrl(), metaDs.getUsername(), metaDs.getPassword());
         } catch (SQLException e) {
             connection = null;
             log.error("RuntimeLeaderElector init connection fail", e);
         }
-    }
-
-    private static String tryDecryptPassword(String password) {
-        boolean useEncryptedPassword = DynamicApplicationConfig.getBoolean(ConfigKeys.USE_ENCRYPTED_PASSWORD);
-        return useEncryptedPassword ? PasswdUtil.decryptBase64(password) : password;
-    }
-
-    @Override
-    public void onInit(String propsName, String value) {
-
-    }
-
-    @Override
-    public void onPropertyChange(String propsName, String oldValue, String newValue) {
-        if (connection != null) {
-            try {
-                connection.close();
-            } catch (Exception e) {
-            }
-        }
-        connection = null;
-        log.warn("connection is invalid, detected properties {} change", propsName);
     }
 }

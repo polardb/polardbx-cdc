@@ -19,7 +19,6 @@ import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
@@ -38,6 +37,7 @@ import com.aliyun.polardbx.rpl.validation.repository.impl.ValTaskRepositoryImpl;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.sql.DataSource;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -52,6 +52,15 @@ import java.util.Set;
 @Data
 @Slf4j
 public class ValidationContext {
+
+    private static final String POLARX_DEFAULT_SCHEMA = "polardbx";
+    private static final String SET_POLARX_SERVER_ID = "set polardbx_server_id=%d";
+    private static final TaskContext taskContext = TaskContext.getInstance();
+    private static final RplService rplService = taskContext.getService();
+    private static final DataImportMeta.PhysicalMeta meta = taskContext.getPhysicalMeta();
+    private static final ValidationExtractorConfig config = JSON.parseObject(taskContext.getTaskConfig()
+        .getExtractorConfig(), ValidationExtractorConfig.class);
+    private static CtxFactory factory;
     /**
      * One record of rpl_state_machine table. One state machine id represents one drds upgrade task
      */
@@ -84,11 +93,11 @@ public class ValidationContext {
     /**
      * source datasource
      */
-    DruidDataSource srcDs;
+    DataSource srcDs;
     /**
      * destination datasource
      */
-    DruidDataSource dstDs;
+    DataSource dstDs;
     /**
      * Chunk size
      */
@@ -106,16 +115,6 @@ public class ValidationContext {
      */
     ValSQLGenerator valSQLGenerator;
 
-    private final static String POLARX_DEFAULT_SCHEMA = "polardbx";
-    private final static String SET_POLARX_SERVER_ID = "set polardbx_server_id=%d";
-
-    private final static TaskContext taskContext = TaskContext.getInstance();
-    private final static RplService rplService = taskContext.getService();
-    private final static DataImportMeta.PhysicalMeta meta = taskContext.getPhysicalMeta();
-    private final static ValidationExtractorConfig config = JSON.parseObject(taskContext.getTaskConfig()
-        .getExtractorConfig(), ValidationExtractorConfig.class);
-
-    private static CtxFactory factory;
     public static CtxFactory getFactory() {
         if (factory == null) {
             factory = new CtxFactory();
@@ -126,13 +125,15 @@ public class ValidationContext {
     }
 
     public static class CtxFactory {
-        public List<ValidationContext> createCtxList(HostInfo srcHost, HostInfo dstHost, DataImportFilter filter) {
+        public List<ValidationContext> createCtxList(HostInfo srcHost, HostInfo dstHost, DataImportFilter filter)
+            throws Exception {
             List<ValidationContext> contextList = new ArrayList<>();
 
             // add server id to make sure backflow knows how to filter events
             List<String> connectionInitSQLs = new ArrayList<>();
-            String setServerIdSql = String.format(SET_POLARX_SERVER_ID, Math.abs(new Long(dstHost.getServerId()).intValue()));
-            log.info("set polarx_server_id: {}", setServerIdSql);
+            String setServerIdSql =
+                String.format(SET_POLARX_SERVER_ID, Math.abs(new Long(dstHost.getServerId()).intValue()));
+            log.info("set polardbx_server_id: {}", setServerIdSql);
             connectionInitSQLs.add(setServerIdSql);
 
             Set<String> dbs = meta.getSrcDbList();
@@ -151,7 +152,7 @@ public class ValidationContext {
                 try {
                     Map<String, String> connParams = new HashMap<>();
                     srcDs = DataSourceUtil.createDruidMySqlDataSource(
-                        isPolarxToDrds(),
+                        srcHost.isUsePolarxPoolCN(),
                         srcHost.getHost(),
                         srcHost.getPort(),
                         db,
@@ -163,7 +164,7 @@ public class ValidationContext {
                         connParams,
                         null);
                     dstDs = DataSourceUtil.createDruidMySqlDataSource(
-                        !isPolarxToDrds(),
+                        dstHost.isUsePolarxPoolCN(),
                         dstHost.getHost(),
                         dstHost.getPort(),
                         context.getDstLogicalDB(),
@@ -197,9 +198,9 @@ public class ValidationContext {
                     }
                 } catch (Exception e) {
                     log.error("Initializing ValidationExtractor exception. src db: {}", db, e);
-                    MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR,
+                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR,
                         context.getTaskId(), e.getMessage());
-                    System.exit(-1);
+                    throw e;
                 }
                 contextList.add(context);
                 // update task status. heartbeat has 300s timeout setting
@@ -210,21 +211,18 @@ public class ValidationContext {
 
         /**
          * src physical table -> dst logical table
-         * @param srcTableList
-         * @param dstDb
-         * @param dstDs
-         * @param filter
-         * @return
-         * @throws Exception
          */
-        private Map<String, TableInfo> getMappingTableMap(List<TableInfo> srcTableList, String dstDb, DruidDataSource dstDs, DataImportFilter filter) throws Exception {
+        private Map<String, TableInfo> getMappingTableMap(List<TableInfo> srcTableList, String dstDb,
+                                                          DruidDataSource dstDs, DataImportFilter filter)
+            throws Exception {
             Map<String, TableInfo> dstTableMap = new HashMap<>();
             Map<String, TableInfo> srcToDstTblMap = new HashMap<>();
             // srcTable --- n:1 ---> dstTable
             for (TableInfo tableInfo : srcTableList) {
                 if (isPolarxToDrds()) {
                     // in polarx to drds situation, logical table should be identical
-                    TableInfo dstTable = DbMetaManager.getTableInfo(dstDs, dstDb, tableInfo.getName(), HostType.POLARX1);
+                    TableInfo dstTable =
+                        DbMetaManager.getTableInfo(dstDs, dstDb, tableInfo.getName(), HostType.POLARX1);
                     srcToDstTblMap.put(tableInfo.getName(), dstTable);
                 } else {
                     String dstTblName = filter.getRewriteTable(tableInfo.getName());
@@ -244,12 +242,8 @@ public class ValidationContext {
         }
 
         private boolean isPolarxToDrds() {
-            if (rplService.getServiceType() == ServiceType.FULL_VALIDATION_CROSSCHECK.getValue()
-                || rplService.getServiceType() == ServiceType.RECONCILIATION_CROSSCHECK.getValue()) {
-                return true;
-            } else {
-                return false;
-            }
+            return rplService.getServiceType() == ServiceType.FULL_VALIDATION_CROSSCHECK.getValue()
+                || rplService.getServiceType() == ServiceType.RECONCILIATION_CROSSCHECK.getValue();
         }
 
         private boolean shouldCreateTask() {
@@ -263,6 +257,7 @@ public class ValidationContext {
             }
             return false;
         }
+
         private ValidationTypeEnum getType() {
             switch (ServiceType.from(rplService.getServiceType())) {
             case FULL_VALIDATION:

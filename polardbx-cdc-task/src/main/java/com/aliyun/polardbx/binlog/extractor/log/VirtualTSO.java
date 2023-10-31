@@ -14,18 +14,24 @@
  */
 package com.aliyun.polardbx.binlog.extractor.log;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import lombok.ToString;
+
+import java.io.Serializable;
 
 /**
  * true tso | transactionId | seq | storageInstanceId
  */
 @ToString
-public class VirtualTSO implements Comparable<VirtualTSO> {
+public class VirtualTSO implements Comparable<VirtualTSO>, Serializable {
 
-    public final long tso;
-    public final long transactionId;
-    public final long seq;
+    public long tso;
+    public long transactionId;
+    public long seq;
+
+    public VirtualTSO() {
+
+    }
 
     public VirtualTSO(long tso, long transactionId, int seq) {
         this.tso = tso;

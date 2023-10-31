@@ -16,6 +16,7 @@ package com.aliyun.polardbx.binlog.canal.binlog;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.SearchMode;
 import com.aliyun.polardbx.binlog.canal.binlog.cache.Cache;
 import com.aliyun.polardbx.binlog.canal.binlog.cache.CacheManager;
 import com.aliyun.polardbx.binlog.canal.binlog.cache.CacheMode;
@@ -59,14 +60,15 @@ public class MultiPartInputStream {
     public MultiPartInputStream(String url, long fileSize) throws IOException {
         this.url = url;
         this.fileSize = fileSize;
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SEARCHTSO_QUICKMODE) && BinlogDumpContext.isSearch()) {
+        if (SearchMode.isSearchInQuickMode() && BinlogDumpContext.isSearch()) {
             this.DEFAULT_BUFFER_SIZE = fileSize;
         } else {
             CacheMode mode = CacheManager.getInstance().getMode();
             if (mode == CacheMode.DISK) {
                 this.DEFAULT_BUFFER_SIZE = fileSize / DEFAULT_THREAD_SIZE + DEFAULT_THREAD_SIZE;
             } else {
-                this.DEFAULT_BUFFER_SIZE = DynamicApplicationConfig.getInt(ConfigKeys.TASK_OSS_CACHE_SIZE);
+                this.DEFAULT_BUFFER_SIZE =
+                    DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CACHE_UNIT_SIZE);
             }
         }
 

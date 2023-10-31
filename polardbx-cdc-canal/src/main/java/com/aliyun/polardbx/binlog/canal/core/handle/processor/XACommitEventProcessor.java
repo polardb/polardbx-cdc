@@ -42,12 +42,14 @@ public class XACommitEventProcessor implements ILogEventProcessor {
         }
 
         context.onComplete(xid, buildPosition(event, context));
+        // reset last tso
+        context.setLastTSO(null);
     }
 
     @Override
     public void handle(LogEvent event, ProcessorContext context) {
         String xid = LogEventUtil.getXid(event);
-        if (StringUtils.isNotBlank(xid)) {
+        if (StringUtils.isNotBlank(xid) && LogEventUtil.isValidXid(xid)) {
             processCommit(event, xid, context);
         } else {
             context.setCurrentTran(null);

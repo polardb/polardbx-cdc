@@ -16,19 +16,17 @@ package com.aliyun.polardbx.binlog.remote.lindorm;
 
 import com.aliyun.oss.common.utils.CRC64;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.remote.Appender;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.ListUtils;
 import org.junit.Assert;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -43,15 +41,12 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
  * @since 2022/10/18
  **/
 @Slf4j
-public class LindormManagerTest {
+@Ignore
+public class LindormManagerTest extends BaseTest {
     private static LindormManager manager;
 
     @BeforeClass
     public static void config() {
-        final SpringContextBootStrap appContextBootStrap =
-                new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
         LindormConfig config = new LindormConfig();
         config.setAccessKey(getString(ConfigKeys.LINDORM_ACCESSKEY_ID));
         config.setAccessSecret(getString(ConfigKeys.LINDORM_ACCESSKEY_ID_SECRET));
@@ -138,7 +133,6 @@ public class LindormManagerTest {
 
     }
 
-
     @Test
     public void downloadBigFileTest() {
         // todo @yudong
@@ -195,7 +189,7 @@ public class LindormManagerTest {
 
     @Test
     public void appendBigFileTest() {
-       // append 1个大文件
+        // append 1个大文件
         String fileName = "append-big-file-test.txt";
         manager.delete(fileName);
         CRC64 expectCrc64 = new CRC64();

@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.rpc;
 
-import com.aliyun.polardbx.binlog.base.BaseTest;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
 import com.aliyun.polardbx.binlog.protocol.MessageType;
 import com.aliyun.polardbx.binlog.protocol.TxnBegin;
@@ -28,9 +27,8 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.UUID;
 
-public class TxnStreamRpcServerTest extends BaseTest {
+public class TxnStreamRpcServerTest {
 
     @Test
     @Ignore
@@ -59,7 +57,7 @@ public class TxnStreamRpcServerTest extends BaseTest {
 
                     TxnToken token = TxnToken.newBuilder()
                         .setTso(String.valueOf(tsoSeed++))
-                        .setTxnId(UUID.randomUUID().toString())
+                        .setTxnId(System.nanoTime())
                         .setPartitionId("11")
                         .build();
 

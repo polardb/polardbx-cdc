@@ -16,8 +16,7 @@ package com.aliyun.polardbx.binlog.storage;
 
 import com.aliyun.polardbx.binlog.storage.memory.WatchObject;
 import com.google.common.collect.Maps;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.CollectionUtils;
 
 import java.util.Map;
@@ -26,22 +25,22 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * created by ziyang.lb
+ */
+@Slf4j
 public class MemoryLeakDetector implements Runnable {
-
-    private static final Logger logger = LoggerFactory.getLogger(MemoryLeakDetector.class);
     private static final long WARNING_INTERVAL = TimeUnit.MINUTES.toMillis(2);
-    private static final ScheduledExecutorService schedule = Executors.newSingleThreadScheduledExecutor(r -> {
+    private static final ScheduledExecutorService SCHEDULE = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r);
         t.setDaemon(true);
         return t;
     });
-    private ConcurrentHashMap<Object, WatchObject> watchBuffer = new ConcurrentHashMap();
 
-    public MemoryLeakDetector() {
-    }
+    private final ConcurrentHashMap<Object, WatchObject> watchBuffer = new ConcurrentHashMap<>();
 
     public void start() {
-        schedule.scheduleAtFixedRate(this, 10, 10, TimeUnit.SECONDS);
+        SCHEDULE.scheduleAtFixedRate(this, 10, 10, TimeUnit.SECONDS);
     }
 
     public void watch(Object key, WatchObject object) {
@@ -67,7 +66,8 @@ public class MemoryLeakDetector implements Runnable {
         }
         if (!CollectionUtils.isEmpty(traceCounterMap)) {
             for (Map.Entry<String, Integer> counterEntry : traceCounterMap.entrySet()) {
-                logger.error("counter ： " + counterEntry.getValue() + ",  trace @ " + counterEntry.getKey());
+                log.error("find memory leak with transaction object , "
+                    + "count : " + counterEntry.getValue() + ", trace @ " + counterEntry.getKey());
             }
         }
     }

@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicReference;
  **/
 public class DumpClient {
 
-    private final static Logger logger = LoggerFactory.getLogger(DumpClient.class);
+    private static final Logger logger = LoggerFactory.getLogger(DumpClient.class);
 
     private final String host;
     private final Integer port;

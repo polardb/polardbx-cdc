@@ -14,13 +14,13 @@
  */
 package com.aliyun.polardbx.binlog.remote.channel;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
-import com.aliyun.polardbx.binlog.remote.Appender;
-import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
+import com.aliyun.polardbx.binlog.remote.oss.OssFixture;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import lombok.SneakyThrows;
 import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.BeforeClass;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
@@ -36,39 +36,35 @@ import java.util.zip.CRC32;
  * @author yudong
  * @since 2022/10/27 20:00
  **/
-public class BinlogFileReadChannelTest {
-    private static final String fileName = "binlog.000001";
+public class BinlogFileReadChannelTest extends BaseTest {
+    private static OssFixture ossFixture;
+    private static final String fileName = "read-channel-test.txt";
     private static FileChannel localChannel;
     private static BinlogFileReadChannel binlogFileReadChannel;
 
-    @BeforeClass
-    public static void prepare() throws IOException {
-        // prepare oss client
-        final SpringContextBootStrap appContextBootStrap =
-            new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
+    @Before
+    @SneakyThrows
+    public void prepare() {
+        ossFixture = new OssFixture();
         prepareTestFile();
     }
 
     @AfterClass
     public static void after() {
-        new File(fileName).deleteOnExit();
-        RemoteBinlogProxy.getInstance().deleteFile(fileName);
+        ossFixture.delete(fileName);
     }
 
     private static void prepareTestFile() throws IOException {
-        if (RemoteBinlogProxy.getInstance().isObjectsExistForPrefix(fileName)) {
-            RemoteBinlogProxy.getInstance().deleteFile(fileName);
+        if (ossFixture.exists(fileName)) {
+            ossFixture.delete(fileName);
         }
 
-        Appender appender = RemoteBinlogProxy.getInstance().providerAppender(fileName);
-        appender.begin();
         File localFile = new File(fileName);
         if (localFile.exists()) {
             localFile.delete();
         }
         localFile.createNewFile();
+        localFile.deleteOnExit();
         FileOutputStream outputStream = new FileOutputStream(localFile, true);
         byte[] buffer = new byte[1024];
         // file size : 1K ~ 1M bytes
@@ -76,7 +72,6 @@ public class BinlogFileReadChannelTest {
         for (int i = 0; i < n; i++) {
             new Random().nextBytes(buffer);
             outputStream.write(buffer);
-            appender.append(buffer, buffer.length);
         }
 
         int extra = new Random().nextInt(1024) + 1;
@@ -84,12 +79,9 @@ public class BinlogFileReadChannelTest {
         new Random().nextBytes(extraBytes);
         outputStream.write(extraBytes);
         outputStream.close();
-        appender.append(extraBytes, extraBytes.length);
-        appender.end();
-
+        ossFixture.write(fileName, new FileInputStream(fileName));
         localChannel = new FileInputStream(fileName).getChannel();
-        binlogFileReadChannel = new BinlogFileReadChannel(
-            RemoteBinlogProxy.getInstance().prepareReadChannel(fileName), null);
+        binlogFileReadChannel = new BinlogFileReadChannel(ossFixture.getChannel(fileName), null);
     }
 
     @Test
@@ -128,7 +120,6 @@ public class BinlogFileReadChannelTest {
     @Test
     public void testReadWithPos() throws IOException {
         // 测试从某个指定的位置读取一次
-
         long fileSize = localChannel.size();
         ByteBuffer buffer1 = ByteBuffer.allocate(1024);
         ByteBuffer buffer2 = ByteBuffer.allocate(1024);

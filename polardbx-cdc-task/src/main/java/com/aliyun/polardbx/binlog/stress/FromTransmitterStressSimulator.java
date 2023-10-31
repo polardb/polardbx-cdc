@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.stress;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.domain.TaskType;
@@ -34,6 +33,7 @@ import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.aliyun.polardbx.binlog.transmit.ChunkMode;
 import com.aliyun.polardbx.binlog.transmit.LogEventTransmitter;
 import com.aliyun.polardbx.binlog.transmit.Transmitter;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
 import org.apache.commons.lang3.StringUtils;
@@ -148,7 +148,7 @@ public class FromTransmitterStressSimulator extends BaseStressSimulator {
             .setTso(virtualTso)
             .setType(TxnType.DML)
             .addAllAllParties(ALL_PARTIES)
-            .setTxnId(String.valueOf(xid))
+            .setTxnId(xid)
             .setXaTxn(true)
             .setTsoTransaction(true)
             .setTxnSize(8)

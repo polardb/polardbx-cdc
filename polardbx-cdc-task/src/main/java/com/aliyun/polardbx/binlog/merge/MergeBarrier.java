@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.merge;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import lombok.extern.slf4j.Slf4j;

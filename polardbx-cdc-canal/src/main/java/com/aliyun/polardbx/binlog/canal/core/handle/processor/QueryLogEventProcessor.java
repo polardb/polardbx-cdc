@@ -14,12 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.handle.processor;
 
-import com.alibaba.polardbx.druid.DbType;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
-import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
-import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -28,7 +25,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.handle.ILogEventProcessor;
 import com.aliyun.polardbx.binlog.canal.core.handle.ProcessorContext;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
-import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import com.aliyun.polardbx.binlog.util.RegexUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,8 +33,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.POLARX_INST_ID;
-import static com.aliyun.polardbx.binlog.canal.system.SystemDB.LOGIC_SCHEMA;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.LOGIC_SCHEMA;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
  * begin
@@ -82,13 +80,20 @@ public class QueryLogEventProcessor implements ILogEventProcessor<QueryLogEvent>
             }
             try {
                 String ddl = event.getQuery();
-                if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DDL_REMOVEHINTS_SUPPORT)) {
+                if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_REMOVE_HINTS_IN_DDL_SQL)) {
                     ddl = com.aliyun.polardbx.binlog.canal.core.ddl.SQLUtils.removeDDLHints(ddl);
                 }
-                SQLStatementParser parser =
-                    SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.FEATURES);
-                List<SQLStatement> statementList = parser.parseStatementList();
-                SQLStatement statement = statementList.get(0);
+                boolean ignore =
+                    RegexUtil.match(DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX),
+                        ddl);
+                if (ignore) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("ignore ddl sql : {}", ddl);
+                    }
+                    return;
+                }
+
+                SQLStatement statement = parseSQLStatement(ddl);
 
                 if (statement instanceof SQLCreateDatabaseStatement) {
                     SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) statement;
@@ -96,8 +101,8 @@ public class QueryLogEventProcessor implements ILogEventProcessor<QueryLogEvent>
                     String databaseName2 = getCdcPhyDbNameByStorageInstId(context.getAuthenticationInfo());
                     if (StringUtils.equalsIgnoreCase(databaseName1, databaseName2)) {
                         context.setReceivedCreateCdcPhyDbEvent(true);
-                        logger
-                            .info("receive create sql for cdc physical database, sql content is : " + event.getQuery());
+                        logger.info("receive create sql for cdc physical database, sql content is : "
+                            + event.getQuery());
                     }
                 }
             } catch (Exception e) {
@@ -109,9 +114,10 @@ public class QueryLogEventProcessor implements ILogEventProcessor<QueryLogEvent>
     private String getCdcPhyDbNameByStorageInstId(AuthenticationInfo authenticationInfo) {
         JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
         List<String> list = jdbcTemplate.queryForList(String.format(
-            "select g.phy_db_name from db_group_info g,group_detail_info d where "
-                + "d.group_name = g.group_name and d.inst_id = '%s' and d.storage_inst_id = '%s' and d.db_name = '%s'",
-            DynamicApplicationConfig.getString(POLARX_INST_ID), authenticationInfo.getStorageInstId(), LOGIC_SCHEMA),
+                "select g.phy_db_name from db_group_info g,group_detail_info d where "
+                    + "d.group_name = g.group_name and d.storage_inst_id = '%s' and d.db_name = '%s'",
+                authenticationInfo.getStorageMasterInstId(),
+                LOGIC_SCHEMA),
             String.class);
         return list.isEmpty() ? "" : list.get(0);
     }

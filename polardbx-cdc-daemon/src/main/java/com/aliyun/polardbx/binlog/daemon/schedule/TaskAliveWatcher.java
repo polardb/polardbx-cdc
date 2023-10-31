@@ -30,10 +30,14 @@ import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.BinlogTaskConfigStatus;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
+import com.aliyun.polardbx.binlog.enums.BinlogTaskStatus;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
+import com.aliyun.polardbx.binlog.util.GmsTimeUtil;
+import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Sets;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
@@ -45,16 +49,20 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_ROCKS_BASE_PATH;
-import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TASK_STOP_NOLOCAL_WHITLIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS;
-import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_PATH;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_DIR;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_ROCKSDB_BASE_PATH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_BLACKLIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_BASE_PATH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR;
+import static com.aliyun.polardbx.binlog.daemon.constant.ClusterExecutionInstruction.START_EXECUTION_INSTRUCTION;
+import static com.aliyun.polardbx.binlog.daemon.constant.ClusterExecutionInstruction.STOP_EXECUTION_INSTRUCTION;
 
 /**
  * Created by ziyang.lb
@@ -70,10 +78,13 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         SpringContextHolder.getObject(DumperInfoMapper.class);
     private final BinlogTaskInfoMapper taskInfoMapper =
         SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
+    private AtomicBoolean sameRegionFlag;
 
     public TaskAliveWatcher(String cluster, String clusterType, String taskName, int interval) {
         super(cluster, clusterType, taskName, interval);
         instId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
+        boolean sameRegion = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_SAME_REGION_STORAGE_BINLOG);
+        sameRegionFlag = new AtomicBoolean(sameRegion);
     }
 
     @Override
@@ -88,10 +99,28 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
                 return;
             }
 
+            boolean newSameRegion =
+                DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_SAME_REGION_STORAGE_BINLOG);
+            boolean changeRegion = false;
+            // master集群不需要关心切换就近访问
+            if (CommonUtils.isGlobalBinlogSlave()) {
+                changeRegion = sameRegionFlag.get() != newSameRegion;
+            }
+
+            final boolean filterTask = changeRegion;
+
             // 查询本机需要运行的任务列表
             List<BinlogTaskConfig> localTaskConfigs = taskConfigMapper.select(
                 s -> s.where(BinlogTaskConfigDynamicSqlSupport.containerId, SqlBuilder.isEqualTo(instId)));
+
             Set<String> localTasks = localTaskConfigs.stream()
+                .filter(b -> {
+                    if (filterTask && StringUtils
+                        .equalsAnyIgnoreCase(b.getRole(), TaskType.Final.name(), TaskType.Dispatcher.name())) {
+                        return false;
+                    }
+                    return true;
+                })
                 .map(BinlogTaskConfig::getTaskName).collect(Collectors.toSet());
 
             // 停止没有分配在本机上的正在运行的任务
@@ -100,17 +129,29 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             // 对已经不在本机运行的Task或Dumper遗留的资源进行GC
             tryCleanResource(localTasks);
 
+            if (changeRegion) {
+                sameRegionFlag.set(newSameRegion);
+            }
+
             if (log.isDebugEnabled()) {
                 log.debug("local binlog task config is " + JSONObject.toJSONString(localTaskConfigs));
             }
 
-            // 尝试启动或重启任务
-            for (BinlogTaskConfig config : localTaskConfigs) {
-                //跳过不自动调度的任务
-                if (config.getStatus() == BinlogTaskConfigStatus.DISABLE_AUTO_SCHEDULE) {
-                    continue;
-                }
-                process(config);
+            String executionInstruction =
+                StringUtils.defaultIfEmpty(SystemDbConfig.getSystemDbConfig(ConfigKeys.CLUSTER_EXECUTION_INSTRUCTION),
+                    START_EXECUTION_INSTRUCTION);
+            if (log.isDebugEnabled()) {
+                log.debug("binlog execution instruction is {}", executionInstruction);
+            }
+
+            // 跳过不自动调度的任务
+            List<BinlogTaskConfig> scheduleTasks = localTaskConfigs.stream()
+                .filter(config -> config.getStatus() != BinlogTaskConfigStatus.DISABLE_AUTO_SCHEDULE).collect(
+                    Collectors.toList());
+            if (executionInstruction.equals(STOP_EXECUTION_INSTRUCTION)) {
+                processStop(scheduleTasks);
+            } else {
+                processStart(scheduleTasks);
             }
         } catch (Exception e) {
             log.error("TaskKeepAlive Fail {}", name, e);
@@ -119,18 +160,49 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private void process(BinlogTaskConfig config) throws Exception {
+    private void processStart(List<BinlogTaskConfig> taskConfigs) {
+        taskConfigs.forEach(config -> {
+            try {
+                startTask(config);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    private void processStop(List<BinlogTaskConfig> taskConfigs) throws Exception {
+        CommandResult result = getAllTaskProcess();
+        Set<String> whiteList = stopTaskWhitList();
+        if (result.getCode() == 0) {
+            Set<String> runningTaskSet =
+                new HashSet<>(Arrays.asList(StringUtils.split(result.getMsg(), System.getProperty("line.separator"))));
+            if (log.isDebugEnabled()) {
+                log.debug("local running tasks {}", runningTaskSet);
+            }
+            for (BinlogTaskConfig config : taskConfigs) {
+                if (runningTaskSet.contains(config.getTaskName()) && !whiteList.contains(config.getTaskName())) {
+                    commander.stopTask(config.getTaskName());
+                    log.warn("stop local running task:{}", config.getTaskName());
+                }
+                updateTaskStatus(config.getClusterId(), config.getTaskName(), config.getRole(),
+                    BinlogTaskStatus.STOPPED);
+            }
+        } else {
+            log.warn("check local running task fail!");
+        }
+    }
+
+    private void startTask(BinlogTaskConfig config) throws Exception {
         Optional<CommonInfo> infoOptional;
-        if (TaskType.Relay.name().equals(config.getRole()) || TaskType.Final.name().equals(config.getRole())
-            || TaskType.Dispatcher.name().equals(config.getRole())) {
+        if (TaskType.isTask(config.getRole())) {
             infoOptional = taskInfoMapper.selectOne(
-                s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                    .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
+                    s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
+                        .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
                 .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(), s.getVersion()));
         } else {
             infoOptional = dumperInfoMapper.selectOne(
-                s -> s.where(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                    .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
+                    s -> s.where(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
+                        .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
                 .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(), s.getVersion()));
         }
 
@@ -140,10 +212,10 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             }
 
             CommonInfo info = infoOptional.get();
-            long now = System.currentTimeMillis();
-            int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS);
-            if (now - info.heartbeatTime.getTime() > heartbeatTimeout) {
-
+            int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
+            long heartbeatInterval =
+                GmsTimeUtil.getHeartbeatInterval(config.getRole(), config.getClusterId(), config.getTaskName());
+            if (heartbeatInterval > heartbeatTimeout) {
                 //心跳超时，但进程还在，一个典型的场景：大数据量场景下GC很频繁，导致cpu使用率很高，Task进程的心跳会出现超时
                 if (!isTaskProcessAlive(config.getTaskName())) {
                     MonitorManager.getInstance().triggerAlarm(MonitorType.PROCESS_HEARTBEAT_TIMEOUT_WARNING, info.name);
@@ -160,6 +232,18 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             }
         } else {
             startTask(config.getTaskName(), config.getMem(), false);
+        }
+    }
+
+    private void updateTaskStatus(String clusterId, String taskName, String taskType, BinlogTaskStatus status) {
+        if (TaskType.isDumper(taskType)) {
+            dumperInfoMapper.update(s -> s.set(DumperInfoDynamicSqlSupport.status).equalTo(status.ordinal())
+                .where(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(taskName))
+                .and(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
+        } else {
+            taskInfoMapper.update(s -> s.set(BinlogTaskInfoDynamicSqlSupport.status).equalTo(status.ordinal())
+                .where(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(taskName))
+                .and(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
         }
     }
 
@@ -195,6 +279,9 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         return false;
     }
 
+    /**
+     * 获得当前容器内运行的Task以及Dumper的名字
+     */
     private CommandResult getAllTaskProcess() throws Exception {
         return commander.execCommand(
             new String[] {
@@ -256,8 +343,7 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
     }
 
     private void cleanInfo(BinlogTaskConfig config) {
-        if (TaskType.Relay.name().equals(config.getRole()) || TaskType.Final.name().equals(config.getRole())
-            || TaskType.Dispatcher.name().equals(config.getRole())) {
+        if (TaskType.isTask(config.getRole())) {
             deleteTaskInfo(config.getTaskName());
         } else {
             deleteDumperInfo(config.getTaskName());
@@ -268,20 +354,20 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
     private void deleteDumperInfo(String name) {
         dumperInfoMapper.delete(s ->
             s.where(DumperInfoDynamicSqlSupport.clusterId,
-                SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
+                    SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
                 .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
     }
 
     private void deleteTaskInfo(String name) {
         taskInfoMapper.delete(s ->
             s.where(BinlogTaskInfoDynamicSqlSupport.clusterId,
-                SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
+                    SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
                 .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
     }
 
     private void tryCleanResource(Set<String> localTasks) {
-        tryCleanRocksDb(DynamicApplicationConfig.getString(STORAGE_PERSIST_PATH), localTasks);
-        tryCleanRocksDb(DynamicApplicationConfig.getString(BINLOG_X_ROCKS_BASE_PATH), localTasks);
+        tryCleanRocksDb(DynamicApplicationConfig.getString(STORAGE_PERSIST_BASE_PATH), localTasks);
+        tryCleanRocksDb(DynamicApplicationConfig.getString(BINLOGX_ROCKSDB_BASE_PATH), localTasks);
         tryCleanRdsBinlog(localTasks);
     }
 
@@ -307,7 +393,7 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
 
     private void tryCleanRdsBinlog(Set<String> localTasks) {
         try {
-            String basePath = DynamicApplicationConfig.getString(TASK_RDSBINLOG_DOWNLOAD_DIR);
+            String basePath = DynamicApplicationConfig.getString(TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR);
             File baseDir = new File(basePath);
             if (baseDir.exists()) {
                 File[] files = baseDir
@@ -328,7 +414,7 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
     }
 
     private Set<String> stopTaskWhitList() {
-        String whitListStr = DynamicApplicationConfig.getString(DAEMON_TASK_STOP_NOLOCAL_WHITLIST);
+        String whitListStr = DynamicApplicationConfig.getString(DAEMON_WATCH_WORK_PROCESS_BLACKLIST);
         if (StringUtils.isNotBlank(whitListStr)) {
             return Sets.newHashSet(StringUtils.split(whitListStr, ","));
         }

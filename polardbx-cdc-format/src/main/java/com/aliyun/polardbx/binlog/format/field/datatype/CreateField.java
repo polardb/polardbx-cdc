@@ -18,6 +18,7 @@ import com.alibaba.druid.util.StringUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
 import lombok.Data;
+import org.apache.commons.lang3.math.NumberUtils;
 
 import java.io.Serializable;
 import java.nio.charset.Charset;
@@ -42,6 +43,8 @@ public class CreateField {
 
     private boolean unsigned;
 
+    private String realType;
+
     public static CreateField parse(String dataType, Serializable defaultValue, String charset, boolean nullable,
                                     boolean unsigned) {
         CreateField type = new CreateField();
@@ -62,19 +65,22 @@ public class CreateField {
             if (type.parameters.length > 0) {
                 type.explicitWidth = true;
                 if (type.parameters.length == 1) {
-                    type.codepoint = Integer.parseInt(type.parameters[0]);
+                    String p0 = type.parameters[0];
+                    if (NumberUtils.isDigits(p0)) {
+                        type.codepoint = Integer.parseInt(type.parameters[0]);
+                    }
                 }
             }
         } else {
             convertType = dataType.split(" ")[0].toUpperCase();
         }
+        type.realType = convertType;
         SqlTypeConvert needConvert = SqlTypeConvert.findConverter(convertType);
         if (needConvert != null) {
             convertType = needConvert.innerType;
             type.convertType = needConvert;
         }
-        type.dataType = convertType;
-        type.dataType = "MYSQL_TYPE_" + type.dataType;
+        type.dataType = "MYSQL_TYPE_" + convertType;
         if (defaultValue == null || StringUtils.equalsIgnoreCase(defaultValue.toString(), "null")) {
             type.defaultValue = null;
         } else {

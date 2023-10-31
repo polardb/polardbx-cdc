@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
-import com.alibaba.polardbx.druid.DbType;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
@@ -22,8 +21,6 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
-import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -33,30 +30,28 @@ import com.aliyun.polardbx.binlog.cdc.repository.CdcSchemaStoreProvider;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicBasicInfo;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyTableTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
-import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistory;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
-import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import com.aliyun.polardbx.binlog.service.BinlogPhyDdlHistoryService;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
-import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import static com.alibaba.polardbx.druid.sql.parser.SQLParserUtils.createSQLStatementParser;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_DDL_IGNORE_APPLY_ERROR;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_TABLE_CACHE_EXPIRE_TIME_MINUTES;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_TABLE_MAX_CACHE_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_IGNORE_APPLY_ERROR;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_META_MAX_SIZE;
+import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getString;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
  * Created by Shuguang & ziyang.lb
@@ -65,12 +60,13 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
     private static final Logger logger = LoggerFactory.getLogger(PolarDbXStorageTableMeta.class);
     private static final int PAGE_SIZE = 200;
 
+    private final BinlogPhyDdlHistoryService phyDdlHistoryService =
+        SpringContextHolder.getObject(BinlogPhyDdlHistoryService.class);
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
     private final String storageInstId;
     private final PolarDbXLogicTableMeta polarDbXLogicTableMeta;
     private final TopologyManager topologyManager;
-    private final BinlogPhyDdlHistoryMapper binlogPhyDdlHistoryMapper = SpringContextHolder.getObject(
-        BinlogPhyDdlHistoryMapper.class);
+    private final String dnVersion;
     private String maxTsoWithInit = "";
     private long applySnapshotCostTime = -1;
     private long applyHistoryCostTime = -1;
@@ -78,19 +74,22 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
     private long queryDdlHistoryCount = -1;
 
     public PolarDbXStorageTableMeta(String storageInstId, PolarDbXLogicTableMeta polarDbXLogicTableMeta,
-                                    TopologyManager topologyManager) {
+                                    TopologyManager topologyManager, String dnVersion) {
         super(logger, CdcSchemaStoreProvider.getInstance(),
-            DynamicApplicationConfig.getInt(META_TABLE_MAX_CACHE_SIZE),
-            DynamicApplicationConfig.getInt(META_TABLE_CACHE_EXPIRE_TIME_MINUTES),
-            DynamicApplicationConfig.getBoolean(META_DDL_IGNORE_APPLY_ERROR));
+            DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_MAX_SIZE),
+            DynamicApplicationConfig.getInt(META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES),
+            DynamicApplicationConfig.getBoolean(META_BUILD_IGNORE_APPLY_ERROR));
         this.storageInstId = storageInstId;
         this.polarDbXLogicTableMeta = polarDbXLogicTableMeta;
         this.topologyManager = topologyManager;
+        this.dnVersion = dnVersion;
+        boolean isMySQL8 = StringUtils.startsWith(dnVersion, "8");
+        setMySql8(isMySQL8);
     }
 
     @Override
     public boolean init(final String destination) {
-        //this.initMaxTso();暂时先不支持
+        this.maxTsoWithInit = phyDdlHistoryService.getMaxTso(getString(CLUSTER_ID), storageInstId);
         return true;
     }
 
@@ -167,14 +166,8 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
         while (true) {
             final String snapshotTsoCondition = snapshotTso;
             long queryStartTime = System.currentTimeMillis();
-            List<BinlogPhyDdlHistory> ddlHistories = binlogPhyDdlHistoryMapper.select(
-                s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.storageInstId, SqlBuilder.isEqualTo(storageInstId))
-                    .and(BinlogPhyDdlHistoryDynamicSqlSupport.tso, SqlBuilder.isGreaterThan(snapshotTsoCondition))
-                    .and(BinlogPhyDdlHistoryDynamicSqlSupport.tso, SqlBuilder.isLessThanOrEqualTo(rollbackTso))
-                    .and(BinlogPhyDdlHistoryDynamicSqlSupport.clusterId,
-                        SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
-                    .orderBy(BinlogPhyDdlHistoryDynamicSqlSupport.tso).limit(PAGE_SIZE)
-            );
+            List<BinlogPhyDdlHistory> ddlHistories = phyDdlHistoryService.getPhyDdlHistoryForRollback(storageInstId,
+                snapshotTsoCondition, rollbackTso, getString(CLUSTER_ID), PAGE_SIZE);
             queryDdlHistoryCostTime += (System.currentTimeMillis() - queryStartTime);
             queryDdlHistoryCount += ddlHistories.size();
 
@@ -182,7 +175,7 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
                 toLowerCase(ddlHistory);
                 BinlogPosition position = new BinlogPosition(null, ddlHistory.getTso());
                 String ddl = ddlHistory.getDdl();
-                if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DDL_REMOVEHINTS_SUPPORT)) {
+                if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_REMOVE_HINTS_IN_DDL_SQL)) {
                     ddl = com.aliyun.polardbx.binlog.canal.core.ddl.SQLUtils.removeDDLHints(ddlHistory.getDdl());
                 }
                 super.apply(position, ddlHistory.getDbName(), ddl, ddlHistory.getExtra());
@@ -243,24 +236,18 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
     }
 
     private void applyHistoryToDb(BinlogPosition position, String schema, String ddl, String extra) {
-        try {
-            if (position.getRtso().compareTo(maxTsoWithInit) <= 0) {
-                return;
-            }
-
-            binlogPhyDdlHistoryMapper.insert(BinlogPhyDdlHistory.builder().storageInstId(storageInstId)
+        if (position.getRtso().compareTo(maxTsoWithInit) <= 0) {
+            return;
+        }
+        phyDdlHistoryService.insetSelectiveIgnore(BinlogPhyDdlHistory.builder().storageInstId(storageInstId)
                 .binlogFile(position.getFileName())
                 .tso(position.getRtso())
                 .dbName(schema)
                 .ddl(ddl)
                 .clusterId(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID))
-                .extra(extra).build());
-        } catch (DuplicateKeyException e) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("already applyHistoryToDB, ignore this time, position is : {}, schema is {}, tso is {},"
-                    + " extra is {}", position, schema, position.getRtso(), extra);
-            }
-        }
+                .extra(extra).build(),
+            String.format("already applyHistoryToDB, ignore this time, position is : %s, schema is %s, tso is %s,"
+                + " extra is %s", position, schema, position.getRtso(), extra));
     }
 
     private void toLowerCase(BinlogPhyDdlHistory phyDdlHistory) {
@@ -283,10 +270,7 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
                 return "";
             }
 
-            SQLStatementParser parser = createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.FEATURES);
-            List<SQLStatement> statementList = parser.parseStatementList();
-            SQLStatement sqlStatement = statementList.get(0);
-
+            SQLStatement sqlStatement = parseSQLStatement(ddl);
             if (sqlStatement instanceof SQLCreateTableStatement) {
                 SQLCreateTableStatement sqlCreateTableStatement = (SQLCreateTableStatement) sqlStatement;
                 return SQLUtils.normalize(sqlCreateTableStatement.getTableName());
@@ -312,13 +296,6 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
         return "";
     }
 
-    private void initMaxTso() {
-        JdbcTemplate metaJdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
-        String sql = "select max(tso) tso from binlog_phy_ddl_history where storage_inst_id = '" + storageInstId + "'";
-        String result = metaJdbcTemplate.queryForObject(sql, String.class);
-        this.maxTsoWithInit = result == null ? "" : result;
-    }
-
     public long getApplySnapshotCostTime() {
         return applySnapshotCostTime;
     }
@@ -334,4 +311,5 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
     public long getQueryDdlHistoryCount() {
         return queryDdlHistoryCount;
     }
+
 }

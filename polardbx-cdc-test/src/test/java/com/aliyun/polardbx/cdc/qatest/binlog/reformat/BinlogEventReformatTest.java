@@ -37,9 +37,9 @@ import com.aliyun.polardbx.binlog.format.field.Field;
 import com.aliyun.polardbx.binlog.format.field.MakeFieldFactory;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
-import com.aliyun.polardbx.binlog.format.utils.BinlogGenerateUtil;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
 import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
+import com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.RandomUtils;
@@ -146,7 +146,7 @@ public class BinlogEventReformatTest {
             CollationCharset.utf8mb4Charset.getId(),
             true,
             (int) (System.currentTimeMillis() / 1000),
-            serverId);
+            serverId, 0);
         int len = ddlBuilder.write(output);
         QueryEventBuilder queryEventBuilder = new QueryEventBuilder("test_db",
             "/*DRDS /127.0.0.1/11cffbe3f6c00000/ */CREATE TABLE `test_aaab_1Ot8` (\n"
@@ -156,7 +156,7 @@ public class BinlogEventReformatTest {
             CollationCharset.utf8mb4Charset.getId(),
             true,
             (int) (System.currentTimeMillis() / 1000),
-            serverId);
+            serverId, 0);
         len += queryEventBuilder.write(output);
     }
 

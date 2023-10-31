@@ -14,7 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig;
@@ -28,13 +29,12 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RotateLogEvent;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.client.DumpClient;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
@@ -63,14 +63,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CLIENT_ASYNC_ENABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CLIENT_RECEIVE_QUEUE_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CLIENT_USE_ASYNC_MODE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_EVENT_SPLIT_MODE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_FLOW_CONTROL_WINDOW_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_INJECT_TROUBLE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_DRYRUN;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_USE_DIRECT_BYTE_BUFFER;
-import static com.aliyun.polardbx.binlog.Constants.STREAM_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_BUFFER_DIRECT_ENABLE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_DRY_RUN_ENABLE;
+import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 
 /**
  * Created by ziyang.lb
@@ -110,9 +110,9 @@ public class LogFileCopier {
         this.logDecoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
         this.logContext = new LogContext();
         this.logContext.setFormatDescription(new FormatDescriptionLogEvent(4, LogEvent.BINLOG_CHECKSUM_ALG_CRC32));
-        this.useDirectByteBuffer = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_USE_DIRECT_BYTE_BUFFER);
-        this.dryRun = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_DRYRUN);
-        this.rpcUseAsyncMode = DynamicApplicationConfig.getBoolean(BINLOG_SYNC_CLIENT_USE_ASYNC_MODE);
+        this.useDirectByteBuffer = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_BUFFER_DIRECT_ENABLE);
+        this.dryRun = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_DRY_RUN_ENABLE);
+        this.rpcUseAsyncMode = DynamicApplicationConfig.getBoolean(BINLOG_SYNC_CLIENT_ASYNC_ENABLE);
         this.asyncQueueSize = DynamicApplicationConfig.getInt(BINLOG_SYNC_CLIENT_RECEIVE_QUEUE_SIZE);
         this.flowControlWindowSize = DynamicApplicationConfig.getInt(BINLOG_SYNC_FLOW_CONTROL_WINDOW_SIZE);
         this.injectTrouble = DynamicApplicationConfig.getBoolean(BINLOG_SYNC_INJECT_TROUBLE);
@@ -331,7 +331,7 @@ public class LogFileCopier {
             }
         }
 
-        logFileManager.setLatestFileCursor(new Cursor(binlogFile.getFileName(), binlogFile.filePointer()));
+        logFileManager.setLatestFileCursor(new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer()));
     }
 
     private void checkOffset(int offset, int length) {
@@ -384,7 +384,7 @@ public class LogFileCopier {
     private void processHeartBeat() throws IOException {
         if (binlogFile.hasBufferedData() && binlogFile.getLastFlushTime() < System.currentTimeMillis() - 5000) {
             binlogFile.flush();
-            logFileManager.setLatestFileCursor(new Cursor(binlogFile.getFileName(), binlogFile.filePointer()));
+            logFileManager.setLatestFileCursor(new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer()));
         }
     }
 
@@ -429,8 +429,11 @@ public class LogFileCopier {
         List<String> binlogFileNames = logFileManager.getAllLocalBinlogFileNamesOrdered();
         for (int i = binlogFileNames.size() - 1; i >= 0; i--) {
             String fileName = binlogFileNames.get(i);
+            String fullPath =
+                BinlogFileUtil.getFullPath(logFileManager.getBinlogRootPath(), logFileManager.getGroupName(),
+                    logFileManager.getStreamName());
             BinlogFile binlogFile =
-                new BinlogFile(new File(logFileManager.getLocalBinlogPath() + File.separator + fileName), "rw",
+                new BinlogFile(new File(fullPath, fileName), "rw",
                     writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
             BinlogFile.SeekResult result = binlogFile.seekLastTso();
             binlogFile.close();

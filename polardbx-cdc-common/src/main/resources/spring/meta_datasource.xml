@@ -18,20 +18,22 @@
           p:basePackage="com.aliyun.polardbx.binlog.dao"
           p:sqlSessionFactoryBeanName="sqlSessionFactory"/>
 
-    <bean id="metaDataSource" class="com.aliyun.polardbx.binlog.CustomDataSource" destroy-method="close"
-          lazy-init="true">
+    <bean id="metaDataSource" class="com.aliyun.polardbx.binlog.MetaDbDataSource" destroy-method="close"
+          lazy-init="true" init-method="init">
         <constructor-arg name="dnPasswordKey" value="${dnPasswordKey}"/>
         <constructor-arg name="useEncryptedPassword" value="${useEncryptedPassword}"/>
-        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
-        <property name="url" value="${metaDb_url}"/>
+
         <property name="username" value="${metaDb_username}"/>
         <property name="password" value="${metaDb_password}"/>
-        <property name="maxActive" value="${datasource.maxActive}"/>
+        <property name="metaDbScanSwitch" value="${metadb_scan_switch}"/>
+        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+        <property name="url" value="${metaDb_url}"/>
+        <property name="maxActive" value="${datasource_max_active}"/>
         <property name="initialSize">
             <value>1</value>
         </property>
         <property name="maxWait">
-            <value>${datasource.maxWait}</value>
+            <value>${datasource_max_wait}</value>
         </property>
         <property name="maxIdle">
             <value>20</value>
@@ -59,7 +61,7 @@
             <value>true</value>
         </property>
         <property name="testOnBorrow">
-            <value>false</value>
+            <value>true</value>
         </property>
         <property name="testOnReturn">
             <value>false</value>

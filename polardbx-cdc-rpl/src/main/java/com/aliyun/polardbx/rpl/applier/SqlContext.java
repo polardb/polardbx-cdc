@@ -31,6 +31,7 @@ public class SqlContext {
     protected String dstTable;
     protected String fullTable;
     protected List<Serializable> params;
+    protected String sqlMode;
 
     public SqlContext(String sql, String dstSchema, String dstTable, List<Serializable> params) {
         this.sql = sql;
@@ -38,5 +39,14 @@ public class SqlContext {
         this.dstTable = dstTable;
         this.params = params;
         this.fullTable = dstSchema + "." + dstTable;
+    }
+
+    public SqlContext(String sql, String dstSchema, String dstTable, List<Serializable> params, String sqlMode) {
+        this.sql = sql;
+        this.dstSchema = dstSchema;
+        this.dstTable = dstTable;
+        this.params = params;
+        this.fullTable = dstSchema + "." + dstTable;
+        this.sqlMode = sqlMode;
     }
 }

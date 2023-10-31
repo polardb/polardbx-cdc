@@ -15,25 +15,43 @@
 package com.aliyun.polardbx.rpl.common;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowsQueryLog;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.applier.ApplyHelper;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.MutablePair;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Future;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * @author shicai.xsc 2021/1/14 17:50
  * @since 5.0.0.0
  */
+@Slf4j
 public class CommonUtil {
+
+    private static final String SHOW_COMPUTE_NODE =
+        "select ip, port from metadb.server_info where inst_type=0 and status=0";
+    private static final String SHOW_BINARY_STREAMS =
+        "show binary streams";
+    private static final String SHOW_MASTER_STATUS =
+        "show master status";
 
     public static String createInitialBinlogPosition() {
         String timeStr = new SimpleDateFormat(RplConstants.DEFAULT_DATE_FORMAT).format(System.currentTimeMillis());
@@ -154,10 +172,91 @@ public class CommonUtil {
     }
 
     public static boolean isPolarDBXHeartbeat(DBMSEvent event) {
-        return (event instanceof DefaultQueryLog && ((DefaultQueryLog) event).getQuery().contains("CTS::"));
+        return (event instanceof DefaultRowsQueryLog && ((DefaultRowsQueryLog) event).getRowsQuery().contains("CTS::"));
     }
 
     public static boolean isDDL(DBMSEvent event) {
         return ApplyHelper.isDdl(event);
+    }
+
+    public static List<MutablePair<String, Integer>> getComputeNodes(Connection connection) {
+        List<MutablePair<String, Integer>> computeNodes = new ArrayList<>();
+        try (Statement st = connection.createStatement()) {
+            ResultSet rs = st.executeQuery(SHOW_COMPUTE_NODE);
+            while (rs.next()) {
+                String host = rs.getString(1);
+                Integer port = rs.getInt(2);
+                computeNodes.add(new MutablePair<>(host, port));
+            }
+        } catch (SQLException e) {
+            throw new PolardbxException("connect to master failed ", e);
+        }
+        return computeNodes;
+    }
+
+    public static List<MutablePair<String, Integer>> getDumperNodes(Connection connection) {
+        return null;
+    }
+
+    public static List<String> getStreamLatestPositions(Connection connection, String streamGroupName) {
+        List<String> positions = new ArrayList<>();
+        try (Statement st = connection.createStatement()) {
+            ResultSet rs = st.executeQuery(SHOW_BINARY_STREAMS);
+            while (rs.next()) {
+                String groupName = rs.getString("GROUP");
+                if (StringUtils.equals(groupName, streamGroupName)) {
+                    String file = rs.getString("FILE");
+                    String offset = rs.getString("POSITION");
+                    positions.add(file + ":" + offset);
+                }
+            }
+        } catch (SQLException e) {
+            throw new PolardbxException("connect to master failed ", e);
+        }
+        if (positions.isEmpty()) {
+            throw new PolardbxException("can not find position for this stream " + streamGroupName);
+        }
+        return positions;
+    }
+
+    public static String getBinaryLatestPosition(Connection connection) {
+        try (Statement st = connection.createStatement()) {
+            ResultSet rs = st.executeQuery(SHOW_MASTER_STATUS);
+            if (rs.next()) {
+                String file = rs.getString("FILE");
+                String offset = rs.getString("POSITION");
+                return file + ":" + offset;
+            }
+        } catch (SQLException e) {
+            throw new PolardbxException("connect to master failed ", e);
+        }
+        throw new PolardbxException("can not get master latest position automatically");
+    }
+
+    public static PolardbxException waitAllTaskFinishedAndReturn(List<Future<Void>> futures) {
+        Throwable throwable = null;
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (Throwable e) {
+                log.warn("task execute runs into exception: ", e);
+                throwable = e;
+            }
+        }
+        if (throwable == null) {
+            return null;
+        }
+        return new PolardbxException(throwable);
+    }
+
+    public static void hostSafeCheck(String host) {
+        String regex = "^[a-zA-Z0-9_\\-.:\\[\\]]+$";
+
+        Pattern pattern = Pattern.compile(regex);
+        Matcher matcher = pattern.matcher(host);
+
+        if (!matcher.matches()) {
+            throw new PolardbxException(String.format("invalid host name : %s", host));
+        }
     }
 }

@@ -14,13 +14,12 @@
  */
 package com.aliyun.polardbx.binlog.remote;
 
-import com.aliyun.polardbx.binlog.BinlogBackupTypeEnum;
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.SystemConfigInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.SystemConfigInfo;
+import com.aliyun.polardbx.binlog.enums.BinlogBackupType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.remote.channel.LindormBinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.remote.channel.OssBinlogFileReadChannel;
@@ -28,6 +27,7 @@ import com.aliyun.polardbx.binlog.remote.lindorm.LindormConfig;
 import com.aliyun.polardbx.binlog.remote.lindorm.LindormManager;
 import com.aliyun.polardbx.binlog.remote.oss.OssConfig;
 import com.aliyun.polardbx.binlog.remote.oss.OssManager;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -129,6 +129,11 @@ public class RemoteBinlogProxy {
         return delegate.providerAppender(fileName);
     }
 
+    public boolean supportMultiUpload() {
+        checkDelegator();
+        return delegate.supportMultiAppend();
+    }
+
     public boolean needSwitchMultiUpload(long size) {
         checkDelegator();
         return delegate.useMultiAppender(size);
@@ -158,10 +163,10 @@ public class RemoteBinlogProxy {
 
     private void config() {
         String backupType = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_BACKUP_TYPE);
-        BinlogBackupTypeEnum backupTypeEnum = BinlogBackupTypeEnum.typeOf(backupType);
+        BinlogBackupType backupTypeEnum = BinlogBackupType.typeOf(backupType);
         instId = buildPolarxInstId();
         if (backupTypeEnum != null) {
-            if (backupTypeEnum == BinlogBackupTypeEnum.OSS) {
+            if (backupTypeEnum == BinlogBackupType.OSS) {
                 OssConfig ossConfig = new OssConfig();
                 ossConfig.setAccessKeyId(DynamicApplicationConfig.getString(ConfigKeys.OSS_ACCESSKEY_ID));
                 ossConfig.setAccessKeySecret(DynamicApplicationConfig.getString(ConfigKeys.OSS_ACCESSKEY_ID_SECRET));
@@ -169,7 +174,7 @@ public class RemoteBinlogProxy {
                 ossConfig.setEndpoint(DynamicApplicationConfig.getString(ConfigKeys.OSS_ENDPOINT));
                 ossConfig.setPolardbxInstance(instId);
                 configOss(ossConfig);
-            } else if (backupTypeEnum == BinlogBackupTypeEnum.LINDORM) {
+            } else if (backupTypeEnum == BinlogBackupType.LINDORM) {
                 LindormConfig lindormConfig = new LindormConfig();
                 lindormConfig.setAccessKey(DynamicApplicationConfig.getString(ConfigKeys.LINDORM_ACCESSKEY_ID));
                 lindormConfig
@@ -196,6 +201,7 @@ public class RemoteBinlogProxy {
             waitClusterReady();
             String randomPolarxInstId = polarxInstId + "-" + getServerUid();
             logger.info("random polarx instance id for lab test is " + randomPolarxInstId);
+            logger.info("oss binlog file path is " + BinlogFileUtil.buildRemoteFileFullName("", randomPolarxInstId));
             return randomPolarxInstId;
         }
         return polarxInstId;

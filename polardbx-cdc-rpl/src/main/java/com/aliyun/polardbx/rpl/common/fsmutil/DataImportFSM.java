@@ -39,7 +39,9 @@ public class DataImportFSM extends AbstractFSM<DataImportMeta> {
             new DataImportTransitions.FullReconFinishTransition(),
             new DataImportTransitions.IncCopyCatchUpTransition(),
             new DataImportTransitions.CheckCatchUpTransition(),
-            new DataImportTransitions.CheckNotCatchUpTransition()
+            new DataImportTransitions.CheckNotCatchUpTransition(),
+            new DataImportTransitions.CheckBackFlowCatchUpTransition(),
+            new DataImportTransitions.CheckBackFlowNotCatchUpTransition()
         ), FSMState.FULL_COPY);
     }
 

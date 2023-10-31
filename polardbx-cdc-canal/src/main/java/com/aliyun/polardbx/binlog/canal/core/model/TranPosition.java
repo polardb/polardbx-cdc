@@ -14,13 +14,13 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.model;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.WriteRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.system.InstructionCommand;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
 import com.aliyun.polardbx.binlog.canal.system.TxGlobalEvent;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +37,8 @@ public class TranPosition implements IXaTransaction<TranPosition> {
     private String xid;
 
     private long transId;
+
+    private String rtso;
 
     private InstructionCommand command;
 
@@ -68,12 +70,12 @@ public class TranPosition implements IXaTransaction<TranPosition> {
             WriteRowsLogEvent wr = (WriteRowsLogEvent) event;
             TableMapLogEvent tm = wr.getTable();
             if (SystemDB.isInstruction(tm.getDbName(), tm.getTableName())) {
-                command = SystemDB.getInstance().parseInstructionCommand(wr);
+                command = SystemDB.parseInstructionCommand(wr);
                 logger.warn("tranPosition find cdc instruction type : " + command);
             }
             if (SystemDB.isGlobalTxTable(tm.getTableName())) {
                 // 这里编码写死，因为没有字符串解析，所以用不到
-                TxGlobalEvent txGlobalEvent = SystemDB.getInstance().parseTxGlobalEvent(wr, "utf8");
+                TxGlobalEvent txGlobalEvent = SystemDB.parseTxGlobalEvent(wr, "utf8");
                 transId = txGlobalEvent.getTxGlobalTid();
                 Long tmpTso = txGlobalEvent.getTxGlobalTso();
                 if (tmpTso != null) {
@@ -106,9 +108,11 @@ public class TranPosition implements IXaTransaction<TranPosition> {
     }
 
     public BinlogPosition getPosition() {
-        begin.setTso(tso);
-        begin.setRtso(CommonUtils.generateTSO(tso, StringUtils.rightPad(transId + "", 29, "0"), null));
         return begin;
+    }
+
+    public String buildRTso() {
+        return CommonUtils.generateTSO(tso, StringUtils.rightPad(transId + "", 29, "0"), null);
     }
 
     public void complete(BinlogPosition end) {
@@ -137,6 +141,14 @@ public class TranPosition implements IXaTransaction<TranPosition> {
 
     public void setTso(Long tso) {
         this.tso = tso;
+    }
+
+    public String getRtso() {
+        return rtso;
+    }
+
+    public void setRtso(String rtso) {
+        this.rtso = rtso;
     }
 
     @Override

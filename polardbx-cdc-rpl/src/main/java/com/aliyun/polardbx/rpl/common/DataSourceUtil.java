@@ -77,6 +77,7 @@ public class DataSourceUtil {
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("maxAllowedPacket", "1073741824");
         // net_write_timeout
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("netTimeoutForStreamingResults", "72000");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useServerPrepStmts", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useInformationSchema", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("pedantic", "true");
     }
@@ -114,7 +115,8 @@ public class DataSourceUtil {
     /**
      * Get key columns from db. It does NOT close data source.
      */
-    public static Map<String, List<String>> getKeyColumnsInDB(List<String> tables, DruidDataSource dataSource) throws Exception {
+    public static Map<String, List<String>> getKeyColumnsInDB(List<String> tables, DruidDataSource dataSource)
+        throws Exception {
         PreparedStatement stmt = null;
         Connection conn = null;
         ResultSet rs = null;
@@ -174,10 +176,6 @@ public class DataSourceUtil {
     /**
      * Get key column out from one db table
      * NOTE: This method DOESN'T close data source
-     * @param dataSource
-     * @param tableName
-     * @return
-     * @throws SQLException
      */
     public static List<String> getKeyColumnsInTable(DruidDataSource dataSource, String tableName) throws Exception {
         Connection conn = dataSource.getConnection();
@@ -328,11 +326,12 @@ public class DataSourceUtil {
     /**
      * Execute query and process with mapper
      */
-    public static <T> T query(Connection conn, String query, int fetchSize, int tryTimes, ResultSetMapper<T> mapper) throws SQLException {
+    public static <T> T query(Connection conn, String query, int fetchSize, int tryTimes, ResultSetMapper<T> mapper)
+        throws SQLException {
         Objects.requireNonNull(mapper, "ResultSetMapper should not be null");
         for (int i = 0; i < tryTimes; i++) {
             try (Statement stmt = conn.createStatement(ResultSet.TYPE_FORWARD_ONLY,
-                                                       ResultSet.CONCUR_READ_ONLY)) {
+                ResultSet.CONCUR_READ_ONLY)) {
                 stmt.setFetchSize(fetchSize);
                 log.debug("Executing query: {}", query);
                 try (ResultSet rs = query(stmt, query)) {
@@ -353,11 +352,11 @@ public class DataSourceUtil {
         return null;
     }
 
-
     /**
      * Execute query and process with mapper
      */
-    public static <T> T query(Connection conn, SqlContext sqlContext, int fetchSize, int tryTimes, ResultSetMapper<T> mapper) throws SQLException {
+    public static <T> T query(Connection conn, SqlContext sqlContext, int fetchSize, int tryTimes,
+                              ResultSetMapper<T> mapper) throws SQLException {
         Objects.requireNonNull(mapper, "ResultSetMapper should not be null");
         for (int i = 0; i < tryTimes; i++) {
             try (PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql(), ResultSet.TYPE_FORWARD_ONLY,
@@ -470,7 +469,8 @@ public class DataSourceUtil {
         ds.setConnectProperties(prop);
         if (newConnectionSQLs != null && newConnectionSQLs.size() > 0) {
             ds.setConnectionInitSqls(newConnectionSQLs);
-            log.info("druid setConnectionInitSqls, {}", JSON.toJSONString(newConnectionSQLs));
+            log.info("druid setConnectionInitSqls, {}, {}", JSON.toJSONString(newConnectionSQLs),
+                DEFAULT_MYSQL_CONNECTION_PROPERTIES);
         }
         try {
             ds.init();

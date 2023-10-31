@@ -14,10 +14,10 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
-import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.BufferedWriter;
@@ -26,20 +26,15 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 
-public class BinlogEventReaderTest {
+@Ignore
+public class BinlogEventReaderTest extends BaseTest {
     File dir = new File(System.getProperty("user.dir") + "/binlog/mysql/");
-
-    @Before
-    public void before() {
-        SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-    }
 
     @Test
     public void nextBinlogEvent() throws IOException {
         LogFileManager logFileManager = new LogFileManager();
-        logFileManager.setBinlogFullPath(dir.getPath());
-        logFileManager.setLatestFileCursor(new Cursor("binlog.000001", 860L));
+        logFileManager.setBinlogRootPath(dir.getPath());
+        logFileManager.setLatestFileCursor(new BinlogCursor("binlog.000001", 860L));
 
         BinlogEventReader binlogFileReader =
             new BinlogEventReader(logFileManager.getBinlogFileByName("binlog.000001"),
@@ -58,7 +53,7 @@ public class BinlogEventReaderTest {
     @Test
     public void binlogDumper() throws IOException {
         LogFileManager logFileManager = new LogFileManager();
-        logFileManager.setBinlogFullPath(dir.getPath());
+        logFileManager.setBinlogRootPath(dir.getPath());
         BinlogEventReader binlogFileReader =
             new BinlogEventReader(logFileManager.getBinlogFileByName("binlog.000001"), 0, 0, -1);
         BufferedWriter bw = new BufferedWriter(

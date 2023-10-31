@@ -69,4 +69,8 @@ public interface Storage {
      */
     long getCleanerQueuedSize();
 
+    /**
+     * 获取仓库对象
+     */
+    Repository getRepository();
 }

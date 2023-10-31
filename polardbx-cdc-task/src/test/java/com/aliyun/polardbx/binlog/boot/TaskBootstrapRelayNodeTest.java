@@ -17,7 +17,7 @@ package com.aliyun.polardbx.binlog.boot;
 import com.aliyun.polardbx.binlog.TaskBootStrap;
 import com.aliyun.polardbx.binlog.TaskConfigProvider;
 import com.aliyun.polardbx.binlog.domain.BinlogParameter;
-import com.aliyun.polardbx.binlog.domain.DbHostVO;
+import com.aliyun.polardbx.binlog.domain.DnHost;
 import com.aliyun.polardbx.binlog.domain.MergeSourceInfo;
 import com.aliyun.polardbx.binlog.domain.MergeSourceType;
 import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
@@ -26,9 +26,6 @@ import com.aliyun.polardbx.binlog.domain.TaskType;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- *
- **/
 public class TaskBootstrapRelayNodeTest {
 
     // 根据自己的测试需求进行调整
@@ -65,7 +62,7 @@ public class TaskBootstrapRelayNodeTest {
 
             private BinlogParameter buildBinlogParameter() {
                 BinlogParameter parameter = new BinlogParameter();
-                DbHostVO hostVO = new DbHostVO();
+                DnHost hostVO = DnHost.getNormalDnHost("polardbx-storage-0-master");
                 parameter.setDoDbFilter("tso_test_\\d+");
                 parameter.setStorageInstId("polardbx-storage-0-master");
                 parameter.setHasTsoHeartbeat(false);

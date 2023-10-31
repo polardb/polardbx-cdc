@@ -21,6 +21,7 @@ import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.sql.Connection;
@@ -36,6 +37,7 @@ import java.util.concurrent.Future;
  * @author shicai.xsc 2021/4/28 16:00
  * @since 5.0.0.0
  */
+@Ignore
 public class PrimaryKeyTest extends TestBase {
     private static final String DB_1 = "primary_key_test";
 

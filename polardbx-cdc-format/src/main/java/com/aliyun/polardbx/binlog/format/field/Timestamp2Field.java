@@ -36,8 +36,7 @@ public class Timestamp2Field extends Field {
 
     @Override
     public boolean isNull() {
-        return super.isNull() || StringUtils.equalsIgnoreCase(buildDataStr(), "CURRENT_TIMESTAMP")
-            || StringUtils.equalsIgnoreCase(buildDataStr(), "0000-00-00 00:00:00");
+        return super.isNull() || StringUtils.equalsIgnoreCase(buildDataStr(), "CURRENT_TIMESTAMP");
     }
 
     @Override

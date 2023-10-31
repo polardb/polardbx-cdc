@@ -14,8 +14,10 @@
  */
 package com.aliyun.polardbx.binlog.cdc.meta.domain;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.ToString;
 
 /**
@@ -24,6 +26,8 @@ import lombok.ToString;
 @Data
 @Builder
 @ToString
+@NoArgsConstructor
+@AllArgsConstructor
 public class DDLRecord {
     private Long id;
     private Long jobId;

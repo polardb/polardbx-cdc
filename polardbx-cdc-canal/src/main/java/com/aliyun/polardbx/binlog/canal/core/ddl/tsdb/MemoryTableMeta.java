@@ -14,8 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 
-import com.alibaba.polardbx.druid.DbType;
-import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLDataType;
 import com.alibaba.polardbx.druid.sql.ast.SQLDataTypeImpl;
 import com.alibaba.polardbx.druid.sql.ast.SQLExpr;
@@ -45,8 +43,6 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlUnique;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.expr.MySqlOrderingExpr;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
-import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
-import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.alibaba.polardbx.druid.sql.repository.Schema;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObject;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObjectStoreProvider;
@@ -56,7 +52,7 @@ import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.util.FastSQLConstant;
+import com.aliyun.polardbx.binlog.util.SQLUtils;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import org.apache.commons.lang3.StringUtils;
@@ -70,8 +66,11 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
  * 基于DDL维护的内存表结构
@@ -80,16 +79,23 @@ import java.util.concurrent.TimeUnit;
  * @since 3.2.5
  */
 public class MemoryTableMeta implements TableMetaTSDB {
-    private final static int DEFAULT_MAX_CACHE_SIZE = 8192;
-    private final static int DEFAULT_CACHE_EXPIRE_TIME_MINUTES = 60;
+
+    private static final String _DRDS_IMPLICIT_ID_ = "_drds_implicit_id_";
+    private static final int DEFAULT_MAX_CACHE_SIZE = 8192;
+    private static final int DEFAULT_CACHE_EXPIRE_TIME_MINUTES = 60;
 
     private final Cache<List<String>, TableMeta> tableMetas;
     private final Logger logger;
     private final boolean ignoreApplyError;
+    private boolean ignoreImplicitPrimaryKey;
     protected SchemaRepository repository = new SchemaRepository(JdbcConstants.MYSQL);
+    protected boolean isMySql8 = false;
 
     public MemoryTableMeta(Logger logger, boolean ignoreApplyError) {
-        this(logger, DEFAULT_MAX_CACHE_SIZE, DEFAULT_CACHE_EXPIRE_TIME_MINUTES, ignoreApplyError);
+        this(logger,
+            DEFAULT_MAX_CACHE_SIZE,
+            DEFAULT_CACHE_EXPIRE_TIME_MINUTES,
+            ignoreApplyError);
     }
 
     public MemoryTableMeta(Logger logger, SchemaObjectStoreProvider provider, int maxCacheSize,
@@ -107,13 +113,17 @@ public class MemoryTableMeta implements TableMetaTSDB {
         this.ignoreApplyError = ignoreApplyError;
     }
 
+    public void setMySql8(boolean mySql8) {
+        isMySql8 = mySql8;
+    }
+
     @Override
     public boolean init(String destination) {
         return true;
     }
 
     @Override
-    public void destory() {
+    public void destroy() {
         tableMetas.invalidateAll();
         repository = new SchemaRepository(JdbcConstants.MYSQL);
     }
@@ -136,8 +146,9 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 if (!StringUtils.startsWithIgnoreCase(StringUtils.trim(ddl), "flush")
                     && !StringUtils.startsWithIgnoreCase(StringUtils.trim(ddl), "grant")
                     && !StringUtils.startsWithIgnoreCase(StringUtils.trim(ddl), "create user")
-                    && !StringUtils.startsWithIgnoreCase(StringUtils.trim(ddl), "drop user")) {
-                    repository.console(ddl, FastSQLConstant.FEATURES);
+                    && !StringUtils.startsWithIgnoreCase(StringUtils.trim(ddl), "drop user")
+                    && !StringUtils.startsWithIgnoreCase(StringUtils.trim(ddl), "alter user")) {
+                    repository.console(ddl, SQLUtils.SQL_FEATURES);
                     tryRemoveSchema(position, ddl, schema);
                 }
             } catch (Throwable e) {
@@ -240,7 +251,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
         if (size > 0) {
             TableMeta tableMeta = new TableMeta();
             for (SQLAssignItem tableOption : statement.getTableOptions()) {
-                if (tableOption instanceof SQLAssignItem) {
+                if (tableOption != null) {
                     if (!(tableOption.getTarget() instanceof SQLIdentifierExpr)) {
                         continue;
                     }
@@ -249,8 +260,6 @@ public class MemoryTableMeta implements TableMetaTSDB {
                         tableMeta.setCharset(((SQLIdentifierExpr) tableOption.getValue()).getName());
                         break;
                     }
-                } else {
-                    continue;
                 }
             }
 
@@ -269,10 +278,25 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 }
             }
 
+            tryFilterImplicitPrimaryKey(tableMeta);
             return tableMeta;
         }
 
         return null;
+    }
+
+    private void tryFilterImplicitPrimaryKey(TableMeta tableMeta) {
+        if (ignoreImplicitPrimaryKey) {
+            tableMeta.getFields().removeIf(i -> StringUtils.equalsIgnoreCase(i.getColumnName(), _DRDS_IMPLICIT_ID_));
+        }
+
+        // see com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta_ImplicitPk_Test.testDropImplicitPk
+        List<FieldMeta> primaryKeys = tableMeta.getPrimaryFields();
+        Optional<FieldMeta> optional = primaryKeys.stream()
+            .filter(i -> StringUtils.equalsIgnoreCase(i.getColumnName(), _DRDS_IMPLICIT_ID_)).findAny();
+        if (optional.isPresent() && tableMeta.getPrimaryFields().size() > 1) {
+            optional.get().setKey(false);
+        }
     }
 
     private void processTableElement(SQLTableElement element, TableMeta tableMeta) {
@@ -302,7 +326,8 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 fieldMeta.setDefaultValue(null);
             } else {
                 // 处理一下default value中特殊的引号
-                fieldMeta.setDefaultValue(SQLUtils.normalize(getSqlName(column.getDefaultExpr())));
+                fieldMeta.setDefaultValue(
+                    com.alibaba.polardbx.druid.sql.SQLUtils.normalize(getSqlName(column.getDefaultExpr())));
             }
             if (dataType instanceof SQLCharacterDataType) {
                 final String charSetName = ((SQLCharacterDataType) dataType).getCharSetName();
@@ -323,6 +348,14 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 }
             }
 
+            // try fill charset for special scene
+            if (StringUtils.isBlank(fieldMeta.getCharset())) {
+                String charset = buildCharset(dataType.getName());
+                if (StringUtils.isNotBlank(charset)) {
+                    fieldMeta.setCharset(charset);
+                }
+            }
+
             fieldMeta.setColumnName(name);
             fieldMeta.setColumnType(dataTypStr);
             fieldMeta.setNullable(true);
@@ -339,6 +372,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
                     fieldMeta.setUnique(true);
                 }
             }
+            fieldMeta.setGenerated(column.getGeneratedAlawsAs() != null);
             tableMeta.addFieldMeta(fieldMeta);
         } else if (element instanceof MySqlPrimaryKey) {
             MySqlPrimaryKey column = (MySqlPrimaryKey) element;
@@ -367,15 +401,15 @@ public class MemoryTableMeta implements TableMetaTSDB {
 
         if (sqlName instanceof SQLPropertyExpr) {
             SQLIdentifierExpr owner = (SQLIdentifierExpr) ((SQLPropertyExpr) sqlName).getOwner();
-            return SQLUtils
+            return com.alibaba.polardbx.druid.sql.SQLUtils
                 .normalize(owner.getName()) + "."
-                + SQLUtils.normalize(((SQLPropertyExpr) sqlName).getName());
+                + com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLPropertyExpr) sqlName).getName());
         } else if (sqlName instanceof SQLIdentifierExpr) {
-            return SQLUtils.normalize(((SQLIdentifierExpr) sqlName).getName());
+            return com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLIdentifierExpr) sqlName).getName());
         } else if (sqlName instanceof SQLCharExpr) {
             return ((SQLCharExpr) sqlName).getText();
         } else if (sqlName instanceof SQLMethodInvokeExpr) {
-            return SQLUtils.normalize(((SQLMethodInvokeExpr) sqlName).getMethodName());
+            return com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLMethodInvokeExpr) sqlName).getMethodName());
         } else if (sqlName instanceof MySqlOrderingExpr) {
             return getSqlName(((MySqlOrderingExpr) sqlName).getExpr());
         } else {
@@ -412,7 +446,8 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 if (e instanceof SQLConstraint && e instanceof SQLIndex) {
                     SQLConstraint sqlConstraint = (SQLConstraint) e;
                     if (sqlConstraint.getName() != null) {
-                        result.add(SQLUtils.normalize(sqlConstraint.getName().getSimpleName()));
+                        result.add(
+                            com.alibaba.polardbx.druid.sql.SQLUtils.normalize(sqlConstraint.getName().getSimpleName()));
                     }
                 } else if (e instanceof SQLColumnDefinition) {
                     SQLColumnDefinition columnDefinition = (SQLColumnDefinition) e;
@@ -420,7 +455,8 @@ public class MemoryTableMeta implements TableMetaTSDB {
                     if (constraints != null) {
                         for (SQLColumnConstraint constraint : constraints) {
                             if (constraint instanceof SQLColumnUniqueKey) {
-                                result.add(SQLUtils.normalize(columnDefinition.getName().getSimpleName()));
+                                result.add(com.alibaba.polardbx.druid.sql.SQLUtils
+                                    .normalize(columnDefinition.getName().getSimpleName()));
                             }
                         }
                     }
@@ -433,11 +469,12 @@ public class MemoryTableMeta implements TableMetaTSDB {
             objects.forEach(o -> {
                 if (o.getStatement() instanceof SQLCreateIndexStatement) {
                     SQLCreateIndexStatement createIndexStatement = (SQLCreateIndexStatement) o.getStatement();
-                    String indexTable = SQLUtils.normalize(createIndexStatement.getTableName());
+                    String indexTable =
+                        com.alibaba.polardbx.druid.sql.SQLUtils.normalize(createIndexStatement.getTableName());
                     if (StringUtils.equalsIgnoreCase(indexTable, table)) {
                         SQLName sqlName = createIndexStatement.getIndexDefinition().getName();
                         if (sqlName != null) {
-                            result.add(SQLUtils.normalize(sqlName.getSimpleName()));
+                            result.add(com.alibaba.polardbx.druid.sql.SQLUtils.normalize(sqlName.getSimpleName()));
                         }
                     }
                 }
@@ -448,9 +485,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
     }
 
     private void tryRemoveSchema(BinlogPosition position, String ddlSql, String schema) throws IllegalAccessException {
-        SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(ddlSql, DbType.mysql, FastSQLConstant.FEATURES);
-        SQLStatement stmt = parser.parseStatementList().get(0);
+        SQLStatement stmt = parseSQLStatement(ddlSql);
 
         if (stmt instanceof SQLDropDatabaseStatement) {
             Class<?> clazz = SchemaRepository.class;
@@ -464,8 +499,11 @@ public class MemoryTableMeta implements TableMetaTSDB {
                         Schema schemaObj = (Schema) schemas.get(schema);
                         schemaObj.getStore().clearAll();
                         schemas.remove(schema);
-                        logger.warn("schema is removed from schema repository, tso {}, schema {}, ddlSql {}.",
-                            position == null ? "" : position.getRtso(), schema, ddlSql);
+
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("schema is removed from schema repository, tso {}, schema {}, ddlSql {}.",
+                                position == null ? "" : position.getRtso(), schema, ddlSql);
+                        }
                     }
                     break;
                 }
@@ -558,12 +596,26 @@ public class MemoryTableMeta implements TableMetaTSDB {
         }
     }
 
+    private String buildCharset(String dataType) {
+        // see issue:49619404
+        if ("nchar".equalsIgnoreCase(dataType)) {
+            return "utf8";
+        } else if ("nvarchar".equalsIgnoreCase(dataType)) {
+            return "utf8";
+        }
+        return null;
+    }
+
     private String buildDataTypeStr(String dataTypeStr) {
         if (StringUtils.equalsIgnoreCase(dataTypeStr, "dec")
             || StringUtils.equalsIgnoreCase(dataTypeStr, "numeric")) {
             return "decimal";
         } else if (StringUtils.equalsIgnoreCase(dataTypeStr, "integer")) {
             return "int";
+        } else if (StringUtils.equalsIgnoreCase(dataTypeStr, "nchar")) {
+            return "char";
+        } else if (StringUtils.equalsIgnoreCase(dataTypeStr, "nvarchar")) {
+            return "varchar";
         } else {
             return dataTypeStr;
         }
@@ -605,6 +657,10 @@ public class MemoryTableMeta implements TableMetaTSDB {
         str = StringUtils.substringAfter(str, "(");
         str = StringUtils.substringBefore(str, ")");
         long length = Long.parseLong(str);
+        if (!isMySql8 && length == 0L) {
+            return "blob";
+        }
+
         if (length <= 255) {
             return "tinyblob";
         } else if (length <= 65535) {
@@ -620,7 +676,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
         str = StringUtils.substringAfter(str, "(");
         str = StringUtils.substringBefore(str, ")");
         long length = Long.parseLong(str.trim());
-        if (length == 0L) {
+        if (!isMySql8 && length == 0L) {
             return "text";
         }
 
@@ -637,11 +693,8 @@ public class MemoryTableMeta implements TableMetaTSDB {
 
     // see aone : 46916964
     String tryRepairSql(String sql) {
-        if (StringUtils.containsIgnoreCase(sql, "_drds_implicit_id_")) {
-            SQLStatementParser parser =
-                SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FastSQLConstant.FEATURES);
-            List<SQLStatement> statementList = parser.parseStatementList();
-            SQLStatement sqlStatement = statementList.get(0);
+        if (StringUtils.containsIgnoreCase(sql, _DRDS_IMPLICIT_ID_)) {
+            SQLStatement sqlStatement = parseSQLStatement(sql);
 
             if (sqlStatement instanceof MySqlCreateTableStatement) {
                 MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) sqlStatement;
@@ -654,16 +707,18 @@ public class MemoryTableMeta implements TableMetaTSDB {
                     SQLTableElement element = iterator.next();
                     if (element instanceof SQLColumnDefinition) {
                         SQLColumnDefinition columnDefinition = (SQLColumnDefinition) element;
-                        String columnName = SQLUtils.normalize(columnDefinition.getColumnName());
-                        if (StringUtils.equalsIgnoreCase(columnName, "_drds_implicit_id_")) {
+                        String columnName =
+                            com.alibaba.polardbx.druid.sql.SQLUtils.normalize(columnDefinition.getColumnName());
+                        if (StringUtils.equalsIgnoreCase(columnName, _DRDS_IMPLICIT_ID_)) {
                             containsImplicitCol = true;
                         }
                     } else if (element instanceof MySqlPrimaryKey) {
                         MySqlPrimaryKey column = (MySqlPrimaryKey) element;
                         List<SQLSelectOrderByItem> pks = column.getColumns();
                         for (SQLSelectOrderByItem pk : pks) {
-                            String columnName = SQLUtils.normalize(getSqlName(pk.getExpr()));
-                            if (StringUtils.equalsIgnoreCase(columnName, "_drds_implicit_id_")) {
+                            String columnName =
+                                com.alibaba.polardbx.druid.sql.SQLUtils.normalize(getSqlName(pk.getExpr()));
+                            if (StringUtils.equalsIgnoreCase(columnName, _DRDS_IMPLICIT_ID_)) {
                                 containsImplicitPrimary = true;
                             }
                         }
@@ -671,7 +726,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 }
                 if (containsImplicitPrimary && !containsImplicitCol) {
                     SQLColumnDefinition columnDefinition = new SQLColumnDefinition();
-                    columnDefinition.setName("_drds_implicit_id_");
+                    columnDefinition.setName(_DRDS_IMPLICIT_ID_);
                     columnDefinition.setDataType(new SQLDataTypeImpl("bigint(20)"));
                     columnDefinition.setAutoIncrement(true);
                     sqlTableElementList.add(columnDefinition);
@@ -686,4 +741,11 @@ public class MemoryTableMeta implements TableMetaTSDB {
         return repository;
     }
 
+    public boolean isIgnoreImplicitPrimaryKey() {
+        return ignoreImplicitPrimaryKey;
+    }
+
+    public void setIgnoreImplicitPrimaryKey(boolean ignoreImplicitPrimaryKey) {
+        this.ignoreImplicitPrimaryKey = ignoreImplicitPrimaryKey;
+    }
 }

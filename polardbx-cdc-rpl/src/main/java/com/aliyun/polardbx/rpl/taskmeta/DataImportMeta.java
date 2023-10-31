@@ -41,12 +41,12 @@ public class DataImportMeta {
     private int producerParallelCount = RplConstants.PRODUCER_DEFAULT_PARALLEL_COUNT;
     private int consumerParallelCount = RplConstants.CONSUMER_DEFAULT_PARALLEL_COUNT;
     /**
-    * for increment data extraction
-    */
+     * for increment data extraction
+     */
     private ApplierType applierType = ApplierType.MERGE;
     private boolean supportXa = false;
     private int mergeBatchSize = 500;
-    private int sendBatchSize = 100;
+    private int sendBatchSize = 1;
     private int ringBufferSize = 2048;
 
     /**

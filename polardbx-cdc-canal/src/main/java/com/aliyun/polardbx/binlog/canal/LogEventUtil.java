@@ -19,12 +19,12 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.GcnLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.SequenceLogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.event.XaPrepareLogEvent;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 
 import java.io.UnsupportedEncodingException;
+import java.util.Scanner;
 
 /**
  * @author chengjin.lyf on 2020/7/17 5:50 下午
@@ -75,11 +75,12 @@ public class LogEventUtil {
                 return query.substring(XA_ROLLBACK.length()).trim();
             }
         }
-
-        if (event instanceof XaPrepareLogEvent) {
-            XaPrepareLogEvent xaPrepareLogEvent = (XaPrepareLogEvent) event;
-        }
         return null;
+    }
+
+    public static boolean isValidXid(String xid) {
+        String flag = StringUtils.substringAfterLast(xid, ",");
+        return "1".equals(flag);
     }
 
     public static Long getTranIdFromXid(String xid, String encoding) throws Exception {
@@ -133,6 +134,10 @@ public class LogEventUtil {
             return ((SequenceLogEvent) event).isHeartbeat();
         }
         return false;
+    }
+
+    public static boolean validEventType(int eventType) {
+        return LogEvent.START_EVENT_V3 <= eventType && eventType < LogEvent.ENUM_END_EVENT;
     }
 
     public static boolean isStart(LogEvent logEvent) {
@@ -218,19 +223,46 @@ public class LogEventUtil {
     public static String[] buildTrace(RowsQueryLogEvent event) {
         String query = event.getRowsQuery();
         if (query.startsWith("/*DRDS")) {
-            String[] results = new String[2];
-            String[] primarySplitArray = StringUtils.split(query, "/");
-            String[] secondarySplitArray = StringUtils.split(primarySplitArray[2], "-");
-            String seq = secondarySplitArray.length < 2 ? "0" : secondarySplitArray[1];
-            String subSeq = null;
-            if (NumberUtils.isCreatable(primarySplitArray[3])) {
-                subSeq = primarySplitArray[3];
+            int beginIdx = query.indexOf("/", 6);
+            int endIdx = query.indexOf("*/");
+            if (beginIdx < 0 || endIdx < 0) {
+                return null;
             }
+            query = query.substring(beginIdx + 1, endIdx);
+            String[] results = new String[2];
+            Scanner scanner = new Scanner(query);
+            scanner.useDelimiter("/");
+            int index = 0;
+            String seq = null;
+            String subSeq = null;
+            String serverId = null;
+            while (scanner.hasNext()) {
+                String keyWorkd = StringUtils.trim(scanner.next());
+
+                if (index == 1) {
+                    // trace-seq
+                    String[] secondarySplitArray = StringUtils.split(keyWorkd, "-");
+                    seq = secondarySplitArray.length < 2 ? "0" : secondarySplitArray[1];
+                }
+
+                if (index == 2) {
+                    // subseq
+                    if (NumberUtils.isCreatable(keyWorkd)) {
+                        subSeq = keyWorkd;
+                    }
+                }
+                if (index == 3) {
+                    // serverid
+                    if (NumberUtils.isCreatable(keyWorkd)) {
+                        serverId = keyWorkd;
+                    }
+                }
+                index++;
+            }
+
             String trace = buildTraceId(seq, subSeq);
             results[0] = trace;
-            if (primarySplitArray.length > 4) {
-                results[1] = primarySplitArray[4];
-            }
+            results[1] = serverId;
             return results;
         }
         return null;
@@ -267,6 +299,30 @@ public class LogEventUtil {
         return serverId;
     }
 
+    /**
+     * /drds xxx /
+     * # CTS::12321321321
+     */
+    public static String getTsoFromRowQuery(String rowsQueryLog) {
+        String query = rowsQueryLog;
+        Scanner scanner = new Scanner(query);
+        while (scanner.hasNextLine()) {
+            String line = scanner.nextLine();
+            int cts = line.indexOf("CTS");
+            if (cts != -1) {
+                int begin = line.indexOf("::", cts);
+                int end = line.indexOf("::", begin + 2);
+                if (end != -1) {
+                    return line.substring(begin + 2, end);
+                } else {
+                    return line.substring(begin + 2);
+                }
+            }
+
+        }
+        return null;
+    }
+
     public static String makeXid(Long tranId, String groupName) throws UnsupportedEncodingException {
         StringBuffer sb = new StringBuffer();
         sb.append("X'")
@@ -274,7 +330,7 @@ public class LogEventUtil {
                 "UTF-8")))
             .append("','")
             .append(Hex.encodeHex(groupName.getBytes("UTF-8")))
-            .append("'");
+            .append("',1");
         return sb.toString();
     }
 }

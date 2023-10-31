@@ -21,6 +21,7 @@ import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
 import lombok.Data;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author shicai.xsc 2020/11/30 15:00
@@ -32,10 +33,11 @@ public abstract class BasePipeline {
     protected BaseExtractor extractor;
     protected BaseApplier applier;
     protected PipelineConfig pipeLineConfig;
+    protected final AtomicBoolean running = new AtomicBoolean(false);
 
-    public abstract boolean init();
+    public abstract void init() throws Exception;
 
-    public abstract void start();
+    public abstract void start() throws Exception;
 
     public abstract void stop();
 
@@ -43,9 +45,5 @@ public abstract class BasePipeline {
 
     public abstract void writeRingbuffer(List<MessageEvent> events);
 
-    public abstract void directApply(List<DBMSEvent> messages);
-
-//    public abstract void apply(List<DBMSEvent> messages);
-//
-//    public abstract void tranApply(List<Transaction> transactions);
+    public abstract void directApply(List<DBMSEvent> messages) throws Exception;
 }

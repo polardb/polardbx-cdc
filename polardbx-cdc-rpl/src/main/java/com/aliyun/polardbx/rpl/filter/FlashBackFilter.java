@@ -24,7 +24,6 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.HashMap;
 import java.util.Map;
 
-
 /**
  * @author jiyue 2022/11/30 17:57
  * @since 5.0.0.0
@@ -44,18 +43,11 @@ public class FlashBackFilter extends BaseFilter {
     }
 
     @Override
-    public boolean init() {
-        try {
-            doDb = recoveryMeta.getSchema();
-            doTable = recoveryMeta.getTable();
-            filterCache = new HashMap<>(128);
-            return true;
-        } catch (Throwable e) {
-            log.error("ReplicaFilter init failed", e);
-            return false;
-        }
+    public void init() {
+        doDb = recoveryMeta.getSchema();
+        doTable = recoveryMeta.getTable();
+        filterCache = new HashMap<>(128);
     }
-
 
     @Override
     public boolean ignoreEvent(String schema, String tbName, DBMSAction action, long serverId) {

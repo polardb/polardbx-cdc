@@ -15,7 +15,6 @@
 package com.aliyun.polardbx.rpl.common;
 
 import com.alibaba.fastjson.JSONObject;
-import com.google.gson.Gson;
 import lombok.Data;
 import org.junit.Assert;
 import org.junit.Test;
@@ -30,30 +29,24 @@ public class JsonTest {
     }
 
     @Test
-    public void getValue() throws Exception {
+    public void getValue() {
         MyTest test = JSONObject.parseObject("{\"b\":\"345\"}", MyTest.class);
-        Assert.assertEquals(test.a, false);
-        while (true) {
-            Thread.sleep(500);
-        }
+        Assert.assertEquals(test.a, true);
     }
 
+    public static class TestBean {
 
+        String a;
+        Boolean b = true;//这里给b设置了默认值，坑点
 
-    public static class TestBean implements Serializable {
-
-        String title;
-        boolean isShow = true;//这里给isShow设置了默认值，坑点
-        public TestBean(boolean isShow) {
-            this.isShow = isShow;
+        public TestBean(boolean b) {
+            this.b = b;
         }
     }
 
     @Test
-    public void getValue2() throws Exception {
-        TestBean test = new Gson().fromJson("{title:\"标题\"}", TestBean.class);
-        while (true) {
-            Thread.sleep(500);
-        }
+    public void getValue2() {
+        TestBean test = JSONObject.parseObject("{a:\"标题\"}", TestBean.class);
+        Assert.assertEquals(test.b, false);
     }
 }

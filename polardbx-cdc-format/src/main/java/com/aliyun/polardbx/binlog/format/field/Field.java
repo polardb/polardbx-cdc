@@ -27,6 +27,7 @@ import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
+import java.util.Objects;
 
 import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_BIT;
 import static com.aliyun.polardbx.binlog.format.utils.MySQLType.MYSQL_TYPE_BLOB;
@@ -68,6 +69,7 @@ public abstract class Field {
     static int MAX_FIELD_VARCHARLENGTH = 65535;
     static long UINT_MAX32 = 0xFFFFFFFFL;
     static long MAX_FIELD_BLOBLENGTH = UINT_MAX32;/* cf field_blob::get_length() */
+    protected final Serializable data;
     /// The maximum display width of this column.
     ///
     /// The "display width" is the number of code points that is needed to print
@@ -89,7 +91,6 @@ public abstract class Field {
     /// where one is the letter E and the other one is the quotation mark above
     /// the letter.
     protected int m_max_display_width_in_codepoints;
-    protected Serializable data;
     protected MySQLType mysqlType;
     protected long fieldLength;
     protected int packageLength;
@@ -99,14 +100,17 @@ public abstract class Field {
     protected int count;
     protected Charset charset;
     protected boolean nullable;
+    protected String realType;
     protected byte[] EMPTY = new byte[0];
 
     public Field(CreateField createField) {
         if (createField == null) {
+            this.data = null;
             return;
         }
         this.data = createField.getDefaultValue();
         this.mysqlType = MySQLType.valueOf(createField.getDataType());
+        this.realType = createField.getRealType();
         this.m_max_display_width_in_codepoints = createField.getCodepoint();
         this.m_explicit_display_width = createField.isExplicitWidth();
         CharsetMaxLenEnum maxLenEnum = CharsetMaxLenEnum.find(createField.getMysqlCharset());
@@ -168,6 +172,10 @@ public abstract class Field {
             dataStr = StringUtils.substringAfter(dataStr, "X'");
             dataStr = StringUtils.substringBefore(dataStr, "'");
             v = Long.parseUnsignedLong(dataStr, 16);
+        } else if (StringUtils.equals(dataStr, "true")) {
+            v = 1;
+        } else if (StringUtils.equals(dataStr, "false")) {
+            v = 0;
         } else {
             v = Long.parseLong(dataStr);
         }
@@ -210,8 +218,8 @@ public abstract class Field {
             return EMPTY;
         } else {
             byte[] bytes = encodeInternal();
-            if (bytes == null || bytes.length == 0) {
-                throw new PolardbxException("encoded data value can`t be null or empty!");
+            if (Objects.isNull(bytes)) {
+                throw new PolardbxException("encoded data value can`t be null!");
             }
             return bytes;
         }

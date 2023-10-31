@@ -14,14 +14,14 @@
  */
 package com.aliyun.polardbx.rpl.applier;
 
-
 /**
- * @author jiyue 2022/05/21 13:44
  * @since 5.0.0.0
  */
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import org.springframework.util.CollectionUtils;
@@ -40,7 +40,7 @@ public class TableParallelApplier extends MysqlApplier {
     }
 
     @Override
-    protected boolean dmlApply(List<DBMSEvent> dbmsEvents) throws Throwable {
+    protected void dmlApply(List<DBMSEvent> dbmsEvents) {
         Map<String, List<SqlContext>> parallelSqlContexts = new HashMap<>();
         for (DBMSEvent event : dbmsEvents) {
             DBMSRowChange rowChangeEvent = (DBMSRowChange) event;
@@ -50,15 +50,17 @@ public class TableParallelApplier extends MysqlApplier {
                 parallelSqlContexts.get(sqlContexts.get(0).getFullTable()).addAll(sqlContexts);
             }
         }
-        List<Future<Boolean>> futures = new ArrayList<>();
-        for (List<SqlContext> contexts: parallelSqlContexts.values()) {
-            Callable<Boolean> task = () -> execSqlContexts(contexts);
+        List<Future<Void>> futures = new ArrayList<>();
+        for (List<SqlContext> contexts : parallelSqlContexts.values()) {
+            Callable<Void> task = () -> {
+                execSqlContexts(contexts);
+                return null;
+            };
             futures.add(executorService.submit(task));
         }
-        boolean res = true;
-        for (Future<Boolean> future : futures) {
-            res &= future.get();
+        PolardbxException exception = CommonUtil.waitAllTaskFinishedAndReturn(futures);
+        if (exception != null) {
+            throw exception;
         }
-        return res;
     }
 }

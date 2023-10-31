@@ -21,6 +21,7 @@ import com.google.protobuf.UnsafeByteOperations;
 import org.apache.commons.lang3.tuple.Pair;
 import org.rocksdb.RocksDBException;
 
+import java.io.Serializable;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -28,22 +29,25 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Created by ziyang.lb
  **/
-public class TxnItemRef implements Comparable<TxnItemRef> {
+public class TxnItemRef implements Comparable<TxnItemRef>, Serializable {
     public static final AtomicLong CURRENT_TXN_ITEM_COUNT = new AtomicLong(0);
     public static final AtomicLong CURRENT_TXN_ITEM_PERSISTED_COUNT = new AtomicLong(0);
 
-    private final TxnBuffer txnBuffer;
-    private final String traceId;
-    private final int eventType;
+    private transient TxnBuffer txnBuffer;
+    private transient EventData eventData;
+    private String traceId;
+    private int eventType;
     private boolean shouldClearRowsQuery;
     private int subKeySeq;
     private boolean restored;
     private int hashKey;
     private List<byte[]> primaryKey;
-    private EventData eventData;
 
-    TxnItemRef(TxnBuffer txnBuffer, String traceId, String rowsQuery, int eventType, byte[] payload,
-               String schema, String table, int hashKey, List<byte[]> primaryKey) {
+    public TxnItemRef() {
+    }
+
+    public TxnItemRef(TxnBuffer txnBuffer, String traceId, String rowsQuery, int eventType, byte[] payload,
+                      String schema, String table, int hashKey, List<byte[]> primaryKey) {
         checkPayload(payload);
         this.txnBuffer = txnBuffer;
         this.traceId = traceId.intern();
@@ -163,6 +167,10 @@ public class TxnItemRef implements Comparable<TxnItemRef> {
         } catch (InvalidProtocolBufferException e) {
             throw new PolardbxException("parse error when restore txn item.", e);
         }
+    }
+
+    public void setTxnBuffer(TxnBuffer txnBuffer) {
+        this.txnBuffer = txnBuffer;
     }
 
     TxnBuffer getTxnBuffer() {

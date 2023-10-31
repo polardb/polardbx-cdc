@@ -14,13 +14,12 @@
  */
 package com.aliyun.polardbx.binlog.daemon.cluster;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.BinlogXTopologyBuilder;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.Resource;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.google.common.collect.Lists;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -30,13 +29,7 @@ import java.util.stream.Collectors;
 /**
  * created by ziyang.lb
  **/
-public class BinlogXTopologyBuilderTest {
-
-    @Before
-    public void init() {
-        SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-    }
+public class BinlogXTopologyBuilderTest extends BaseTest {
 
     @Test
     public void tesSortByFreeResourceDesc() {

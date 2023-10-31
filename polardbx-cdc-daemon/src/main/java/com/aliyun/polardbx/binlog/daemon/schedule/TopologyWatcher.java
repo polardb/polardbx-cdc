@@ -15,7 +15,7 @@
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.BinlogXTopologyService;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.GlobalBinlogTopologyService;
@@ -86,9 +86,9 @@ public class TopologyWatcher extends AbstractBinlogTimerTask {
     }
 
     private TopologyService getTopologyService() {
-        if (StringUtils.equals(clusterType, ClusterTypeEnum.BINLOG.name())) {
+        if (StringUtils.equals(clusterType, ClusterType.BINLOG.name())) {
             return new GlobalBinlogTopologyService(clusterId, clusterType);
-        } else if (StringUtils.equals(clusterType, ClusterTypeEnum.BINLOG_X.name())) {
+        } else if (StringUtils.equals(clusterType, ClusterType.BINLOG_X.name())) {
             return new BinlogXTopologyService(clusterId, clusterType);
         } else {
             throw new PolardbxException("invalid cluster type " + clusterType);

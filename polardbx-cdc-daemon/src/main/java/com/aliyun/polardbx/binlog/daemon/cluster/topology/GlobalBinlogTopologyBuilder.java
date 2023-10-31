@@ -14,7 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
 
-import com.aliyun.polardbx.binlog.Constants;
+import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.BinlogTaskConfigStatus;
 import com.aliyun.polardbx.binlog.domain.MergeSourceType;
@@ -25,8 +26,6 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.google.common.collect.Lists;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -37,59 +36,61 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_DOWNLOAD_TESTING_ENABLE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RECOVER_TSO_TESTING_ENABLE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_FORCE_DOWNLOAD_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_SLAVE_MAX_MEM;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_WEIGHT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_TASK_WEIGHT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_TASK_RELAY_DATANODE_THRESHOLD;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_USE_RELAY_TASK_THRESHOLD_WITH_DN_NUM;
 
 /**
  * Created by ziyang.lb
  */
 @Slf4j
 public class GlobalBinlogTopologyBuilder {
-    private static final Gson GSON = new GsonBuilder().create();
-
     private final String clusterId;
 
     public GlobalBinlogTopologyBuilder(String clusterId) {
         this.clusterId = clusterId;
     }
 
+    /**
+     * 给定一个容器列表，确定每个容器中运行哪些Task或Dumper
+     */
     public List<BinlogTaskConfig> buildTopology(List<Container> containerList, List<StorageInfo> storageInfoList,
                                                 String expectedStorageTso, long newVersion, String dumperMasterNodeId) {
 
         int containerCount = containerList.size();
 
         // (m * Dumper) + (1 * Final) + (n * Relay)
-        List<List<StorageInfo>> relayStorageList = calcRelayStorage(containerCount, storageInfoList);
+        List<List<StorageInfo>> relayStorageList = calcStorageListForRelayTask(containerCount, storageInfoList);
         List<BinlogTaskConfig> result = Lists.newArrayList();
 
         int dumperWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_DUMPER_WEIGHT);
         int taskWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_TASK_WEIGHT);
-        int rasterize = dumperWeight + taskWeight;
+        int totalWeight = dumperWeight + taskWeight;
         int vcpu = containerList.get(0).getCapability().getVirCpu();
-        int memUnit = containerList.get(0).getCapability().getFreeMemMb() / rasterize;
+        int memUnit = containerList.get(0).getCapability().getFreeMemMb() / totalWeight;
         int memPerTask = relayStorageList.size() > 0 ? (memUnit * taskWeight) / 2 : memUnit * taskWeight;
+        int memPerDumper = memUnit * dumperWeight;
 
         // build recover tso
         List<String> recoverInfo =
-            RecoverTsoBuilder.buildRecoverInfo(Constants.GROUP_NAME_GLOBAL, Constants.STREAM_NAME_GLOBAL);
+            RecoverTsoBuilder.buildRecoverInfo(CommonConstants.GROUP_NAME_GLOBAL, CommonConstants.STREAM_NAME_GLOBAL,
+                expectedStorageTso);
         Map<String, String> recoverTsoMap = new HashMap<>(1);
-        recoverTsoMap.put(Constants.STREAM_NAME_GLOBAL, recoverInfo.get(0));
+        recoverTsoMap.put(CommonConstants.STREAM_NAME_GLOBAL, recoverInfo.get(0));
         Map<String, String> recoverFileNameMap = new HashMap<>(1);
-        recoverFileNameMap.put(Constants.STREAM_NAME_GLOBAL, recoverInfo.get(1));
+        recoverFileNameMap.put(CommonConstants.STREAM_NAME_GLOBAL, recoverInfo.get(1));
         // 测试recover tso功能开关
         boolean forceRecover = isForceRecover();
         // 测试binlog下载功能开关
         boolean forceDownload = isForceDownload();
 
-        //Dumper
+        // 为每个容器分配一个Dumper，并计算出每个Dumper的配置
         for (int i = 0; i < containerList.size(); i++) {
             ExecutionConfig tc = new ExecutionConfig();
             tc.setType(MergeSourceType.RPC.name());
@@ -102,17 +103,19 @@ public class GlobalBinlogTopologyBuilder {
             tc.setForceDownload(forceDownload);
             tc.setTimestamp(System.currentTimeMillis());
             tc.setRuntimeVersion(newVersion);
+
             Container container = containerList.get(i);
-            container.deductMem(memUnit * dumperWeight);
-            BinlogTaskConfig dumperConfig = makeTask((long) (i + 1), TaskType.Dumper, container,
-                GSON.toJson(tc), newVersion);
+            container.deductMem(memPerDumper);
+
+            BinlogTaskConfig dumperConfig =
+                makeTask((long) (i + 1), TaskType.Dumper, container, JSONObject.toJSONString(tc), newVersion);
             dumperConfig.setClusterId(clusterId);
-            dumperConfig.setMem(memUnit * dumperWeight);
+            dumperConfig.setMem(memPerDumper);
             dumperConfig.setVcpu(vcpu);
             result.add(dumperConfig);
         }
 
-        //Relay
+        // 如果DN节点数目超过阈值，启用RelayTask，计算每个RelayTask的配置
         Container finalContainer = selectContainer4Final(containerList, dumperMasterNodeId);
         List<BinlogTaskConfig> relayTaskList = new ArrayList<>();
         if (relayStorageList.size() > 0) {
@@ -133,7 +136,7 @@ public class GlobalBinlogTopologyBuilder {
             result.addAll(relayTaskList);
         }
 
-        //Final
+        // Final
         finalContainer.deductMem(memPerTask);
         ExecutionConfig config = new ExecutionConfig();
         config.setType(relayTaskList.size() > 0 ? MergeSourceType.RPC.name() : MergeSourceType.BINLOG.name());
@@ -144,7 +147,8 @@ public class GlobalBinlogTopologyBuilder {
         }
         config.setTso(expectedStorageTso);
         config.setRuntimeVersion(newVersion);
-        BinlogTaskConfig finalConfig = makeTask(0L, TaskType.Final, finalContainer, GSON.toJson(config), newVersion);
+        BinlogTaskConfig finalConfig = makeTask(0L, TaskType.Final, finalContainer,
+            JSONObject.toJSONString(config), newVersion);
         finalConfig.setClusterId(clusterId);
         finalConfig.setMem(memPerTask);
         finalConfig.setVcpu(vcpu);
@@ -192,7 +196,7 @@ public class GlobalBinlogTopologyBuilder {
             storageInfoList.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toList()));
         config.setTso(expectedStorageTso);
         BinlogTaskConfig relayTaskConfig =
-            makeTask(index.incrementAndGet(), TaskType.Relay, container, GSON.toJson(config), newVersion);
+            makeTask(index.incrementAndGet(), TaskType.Relay, container, JSONObject.toJSONString(config), newVersion);
         relayTaskConfig.setClusterId(clusterId);
         relayTaskConfig.setMem(mem);
         relayTaskConfig.setVcpu(vcpu);
@@ -226,17 +230,11 @@ public class GlobalBinlogTopologyBuilder {
     }
 
     private static boolean isForceRecover() {
-        if (DynamicApplicationConfig.getBoolean(TOPOLOGY_RECOVER_TSO_TESTING_ENABLE)) {
-            return new Random().nextBoolean();
-        }
-        return false;
+        return DynamicApplicationConfig.getBoolean(TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED);
     }
 
     private static boolean isForceDownload() {
-        if (DynamicApplicationConfig.getBoolean(TOPOLOGY_FORCE_DOWNLOAD_TESTING_ENABLE)) {
-            return new Random().nextBoolean();
-        }
-        return false;
+        return DynamicApplicationConfig.getBoolean(BINLOG_BACKUP_FORCE_DOWNLOAD_ENABLED);
     }
 
     /**
@@ -268,12 +266,17 @@ public class GlobalBinlogTopologyBuilder {
         return count;
     }
 
-    private List<List<StorageInfo>> calcRelayStorage(int cdcCount, List<StorageInfo> storageInfoList) {
+    /**
+     * 当DN节点数据超过阈值时，使用RelayTask
+     * 计算是否需要使用RelayTask，以及如果使用RelayTask，每个RelayTask需要对接的DN节点
+     */
+    private List<List<StorageInfo>> calcStorageListForRelayTask(int cdcCount, List<StorageInfo> storageInfoList) {
         if (cdcCount == 1 || storageInfoList.size() < DynamicApplicationConfig
-            .getInt(TOPOLOGY_TASK_RELAY_DATANODE_THRESHOLD)) {
+            .getInt(TOPOLOGY_USE_RELAY_TASK_THRESHOLD_WITH_DN_NUM)) {
             return Lists.newArrayList();
         } else {
             // 除Final所在的容器，每个容器分配两个RelayTask
+            // Final所在的容器中分配一个RelayTask
             int relayTaskCount = (cdcCount - 1) * 2 + 1;
             if (storageInfoList.size() <= relayTaskCount) {
                 return Lists.newArrayList();

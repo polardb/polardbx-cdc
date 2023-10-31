@@ -16,6 +16,7 @@ package com.aliyun.polardbx.binlog.format.field;
 
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
+import org.apache.commons.lang3.math.NumberUtils;
 
 /**
  * support MYSQL_TYPE_ENUM
@@ -37,6 +38,12 @@ public class EnumField extends Field {
             if (typeNames[i].replaceAll("'", "").equalsIgnoreCase(strData)) {
                 v = i + 1;
                 break;
+            }
+        }
+        if (v == 0 && NumberUtils.isCreatable(strData)) {
+            int idx = NumberUtils.createInteger(strData);
+            if (idx > 0 && idx <= typeNames.length) {
+                v = idx;
             }
         }
         return toByte(v, packageLength);

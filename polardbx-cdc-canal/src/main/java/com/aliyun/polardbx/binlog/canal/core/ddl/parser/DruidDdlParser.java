@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.parser;
 
-import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLExpr;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.expr.SQLIdentifierExpr;
@@ -44,12 +43,13 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLUpdateStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement.Item;
 import com.alibaba.polardbx.druid.sql.parser.ParserException;
-import com.alibaba.polardbx.druid.util.JdbcConstants;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatementList;
 
 /**
  * @author agapple 2017年7月27日 下午4:05:34
@@ -58,18 +58,17 @@ import java.util.List;
 public class DruidDdlParser {
 
     public static List<DdlResult> parse(String queryString, String schemaName) {
-        List<SQLStatement> stmtList = null;
+        List<SQLStatement> stmtList;
         try {
-            stmtList = SQLUtils.parseStatements(queryString, JdbcConstants.MYSQL, false);
+            stmtList = parseSQLStatementList(queryString);
         } catch (ParserException e) {
             // 可能存在一些SQL是不支持的，比如存储过程
             DdlResult ddlResult = new DdlResult();
             ddlResult.setType(DBMSAction.QUERY);
-            // return Arrays.asList(ddlResult);
             return Lists.newArrayList();
         }
 
-        List<DdlResult> ddlResults = new ArrayList<DdlResult>();
+        List<DdlResult> ddlResults = new ArrayList<>();
         for (SQLStatement statement : stmtList) {
             if (statement instanceof SQLCreateTableStatement) {
                 DdlResult ddlResult = new DdlResult();
@@ -86,6 +85,7 @@ public class DruidDdlParser {
                     ddlResult.setType(DBMSAction.ALTER);
                     ddlResults.add(ddlResult);
                 }
+
                 for (SQLAlterTableItem item : alterTable.getItems()) {
                     if (item instanceof SQLAlterTableRename) {
                         DdlResult ddlResult = new DdlResult();
@@ -118,12 +118,14 @@ public class DruidDdlParser {
                         processName(ddlResult, schemaName, alterTable.getName(), false);
                         ddlResult.setType(DBMSAction.DINDEX);
                         ddlResults.add(ddlResult);
-                    } else {
-                        DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schemaName, alterTable.getName(), false);
-                        ddlResult.setType(DBMSAction.ALTER);
-                        ddlResults.add(ddlResult);
                     }
+                }
+
+                if (ddlResults.isEmpty()) {
+                    DdlResult ddlResult = new DdlResult();
+                    processName(ddlResult, schemaName, alterTable.getName(), false);
+                    ddlResult.setType(DBMSAction.ALTER);
+                    ddlResults.add(ddlResult);
                 }
             } else if (statement instanceof SQLDropTableStatement) {
                 SQLDropTableStatement dropTable = (SQLDropTableStatement) statement;
@@ -213,10 +215,10 @@ public class DruidDdlParser {
         String table = null;
         if (sqlName instanceof SQLPropertyExpr) {
             SQLIdentifierExpr owner = (SQLIdentifierExpr) ((SQLPropertyExpr) sqlName).getOwner();
-            schema = SQLUtils.normalize(owner.getName());
-            table = SQLUtils.normalize(((SQLPropertyExpr) sqlName).getName());
+            schema = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(owner.getName());
+            table = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLPropertyExpr) sqlName).getName());
         } else if (sqlName instanceof SQLIdentifierExpr) {
-            table = SQLUtils.normalize(((SQLIdentifierExpr) sqlName).getName());
+            table = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLIdentifierExpr) sqlName).getName());
         }
 
         if (isOri) {

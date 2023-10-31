@@ -87,7 +87,7 @@ public abstract class BinlogBuilder {
      * LOG_EVENT_RELAY_LOG_F
      * event is created by the slaves IO-thread when written to the relay log
      */
-    protected short flags;
+    protected short flags = 0x1;
 
     protected int startPos;
 
@@ -215,8 +215,8 @@ public abstract class BinlogBuilder {
     private void resetEventSize(AutoExpandBuffer outputData) {
         eventSize = outputData.size() - startPos;
         // 回填event size
-        outputData.putInt(eventSize, EVENT_LEN_OFFSET + startPos);
-        outputData.putInt(outputData.position(), LOG_POS_OFFSET + startPos);
+        outputData.putInt(EVENT_LEN_OFFSET + startPos, eventSize);
+        outputData.putInt(LOG_POS_OFFSET + startPos, outputData.position());
     }
 
     protected void writeCommonHeader(AutoExpandBuffer outputData) {

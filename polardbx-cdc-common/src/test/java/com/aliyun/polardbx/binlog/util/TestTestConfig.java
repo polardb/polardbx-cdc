@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.util;
 
+import com.aliyun.polardbx.binlog.testing.TestConfig;
 import org.junit.Assert;
 import org.junit.Test;
 

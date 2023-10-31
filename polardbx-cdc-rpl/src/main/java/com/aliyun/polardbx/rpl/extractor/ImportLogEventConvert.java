@@ -145,10 +145,13 @@ public class ImportLogEventConvert extends LogEventConvert {
     @Override
     protected MySQLDBMSEvent parseQueryEvent(QueryLogEvent event, boolean isSeek) {
         String queryString = event.getQuery();
-        // 由于trace带来的server id会晚于begin & xa start 要不就不过滤了？ todo jiyue
+        // 普通事务
+        // 由于trace带来的server id会晚于begin & xa start 因此不过滤begin
         // 这样可能导致多余的事务控制信息
         if (StringUtils.endsWithIgnoreCase(queryString, BEGIN)) {
             DBMSTransactionBegin transactionBegin = createTransactionBegin(event.getSessionId());
+            // 清除rows query log 带来的server id in trace
+            nowLogicServerId = 0L;
             return new MySQLDBMSEvent(transactionBegin, createPosition(event.getHeader()),
                 event.getHeader().getEventLen());
         } else if (StringUtils.endsWithIgnoreCase(queryString, COMMIT)) {
@@ -159,11 +162,13 @@ public class ImportLogEventConvert extends LogEventConvert {
             // XA事务
             DBMSXATransaction xaTransaction = getXaTransaction(queryString);
             if (xaTransaction != null) {
+                // 清除rows query log 带来的server id in trace
+                nowLogicServerId = 0L;
                 String rewriteDbName = filter.getRewriteDb(event.getDbName(), null);
                 DefaultQueryLog queryEvent = new DefaultQueryLog(rewriteDbName,
                     queryString,
                     new java.sql.Timestamp(event.getHeader().getWhen() * 1000),
-                    event.getErrorCode(), DBMSAction.QUERY);
+                    event.getErrorCode(), 0, DBMSAction.QUERY);
                 MySQLDBMSEvent mySQLDBMSEvent =
                     new MySQLDBMSEvent(queryEvent, createPosition(event.getHeader()), event.getHeader().getEventLen());
                 mySQLDBMSEvent.setXaTransaction(xaTransaction);
@@ -177,14 +182,10 @@ public class ImportLogEventConvert extends LogEventConvert {
 
     @Override
     protected MySQLDBMSEvent parseRowsQueryEvent(RowsQueryLogEvent event) {
-//        if (filterQueryDml) {
-//            return null;
-//        }
-        // mysql5.6支持，需要设置binlog-rows-query-log-events=1，可详细打印原始DML语句
-        String queryString = null;
+        String queryString;
         try {
             queryString = new String(event.getRowsQuery().getBytes(ISO_8859_1), charset);
-            return buildQueryEntry(queryString, event.getHeader(), DBMSAction.ROWQUERY);
+            return buildRowsQueryEntry(queryString, event.getHeader(), DBMSAction.ROWQUERY);
         } catch (UnsupportedEncodingException e) {
             throw new CanalParseException(e);
         }
@@ -238,7 +239,7 @@ public class ImportLogEventConvert extends LogEventConvert {
                 DefaultRowChange rowChange = new DefaultRowChange(action,
                     rewriteDbName,
                     table.getTableName(),
-                    new DefaultColumnSet());
+                    new DefaultColumnSet(Lists.newArrayList()));
                 return new MySQLDBMSEvent(rowChange, position, event.getHeader().getEventLen());
             }
 

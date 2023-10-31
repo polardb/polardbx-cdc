@@ -14,27 +14,41 @@
  */
 package com.aliyun.polardbx.binlog.dao;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.domain.po.BinlogLogicMetaHistory;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
-import org.springframework.context.ApplicationContext;
 
-public class BinlogLogicMetaHistoryMapperExtTest {
-    private ApplicationContext context;
-
-    @Before
-    public void before() {
-        SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-    }
+public class BinlogLogicMetaHistoryMapperExtTest extends BaseTestWithGmsTables {
 
     @Test
     public void test() {
+        BinlogLogicMetaHistoryMapper mapper = SpringContextHolder.getObject(BinlogLogicMetaHistoryMapper.class);
+
+        BinlogLogicMetaHistory history1 = new BinlogLogicMetaHistory();
+        history1.setDdl("create table t1(id bigint primary key)");
+        history1.setTableName("t1");
+        history1.setDbName("xxx");
+        history1.setType((byte) 2);
+        history1.setTso("101");
+        history1.setSqlKind("CREATE_TABLE");
+        history1.setDelete(true);
+        mapper.insertSelective(history1);
+
+        BinlogLogicMetaHistory history2 = new BinlogLogicMetaHistory();
+        history2.setDdl("create table t2(id bigint primary key)");
+        history2.setTableName("t2");
+        history2.setDbName("xxx");
+        history2.setType((byte) 2);
+        history2.setTso("102");
+        history2.setSqlKind("CREATE_TABLE");
+        history2.setDelete(true);
+        mapper.insertSelective(history2);
+
         BinlogLogicMetaHistoryMapperExtend binlogLogicMetaHistoryMapperExtend =
             SpringContextHolder.getObject(BinlogLogicMetaHistoryMapperExtend.class);
-        int n = binlogLogicMetaHistoryMapperExtend.softClean("697865176674939705615097169811991429120000000000000000");
-        Assert.assertEquals(n, 3);
+        int n = binlogLogicMetaHistoryMapperExtend.softClean("103");
+        Assert.assertEquals(2, n);
     }
 }

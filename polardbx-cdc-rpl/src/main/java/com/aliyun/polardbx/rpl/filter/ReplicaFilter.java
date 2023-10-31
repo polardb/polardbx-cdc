@@ -16,7 +16,7 @@ package com.aliyun.polardbx.rpl.filter;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
-import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
@@ -47,27 +47,29 @@ public class ReplicaFilter extends BaseFilter {
     private List<List<Pattern>> wildDoTables;
     private Map<String, Boolean> filterCache;
     private Map<String, String> rewriteDbs;
+    private String skipTso;
+    private String skipUntilTso;
+    private boolean needCheckSkip;
 
     public ReplicaFilter(ReplicaMeta replicaMeta) {
         this.replicaMeta = replicaMeta;
     }
 
     @Override
-    public boolean init() {
-        try {
-            doTables = initFilterSet(replicaMeta.getDoTable());
-            ignoreTables = initFilterSet(replicaMeta.getIgnoreTable());
-            doDbs = initFilterSet(replicaMeta.getDoDb());
-            ignoreDbs = initFilterSet(replicaMeta.getIgnoreDb());
-            ignoreServerIds = initIgnoreServerIds(replicaMeta.getIgnoreServerIds());
-            wildDoTables = initWildPatternPairs(replicaMeta.getWildDoTable());
-            wildIgnoreTables = initWildPatternPairs(replicaMeta.getWildIgnoreTable());
-            filterCache = new HashMap<>(128);
-            rewriteDbs = initRewriteDbs(replicaMeta.getRewriteDb());
-            return true;
-        } catch (Throwable e) {
-            log.error("ReplicaFilter init failed", e);
-            return false;
+    public void init() {
+        doTables = initFilterSet(replicaMeta.getDoTable());
+        ignoreTables = initFilterSet(replicaMeta.getIgnoreTable());
+        doDbs = initFilterSet(replicaMeta.getDoDb());
+        ignoreDbs = initFilterSet(replicaMeta.getIgnoreDb());
+        ignoreServerIds = initIgnoreServerIds(replicaMeta.getIgnoreServerIds());
+        wildDoTables = initWildPatternPairs(replicaMeta.getWildDoTable());
+        wildIgnoreTables = initWildPatternPairs(replicaMeta.getWildIgnoreTable());
+        filterCache = new HashMap<>(128);
+        rewriteDbs = initRewriteDbs(replicaMeta.getRewriteDb());
+        skipTso = replicaMeta.getSkipTso();
+        skipUntilTso = replicaMeta.getSkipUntilTso();
+        if (StringUtils.isNotEmpty(skipTso) || StringUtils.isNotEmpty(skipUntilTso)) {
+            needCheckSkip = true;
         }
     }
 
@@ -96,15 +98,44 @@ public class ReplicaFilter extends BaseFilter {
         filterCache.put(key, result);
 
         if (result) {
-            StatisticalProxy.getInstance().addSkipCount(1);
+            StatMetrics.getInstance().addSkipCount(1);
         }
+        return result;
+    }
+
+    @Override
+    public boolean ignoreEventByTso(String tso) {
+        if (!needCheckSkip || StringUtils.isEmpty(tso)) {
+            return false;
+        }
+        boolean result = false;
+        if (StringUtils.isNotEmpty(skipTso)) {
+            if (StringUtils.equals(tso, skipTso)) {
+                result = true;
+                skipTso = null;
+            }
+        }
+        if (StringUtils.isNotEmpty(skipUntilTso)) {
+            if (StringUtils.compare(tso, skipUntilTso) < 0) {
+                result = true;
+            } else {
+                skipUntilTso = null;
+            }
+        }
+        if (skipTso == null && skipUntilTso == null) {
+            needCheckSkip = false;
+        }
+        if (result) {
+            StatMetrics.getInstance().addSkipCount(1);
+        }
+
         return result;
     }
 
     @Override
     public String getRewriteDb(String schema, DBMSAction action) {
         if (action != DBMSAction.CREATEDB && action != DBMSAction.DROPDB) {
-            return rewriteDbs.containsKey(schema) ? rewriteDbs.get(schema) : schema;
+            return rewriteDbs.getOrDefault(schema, schema);
         }
         return schema;
     }
@@ -205,31 +236,6 @@ public class ReplicaFilter extends BaseFilter {
         }
         return false;
     }
-
-//    private Set<String> initFilterSet(String filterStr) {
-//        Set<String> filters = new HashSet<>();
-//
-//        if (StringUtils.isBlank(filterStr)) {
-//            return filters;
-//        }
-//
-//        for (String token : filterStr.trim().toLowerCase().split(RplConstants.COMMA)) {
-//            filters.add(token.trim());
-//        }
-//
-//        return filters;
-//    }
-
-//    private Set<Long> initIgnoreServerIds(String filterStr) {
-//        Set<String> tmpIgnoreServerIds = initFilterSet(filterStr);
-//        Set<Long> ignoreServerIds = new HashSet<>();
-//        for (String serverId : tmpIgnoreServerIds) {
-//            ignoreServerIds.add(Long.valueOf(serverId));
-//        }
-//        // ignore the server id of myself
-//        ignoreServerIds.add(RplConstants.MY_POLARX_SERVER_ID);
-//        return ignoreServerIds;
-//    }
 
     private List<List<Pattern>> initWildPatternPairs(String fullWildPairStr) {
         List<List<Pattern>> wildPatternPairs = new ArrayList<>();

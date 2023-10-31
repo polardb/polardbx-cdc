@@ -37,7 +37,7 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
  **/
 @Slf4j
 public class StorageSequence {
-    private final static LoadingCache<String, String> SEQ_CACHE =
+    private static final LoadingCache<String, String> SEQ_CACHE =
         CacheBuilder.newBuilder().build(new CacheLoader<String, String>() {
             @Override
             @ParametersAreNonnullByDefault

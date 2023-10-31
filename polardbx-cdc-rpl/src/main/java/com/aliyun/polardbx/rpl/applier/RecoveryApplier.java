@@ -24,7 +24,6 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowData;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.remote.Appender;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
@@ -107,11 +106,11 @@ public class RecoveryApplier extends BaseApplier {
     }
 
     @Override
-    public boolean init() {
+    public void init() {
         RplTask task = DbTaskMetaManager.getTask(taskId);
         if (task.getStatus() != null && task.getStatus() == TaskStatus.FINISHED.getValue()) {
-            log.info("task {} has already finished, sikp execute.", taskId);
-            System.exit(1);
+            log.info("task {} has already finished, skip execute.", taskId);
+            throw new PolardbxException("task has already finished, skip execute");
         }
 
         if (StringUtils.isNotBlank(task.getExtra()) && task.getExtra().contains("injectTroubleCount")) {
@@ -123,13 +122,12 @@ public class RecoveryApplier extends BaseApplier {
         if (result) {
             throw new PolardbxException("found dirty files for task " + taskId + " with prefix " + filePrefix);
         }
-        return true;
     }
 
     @Override
-    public boolean apply(List<DBMSEvent> dbmsEvents) {
+    public void apply(List<DBMSEvent> dbmsEvents) throws Exception {
         if (CollectionUtils.isEmpty(dbmsEvents)) {
-            return true;
+            return;
         }
 
         for (DBMSEvent event : dbmsEvents) {
@@ -180,6 +178,7 @@ public class RecoveryApplier extends BaseApplier {
 
             } else {
                 log.warn("receive stop flag!");
+                Exception ex = null;
                 try {
                     flush();
                     recordTaskExecuteInfo();
@@ -189,16 +188,18 @@ public class RecoveryApplier extends BaseApplier {
 
                     FSMMetaManager.setTaskFinish(taskId);
                     // todo by yudong 上传日志至oss
-                    System.exit(0);
-                } catch (Throwable e) {
+                } catch (Exception e) {
                     log.error("flush data occur exception", e);
-                    MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
+                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
                         TaskContext.getInstance().getTaskId(), "flush data occur exception: " + e.getMessage());
-                    throw e;
+                    ex = e;
                 } finally {
-                    extractor.stop();
+                    TaskContext.getInstance().getPipeline().stop();
+                    if (ex != null) {
+                        throw ex;
+                    }
                 }
-                return true;
+                return;
             }
         }
 
@@ -211,12 +212,10 @@ public class RecoveryApplier extends BaseApplier {
             }
         } catch (Throwable e) {
             log.error("flush data occur exception ", e);
-            MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
                 TaskContext.getInstance().getTaskId(), "flush data occur exception: " + e.getMessage());
             throw e;
         }
-
-        return true;
     }
 
     @SneakyThrows

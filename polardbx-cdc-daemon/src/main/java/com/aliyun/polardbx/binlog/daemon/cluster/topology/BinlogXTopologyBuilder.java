@@ -29,8 +29,6 @@ import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.google.common.collect.Lists;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
@@ -40,17 +38,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_SCHEDULE_DISPATCHER_COUNT_UNIT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_SCHEDULE_DISPATCHER_MEMORY_MIN;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_SCHEDULE_DISPATCHER_MEMORY_UNIT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_SCHEDULE_DISPATCHER_ROCKSDB_RATIO;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_DOWNLOAD_TESTING_ENABLE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RECOVER_TSO_TESTING_ENABLE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_SCHEDULE_DISPATCHER_COUNT_PER_NODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_SCHEDULE_DISPATCHER_MEMORY_MIN;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_SCHEDULE_DISPATCHER_MEMORY_UNIT;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_SCHEDULE_DISPATCHER_ROCKSDB_RATIO;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_FORCE_DOWNLOAD_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_WEIGHT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_TASK_WEIGHT;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.getStreamConfig;
@@ -61,7 +58,6 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
  **/
 @Slf4j
 public class BinlogXTopologyBuilder {
-    private static final Gson GSON = new GsonBuilder().create();
     private final String clusterId;
 
     private Map<String, String> recoverTsoMap;
@@ -77,7 +73,7 @@ public class BinlogXTopologyBuilder {
                                                 ClusterSnapshot preClusterSnapshot) {
         List<BinlogTaskConfig> result = Lists.newArrayList();
 
-        prepareRecoverInfo();
+        prepareRecoverInfo(expectedStorageTso);
         // 测试recover tso功能开关
         boolean forceRecover = isForceRecover();
         // 测试binlog下载功能开关
@@ -158,11 +154,12 @@ public class BinlogXTopologyBuilder {
             exeConfig.setRecoverType(recoverType);
             exeConfig.setForceRecover(forceRecover);
             exeConfig.setForceDownload(forceDownload);
+            exeConfig.setTimestamp(System.currentTimeMillis());
             exeConfig.setStreamNameSet(v);
             exeConfig.setRuntimeVersion(newVersion);
 
             BinlogTaskConfig taskConfig = createTask(container.getContainerId().hashCode(), TaskType.DumperX,
-                container, GSON.toJson(exeConfig), newVersion);
+                container, JSONObject.toJSONString(exeConfig), newVersion);
             taskConfig.setClusterId(clusterId);
             taskConfig.setMem(dumperWeight * memUnit);
             taskConfig.setVcpu(dumperWeight * cpuUnit);
@@ -174,14 +171,14 @@ public class BinlogXTopologyBuilder {
         return result;
     }
 
-    private void prepareRecoverInfo() {
+    private void prepareRecoverInfo(String expectedStorageTso) {
         List<XStream> xStreamList = getStreamConfig();
         recoverTsoMap = new HashMap<>(xStreamList.size());
         recoverFileMap = new HashMap<>(xStreamList.size());
         for (XStream xStream : xStreamList) {
             String groupName = xStream.getGroupName();
             String streamName = xStream.getStreamName();
-            List<String> recoverInfo = RecoverTsoBuilder.buildRecoverInfo(groupName, streamName);
+            List<String> recoverInfo = RecoverTsoBuilder.buildRecoverInfo(groupName, streamName, expectedStorageTso);
             recoverTsoMap.put(streamName, recoverInfo.get(0));
             recoverFileMap.put(streamName, recoverInfo.get(1));
             recoverType = recoverInfo.get(2);
@@ -189,27 +186,21 @@ public class BinlogXTopologyBuilder {
     }
 
     private boolean isForceRecover() {
-        if (DynamicApplicationConfig.getBoolean(TOPOLOGY_RECOVER_TSO_TESTING_ENABLE)) {
-            return new Random().nextBoolean();
-        }
-        return false;
+        return DynamicApplicationConfig.getBoolean(TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED);
     }
 
     private static boolean isForceDownload() {
-        if (DynamicApplicationConfig.getBoolean(TOPOLOGY_FORCE_DOWNLOAD_TESTING_ENABLE)) {
-            return new Random().nextBoolean();
-        }
-        return false;
+        return DynamicApplicationConfig.getBoolean(BINLOG_BACKUP_FORCE_DOWNLOAD_ENABLED);
     }
 
     private List<BinlogTaskConfig> buildDispatchers(List<Container> containerList, List<StorageInfo> storageInfoList,
                                                     String expectedStorageTso, long newVersion) {
         sortByFreeResourceDesc(containerList);
-        int dispatcherMemUnit = DynamicApplicationConfig.getInt(BINLOG_X_SCHEDULE_DISPATCHER_MEMORY_UNIT);
-        int dispatcherMinMem = DynamicApplicationConfig.getInt(BINLOG_X_SCHEDULE_DISPATCHER_MEMORY_MIN);
+        int dispatcherMemUnit = DynamicApplicationConfig.getInt(BINLOGX_SCHEDULE_DISPATCHER_MEMORY_UNIT);
+        int dispatcherMinMem = DynamicApplicationConfig.getInt(BINLOGX_SCHEDULE_DISPATCHER_MEMORY_MIN);
 
         Map<Container, Integer> assignedCountMap = new HashMap<>();
-        int assignedTaskCountPerContainer = DynamicApplicationConfig.getInt(BINLOG_X_SCHEDULE_DISPATCHER_COUNT_UNIT);
+        int assignedTaskCountPerContainer = DynamicApplicationConfig.getInt(BINLOGX_SCHEDULE_DISPATCHER_COUNT_PER_NODE);
         while (true) {
             int totalTaskCount = 0;
             assignedCountMap.clear();
@@ -249,7 +240,7 @@ public class BinlogXTopologyBuilder {
 
             int mem = container.getCapability().getFreeMemMb() / taskCount;
             int cpu = container.getCapability().getCpu();//没有绑核操作，暂时不需要资源隔离
-            double rocksDbRatio = DynamicApplicationConfig.getDouble(BINLOG_X_SCHEDULE_DISPATCHER_ROCKSDB_RATIO);
+            double rocksDbRatio = DynamicApplicationConfig.getDouble(BINLOGX_SCHEDULE_DISPATCHER_ROCKSDB_RATIO);
             mem = mem - Double.valueOf(mem * rocksDbRatio).intValue();//给rocksdb预留一些内存资源
             for (int i = 0; i < taskCount; i++) {
                 taskSequence++;
@@ -281,7 +272,7 @@ public class BinlogXTopologyBuilder {
         List<BinlogTaskConfig> result = new ArrayList<>();
         assignedExeConfigMap.forEach((k, v) -> {
             BinlogTaskConfig taskConfig = assignedTaskMap.get(k + 1);
-            taskConfig.setConfig(GSON.toJson(v));
+            taskConfig.setConfig(JSONObject.toJSONString(v));
             result.add(taskConfig);
         });
         return result;
@@ -312,9 +303,9 @@ public class BinlogXTopologyBuilder {
         if (preItems.equals(currentItems)) {
             currentDumpers.forEach(d -> {
                 String configStr = d.getConfig();
-                ExecutionConfig executionConfig = GSON.fromJson(configStr, ExecutionConfig.class);
+                ExecutionConfig executionConfig = JSONObject.parseObject(configStr, ExecutionConfig.class);
                 executionConfig.setNeedCleanBinlogOfPreVersion(false);
-                d.setConfig(GSON.toJson(executionConfig));
+                d.setConfig(JSONObject.toJSONString(executionConfig));
             });
         }
     }
@@ -326,7 +317,7 @@ public class BinlogXTopologyBuilder {
             item.setDumperName(config.getTaskName());
             item.setContainerId(config.getContainerId());
             String configStr = config.getConfig();
-            ExecutionConfig executionConfig = GSON.fromJson(configStr, ExecutionConfig.class);
+            ExecutionConfig executionConfig = JSONObject.parseObject(configStr, ExecutionConfig.class);
             item.setStreams(executionConfig.getStreamNameSet());
             items.add(item);
         }

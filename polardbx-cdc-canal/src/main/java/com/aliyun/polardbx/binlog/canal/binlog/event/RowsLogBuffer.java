@@ -286,8 +286,9 @@ public final class RowsLogBuffer {
      *
      * @see mysql-5.1.60/sql/log_event.cc - log_event_print_value
      */
-    final Serializable fetchValue(int type, final int meta, boolean isBinary, LogBuffer buffer, String charsetName,
-                                  boolean unsigned) {
+    public final Serializable fetchValue(int type, final int meta, boolean isBinary, LogBuffer buffer,
+                                         String charsetName,
+                                         boolean unsigned) {
         int len = 0;
 
         if (type == LogEvent.MYSQL_TYPE_STRING) {

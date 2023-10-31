@@ -39,8 +39,8 @@ public class FromMergerStressSimulator extends BaseStressSimulator {
     private static final String DEFAULT_EVENT_SIZE = "0";
     private static final String DEFAULT_USE_BUFFER = "true";
 
-    // sh stress.sh  MergerSimulator "taskName=Final stress.merge.sourceCount=4 task.engine.autoStart=true stress.merge.eventSize=1024 stress.merger.txnType=2"
-    // sh stress.sh  MergerSimulator "taskName=Final task.merger.dryRun=true task.merger.dryRun.mode=0 stress.merge.sourceCount=4 task.engine.autoStart=true stress.merge.eventSize=1024 stress.merge.useBuffer=false stress.merger.txnType=2"
+    // sh stress.sh  MergerSimulator "taskName=Final stress.merge.sourceCount=4 task_engine_auto_start=true stress.merge.eventSize=1024 stress.merger.txnType=2"
+    // sh stress.sh  MergerSimulator "taskName=Final task_merge_dry_run=true task_merge_dry_run_mode=0 stress.merge.sourceCount=4 task_engine_auto_start=true stress.merge.eventSize=1024 stress.merge.useBuffer=false stress.merger.txnType=2"
     public static void main(String[] args) {
         if (args.length > 0 && StringUtils.isNotBlank(args[0])) {
             handleArgs(args[0]);

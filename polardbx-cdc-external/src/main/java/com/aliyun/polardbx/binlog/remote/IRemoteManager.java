@@ -37,6 +37,8 @@ public interface IRemoteManager {
 
     Appender providerAppender(String fileName);
 
+    boolean supportMultiAppend();
+
     boolean useMultiAppender(long size);
 
     String prepareDownloadLink(String fileName, long expireTimeInSec);

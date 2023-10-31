@@ -15,5 +15,6 @@
 package com.aliyun.polardbx.binlog;
 
 public enum MetaCoopCommandEnum {
-    ConfigChange;
+    ConfigChange,
+    FlushLog;
 }

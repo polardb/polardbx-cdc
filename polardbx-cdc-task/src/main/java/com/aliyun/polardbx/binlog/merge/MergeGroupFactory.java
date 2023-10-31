@@ -18,16 +18,16 @@ import com.aliyun.polardbx.binlog.storage.Storage;
 
 import java.util.Map;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGER_GROUP_MAX_LEVEL;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGER_GROUP_UNIT_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_GROUP_MAX_LEVEL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_GROUP_UNIT_SIZE;
 import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getInt;
 
 /**
  * created by ziyang.lb
  **/
 public class MergeGroupFactory {
-    private static final int MERGE_GROUP_UNIT_SIZE = getInt(TASK_MERGER_GROUP_UNIT_SIZE);
-    private static final int MERGE_GROUP_MAX_LEVEL = Math.max(2, getInt(TASK_MERGER_GROUP_MAX_LEVEL));
+    private static final int MERGE_GROUP_UNIT_SIZE = getInt(TASK_MERGE_GROUP_UNIT_SIZE);
+    private static final int MERGE_GROUP_MAX_LEVEL = Math.max(2, getInt(TASK_MERGE_GROUP_MAX_LEVEL));
     private static final String ROOT_IDENTIFIER = "root";
 
     public static MergeGroup build(Map<String, MergeSource> mergeSources) {

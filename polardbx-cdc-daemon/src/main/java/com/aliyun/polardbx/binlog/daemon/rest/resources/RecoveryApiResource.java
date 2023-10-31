@@ -18,6 +18,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.ResultCode;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.rest.ann.ACL;
 import com.aliyun.polardbx.binlog.daemon.rest.resources.request.FlashBackCleanFileParameter;
@@ -29,13 +30,13 @@ import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
-import com.aliyun.polardbx.rpl.common.ResultCode;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
 import com.aliyun.polardbx.rpl.common.fsmutil.RecoveryFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.ServiceDetail;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
+import com.aliyun.polardbx.rpl.taskmeta.MetaManagerTranProxy;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryMeta;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryStateMachineContext;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceStatus;
@@ -78,6 +79,8 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 public class RecoveryApiResource {
 
     private static final Logger logger = LoggerFactory.getLogger(RecoveryApiResource.class);
+    private static final MetaManagerTranProxy MANAGER = SpringContextHolder.getObject(MetaManagerTranProxy.class);
+
 
     public static void main(String args[]) {
         FlashBackCleanFileParameter parameter = new FlashBackCleanFileParameter();
@@ -150,7 +153,7 @@ public class RecoveryApiResource {
     @Path("/service/delete/{fsmId}")
     public ResultCode delete(@PathParam("fsmId") Long fsmId) {
         logger.warn("receive delete fsm request " + fsmId);
-        return FSMMetaManager.deleteStateMachine(fsmId);
+        return MANAGER.deleteStateMachine(fsmId);
     }
 
     @POST

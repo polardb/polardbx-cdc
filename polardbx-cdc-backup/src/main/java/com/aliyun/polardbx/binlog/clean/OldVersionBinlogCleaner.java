@@ -24,9 +24,9 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_CLEAN_OLD_VERSION_BINLOG_ENABLE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_DIR_PATH_PREFIX;
-import static com.aliyun.polardbx.binlog.Constants.VERSION_PATH_PREFIX;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_CLEAN_OLD_VERSION_BINLOG_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_DIR_PATH_PREFIX;
+import static com.aliyun.polardbx.binlog.CommonConstants.VERSION_PATH_PREFIX;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
@@ -39,13 +39,13 @@ public class OldVersionBinlogCleaner {
     private final long runtimeVersion;
 
     public void purge() {
-        boolean cleanOldVersion = getBoolean(BINLOG_X_CLEAN_OLD_VERSION_BINLOG_ENABLE);
+        boolean cleanOldVersion = getBoolean(BINLOGX_CLEAN_OLD_VERSION_BINLOG_ENABLED);
         if (!cleanOldVersion) {
             log.info("purge old version binlog files is disabled, will skip ");
             return;
         }
 
-        String basePath = getString(BINLOG_X_DIR_PATH_PREFIX);
+        String basePath = getString(BINLOGX_DIR_PATH_PREFIX);
         File baseDir = new File(basePath);
         File[] files = baseDir.listFiles((dir, name) ->
             StringUtils.startsWith(name, VERSION_PATH_PREFIX) && !StringUtils

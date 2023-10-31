@@ -14,14 +14,14 @@
  */
 package com.aliyun.polardbx.binlog.format.utils;
 
-import com.aliyun.polardbx.binlog.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.zip.CRC32;
 
-import static com.aliyun.polardbx.binlog.format.utils.BinlogGenerateUtil.getTableIdLength;
+import static com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil.getTableIdLength;
 
 /**
  * Created by ziyang.lb

@@ -27,6 +27,7 @@ import com.aliyun.polardbx.binlog.canal.core.handle.EventHandle;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.extractor.LogEventConvert;
@@ -85,12 +86,19 @@ public class DefaultCdcExtractHandler implements EventHandle {
             if (sqldbmsEvent == null) {
                 return;
             }
+            long now = System.currentTimeMillis();
             Timestamp extractTimestamp = new Timestamp(System.currentTimeMillis());
             DBMSEvent dbmsEvent = sqldbmsEvent.getDbMessageWithEffect();
+            StatMetrics.getInstance().setReceiveDelay(now - event.getWhen() * 1000);
+            StatMetrics.getInstance().addInMessageCount(1);
+            StatMetrics.getInstance().addInBytes(dbmsEvent.getEventSize());
             if (!acceptEvent(dbmsEvent)) {
                 return;
             }
             datas.clear();
+            dbmsEvent.setEventSize(event.getEventLen());
+            dbmsEvent.setSourceTimeStamp(now);
+
             if (dbmsEvent instanceof DefaultRowChange) {
                 DefaultRowChange rowChange = (DefaultRowChange) dbmsEvent;
                 if (rowChange.getRowSize() == 1) {

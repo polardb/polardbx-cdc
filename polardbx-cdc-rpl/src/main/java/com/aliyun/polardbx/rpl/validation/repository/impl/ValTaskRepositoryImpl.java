@@ -43,13 +43,12 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * @author siyu.yusi
- * @date 02/28/2022
  **/
 @Slf4j
 public class ValTaskRepositoryImpl implements ValTaskRepository {
     private ValidationContext ctx;
-    private final static ValidationTaskMapper valTaskMapper = SpringContextHolder.getObject(ValidationTaskMapper.class);
-    private final static ValidationDiffMapper diffMapper = SpringContextHolder.getObject(ValidationDiffMapper.class);
+    private static final ValidationTaskMapper valTaskMapper = SpringContextHolder.getObject(ValidationTaskMapper.class);
+    private static final ValidationDiffMapper diffMapper = SpringContextHolder.getObject(ValidationDiffMapper.class);
 
     public ValTaskRepositoryImpl(ValidationContext ctx) {
         this.ctx = ctx;
@@ -57,7 +56,8 @@ public class ValTaskRepositoryImpl implements ValTaskRepository {
 
     @Override
     public List<ValidationDiff> getValDiffList(TableInfo srcTable) {
-        return diffMapper.select(s -> s.where(ValidationDiffDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(ctx.getStateMachineId()))
+        return diffMapper.select(
+            s -> s.where(ValidationDiffDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(ctx.getStateMachineId()))
                 .and(ValidationDiffDynamicSqlSupport.srcPhyDb, SqlBuilder.isEqualTo(ctx.getSrcPhyDB()))
                 .and(ValidationDiffDynamicSqlSupport.srcPhyTable, SqlBuilder.isEqualTo(srcTable.getName()))
                 .and(ValidationDiffDynamicSqlSupport.type, SqlBuilder.isEqualTo(ctx.getType().getValue()))
@@ -68,29 +68,29 @@ public class ValTaskRepositoryImpl implements ValTaskRepository {
     @Override
     public ValidationTask getValTaskRecord(String srcPhyTable) throws Exception {
         return valTaskMapper.selectOne(s -> s
-                        .where(ValidationTaskDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(ctx.getStateMachineId()))
-                        .and(ValidationTaskDynamicSqlSupport.serviceId, SqlBuilder.isEqualTo(ctx.getServiceId()))
-                        .and(ValidationTaskDynamicSqlSupport.taskId, SqlBuilder.isEqualTo(ctx.getTaskId()))
-                        .and(ValidationTaskDynamicSqlSupport.srcPhyDb, SqlBuilder.isEqualTo(ctx.getSrcPhyDB()))
-                        .and(ValidationTaskDynamicSqlSupport.srcPhyTable, SqlBuilder.isEqualTo(srcPhyTable))
-                        .and(ValidationTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(ctx.getType().getValue()))
-                        .and(ValidationTaskDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false)))
-                .orElseThrow(() -> new Exception(String.format(
-                        "Cannot find validation task record with stateMachineId: %s, serviceId: %s, taskId: %s, srcPhyDB: %s, srcTable: %s",
-                        ctx.getStateMachineId(), ctx.getServiceId(), ctx.getTaskId(), ctx.getSrcPhyDB(),
-                        srcPhyTable)));
+                .where(ValidationTaskDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(ctx.getStateMachineId()))
+                .and(ValidationTaskDynamicSqlSupport.serviceId, SqlBuilder.isEqualTo(ctx.getServiceId()))
+                .and(ValidationTaskDynamicSqlSupport.taskId, SqlBuilder.isEqualTo(ctx.getTaskId()))
+                .and(ValidationTaskDynamicSqlSupport.srcPhyDb, SqlBuilder.isEqualTo(ctx.getSrcPhyDB()))
+                .and(ValidationTaskDynamicSqlSupport.srcPhyTable, SqlBuilder.isEqualTo(srcPhyTable))
+                .and(ValidationTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(ctx.getType().getValue()))
+                .and(ValidationTaskDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false)))
+            .orElseThrow(() -> new Exception(String.format(
+                "Cannot find validation task record with stateMachineId: %s, serviceId: %s, taskId: %s, srcPhyDB: %s, srcTable: %s",
+                ctx.getStateMachineId(), ctx.getServiceId(), ctx.getTaskId(), ctx.getSrcPhyDB(),
+                srcPhyTable)));
     }
 
     @Override
     public long countValRecords(String srcTable) {
         return valTaskMapper.count(s -> s
-                .where(ValidationTaskDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(ctx.getStateMachineId()))
-                .and(ValidationTaskDynamicSqlSupport.serviceId, SqlBuilder.isEqualTo(ctx.getServiceId()))
-                .and(ValidationTaskDynamicSqlSupport.taskId, SqlBuilder.isEqualTo(ctx.getTaskId()))
-                .and(ValidationTaskDynamicSqlSupport.srcPhyDb, SqlBuilder.isEqualTo(ctx.getSrcPhyDB()))
-                .and(ValidationTaskDynamicSqlSupport.srcPhyTable, SqlBuilder.isEqualTo(srcTable))
-                .and(ValidationTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(ctx.getType().getValue()))
-                .and(ValidationTaskDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false)));
+            .where(ValidationTaskDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(ctx.getStateMachineId()))
+            .and(ValidationTaskDynamicSqlSupport.serviceId, SqlBuilder.isEqualTo(ctx.getServiceId()))
+            .and(ValidationTaskDynamicSqlSupport.taskId, SqlBuilder.isEqualTo(ctx.getTaskId()))
+            .and(ValidationTaskDynamicSqlSupport.srcPhyDb, SqlBuilder.isEqualTo(ctx.getSrcPhyDB()))
+            .and(ValidationTaskDynamicSqlSupport.srcPhyTable, SqlBuilder.isEqualTo(srcTable))
+            .and(ValidationTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(ctx.getType().getValue()))
+            .and(ValidationTaskDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false)));
     }
 
     @Override
@@ -122,15 +122,15 @@ public class ValTaskRepositoryImpl implements ValTaskRepository {
                 ctx.getSrcPhyDB(), table.getName());
             if (countValRecords(table.getName()) > 0) {
                 log.warn(
-                        "Found duplicate validation_task record. StateMachineId: {}, ServiceId: {}, TaskId: {}, SrcPhyDb: {}, SrcPhyTable: {}",
-                        ctx.getStateMachineId(), ctx.getServiceId(),
-                        ctx.getTaskId(),
-                        ctx.getSrcPhyDB(), table.getName());
+                    "Found duplicate validation_task record. StateMachineId: {}, ServiceId: {}, TaskId: {}, SrcPhyDb: {}, SrcPhyTable: {}",
+                    ctx.getStateMachineId(), ctx.getServiceId(),
+                    ctx.getTaskId(),
+                    ctx.getSrcPhyDB(), table.getName());
                 continue;
             }
             ValidationTask task = new ValidationTask();
             task.setExternalId(
-                    Instant.now().toEpochMilli() + String.format("%04d", ThreadLocalRandom.current().nextInt(0, 10000)));
+                Instant.now().toEpochMilli() + String.format("%04d", ThreadLocalRandom.current().nextInt(0, 10000)));
             task.setStateMachineId(Long.toString(context.getStateMachineId()));
             task.setServiceId(Long.toString(context.getServiceId()));
             task.setTaskId(Long.toString(context.getTaskId()));
@@ -190,9 +190,10 @@ public class ValTaskRepositoryImpl implements ValTaskRepository {
 
     @Override
     public ValidationTask getValTaskByRefId(String refId) throws SQLException {
-        return valTaskMapper.selectOne(s -> s.where(ValidationTaskDynamicSqlSupport.externalId, SqlBuilder.isEqualTo(refId))
+        return valTaskMapper.selectOne(
+            s -> s.where(ValidationTaskDynamicSqlSupport.externalId, SqlBuilder.isEqualTo(refId))
                 .and(ValidationTaskDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false))).orElseThrow(
-                () -> new SQLException(String.format("Cannot find validationTask with refId: %s", refId))
+            () -> new SQLException(String.format("Cannot find validationTask with refId: %s", refId))
         );
     }
 }

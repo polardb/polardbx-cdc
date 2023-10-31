@@ -14,9 +14,6 @@
  */
 package com.aliyun.polardbx.rpl.applier;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import lombok.Data;
 
 /**
@@ -26,12 +23,11 @@ import lombok.Data;
 @Data
 public class StatisticUnit {
 
-    // private Map<String, Long> totalBatchConsumeMessageCount = new HashMap<>();
-    private Map<String, Long> totalConsumeMessageCount = new HashMap<>();
-    private Map<String, Long> avgMergeBatchSize = new HashMap<>();
-    private Map<String, Long> applyRt = new HashMap<>();
-    private Map<String, Long> messageRps = new HashMap<>();
-    private Map<String, Long> applyQps = new HashMap<>();
+    private Long totalConsumeMessageCount;
+    private Long avgMergeBatchSize;
+    private Long applyRt;
+    private Long messageRps;
+    private Long applyQps;
     private long skipCounter = 0;
     private long skipExceptionCounter = 0;
     private long persistentMessageCounter = 0;

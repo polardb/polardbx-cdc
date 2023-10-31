@@ -25,8 +25,8 @@ import org.rocksdb.util.ByteUtil;
 import java.io.File;
 import java.util.Random;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_RELAY_ENGINE_TYPE;
-import static com.aliyun.polardbx.binlog.transmit.relay.Constants.RELAY_DATA_FORCE_CLEAN_FLAG;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_RELAY_ENGINE_TYPE;
+import static com.aliyun.polardbx.binlog.Constants.RELAY_DATA_FORCE_CLEAN_FLAG;
 
 /**
  * created by ziyang.lb
@@ -80,7 +80,7 @@ public class StoreEngineManager {
         if (ENGINE_TYPE == null) {
             synchronized (StoreEngineManager.class) {
                 if (ENGINE_TYPE == null) {
-                    String type = DynamicApplicationConfig.getString(BINLOG_X_TRANSMIT_RELAY_ENGINE_TYPE);
+                    String type = DynamicApplicationConfig.getString(BINLOGX_TRANSMIT_RELAY_ENGINE_TYPE);
                     EngineType engineType = EngineType.valueOf(type);
                     if (engineType == EngineType.RANDOM) {
                         String value = getEngineType();

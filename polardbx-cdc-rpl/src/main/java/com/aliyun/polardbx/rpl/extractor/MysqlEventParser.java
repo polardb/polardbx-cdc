@@ -14,6 +14,9 @@
  */
 package com.aliyun.polardbx.rpl.extractor;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.binlog.EventRepository;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
@@ -33,19 +36,20 @@ import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.PositionNotFoundException;
 import com.aliyun.polardbx.binlog.canal.exception.ServerIdNotMatchException;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.util.LabEventType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.TaskContext;
+import com.aliyun.polardbx.rpl.extractor.search.PositionFinder;
+import com.aliyun.polardbx.rpl.extractor.search.handler.PositionSearchHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -67,6 +71,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     protected boolean directExitWhenStop = true;
     protected IErrorHandler userDefinedHandler;
     protected EventRepository eventRepository;
+    protected boolean polarx;
 
     public MysqlEventParser(int bufferSize, EventRepository eventRepository) {
         // 初始化一下
@@ -129,7 +134,10 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
             boolean alreadyDeal = userDefinedHandler.handle(e);
             if (directExitWhenStop && !alreadyDeal) {
                 log.error("encounter uncaught exception, process will exit.", e);
-                System.exit(-1);
+                StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                    TaskContext.getInstance().getTaskId(), "apply error");
+                StatisticalProxy.getInstance().recordLastError(e.toString());
+                TaskContext.getInstance().getPipeline().stop();
             }
         });
         parseThread.setName(String.format("address = %s , EventParser",
@@ -145,15 +153,19 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
         }
         if (needTransactionPosition.get()) {
             log.warn("prepare to find last position : " + startPosition);
-            Long preTransactionStartPosition = findTransactionBeginPosition(connection, startPosition);
-            if (!preTransactionStartPosition.equals(startPosition.getPosition())) {
+            BinlogPosition preTransactionStartPosition = findTransactionBeginPosition(connection, startPosition);
+            if (preTransactionStartPosition.getPosition() != (startPosition.getPosition()) ||
+                !preTransactionStartPosition.getFileName().equals(startPosition.getFileName())) {
                 log.warn("find new start Transaction Position , old : {}",
                     startPosition.getPosition() + ", new : " + preTransactionStartPosition);
 
-                startPosition = new BinlogPosition(startPosition.getFileName(),
-                    preTransactionStartPosition,
+                String tso = preTransactionStartPosition.getRtso();
+                startPosition = new BinlogPosition(preTransactionStartPosition.getFileName(),
+                    preTransactionStartPosition.getPosition(),
                     startPosition.getMasterId(),
                     startPosition.getTimestamp());
+                startPosition.setRtso(tso);
+
             }
             needTransactionPosition.compareAndSet(true, false);
         }
@@ -317,109 +329,22 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
 
     // 根据想要的position，可能这个position对应的记录为rowdata，需要找到事务头，避免丢数据
     // 主要考虑一个事务执行时间可能会几秒种，如果仅仅按照timestamp相同，则可能会丢失事务的前半部分数据
-    protected Long findTransactionBeginPosition(ErosaConnection mysqlConnection,
-                                                final BinlogPosition entryPosition) throws IOException {
+    protected BinlogPosition findTransactionBeginPosition(ErosaConnection mysqlConnection,
+                                                          final BinlogPosition entryPosition) throws IOException {
         // 尝试找到一个合适的位置
-        final AtomicBoolean reDump = new AtomicBoolean(false);
         mysqlConnection.reconnect();
         binlogParser.refreshState();
 
-        try {
-            mysqlConnection.seek(entryPosition.getFileName(), entryPosition.getPosition(), new SinkFunction() {
-
-                private BinlogPosition lastPosition;
-
-                @Override
-                public boolean sink(LogEvent event, LogPosition logPosition) {
-                    try {
-                        MySQLDBMSEvent entry = parseAndProfilingIfNecessary(event, true);
-                        if (entry == null) {
-                            return true;
-                        }
-
-                        DBMSEvent dbmsEvent = entry.getDbMessageWithEffect();
-                        // 直接查询第一条业务数据，确认是否为事务Begin/End
-                        if (dbmsEvent instanceof DBMSTransactionBegin || dbmsEvent instanceof DBMSTransactionEnd ||
-                            CommonUtil.isPolarDBXHeartbeat(dbmsEvent) || CommonUtil.isDDL(dbmsEvent)) {
-                            lastPosition = buildLastPosition(entry);
-                            return false;
-                        } else {
-                            reDump.set(true);
-                            lastPosition = buildLastPosition(entry);
-                            return false;
-                        }
-                    } catch (Exception e) {
-                        // 上一次记录的poistion可能为一条update/insert/delete变更事件，直接进行dump的话，会缺少tableMap事件，导致tableId未进行解析
-                        processSinkError(e, lastPosition, entryPosition.getFileName(), entryPosition.getPosition());
-                        MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
-                            TaskContext.getInstance().getTaskId(), e.getMessage());
-                        reDump.set(true);
-                        return false;
-                    }
-                }
-            });
-        } catch (Exception e) {
-            log.error("ERROR ## findTransactionBeginPosition has an error", e);
-        }
-
-        log.info("begin redump");
-
         // 针对开始的第一条为非Begin记录，需要从该binlog扫描
-        if (reDump.get()) {
-            final AtomicLong preTransactionStartPosition = new AtomicLong(0L);
-            mysqlConnection.reconnect();
-            try {
-                mysqlConnection.seek(entryPosition.getFileName(), 4L, new SinkFunction() {
-
-                    private BinlogPosition lastPosition;
-
-                    @Override
-                    public boolean sink(LogEvent event, LogPosition logPosition) {
-                        try {
-
-                            MySQLDBMSEvent entry = parseAndProfilingIfNecessary(event, true);
-                            if (entry == null) {
-                                return true;
-                            }
-
-                            DBMSEvent dbmsEvent = entry.getDbMessageWithEffect();
-                            // 直接查询第一条业务数据，确认是否为事务Begin
-                            // 记录一下transaction begin position
-                            if ((dbmsEvent instanceof DBMSTransactionBegin ||
-                                CommonUtil.isPolarDBXHeartbeat(dbmsEvent) || CommonUtil.isDDL(dbmsEvent))
-                                && entry.getPosition().getPosition() < entryPosition.getPosition()) {
-                                preTransactionStartPosition.set(entry.getPosition().getPosition());
-                            }
-
-                            if (entry.getPosition().getPosition() >= entryPosition.getPosition()) {
-                                return false;// 退出
-                            }
-
-                            lastPosition = buildLastPosition(entry);
-                        } catch (Exception e) {
-                            processSinkError(e, lastPosition, entryPosition.getFileName(), entryPosition.getPosition());
-                            MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
-                                TaskContext.getInstance().getTaskId(), e.getMessage());
-                            return false;
-                        }
-
-                        return running;
-                    }
-                });
-            } catch (Exception e) {
-                log.error("ERROR ## findTransactionBeginPosition has an error", e);
-            }
-
-            // 判断一下找到的最接近position的事务头的位置
-            if (preTransactionStartPosition.get() > entryPosition.getPosition()) {
-                log.error("preTransactionEndPosition greater than startPosition from zk or localconf, maybe lost data");
-                throw new IOException(
-                    "preTransactionStartPosition greater than startPosition from zk or localconf, maybe lost data");
-            }
-            return preTransactionStartPosition.get();
-        } else {
-            return entryPosition.getPosition();
+        PositionFinder finder =
+            new PositionFinder(entryPosition,
+                binlogParser,
+                new PositionSearchHandler(entryPosition),
+                mysqlConnection);
+        if (isPolarx()) {
+            finder.setPolarx();
         }
+        return finder.findPos();
     }
 
     /**
@@ -518,7 +443,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                         lastPosition = buildLastPosition(entry);
                     } catch (Throwable e) {
                         processSinkError(e, lastPosition, searchBinlogFile, 4L);
-                        MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
+                        StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
                             TaskContext.getInstance().getTaskId(), e.getMessage());
                     }
 
@@ -542,13 +467,18 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     protected MySQLDBMSEvent parseAndProfilingIfNecessary(LogEvent bod, boolean isSeek) throws Exception {
         long startTs = -1;
         boolean enabled = getProfilingEnabled();
+        long now = System.currentTimeMillis();
         if (enabled) {
-            startTs = System.currentTimeMillis();
+            startTs = now;
         }
         MySQLDBMSEvent event = binlogParser.parse(bod, isSeek);
         if (event != null) {
             event.setRepository(eventRepository);
             event.tryPersist();
+            DBMSEvent dbmsEvent = event.getDbMessageWithEffect();
+            dbmsEvent.setSourceTimeStamp(now);
+            dbmsEvent.setEventSize(bod.getEventLen());
+            StatMetrics.getInstance().setReceiveDelay(now - bod.getWhen() * 1000);
         }
 
         if (enabled) {
@@ -581,6 +511,19 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
         this.userDefinedHandler = handler;
     }
 
+    protected boolean isPolarx() {
+        return this.polarx;
+    }
+
+    public void setPolarx(boolean polarx) {
+        this.polarx = polarx;
+    }
+
+    @Override
+    protected boolean processTableMeta(BinlogPosition position) {
+        return binlogParser.rollback(position);
+    }
+
     private class ParserThread extends Thread {
         int retry = 0;
 
@@ -606,6 +549,18 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                         startPosition = refreshedPosition;
                     }
 
+                    StringBuilder labRecordBuilder = new StringBuilder();
+                    boolean isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
+                    if (isLabEnv) {
+                        if (startPosition != null) {
+                            labRecordBuilder.append("before:[").append(startPosition.getFileName()).append(":")
+                                .append(startPosition.getPosition()).append("]");
+                        } else {
+
+                            labRecordBuilder.append("before:[]");
+                        }
+                    }
+
                     // 5. 获取最后的位置信息
                     BinlogPosition processedStartPosition = findStartPosition(erosaConnection, startPosition);
                     if (processedStartPosition == null) {
@@ -619,11 +574,21 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                     }
                     startPosition = processedStartPosition;
 
+                    log.warn("find start position : " + startPosition.toString());
+                    if (isLabEnv) {
+                        if (startPosition != null) {
+                            labRecordBuilder.append("after:[").append(startPosition.getFileName()).append(":")
+                                .append(startPosition.getPosition()).append("],tso:" + startPosition.getRtso());
+                        } else {
+                            labRecordBuilder.append("after:[]");
+                        }
+                        LabEventManager.logEvent(LabEventType.RPL_SEARCH_POSITION, labRecordBuilder.toString());
+                    }
+
                     if (!processTableMeta(startPosition)) {
                         throw new CanalParseException(
                             "can't find init table meta for with position : " + startPosition);
                     }
-                    log.warn("find start position : " + startPosition.toString());
                     // 重新链接，因为在找position过程中可能有状态，需要断开后重建
                     erosaConnection.reconnect();
                     binlogParser.refreshState();
@@ -637,6 +602,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                         public boolean sink(LogEvent event, LogPosition logPosition) throws CanalParseException,
                             TableIdNotFoundException {
                             try {
+                                StatMetrics.getInstance().addInBytes(event.getEventLen());
                                 MySQLDBMSEvent entry = parseAndProfilingIfNecessary(event, false);
 
                                 if (!running) {
@@ -649,6 +615,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                                     this.lastPosition = buildLastPosition(entry);
                                 }
                                 StatisticalProxy.getInstance().heartbeat();
+                                StatMetrics.getInstance().addInMessageCount(1);
                                 return running;
                             } catch (TableIdNotFoundException e) {
                                 throw e;
@@ -661,7 +628,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                                     this.lastPosition,
                                     startPosition.getFileName(),
                                     startPosition.getPosition());
-                                MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
+                                StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
                                     TaskContext.getInstance().getTaskId(), e.getMessage());
                                 throw new CanalParseException(e); // 继续抛出异常，让上层统一感知
                             }
@@ -681,7 +648,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                     needTransactionPosition.compareAndSet(false, true);
                     log.error(String.format("dump address %s has an error, retrying. caused by ",
                         runningInfo.getAddress().toString()), e);
-                    MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
+                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
                         TaskContext.getInstance().getTaskId(), e.getMessage());
                 } catch (Throwable e) {
                     processDumpError(e);
@@ -694,7 +661,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                     } else {
                         log.error(String.format("dump address %s has an error, retrying. caused by ",
                             runningInfo.getAddress().toString()), e);
-                        MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
+                        StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
                             TaskContext.getInstance().getTaskId(), e.getMessage());
                     }
                 } finally {
@@ -730,7 +697,10 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
 
             if (directExitWhenStop) {
                 log.error("ParserThread failed after retry: {}, process exit", retry);
-                System.exit(1);
+                StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                    TaskContext.getInstance().getTaskId(), "parse error");
+                StatisticalProxy.getInstance().recordLastError("ParserThread failed");
+                TaskContext.getInstance().getPipeline().stop();
             }
         }
     }

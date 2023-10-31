@@ -17,117 +17,89 @@ package com.aliyun.polardbx.binlog.dao;
 import java.sql.JDBCType;
 import java.util.Date;
 import javax.annotation.Generated;
-
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class ValidationTaskDynamicSqlSupport {
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.722+08:00",
-        comments = "Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.942+08:00", comments="Source Table: validation_task")
     public static final ValidationTask validationTask = new ValidationTask();
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.722+08:00",
-        comments = "Source field: validation_task.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.942+08:00", comments="Source field: validation_task.id")
     public static final SqlColumn<Long> id = validationTask.id;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.723+08:00",
-        comments = "Source field: validation_task.external_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.942+08:00", comments="Source field: validation_task.external_id")
     public static final SqlColumn<String> externalId = validationTask.externalId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.723+08:00",
-        comments = "Source field: validation_task.state_machine_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.942+08:00", comments="Source field: validation_task.state_machine_id")
     public static final SqlColumn<String> stateMachineId = validationTask.stateMachineId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.723+08:00",
-        comments = "Source field: validation_task.service_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.942+08:00", comments="Source field: validation_task.service_id")
     public static final SqlColumn<String> serviceId = validationTask.serviceId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.723+08:00",
-        comments = "Source field: validation_task.task_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.942+08:00", comments="Source field: validation_task.task_id")
     public static final SqlColumn<String> taskId = validationTask.taskId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.723+08:00",
-        comments = "Source field: validation_task.type")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.type")
     public static final SqlColumn<Integer> type = validationTask.type;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.723+08:00",
-        comments = "Source field: validation_task.state")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.state")
     public static final SqlColumn<Integer> state = validationTask.state;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.723+08:00",
-        comments = "Source field: validation_task.drds_ins_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.drds_ins_id")
     public static final SqlColumn<String> drdsInsId = validationTask.drdsInsId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.723+08:00",
-        comments = "Source field: validation_task.rds_ins_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.rds_ins_id")
     public static final SqlColumn<String> rdsInsId = validationTask.rdsInsId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.src_logical_db")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.src_logical_db")
     public static final SqlColumn<String> srcLogicalDb = validationTask.srcLogicalDb;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.src_logical_table")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.src_logical_table")
     public static final SqlColumn<String> srcLogicalTable = validationTask.srcLogicalTable;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.src_logical_key_col")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.src_logical_key_col")
     public static final SqlColumn<String> srcLogicalKeyCol = validationTask.srcLogicalKeyCol;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.src_phy_db")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.src_phy_db")
     public static final SqlColumn<String> srcPhyDb = validationTask.srcPhyDb;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.src_phy_table")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.src_phy_table")
     public static final SqlColumn<String> srcPhyTable = validationTask.srcPhyTable;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.src_phy_key_col")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.src_phy_key_col")
     public static final SqlColumn<String> srcPhyKeyCol = validationTask.srcPhyKeyCol;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.polardbx_ins_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.polardbx_ins_id")
     public static final SqlColumn<String> polardbxInsId = validationTask.polardbxInsId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.dst_logical_db")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.dst_logical_db")
     public static final SqlColumn<String> dstLogicalDb = validationTask.dstLogicalDb;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.dst_logical_table")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.dst_logical_table")
     public static final SqlColumn<String> dstLogicalTable = validationTask.dstLogicalTable;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.dst_logical_key_col")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.dst_logical_key_col")
     public static final SqlColumn<String> dstLogicalKeyCol = validationTask.dstLogicalKeyCol;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.task_range")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.task_range")
     public static final SqlColumn<String> taskRange = validationTask.taskRange;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.deleted")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.deleted")
     public static final SqlColumn<Boolean> deleted = validationTask.deleted;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.create_time")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.create_time")
     public static final SqlColumn<Date> createTime = validationTask.createTime;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.724+08:00",
-        comments = "Source field: validation_task.update_time")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.update_time")
     public static final SqlColumn<Date> updateTime = validationTask.updateTime;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.725+08:00",
-        comments = "Source field: validation_task.config")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.config")
     public static final SqlColumn<String> config = validationTask.config;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.725+08:00",
-        comments = "Source field: validation_task.stats")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source field: validation_task.stats")
     public static final SqlColumn<String> stats = validationTask.stats;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-18T17:59:37.722+08:00",
-        comments = "Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.942+08:00", comments="Source Table: validation_task")
     public static final class ValidationTask extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

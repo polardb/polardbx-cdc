@@ -14,7 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.extractor.sort;
 
+import com.aliyun.polardbx.binlog.extractor.log.TransPosInfo;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
+import com.aliyun.polardbx.binlog.storage.TxnKey;
 import lombok.Builder;
 import lombok.Data;
 import lombok.ToString;
@@ -26,7 +28,8 @@ import lombok.ToString;
 @Builder
 @ToString
 public class SortItem {
-    private String xid;
+    private TxnKey txnKey;
     private SortItemType type;
     private Transaction transaction;
+    private TransPosInfo transPosInfo;
 }

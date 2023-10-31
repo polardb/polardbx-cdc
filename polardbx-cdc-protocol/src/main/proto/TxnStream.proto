@@ -94,7 +94,7 @@ message TxnTag{
 
 message TxnToken{
   string          tso = 1;
-  string          txnId = 2;
+  int64           txnId = 2;
   string          partitionId = 3;
   string          originMergeSourceId = 4;
   TxnType         type = 5;
@@ -220,4 +220,8 @@ enum TxnType{
     元信息：config配置变更
    */
   META_CONFIG_ENV_CHANGE = 6;
+  /**
+    滚动binlog
+   */
+  FLUSH_LOG = 7;
 }

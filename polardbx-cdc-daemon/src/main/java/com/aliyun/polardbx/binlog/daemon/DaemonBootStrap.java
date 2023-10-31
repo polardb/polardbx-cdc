@@ -14,18 +14,18 @@
  */
 package com.aliyun.polardbx.binlog.daemon;
 
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.cdc.meta.CdcMetaManager;
-import com.aliyun.polardbx.binlog.daemon.cluster.ClusterBootStrapFactory;
-import com.aliyun.polardbx.binlog.daemon.cluster.ClusterBootstrapService;
+import com.aliyun.polardbx.binlog.daemon.cluster.bootstrap.ClusterBootStrapFactory;
+import com.aliyun.polardbx.binlog.daemon.cluster.bootstrap.ClusterBootstrapService;
 import com.aliyun.polardbx.binlog.daemon.rest.RestServer;
 import com.aliyun.polardbx.binlog.daemon.schedule.NodeReporter;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang.StringUtils;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.COMMON_PORTS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_HEARTBEAT_INTERVAL_MS;
@@ -53,14 +53,10 @@ public class DaemonBootStrap {
 
             // Cluster Parameter
             String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
-            String clusterType = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_TYPE);
-            if (StringUtils.isBlank(clusterType)) {
-                // 兼容一下历史版本，如果没有配置，默认为CDC Global Binlog集群
-                clusterType = ClusterTypeEnum.BINLOG.name();
-            }
+            String clusterType = DynamicApplicationConfig.getClusterType();
 
             // 初始化表
-            CdcMetaManager cdcMetaManager = new CdcMetaManager(clusterId, clusterType);
+            CdcMetaManager cdcMetaManager = new CdcMetaManager();
             cdcMetaManager.init();
 
             // Node Reporter
@@ -70,7 +66,7 @@ public class DaemonBootStrap {
 
             // Cluster bootstrap
             ClusterBootstrapService bootstrapService =
-                ClusterBootStrapFactory.getBootstrapService(ClusterTypeEnum.valueOf(clusterType));
+                ClusterBootStrapFactory.getBootstrapService(ClusterType.valueOf(clusterType));
             if (bootstrapService == null) {
                 throw new UnsupportedOperationException("not support cluster type :" + clusterType);
             }

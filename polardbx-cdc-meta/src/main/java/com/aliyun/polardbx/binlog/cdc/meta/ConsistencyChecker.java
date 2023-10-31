@@ -15,12 +15,9 @@
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.alibaba.fastjson.JSONObject;
-import com.alibaba.polardbx.druid.DbType;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
-import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
-import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
@@ -29,9 +26,6 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.util.FastSQLConstant;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
@@ -39,27 +33,28 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_CHECK_CONSISTENCY_AFTER_EACH_APPLY;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_CHECK_FASTSQL_FORMAT_RESULT;
-import static com.aliyun.polardbx.binlog.util.FastSQLConstant.FEATURES;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_CHECK_CONSISTENCY_ENABLED;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
  * created by ziyang.lb
  **/
 @Slf4j
 public class ConsistencyChecker {
-
-    private static final Gson GSON = new GsonBuilder().create();
-    private static final JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
-    private static final String cdcPhyTableName = getCdcPhyTableName();
+    public interface OriginMetaSupplier {
+        String get(Long ddlRecordId);
+    }
 
     private final TopologyManager topologyManager;
     private final PolarDbXLogicTableMeta polarDbXLogicTableMeta;
     private final PolarDbXStorageTableMeta polarDbXStorageTableMeta;
     private final PolarDbXTableMetaManager polarDbXTableMetaManager;
     private final String storageInstId;
+    private final AtomicLong checkCount;
+    private OriginMetaSupplier originMetaSupplier;
 
     public ConsistencyChecker(TopologyManager topologyManager, PolarDbXLogicTableMeta polarDbXLogicTableMeta,
                               PolarDbXStorageTableMeta polarDbXStorageTableMeta,
@@ -69,18 +64,20 @@ public class ConsistencyChecker {
         this.polarDbXStorageTableMeta = polarDbXStorageTableMeta;
         this.polarDbXTableMetaManager = polarDbXTableMetaManager;
         this.storageInstId = storageInstId;
-    }
-
-    private static String getCdcPhyTableName() {
-        List<Map<String, Object>> list = polarxTemplate.queryForList("show topology from __cdc__.__cdc_ddl_record__");
-        return list.get(0).get("TABLE_NAME").toString();
+        this.checkCount = new AtomicLong();
+        this.originMetaSupplier = i -> {
+            final JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+            List<Map<String, Object>> list =
+                polarxTemplate.queryForList("show topology from __cdc__.__cdc_ddl_record__");
+            String cdcPhyTableName = list.get(0).get("TABLE_NAME").toString();
+            return polarxTemplate.queryForObject("/!+TDDL:node(0)*/select meta_info from __cdc___000000." +
+                cdcPhyTableName + " where id = " + i, String.class);
+        };
     }
 
     private static String renameTo(String sql) {
         if (StringUtils.isNotBlank(sql)) {
-            SQLStatementParser parser =
-                SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FEATURES);
-            SQLStatement stmt = parser.parseStatementList().get(0);
+            SQLStatement stmt = parseSQLStatement(sql);
 
             if (stmt instanceof MySqlRenameTableStatement) {
                 MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) stmt;
@@ -94,9 +91,9 @@ public class ConsistencyChecker {
     }
 
     public void checkLogicAndPhysicalConsistency(String tso, DDLRecord record) {
-        boolean needCheckConsistency = DynamicApplicationConfig.getBoolean(META_CHECK_CONSISTENCY_AFTER_EACH_APPLY);
+        boolean needCheckConsistency = DynamicApplicationConfig.getBoolean(META_BUILD_CHECK_CONSISTENCY_ENABLED);
         if (needCheckConsistency) {
-            TopologyRecord r = GSON.fromJson(record.getMetaInfo(), TopologyRecord.class);
+            TopologyRecord r = JSONObject.parseObject(record.getMetaInfo(), TopologyRecord.class);
             if ("DROP_DATABASE".equals(record.getSqlKind())) {
                 checkForDropDatabase(tso, record);
             } else if ("DROP_TABLE".equals(record.getSqlKind())) {
@@ -106,35 +103,32 @@ public class ConsistencyChecker {
                 compareForOneLogicTable(tso, record.getSchemaName(), tableName, r != null);
             } else if (StringUtils.isNotEmpty(record.getTableName())) {
                 //针对online modify ddl，打标之后，物理表和逻辑表的结构会出现不一致，但最终是一致的(打标之后物理表会有清理动作)，此处跳过判断
-                if (isAlterWithOMC(record.getDdlSql())) {
+                if (isAlterWithOMC(record)) {
                     log.info("skip consistency check for alter ddl sql with omc");
                     return;
                 }
                 compareForOneLogicTable(tso, record.getSchemaName(), record.getTableName(), r != null);
             }
 
-            boolean checkFastsql = DynamicApplicationConfig.getBoolean(META_CHECK_FASTSQL_FORMAT_RESULT);
-
             String reformatDDL = "";
             try {
-                List<SQLStatement> statements =
-                    SQLUtils.parseStatements(record.getDdlSql(), DbType.mysql, FastSQLConstant.FEATURES);
-                reformatDDL = statements.get(0).toString();
-                SQLUtils.parseStatements(reformatDDL, DbType.mysql, FastSQLConstant.FEATURES);
+                SQLStatement statements = parseSQLStatement(record.getDdlSql());
+                reformatDDL = statements.toString();
+                parseSQLStatement(reformatDDL);
             } catch (Exception e) {
                 log.error("org ddl : " + record.getDdlSql());
                 log.error("after reformat ddl : " + reformatDDL);
                 log.error("reformat parse DDL failed  : ", e);
-                if (checkFastsql) {
-                    throw new PolardbxException(e);
-                }
+                throw new PolardbxException(e);
             }
         }
+
+        checkCount.incrementAndGet();
     }
 
     public void checkTopologyConsistencyWithOrigin(String tso, DDLRecord ddlRecord) {
         //校验topology的一致性
-        boolean needCheckConsistency = DynamicApplicationConfig.getBoolean(META_CHECK_CONSISTENCY_AFTER_EACH_APPLY);
+        boolean needCheckConsistency = DynamicApplicationConfig.getBoolean(META_BUILD_CHECK_CONSISTENCY_ENABLED);
         if (!needCheckConsistency) {
             return;
         }
@@ -144,11 +138,9 @@ public class ConsistencyChecker {
             return;
         }
 
-        String metaStr = polarxTemplate.queryForObject("/!+TDDL:node(0)*/select meta_info from __cdc___000000." +
-            cdcPhyTableName + " where id = " + ddlRecord.getId(), String.class);
-
+        String metaStr = originMetaSupplier.get(ddlRecord.getId());
         if (StringUtils.isNotBlank(metaStr)) {
-            TopologyRecord r = GSON.fromJson(metaStr, TopologyRecord.class);
+            TopologyRecord r = JSONObject.parseObject(metaStr, TopologyRecord.class);
             if (r == null) {
                 return;
             }
@@ -187,6 +179,8 @@ public class ConsistencyChecker {
                 }
             }
         }
+
+        checkCount.incrementAndGet();
     }
 
     private void checkForDropDatabase(String tso, DDLRecord record) {
@@ -232,21 +226,53 @@ public class ConsistencyChecker {
         }
     }
 
-    private boolean isAlterWithOMC(String sql) {
-        return StringUtils.contains(sql.toLowerCase(), "ALGORITHM=OMC".toLowerCase());
+    private boolean isAlterWithOMC(DDLRecord record) {
+        boolean result = StringUtils.contains(record.getDdlSql().toLowerCase(), "ALGORITHM=OMC".toLowerCase()) ||
+            (record.getExtInfo() != null && record.getExtInfo().getUseOMC() != null && record.getExtInfo().getUseOMC());
+        if (result) {
+            log.info("meet a ddl sql with OMC " + JSONObject.toJSONString(record));
+        }
+        return result;
     }
 
     private void compareLogicWithPhysicalTable(String tso, String logicSchemaName, String logicTableName,
                                                String phySchemaName, String phyTableName, boolean createPhyIfNotExist) {
         //get table meta
-        TableMeta logicDimTableMeta = polarDbXLogicTableMeta.findDistinctPhy(logicSchemaName, logicTableName);
-        if (logicDimTableMeta == null) {
-            logicDimTableMeta = polarDbXLogicTableMeta.find(logicSchemaName, logicTableName);
-        }
+        TableMeta logicDimTableMeta = polarDbXLogicTableMeta.find(logicSchemaName, logicTableName);
         TableMeta phyDimTableMeta =
             createPhyIfNotExist ? polarDbXTableMetaManager.findPhyTable(phySchemaName, phyTableName) :
                 polarDbXStorageTableMeta.find(phySchemaName, phyTableName);
+        TableMeta distinctPhyDimTableMeta = polarDbXLogicTableMeta.findDistinctPhy(logicSchemaName, logicTableName);
 
+        // compare table meta
+        boolean result1 = compareOne(logicDimTableMeta, phyDimTableMeta, logicSchemaName, logicTableName, tso,
+            phySchemaName, phyTableName, 0);
+        boolean result2 = distinctPhyDimTableMeta != null &&
+            compareOne(distinctPhyDimTableMeta, phyDimTableMeta, logicSchemaName, logicTableName, tso,
+                phySchemaName, phyTableName, 1);
+
+        if (distinctPhyDimTableMeta != null && !result2) {
+            String message = String.format(
+                "check consistency failed, distinct physical table meta and phy table meta is not consistent, "
+                    + "logicSchema %s, logicTable %s , phySchema %s, phyTable %s,logicColumns %s, phy Columns %s, "
+                    + "tso %s.", logicSchemaName, logicTableName, phySchemaName, phyTableName,
+                parseColumns(distinctPhyDimTableMeta), parseColumns(phyDimTableMeta), tso);
+            throw new PolardbxException(message);
+        }
+
+        if (!result1 && !result2) {
+            String message = String.format(
+                "check consistency failed, logic and phy table meta is not consistent, logicSchema %s,"
+                    + " logicTable %s , phySchema %s, phyTable %s,logicColumns %s, phy Columns %s, tso %s.",
+                logicSchemaName, logicTableName, phySchemaName, phyTableName, parseColumns(logicDimTableMeta),
+                parseColumns(phyDimTableMeta), tso);
+            throw new PolardbxException(message);
+        }
+    }
+
+    private boolean compareOne(
+        TableMeta logicDimTableMeta, TableMeta phyDimTableMeta, String logicSchemaName,
+        String logicTableName, String tso, String phySchemaName, String phyTableName, int mode) {
         // check meta if null
         if (logicDimTableMeta == null) {
             String message = String.format("check consistency failed, can`t find logic table meta %s:%s, with tso %s.",
@@ -258,22 +284,33 @@ public class ConsistencyChecker {
                 phySchemaName, phyTableName, tso);
             throw new PolardbxException(message);
         }
-
-        //compare table meta
-        List<Pair<String, String>> logicDimColumns = logicDimTableMeta.getFields().stream()
-            .map(f -> Pair.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase()))
-            .collect(Collectors.toList());
-        List<Pair<String, String>> phyDimColumns = phyDimTableMeta.getFields().stream()
-            .map(f -> Pair.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase()))
-            .collect(Collectors.toList());
+        List<Pair<String, String>> logicDimColumns = parseColumns(logicDimTableMeta);
+        List<Pair<String, String>> phyDimColumns = parseColumns(phyDimTableMeta);
         boolean result = logicDimColumns.equals(phyDimColumns);
-        if (!result) {
-            String message = String.format(
-                "check consistency failed, logic and phy table meta is not consistent, logicSchema %s,"
-                    + " logicTable %s , phySchema %s, phyTable %s,logicColumns %s, phy Columns %s, tso %s.",
-                logicSchemaName, logicTableName, phySchemaName, phyTableName, logicDimColumns, phyDimColumns, tso);
-            throw new PolardbxException(message);
+        if (!result & mode == 0) {
+            // 允许出现逻辑表和物理表列序不一致，如逻辑sql为: alter table add column xxx after yyy.
+            // 也允许出现物理表比逻辑表多列，如OMC、生成列等场景，会先进行DDL打标，再清理物理表的相关列
+            // 但不允许物理表比逻辑表少列，也不允许逻辑表和物理表列类型不一致
+            Map<String, String> phyColumnMap =
+                phyDimColumns.stream().collect(Collectors.toMap(Pair::getKey, Pair::getValue));
+            logicDimColumns.forEach(p -> {
+                if (!(phyColumnMap.containsKey(p.getKey()) && p.getValue().equals(phyColumnMap.get(p.getKey())))) {
+                    String message = String.format(
+                        "check consistency failed, logic table meta and phy table meta is not consistent, logicSchema %s, "
+                            + "logicTable %s , phySchema %s, phyTable %s, logicColumns %s, phy Columns %s, tso %s.",
+                        logicSchemaName, logicTableName, phySchemaName, phyTableName,
+                        parseColumns(logicDimTableMeta), parseColumns(phyDimTableMeta), tso);
+                    throw new PolardbxException(message);
+                }
+            });
         }
+        return result;
+    }
+
+    private List<Pair<String, String>> parseColumns(TableMeta tableMeta) {
+        return tableMeta.getFields().stream()
+            .map(f -> Pair.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase()))
+            .collect(Collectors.toList());
     }
 
     private boolean comparePhyDbTopology(List<LogicMetaTopology.PhyDbTopology> src,
@@ -327,5 +364,18 @@ public class ConsistencyChecker {
             }
         }
         return result;
+    }
+
+    public void setOriginMetaSupplier(
+        OriginMetaSupplier originMetaSupplier) {
+        this.originMetaSupplier = originMetaSupplier;
+    }
+
+    public OriginMetaSupplier getOriginMetaSupplier() {
+        return originMetaSupplier;
+    }
+
+    public AtomicLong getCheckCount() {
+        return checkCount;
     }
 }

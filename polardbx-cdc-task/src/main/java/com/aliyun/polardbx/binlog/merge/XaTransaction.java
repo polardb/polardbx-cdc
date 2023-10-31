@@ -14,9 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.merge;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +34,7 @@ public class XaTransaction implements MergeTransaction {
     /**
      * XA事务ID，全局唯一
      */
-    private String txnId;
+    private Long txnId;
     /**
      * 参与该XA事务的各分片的局部事务
      */
@@ -75,7 +75,7 @@ public class XaTransaction implements MergeTransaction {
                     txnId));
         }
 
-        if (StringUtils.isBlank(txnId)) {
+        if (txnId == null) {
             txnId = token.getTxnId();
         } else {
             if (!txnId.equals(token.getTxnId())) {

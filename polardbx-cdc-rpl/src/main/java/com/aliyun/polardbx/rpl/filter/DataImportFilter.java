@@ -15,12 +15,13 @@
 package com.aliyun.polardbx.rpl.filter;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
-import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -45,22 +46,15 @@ public class DataImportFilter extends BaseFilter {
     }
 
     @Override
-    public boolean init() {
-        try {
-            doTables = importMeta.getPhysicalDoTableList();
-            doDbs = importMeta.getSrcDbList();
-            dstDbMapping = importMeta.getDstDbMapping();
-            tableNameMapping = importMeta.getRewriteTableMapping();
-            ignoreServerIds = initIgnoreServerIds(importMeta.getIgnoreServerIds());
-            log.warn("ignore server ids: {}", ignoreServerIds);
-            filterCache = new HashMap<>(128);
-            return true;
-        } catch (Throwable e) {
-            log.error("DataImportFilter init failed", e);
-            return false;
-        }
+    public void init() {
+        doTables = importMeta.getPhysicalDoTableList();
+        doDbs = importMeta.getSrcDbList();
+        dstDbMapping = importMeta.getDstDbMapping();
+        tableNameMapping = importMeta.getRewriteTableMapping();
+        ignoreServerIds = initIgnoreServerIds(importMeta.getIgnoreServerIds());
+        log.warn("ignore server ids: {}", ignoreServerIds);
+        filterCache = new HashMap<>(128);
     }
-
 
     @Override
     public boolean ignoreEvent(String schema, String tbName, DBMSAction action, long serverId) {
@@ -76,7 +70,7 @@ public class DataImportFilter extends BaseFilter {
         filterCache.put(key, skip);
 
         if (skip) {
-            StatisticalProxy.getInstance().addSkipCount(1);
+            StatMetrics.getInstance().addSkipCount(1);
         }
         return skip;
     }
@@ -120,6 +114,16 @@ public class DataImportFilter extends BaseFilter {
     public String getRewriteDb(String schema, DBMSAction action) {
         return (dstDbMapping != null && dstDbMapping.containsKey(schema)) ?
             dstDbMapping.get(schema) : schema;
+    }
+
+    @Override
+    protected Set<Long> initIgnoreServerIds(String filterStr) {
+        Set<String> tmpIgnoreServerIds = initFilterSet(filterStr);
+        Set<Long> ignoreServerIds = new HashSet<>();
+        for (String serverId : tmpIgnoreServerIds) {
+            ignoreServerIds.add((long) Math.abs(Long.valueOf(serverId).intValue()));
+        }
+        return ignoreServerIds;
     }
 
 }

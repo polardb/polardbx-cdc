@@ -14,16 +14,16 @@
  */
 package com.aliyun.polardbx.binlog;
 
-import com.aliyun.polardbx.binlog.base.BaseTest;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import org.junit.Test;
 
-public class DynamicApplicationConfigTest extends BaseTest {
+public class DynamicApplicationConfigTest extends BaseTestWithGmsTables {
 
     @Test
     public void getValue() {
-        System.out.println(DynamicApplicationConfig.getValue("daemon.tso.heartbeat.interval.ms"));
-        DynamicApplicationConfig.setValue("daemon.tso.heartbeat.interval.ms", "10");
-        System.out.println(DynamicApplicationConfig.getValue("daemon.tso.heartbeat.interval.ms"));
+        System.out.println(DynamicApplicationConfig.getValue("daemon_tso_heartbeat_interval_ms"));
+        DynamicApplicationConfig.setValue("daemon_tso_heartbeat_interval_ms", "10");
+        System.out.println(DynamicApplicationConfig.getValue("daemon_tso_heartbeat_interval_ms"));
     }
 
     @Test(expected = IllegalArgumentException.class)

@@ -18,6 +18,9 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowData;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
@@ -46,24 +49,23 @@ public class MergeTransactionApplier extends MysqlApplier {
     }
 
     @Override
-    protected boolean dmlApply(List<DBMSEvent> dbmsEvents) throws Throwable {
-        if (dbmsEvents == null || dbmsEvents.size() == 0) {
-            return true;
+    protected void dmlApply(List<DBMSEvent> dbmsEvents) throws Exception {
+        if (dbmsEvents == null || dbmsEvents.isEmpty()) {
+            return;
         }
         // Map<fullTableName, Map<rowPk/rowUk, RowChange>>
         Map<String, Map<RowKey, DefaultRowChange>> insertRowChanges = new HashMap<>();
         Map<String, Map<RowKey, DefaultRowChange>> deleteRowChanges = new HashMap<>();
         Map<String, DefaultRowChange> lastRowChanes = new HashMap<>();
         mergeByTable(dbmsEvents, insertRowChanges, deleteRowChanges, lastRowChanes);
-
         // execute delete
-        return parallelExecSqlContexts(insertRowChanges, deleteRowChanges, lastRowChanes);
+        parallelExecSqlContexts(insertRowChanges, deleteRowChanges);
     }
 
     protected void mergeByTable(List<DBMSEvent> dbmsEvents,
                                 Map<String, Map<RowKey, DefaultRowChange>> insertRowChanges,
                                 Map<String, Map<RowKey, DefaultRowChange>> deleteRowChanges,
-                                Map<String, DefaultRowChange> lastRowChanges) throws Throwable {
+                                Map<String, DefaultRowChange> lastRowChanges) throws Exception {
         Map<String, List<Integer>> allTbWhereColumns = new HashMap<>();
 
         for (DBMSEvent event : dbmsEvents) {
@@ -71,7 +73,7 @@ public class MergeTransactionApplier extends MysqlApplier {
             String fullTbName = rowChange.getSchema() + "." + rowChange.getTable();
             if (rowChange.getRowSize() > 1) {
                 log.error("unexpected: row change has multiply row values: {}", rowChange);
-                System.exit(-1);
+                throw new PolardbxException("unexpected: row change has multiply row values :" + rowChange);
             }
 
             // get identify columns
@@ -146,16 +148,14 @@ public class MergeTransactionApplier extends MysqlApplier {
         }
     }
 
-    protected boolean parallelExecSqlContexts(Map<String, Map<RowKey, DefaultRowChange>> insertRowChanges,
-                                              Map<String, Map<RowKey, DefaultRowChange>> deleteRowChanges,
-                                              Map<String, DefaultRowChange> lastRowChanes)
-        throws Throwable {
+    protected void parallelExecSqlContexts(Map<String, Map<RowKey, DefaultRowChange>> insertRowChanges,
+                                           Map<String, Map<RowKey, DefaultRowChange>> deleteRowChanges)
+        throws Exception {
         Set<String> allTbNames = new HashSet<>();
         allTbNames.addAll(insertRowChanges.keySet());
         allTbNames.addAll(deleteRowChanges.keySet());
 
-        boolean res = true;
-        List<Future<Boolean>> futures = new ArrayList<>();
+        List<Future<Void>> futures = new ArrayList<>();
 
         Map<String, List<MergeDmlSqlContext>> allTbMergeDmlSqlContexts = new HashMap<>();
         for (String tbName : allTbNames) {
@@ -163,7 +163,7 @@ public class MergeTransactionApplier extends MysqlApplier {
 
             // execute delete first
             int insertMode = safeMode ?
-                RplConstants.INSERT_MODE_REPLACE: RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE;
+                RplConstants.INSERT_MODE_REPLACE : RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE;
             if (deleteRowChanges.containsKey(tbName)) {
                 List<MergeDmlSqlContext> sqlContexts = getMergeDmlSqlContexts(deleteRowChanges.get(tbName).values(),
                     insertMode);
@@ -176,82 +176,63 @@ public class MergeTransactionApplier extends MysqlApplier {
                 mergeDmlSqlContexts.addAll(sqlContexts);
             }
 
-            if (mergeDmlSqlContexts.size() == 0) {
+            if (mergeDmlSqlContexts.isEmpty()) {
                 continue;
             }
             allTbMergeDmlSqlContexts.put(tbName, mergeDmlSqlContexts);
 
             // submit task
-            Callable<Boolean> task = () -> {
+            Callable<Void> task = () -> {
                 List<SqlContext> sqlContexts = new ArrayList<>(mergeDmlSqlContexts);
-
-                boolean succeed = tranExecSqlContexts(sqlContexts);
-                mergeDmlSqlContexts.get(0).setSucceed(succeed);
-                return succeed;
+                tranExecSqlContexts(sqlContexts);
+                mergeDmlSqlContexts.get(0).setSucceed(true);
+                return null;
             };
             futures.add(executorService.submit(task));
 
             // record merge size
             for (MergeDmlSqlContext mergeDmlSqlContext : mergeDmlSqlContexts) {
-                StatisticalProxy.getInstance()
+                StatMetrics.getInstance()
                     .addMergeBatchSize(mergeDmlSqlContext.getOriginRowChanges().size());
             }
         }
 
         // get result
-        for (Future<Boolean> future : futures) {
-            res &= future.get();
-        }
-
-        if (res) {
-            return true;
+        PolardbxException exception = CommonUtil.waitAllTaskFinishedAndReturn(futures);
+        if (exception == null) {
+            return;
         }
 
         // for those failed sqlContext, execute the originRowChanges with the sql to be
         // REPLACE INTO
         futures.clear();
-        res = true;
-
         for (String tbName : allTbMergeDmlSqlContexts.keySet()) {
             List<MergeDmlSqlContext> tbMergeDmlSqlContexts = allTbMergeDmlSqlContexts.get(tbName);
             if (tbMergeDmlSqlContexts.get(0).isSucceed()) {
                 continue;
             }
-
             List<SqlContext> tbSqlContexts = new ArrayList<>();
             for (MergeDmlSqlContext mergeDmlSqlContext : tbMergeDmlSqlContexts) {
-                log.error("merge execute failed for: {}, try serial execute",
-                    mergeDmlSqlContext.getDstTable());
+                log.error("merge execute failed for: {}, try serial execute", mergeDmlSqlContext.getDstTable());
                 for (DefaultRowChange rowChange : mergeDmlSqlContext.getOriginRowChanges()) {
                     List<SqlContext> sqlContexts = getSqlContexts(rowChange, true);
                     tbSqlContexts.addAll(sqlContexts);
                 }
             }
-
-            final Callable<Boolean> task = () -> {
-                // execute
-                if (tranExecSqlContexts(tbSqlContexts)) {
-                    return true;
-                }
-                return false;
-
+            final Callable<Void> task = () -> {
+                tranExecSqlContexts(tbSqlContexts);
+                return null;
             };
             futures.add(executorService.submit(task));
         }
-
-        for (Future<Boolean> future : futures) {
-            res &= future.get();
+        exception = CommonUtil.waitAllTaskFinishedAndReturn(futures);
+        if (exception != null) {
+            throw exception;
         }
-
-        if (!res) {
-            log.error("single execute failed");
-        }
-
-        return res;
     }
 
     protected List<MergeDmlSqlContext> getMergeDmlSqlContexts(Collection<DefaultRowChange> rowChanges, int insertMode)
-        throws Throwable {
+        throws Exception {
         List<MergeDmlSqlContext> mergeDmlSqlContexts = new ArrayList<>();
 
         Iterator<DefaultRowChange> iterator = rowChanges.iterator();

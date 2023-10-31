@@ -15,13 +15,15 @@
 package com.aliyun.polardbx.binlog.dumper;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.RuntimeMode;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.TaskConfigProvider;
 import com.aliyun.polardbx.binlog.backup.BinlogBackupManager;
 import com.aliyun.polardbx.binlog.backup.MetricsObserver;
+import com.aliyun.polardbx.binlog.backup.StreamContext;
+import com.aliyun.polardbx.binlog.clean.BinlogCleanManager;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
@@ -35,13 +37,12 @@ import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManager;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManagerCollection;
 import com.aliyun.polardbx.binlog.dumper.metrics.MetricsManager;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
-import com.aliyun.polardbx.binlog.dumper.plugin.DumperPluginManager;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.rpc.EndPoint;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
-import com.google.gson.Gson;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.SneakyThrows;
 import org.apache.commons.io.FileUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -53,32 +54,31 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_FILE_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_BUFFER_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_DRYRUN;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_DRY_RUN_ENABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_FLUSH_INTERVAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_FLUSH_POLICY;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.INST_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.INST_IP;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RUNTIME_MODE;
-import static com.aliyun.polardbx.binlog.Constants.GROUP_NAME_GLOBAL;
-import static com.aliyun.polardbx.binlog.Constants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
 /**
- * Created by ziyang.lb
+ * @author ziyang.lb, yudong
  **/
 public class DumperController {
 
-    private final static Logger logger = LoggerFactory.getLogger(DumperController.class);
+    private static final Logger logger = LoggerFactory.getLogger(DumperController.class);
 
     private final TaskRuntimeConfig taskRuntimeConfig;
     private LogFileManagerCollection logFileManagerCollection;
@@ -86,9 +86,9 @@ public class DumperController {
     private MetricsManager metricsManager;
     private String role;
     private String groupName;
-    private List<String> streamNameList;
-    private DumperPluginManager dumperPluginManager;
-    private BinlogBackupManager binlogBackupManager;
+    private List<String> streamList;
+    private BinlogBackupManager backupManager;
+    private BinlogCleanManager cleanManager;
     private volatile boolean running;
 
     public DumperController(TaskConfigProvider taskConfigProvider) {
@@ -102,10 +102,10 @@ public class DumperController {
             return;
         }
         running = true;
-        this.dumperPluginManager.start();
+        this.cleanManager.start();
         this.logFileManagerCollection.start();
         // 需要保证logFileManager启动之后再启动backupManager
-        this.binlogBackupManager.start();
+        this.backupManager.start();
         this.cdcServer.start();
         this.metricsManager.start();
         logger.info("Dumper controller started({}).", role);
@@ -120,26 +120,26 @@ public class DumperController {
         this.logFileManagerCollection.stop();
         this.cdcServer.stop();
         this.metricsManager.stop();
-        this.dumperPluginManager.stop();
-        this.binlogBackupManager.stop();
+        this.cleanManager.stop();
+        this.backupManager.stop();
         logger.info("Dumper controller stopped.");
     }
 
     /**
      * 单流的group name和stream name不再设置为null，方便下游代码统一
      */
-    private void setGroupNameAndStreamName() {
+    private void setGroupAndStream() {
         TaskType taskType = taskRuntimeConfig.getType();
         switch (taskType) {
         case Dumper:
             groupName = GROUP_NAME_GLOBAL;
-            streamNameList = Collections.singletonList(STREAM_NAME_GLOBAL);
+            streamList = Collections.singletonList(STREAM_NAME_GLOBAL);
             break;
         case DumperX:
-            groupName = getString(BINLOG_X_STREAM_GROUP_NAME);
-            ExecutionConfig executionConfig = new Gson().fromJson(
+            groupName = getString(BINLOGX_STREAM_GROUP_NAME);
+            ExecutionConfig executionConfig = JSONObject.parseObject(
                 taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
-            streamNameList = new ArrayList<>(executionConfig.getStreamNameSet());
+            streamList = new ArrayList<>(executionConfig.getStreamNameSet());
             break;
         default:
             throw new PolardbxException("invalid task type " + taskType);
@@ -147,26 +147,16 @@ public class DumperController {
     }
 
     private void build() {
-        setGroupNameAndStreamName();
+        setGroupAndStream();
         tryRenameBinlogRootPath();
         buildLogFileManagerCollection();
-
-        Map<String, MetricsObserver> metricsObserverMap = new HashMap<>();
-        streamNameList.forEach(streamId -> metricsObserverMap.put(streamId, StreamMetrics.getStreamMetrics(streamId)));
-        String binlogRootPath = BinlogFileUtil.getBinlogFileRootPath(taskRuntimeConfig.getType(),
-            taskRuntimeConfig.getBinlogTaskConfig().getVersion());
-        this.binlogBackupManager =
-            new BinlogBackupManager(binlogRootPath, taskRuntimeConfig.getName(), taskRuntimeConfig.getType(), groupName,
-                streamNameList, metricsObserverMap);
-
-        this.cdcServer = new CdcServer(taskRuntimeConfig.getName(), logFileManagerCollection,
-            taskRuntimeConfig.getServerPort(), taskRuntimeConfig.getBinlogTaskConfig());
-
+        Map<String, MetricsObserver> metrics = new HashMap<>();
+        streamList.forEach(streamId -> metrics.put(streamId, StreamMetrics.getStreamMetrics(streamId)));
+        this.backupManager = new BinlogBackupManager(buildStreamContext(), metrics);
+        this.cleanManager = new BinlogCleanManager(buildStreamContext());
         this.metricsManager = new MetricsManager(taskRuntimeConfig.getName(), taskRuntimeConfig.getType());
-
-        this.dumperPluginManager = new DumperPluginManager();
-        this.dumperPluginManager.load(taskRuntimeConfig.getName(), taskRuntimeConfig.getType(),
-            groupName, streamNameList, taskRuntimeConfig.getBinlogTaskConfig().getVersion());
+        this.cdcServer = new CdcServer(taskRuntimeConfig.getName(), logFileManagerCollection,
+            taskRuntimeConfig.getServerPort(), taskRuntimeConfig.getBinlogTaskConfig(), metricsManager);
         this.updateDumperInfo(taskRuntimeConfig);
     }
 
@@ -175,10 +165,10 @@ public class DumperController {
      * LogFileManagerCollection保存当前Dumper的所有LogFileManager
      */
     private void buildLogFileManagerCollection() {
-        ExecutionConfig config = new Gson().fromJson(
+        ExecutionConfig config = JSONObject.parseObject(
             taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
         this.logFileManagerCollection = new LogFileManagerCollection();
-        streamNameList.forEach(streamName -> {
+        streamList.forEach(streamName -> {
             logFileManagerCollection.add(streamName, buildLogFileManager(config, streamName));
         });
     }
@@ -189,11 +179,10 @@ public class DumperController {
         logFileManager.setTaskType(taskRuntimeConfig.getType());
         logFileManager.setGroupName(groupName);
         logFileManager.setExecutionConfig(executionConfig);
-        logFileManager.setBinlogFullPath(BinlogFileUtil.getBinlogFileFullPath(
-            BinlogFileUtil.getBinlogFileRootPath(taskRuntimeConfig.getType(),
-                taskRuntimeConfig.getBinlogTaskConfig().getVersion()), groupName, streamName));
+        logFileManager.setBinlogRootPath(BinlogFileUtil.getRootPath(taskRuntimeConfig.getType(),
+            taskRuntimeConfig.getBinlogTaskConfig().getVersion()));
         logFileManager.setBinlogFileSize(DynamicApplicationConfig.getInt(BINLOG_FILE_SIZE));
-        logFileManager.setDryRun(DynamicApplicationConfig.getBoolean(BINLOG_WRITE_DRYRUN));
+        logFileManager.setDryRun(DynamicApplicationConfig.getBoolean(BINLOG_WRITE_DRY_RUN_ENABLE));
         logFileManager.setFlushPolicy(
             FlushPolicy.parseFrom(DynamicApplicationConfig.getInt(BINLOG_WRITE_FLUSH_POLICY)));
         logFileManager.setFlushInterval(DynamicApplicationConfig.getInt(BINLOG_WRITE_FLUSH_INTERVAL));
@@ -216,7 +205,7 @@ public class DumperController {
     private void updateDumperInfo(TaskRuntimeConfig taskRuntimeConfig) {
         this.buildRole();
         ExecutionConfig executionConfig =
-            new Gson().fromJson(taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
+            JSONObject.parseObject(taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
 
         TransactionTemplate transactionTemplate = SpringContextHolder.getObject("metaTransactionTemplate");
         DumperInfoMapper dumperInfoMapper = SpringContextHolder.getObject(DumperInfoMapper.class);
@@ -231,21 +220,18 @@ public class DumperController {
         dumperInfo.setVersion(taskRuntimeConfig.getBinlogTaskConfig().getVersion());
         dumperInfo.setRole(role);
         dumperInfo.setStatus(0);
-        Date now = new Date();
-        dumperInfo.setGmtHeartbeat(now);
-        dumperInfo.setGmtCreated(now);
-        dumperInfo.setGmtModified(now);
+        dumperInfo.setPolarxInstId(DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID));
 
         Optional<DumperInfo> dumperInfoInDb = dumperInfoMapper.selectOne(
             s -> s.where(DumperInfoDynamicSqlSupport.clusterId,
-                SqlBuilder.isEqualTo(getString(CLUSTER_ID)))
+                    SqlBuilder.isEqualTo(getString(CLUSTER_ID)))
                 .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(taskRuntimeConfig.getName())));
         if (dumperInfoInDb.isPresent()) {
             // 兼容一下老版调度引擎的逻辑，如果version为0，进行更新
             RuntimeMode runtimeMode = RuntimeMode.valueOf(getString(RUNTIME_MODE));
             if (dumperInfoInDb.get().getVersion() == 0 || runtimeMode == RuntimeMode.LOCAL) {
                 dumperInfo.setId(dumperInfoInDb.get().getId());
-                dumperInfoMapper.updateByPrimaryKey(dumperInfo);
+                dumperInfoMapper.updateByPrimaryKeySelective(dumperInfo);
             } else {
                 logger.error("Duplicate dumper info in database : {}", JSONObject.toJSONString(dumperInfoInDb));
                 Runtime.getRuntime().halt(1);
@@ -278,12 +264,12 @@ public class DumperController {
     @SneakyThrows
     private void tryRenameBinlogRootPath() {
         if (taskRuntimeConfig.getType() == TaskType.DumperX) {
-            ExecutionConfig executionConfig = new Gson().fromJson(
+            ExecutionConfig executionConfig = JSONObject.parseObject(
                 taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
             if (!executionConfig.isNeedCleanBinlogOfPreVersion()) {
                 long currentVersion = executionConfig.getRuntimeVersion();
-                String preRootPath = BinlogFileUtil.getBinlogFileRootPath(TaskType.DumperX, currentVersion - 1);
-                String currentRootPath = BinlogFileUtil.getBinlogFileRootPath(TaskType.DumperX, currentVersion);
+                String preRootPath = BinlogFileUtil.getRootPath(TaskType.DumperX, currentVersion - 1);
+                String currentRootPath = BinlogFileUtil.getRootPath(TaskType.DumperX, currentVersion);
                 File preBinlogDir = new File(preRootPath);
                 File currentBinlogDir = new File(currentRootPath);
                 if (preBinlogDir.exists() && !currentBinlogDir.exists()) {
@@ -296,5 +282,10 @@ public class DumperController {
 
     public LogFileManagerCollection getLogFileManagerCollection() {
         return logFileManagerCollection;
+    }
+
+    private StreamContext buildStreamContext() {
+        return new StreamContext(groupName, streamList, getString(CLUSTER_ID), taskRuntimeConfig.getName(),
+            taskRuntimeConfig.getType(), taskRuntimeConfig.getBinlogTaskConfig().getVersion());
     }
 }

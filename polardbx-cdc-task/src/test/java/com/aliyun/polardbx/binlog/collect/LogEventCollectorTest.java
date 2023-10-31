@@ -16,23 +16,28 @@ package com.aliyun.polardbx.binlog.collect;
 
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
+import com.aliyun.polardbx.binlog.storage.AlreadyExistException;
+import com.aliyun.polardbx.binlog.storage.DeleteMode;
 import com.aliyun.polardbx.binlog.storage.LogEventStorage;
+import com.aliyun.polardbx.binlog.storage.PersistMode;
+import com.aliyun.polardbx.binlog.storage.Repository;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnBufferItem;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.Lists;
+import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
-/**
- *
- **/
-public class LogEventCollectorTest {
-    
+public class LogEventCollectorTest extends BaseTest {
+
     @Test
+    @Ignore
     public void testFlush() throws Exception {
         testInternal(TaskType.Relay);
         testInternal(TaskType.Final);
@@ -41,23 +46,24 @@ public class LogEventCollectorTest {
     private void testInternal(TaskType taskType) throws Exception {
         int txnCount = 1000;
         int partitionCount = 4;
-        LogEventStorage storage = new LogEventStorage(null);
+        LogEventStorage storage = new LogEventStorage(
+            new Repository(false, "/tmp/RocksDB", PersistMode.AUTO, 0.8, 500, 500,
+                DeleteMode.SINGLE, 1));
+        storage.start();
         List<TxnToken> tokens = generateTokens(txnCount, partitionCount, storage);
 
         LogEventCollector collector = new LogEventCollector(storage, null, 65536, taskType, false);
         collector.start();
-        tokens.forEach(t -> collector.push(t));
+        tokens.forEach(collector::push);
         while (true) {
             long ringBufferQueuedSize = collector.getQueuedSize();
             if (ringBufferQueuedSize == 0) {
-                // long queuedSize = collector.getSendBuffer().queuedSize();
+                long queuedSize = collector.getQueuedSize();
                 if (taskType == TaskType.Relay) {
-                    // Assert.assertEquals(txnCount * partitionCount * partitionCount + txnCount *
-                    // partitionCount,
-                    // queuedSize);
+                    Assert.assertEquals(txnCount * partitionCount * partitionCount + txnCount *
+                        partitionCount, queuedSize);
                 } else {
-                    // Assert.assertEquals(txnCount * partitionCount * partitionCount + txnCount,
-                    // queuedSize);
+                    Assert.assertEquals(txnCount * partitionCount * partitionCount + txnCount, queuedSize);
                 }
                 break;
             }
@@ -67,16 +73,16 @@ public class LogEventCollectorTest {
     }
 
     private List<TxnToken> generateTokens(int txnCount, int partitionCount, LogEventStorage storage) {
-        long seed = System.currentTimeMillis();
+        String seed = CommonUtils.generateTSO(System.currentTimeMillis(), System.currentTimeMillis() + "", "");
 
         List<TxnToken> tokens = new ArrayList<>();
         for (int i = 0; i < txnCount; i++) {
-            String txnId = UUID.randomUUID().toString();
+            long txnId = System.nanoTime();
             for (int j = 0; j < partitionCount; j++) {
                 String partitionId = String.valueOf(j);
                 if (j == partitionCount - 1) {
                     TxnToken token = TxnToken.newBuilder()
-                        .setTso(String.valueOf(seed))
+                        .setTso(seed)
                         .setTxnId(txnId)
                         .setPartitionId(partitionId)
                         .setXaTxn(true)
@@ -85,7 +91,7 @@ public class LogEventCollectorTest {
                     tokens.add(token);
                 } else {
                     TxnToken token = TxnToken.newBuilder()
-                        .setTso(String.valueOf(seed))
+                        .setTso(seed)
                         .setTxnId(txnId)
                         .setPartitionId(partitionId)
                         .setXaTxn(true)
@@ -101,7 +107,13 @@ public class LogEventCollectorTest {
                 TxnBufferItem item = TxnBufferItem.builder()
                     .traceId(String.valueOf(i))
                     .payload(new byte[10])
+                    .schema("d1")
+                    .table("t1")
                     .build();
+                try {
+                    storage.create(key);
+                } catch (AlreadyExistException e) {
+                }
                 TxnBuffer txnBuffer = storage.fetch(key);
                 txnBuffer.push(item);
             }

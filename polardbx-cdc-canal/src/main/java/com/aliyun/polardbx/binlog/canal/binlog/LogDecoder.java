@@ -55,7 +55,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidListLogEve
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.StartEncryptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,7 +63,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.BitSet;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL_MS;
 
 /**
  * Implements a binary-log decoder.
@@ -550,7 +550,7 @@ public final class LogDecoder {
 
     private void sleep() {
         try {
-            int tsoHeartBeatInterval = DynamicApplicationConfig.getInt(DAEMON_TSO_HEARTBEAT_INTERVAL);
+            int tsoHeartBeatInterval = DynamicApplicationConfig.getInt(DAEMON_TSO_HEARTBEAT_INTERVAL_MS);
             Thread.sleep(Math.min(tsoHeartBeatInterval * 5, 2000));
         } catch (InterruptedException e) {
         }
@@ -564,4 +564,7 @@ public final class LogDecoder {
         this.needFixRotate = needFixRotate;
     }
 
+    public void setNeedRecordData(boolean needRecordData) {
+        this.needRecordData = needRecordData;
+    }
 }

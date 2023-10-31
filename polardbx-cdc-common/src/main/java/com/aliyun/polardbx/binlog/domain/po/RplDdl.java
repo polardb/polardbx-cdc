@@ -18,184 +18,137 @@ import java.util.Date;
 import javax.annotation.Generated;
 
 public class RplDdl {
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.836+08:00", comments="Source field: rpl_ddl_main.id")
     private Long id;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.gmt_created")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.gmt_created")
     private Date gmtCreated;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.gmt_modified")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.gmt_modified")
     private Date gmtModified;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.state_machine_id")
-    private Long stateMachineId;
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.fsm_id")
+    private Long fsmId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.service_id")
-    private Long serviceId;
-
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.task_id")
-    private Long taskId;
-
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.76+08:00",
-        comments = "Source field: rpl_ddl.ddl_tso")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.ddl_tso")
     private String ddlTso;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.76+08:00",
-        comments = "Source field: rpl_ddl.job_id")
-    private Long jobId;
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.service_id")
+    private Long serviceId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.761+08:00",
-        comments = "Source field: rpl_ddl.state")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.token")
+    private String token;
+
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.state")
     private Integer state;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.761+08:00",
-        comments = "Source field: rpl_ddl.ddl_stmt")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.ddl_stmt")
     private String ddlStmt;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.758+08:00",
-        comments = "Source Table: rpl_ddl")
-    public RplDdl(Long id, Date gmtCreated, Date gmtModified, Long stateMachineId, Long serviceId, Long taskId,
-                  String ddlTso, Long jobId, Integer state, String ddlStmt) {
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.833+08:00", comments="Source Table: rpl_ddl_main")
+    public RplDdl(Long id, Date gmtCreated, Date gmtModified, Long fsmId, String ddlTso, Long serviceId, String token, Integer state, String ddlStmt) {
         this.id = id;
         this.gmtCreated = gmtCreated;
         this.gmtModified = gmtModified;
-        this.stateMachineId = stateMachineId;
-        this.serviceId = serviceId;
-        this.taskId = taskId;
+        this.fsmId = fsmId;
         this.ddlTso = ddlTso;
-        this.jobId = jobId;
+        this.serviceId = serviceId;
+        this.token = token;
         this.state = state;
         this.ddlStmt = ddlStmt;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source Table: rpl_ddl")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.836+08:00", comments="Source Table: rpl_ddl_main")
     public RplDdl() {
         super();
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.id")
     public Long getId() {
         return id;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.id")
     public void setId(Long id) {
         this.id = id;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.gmt_created")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.gmt_created")
     public Date getGmtCreated() {
         return gmtCreated;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.gmt_created")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.gmt_created")
     public void setGmtCreated(Date gmtCreated) {
         this.gmtCreated = gmtCreated;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.gmt_modified")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.gmt_modified")
     public Date getGmtModified() {
         return gmtModified;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.gmt_modified")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.gmt_modified")
     public void setGmtModified(Date gmtModified) {
         this.gmtModified = gmtModified;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.state_machine_id")
-    public Long getStateMachineId() {
-        return stateMachineId;
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.fsm_id")
+    public Long getFsmId() {
+        return fsmId;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.state_machine_id")
-    public void setStateMachineId(Long stateMachineId) {
-        this.stateMachineId = stateMachineId;
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.fsm_id")
+    public void setFsmId(Long fsmId) {
+        this.fsmId = fsmId;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.service_id")
-    public Long getServiceId() {
-        return serviceId;
-    }
-
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.759+08:00",
-        comments = "Source field: rpl_ddl.service_id")
-    public void setServiceId(Long serviceId) {
-        this.serviceId = serviceId;
-    }
-
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.76+08:00",
-        comments = "Source field: rpl_ddl.task_id")
-    public Long getTaskId() {
-        return taskId;
-    }
-
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.76+08:00",
-        comments = "Source field: rpl_ddl.task_id")
-    public void setTaskId(Long taskId) {
-        this.taskId = taskId;
-    }
-
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.76+08:00",
-        comments = "Source field: rpl_ddl.ddl_tso")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.ddl_tso")
     public String getDdlTso() {
         return ddlTso;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.76+08:00",
-        comments = "Source field: rpl_ddl.ddl_tso")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.837+08:00", comments="Source field: rpl_ddl_main.ddl_tso")
     public void setDdlTso(String ddlTso) {
         this.ddlTso = ddlTso == null ? null : ddlTso.trim();
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.76+08:00",
-        comments = "Source field: rpl_ddl.job_id")
-    public Long getJobId() {
-        return jobId;
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.service_id")
+    public Long getServiceId() {
+        return serviceId;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.761+08:00",
-        comments = "Source field: rpl_ddl.job_id")
-    public void setJobId(Long jobId) {
-        this.jobId = jobId;
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.service_id")
+    public void setServiceId(Long serviceId) {
+        this.serviceId = serviceId;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.761+08:00",
-        comments = "Source field: rpl_ddl.state")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.token")
+    public String getToken() {
+        return token;
+    }
+
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.token")
+    public void setToken(String token) {
+        this.token = token == null ? null : token.trim();
+    }
+
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.state")
     public Integer getState() {
         return state;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.761+08:00",
-        comments = "Source field: rpl_ddl.state")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.state")
     public void setState(Integer state) {
         this.state = state;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.761+08:00",
-        comments = "Source field: rpl_ddl.ddl_stmt")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.ddl_stmt")
     public String getDdlStmt() {
         return ddlStmt;
     }
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-12-01T14:20:15.761+08:00",
-        comments = "Source field: rpl_ddl.ddl_stmt")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.838+08:00", comments="Source field: rpl_ddl_main.ddl_stmt")
     public void setDdlStmt(String ddlStmt) {
         this.ddlStmt = ddlStmt == null ? null : ddlStmt.trim();
     }

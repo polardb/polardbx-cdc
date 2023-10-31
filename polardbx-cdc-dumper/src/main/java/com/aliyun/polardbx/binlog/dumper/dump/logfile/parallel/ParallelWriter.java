@@ -36,9 +36,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_PARALLEL_EVENT_DATA_BUFFER_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_PARALLEL_EVENT_DATA_MAX_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_PARALLEL_USE_BATCH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_PARALLEL_BUILD_MAX_SLOT_PAYLOAD_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_PARALLEL_BUILD_MAX_SLOT_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_PARALLEL_BUILD_WITH_BATCH;
 import static io.grpc.internal.GrpcUtil.getThreadFactory;
 
 /**
@@ -56,9 +56,10 @@ public class ParallelWriter {
     private final boolean dryRun;
     private final int dryRunMode;
     private final boolean useBatch;
-    private final int eventDataBufferSize;
-    private final int eventDataMaxSize;
+    private final int maxSlotSize;
+    private final int maxSlotPayloadSize;
     private final StreamMetrics metrics;
+    private final String threadName;
 
     private RingBuffer<EventData> disruptorMsgBuffer;
     private ExecutorService eventBuildExecutor;
@@ -68,7 +69,7 @@ public class ParallelWriter {
     private BatchEventToken currentBatchEventToken;
 
     public ParallelWriter(LogFileGenerator logFileGenerator, int ringBufferSize, int eventBuilderParallelism,
-                          StreamMetrics metrics, boolean dryRun, int dryRunMode) {
+                          StreamMetrics metrics, boolean dryRun, int dryRunMode, String threadName) {
         this.ringBufferSize = ringBufferSize;
         this.eventBuilderParallelism = eventBuilderParallelism;
         this.dryRun = dryRun;
@@ -78,10 +79,11 @@ public class ParallelWriter {
         this.handleContext = new HandleContext();
         this.handleContext.setLogFileGenerator(logFileGenerator);
         this.handleContext.setRunning(running);
-        this.useBatch = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_PARALLEL_USE_BATCH);
-        this.eventDataBufferSize = DynamicApplicationConfig.getInt(BINLOG_WRITE_PARALLEL_EVENT_DATA_BUFFER_SIZE);
-        this.eventDataMaxSize = DynamicApplicationConfig.getInt(BINLOG_WRITE_PARALLEL_EVENT_DATA_MAX_SIZE);
+        this.useBatch = DynamicApplicationConfig.getBoolean(BINLOG_PARALLEL_BUILD_WITH_BATCH);
+        this.maxSlotSize = DynamicApplicationConfig.getInt(BINLOG_PARALLEL_BUILD_MAX_SLOT_SIZE);
+        this.maxSlotPayloadSize = DynamicApplicationConfig.getInt(BINLOG_PARALLEL_BUILD_MAX_SLOT_PAYLOAD_SIZE);
         this.metrics = metrics;
+        this.threadName = threadName;
     }
 
     public void push(SingleEventToken eventToken) {
@@ -95,7 +97,7 @@ public class ParallelWriter {
                 currentBatchEventToken = new BatchEventToken();
             }
 
-            if (currentBatchEventToken.hasCapacity(eventToken, eventDataBufferSize, eventDataMaxSize) &&
+            if (currentBatchEventToken.hasCapacity(eventToken, maxSlotSize, maxSlotPayloadSize) &&
                 eventToken.getType() != SingleEventToken.Type.HEARTBEAT) {
                 currentBatchEventToken.addToken(eventToken);
                 return;
@@ -159,12 +161,12 @@ public class ParallelWriter {
         if (running.compareAndSet(false, true)) {
             // init
             this.disruptorMsgBuffer = RingBuffer
-                .createSingleProducer(new EventDataFactory(eventDataBufferSize), ringBufferSize,
+                .createSingleProducer(new EventDataFactory(maxSlotSize), ringBufferSize,
                     new BlockingWaitStrategy());
             this.eventBuildExecutor = Executors.newFixedThreadPool(eventBuilderParallelism,
-                getThreadFactory("log-event-builder" + "-%d", false));
+                getThreadFactory(threadName + "-event-builder" + "-%d", false));
             this.eventSinkExecutor = Executors.newSingleThreadExecutor(
-                getThreadFactory("log-event-sink" + "-%d", false));
+                getThreadFactory(threadName + "-event-sink" + "-%d", false));
 
             // stage 1
             ExceptionHandler<Object> exceptionHandler = new MessageEventExceptionHandler();

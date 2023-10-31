@@ -34,6 +34,7 @@ public class MySqlInfo {
     private ServerCharactorSet serverCharactorSet;
     private int lowerCaseTableNames;
     private int binlogChecksum = LogEvent.BINLOG_CHECKSUM_ALG_OFF;
+    private String sqlMode;
 
     public void init(MysqlConnection connection) {
         this.serverId = findServerId(connection);
@@ -44,6 +45,7 @@ public class MySqlInfo {
         this.serverCharactorSet = connection.getDefaultDatabaseCharset();
         this.lowerCaseTableNames = connection.getLowerCaseTableNames();
         this.binlogChecksum = connection.loadBinlogChecksum();
+        this.sqlMode = connection.loadSqlMode();
     }
 
     /**

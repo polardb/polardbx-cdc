@@ -17,6 +17,9 @@ package com.aliyun.polardbx.binlog.format.field;
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
+import com.google.common.collect.Sets;
+
+import java.util.Set;
 
 /**
  * MYSQL_TYPE_SET
@@ -40,8 +43,9 @@ public class SetField extends Field {
         String data = buildDataStr();
         final int nbits = (pkgLength & 0xFF) * 8;
         BitMap bitMap = new BitMap(nbits);
+        Set<String> valueSet = Sets.newHashSet(data.split(","));
         for (int i = 0; i < typeNames.length; i++) {
-            if (typeNames[i].replaceAll("'", "").equalsIgnoreCase(data)) {
+            if (valueSet.contains(typeNames[i].replaceAll("'", ""))) {
                 bitMap.set(i, true);
             }
         }

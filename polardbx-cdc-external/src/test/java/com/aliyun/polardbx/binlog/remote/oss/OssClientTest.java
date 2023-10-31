@@ -39,13 +39,14 @@ import com.aliyun.oss.model.UploadPartRequest;
 import com.aliyun.oss.model.UploadPartResult;
 import com.aliyun.oss.model.VersionListing;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.math.NumberUtils;
 import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.BeforeClass;
+import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
@@ -67,17 +68,14 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
  * @since 2022/8/9
  **/
 @Slf4j
-public class OssClientTest {
+@Ignore
+public class OssClientTest extends BaseTest {
     private static final String bucket = "yudong-bucket-bj";
     private static final String testPath = "oss-client-test";
     private static OSS ossClient;
 
-    @BeforeClass
-    public static void before() {
-        final SpringContextBootStrap appContextBootStrap =
-            new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
+    @Before
+    public void prepare() {
         String accessKeySecret = getString(ConfigKeys.OSS_ACCESSKEY_ID_SECRET);
         String accessKeyId = getString(ConfigKeys.OSS_ACCESSKEY_ID);
         String endPoint = getString(ConfigKeys.OSS_ENDPOINT);

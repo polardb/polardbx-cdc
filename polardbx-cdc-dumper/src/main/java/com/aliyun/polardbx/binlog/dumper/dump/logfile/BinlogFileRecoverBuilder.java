@@ -14,9 +14,11 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import lombok.AllArgsConstructor;
@@ -46,9 +48,10 @@ public class BinlogFileRecoverBuilder {
                 BinlogFileUtil.getFirstBinlogFileName(logFileManager.getGroupName(), logFileManager.getStreamName());
             startTso = "";
         } else {
+            String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
             Optional<BinlogOssRecord> record =
-                binlogOssRecordService.getRecordByLastTso(logFileManager.getGroupName(), logFileManager.getStreamName(),
-                    recoverTso);
+                binlogOssRecordService.getRecordByTso(logFileManager.getGroupName(), logFileManager.getStreamName(),
+                    clusterId, recoverTso);
             if (record.isPresent()) {
                 if (!StringUtils.equals(record.get().getBinlogFile(), recoverFileName)) {
                     throw new PolardbxException(String

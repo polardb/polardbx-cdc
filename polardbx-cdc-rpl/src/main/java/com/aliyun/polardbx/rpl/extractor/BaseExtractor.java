@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.rpl.extractor;
 
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
+import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.pipeline.BasePipeline;
 import com.aliyun.polardbx.rpl.pipeline.MessageEvent;
 import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
@@ -38,8 +39,8 @@ public class BaseExtractor {
         this.extractorConfig = extractorConfig;
     }
 
-    public boolean init() throws Exception {
-        return true;
+    public void init() throws Exception {
+        pipeline = TaskContext.getInstance().getPipeline();
     }
 
     public void start() throws Exception {

@@ -21,9 +21,13 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.domain.po.RplDdl;
-import com.aliyun.polardbx.rpl.common.CommonUtil;
+import com.aliyun.polardbx.binlog.domain.po.RplTask;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.relay.DdlRouteMode;
 import com.aliyun.polardbx.rpl.common.RplConstants;
+import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.dbmeta.DbMetaCache;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
@@ -39,10 +43,12 @@ import java.net.InetSocketAddress;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author shicai.xsc 2020/12/9 16:24
@@ -56,7 +62,7 @@ public class MysqlApplier extends BaseApplier {
     protected DbMetaCache dbMetaCache;
     protected ExecutorService executorService;
     protected DataSource defaultDataSource;
-    protected boolean firstDdl = true;
+    protected AtomicBoolean firstDdl = new AtomicBoolean(true);
 
     public MysqlApplier(ApplierConfig applierConfig, HostInfo hostInfo) {
         super(applierConfig);
@@ -69,78 +75,67 @@ public class MysqlApplier extends BaseApplier {
     }
 
     @Override
-    public boolean init() {
-        try {
-            log.info("init Applier: " + this.getClass().getName());
-            if (hostInfo.getServerId() == RplConstants.SERVER_ID_NULL) {
-                hostInfo.setServerId(getSrcServerId());
-            }
-            dbMetaCache = new DbMetaCache(hostInfo, applierConfig.getMaxPoolSize());
-            defaultDataSource = dbMetaCache.getDataSource();
-            executorService =
-                ThreadPoolUtil
-                    .createExecutorWithFixedNum(applierConfig.getMaxPoolSize(), "mysqlApplier");
-            return true;
-        } catch (Throwable e) {
-            log.error("MysqlApplier init failed", e);
-            return false;
+    public void init() throws Exception {
+        log.info("init Applier: " + this.getClass().getName());
+        if (hostInfo.getServerId() == RplConstants.SERVER_ID_NULL) {
+            hostInfo.setServerId(getSrcServerId());
         }
+        dbMetaCache = new DbMetaCache(hostInfo, applierConfig.getMaxPoolSize());
+        defaultDataSource = dbMetaCache.getDataSource();
+        executorService =
+            ThreadPoolUtil
+                .createExecutorWithFixedNum(applierConfig.getMaxPoolSize(), "mysqlApplier");
     }
 
     @Override
-    public boolean apply(List<DBMSEvent> dbmsEvents) {
-        if (dbmsEvents == null || dbmsEvents.size() == 0) {
-            return true;
+    public void apply(List<DBMSEvent> dbmsEvents) throws Exception {
+        if (dbmsEvents == null || dbmsEvents.isEmpty()) {
+            return;
         }
-
-        try {
-            boolean res;
-            if (dbmsEvents.size() == 1 && ApplyHelper.isDdl(dbmsEvents.get(0))) {
-                res = ddlApply(dbmsEvents.get(0));
-            } else {
-                res = dmlApply(dbmsEvents);
-            }
-            if (res) {
-                logCommitInfo(dbmsEvents);
-            }
-            return res;
-        } catch (Throwable e) {
-            log.error("apply failed", e);
-            return false;
+        if (dbmsEvents.size() == 1 && ApplyHelper.isDdl(dbmsEvents.get(0))) {
+            ddlApply(dbmsEvents.get(0));
+        } else {
+            dmlApply(dbmsEvents);
         }
+        logCommitInfo(dbmsEvents);
     }
 
     @Override
-    public boolean applyDdlSql(String schema, String sql) throws Exception {
-        log.debug("direct apply sql, schema: {}, sql: {}", schema, sql);
-        DataSource dataSource = StringUtils.isNotBlank(schema) ? dbMetaCache
-            .getDataSource(schema) : dbMetaCache.getDefaultDataSource();
+    public void applyDdlSql(String schema, String sql) throws Exception {
         SqlContext sqlContext = new SqlContext(sql, schema, null, null);
-        return ApplyHelper.execUpdate(dataSource, ApplyHelper.processDdlSql(sqlContext, schema));
+        execSqlContexts(Collections.singletonList(ApplyHelper.processDdlSql(sqlContext, schema)));
     }
 
-
-    protected boolean ddlApply(DBMSEvent dbmsEvent) throws Throwable {
+    protected void ddlApply(DBMSEvent dbmsEvent) throws Exception {
         if (!applierConfig.isEnableDdl()) {
             log.warn("ddlApply ignore since ddl is not enabled, dbmsEvent: {}", dbmsEvent);
-            return true;
+            return;
         }
-        // get tso
+
+        // prepare tso & token
         DefaultQueryLog queryLog = (DefaultQueryLog) dbmsEvent;
         String position = (String) (queryLog.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue());
         String tso = DdlHelper.getTso(queryLog.getQuery(), queryLog.getTimestamp(), position);
+        String token = UUID.randomUUID().toString();
 
-        // get ddlSqlContext
-        SqlContext sqlContext = ApplyHelper.getDdlSqlContext(queryLog, tso, applierConfig.isUseOriginalSql());
+        // prepare ddlSqlContext
+        SqlContext sqlContext = ApplyHelper.getDdlSqlContext(queryLog, token);
         if (sqlContext == null) {
-            log.warn("get ddl sql context error");
-            return true;
+            throw new PolardbxException("get ddl sql context error" + dbmsEvent);
         }
-        log.info("ddlApply start, schema: {}, sql: {}", sqlContext.getDstSchema(), sqlContext.getSql());
+        log.info("ddlApply start, schema: {}, sql: {}, tso: {}", sqlContext.getDstSchema(), sqlContext.getSql(), tso);
 
-        // try get ddl lock
-        RplDdl ddl = new RplDdl();
-        boolean lock = DdlHelper.getDdlLock(tso, sqlContext.getSql(), ddl);
+        // check if need align cross multi streams
+        boolean needAlign;
+        long alignMasterTaskId;
+        List<RplTask> rplTasks = DbTaskMetaManager.listTaskByService(TaskContext.getInstance().getServiceId());
+        DdlRouteMode mode = DdlHelper.getDdlRouteMode(queryLog.getQuery());
+        needAlign = rplTasks.size() > 1 && mode == DdlRouteMode.BROADCAST;
+        alignMasterTaskId = rplTasks.stream().map(RplTask::getId).min(Long::compareTo).get();
+
+        // prepare ddl log
+        RplDdl rplDdl = DdlHelper.prepareDdlLogAndWait(tso, sqlContext.getSql(), needAlign, alignMasterTaskId, token);
+        sqlContext.setSql(rplDdl.getDdlStmt());
 
         // for ddl like: create table db1.t1_1(id int, f1 int, f2 int),
         // the schema will be db2 if there is a record (db1, db2) in rewriteDbs,
@@ -148,66 +143,28 @@ public class MysqlApplier extends BaseApplier {
         DataSource dataSource = StringUtils.isNotBlank(sqlContext.getDstSchema()) ? dbMetaCache
             .getDataSource(sqlContext.getDstSchema()) : dbMetaCache.getDefaultDataSource();
 
-        // only repair state of first ddl when restart
-        if (firstDdl) {
-            firstDdl = false;
-            ApplyHelper.tryRepairRplDdlState(dataSource, tso, ddl);
-        }
-
         // execute ddl if get ddl lock
-        if (lock && ddl.getState() == DdlState.NOT_START.getValue()) {
-            boolean res = ApplyHelper.execUpdate(dataSource, sqlContext);
-            if (res) {
-                // set ddl status to RUNNING
-                RplDdl newDdl = new RplDdl();
-                newDdl.setId(ddl.getId());
-                newDdl.setState(DdlState.RUNNING.getValue());
-                DbTaskMetaManager.updateDdl(newDdl);
-            }
-            log.info("ddlApply end, result: {}, schema: {}, sql: {}", res, sqlContext.getDstSchema(),
-                sqlContext.getSql());
-            if (!res) {
-                log.error("ddlApply failed when submit ddl job");
-                return false;
-            }
-        }
-
-        // wait ddl finish
-        while (!DdlState.from(ddl.getState()).isFinished()) {
-            StatisticalProxy.getInstance().heartbeat();
-            if (lock) {
-                // check if ddl is done by "show full ddl"
-                DdlState state = ApplyHelper.getAsyncDdlState(dataSource, tso);
-                ddl.setState(state.getValue());
-                DbTaskMetaManager.updateDdl(ddl);
+        if (rplDdl.getState() == DdlState.RUNNING.getValue()) {
+            if (!needAlign || alignMasterTaskId == TaskContext.getInstance().getTaskId()) {
+                // 由于没有实现DdlState和DDL实际执行状态的完全一致
+                // 至多一个不一致的ddl
+                // 因此需要对第一个running状态的ddl进行一致性检测
+                DdlHelper.executeDdl(dataSource, sqlContext, firstDdl, tso, rplDdl, needAlign, dbMetaCache);
             } else {
-                ddl = DbTaskMetaManager.getDdl(tso);
+                DdlHelper.waitDdlCompleted(tso);
             }
-
-            if (DdlState.from(ddl.getState()).isFinished()) {
-                break;
-            }
-            Thread.sleep(100);
-        }
-
-        // check ddl succeed
-        if (ddl.getState() == DdlState.SUCCEED.getValue()) {
-            // refresh metadata
-            if (StringUtils.isNotBlank(sqlContext.getDstSchema()) && StringUtils.isNotBlank(sqlContext.getDstTable())) {
-                dbMetaCache.refreshTableInfo(sqlContext.getDstSchema(), sqlContext.getDstTable());
-            }
-            return true;
+        } else if (rplDdl.getState() == DdlState.SUCCEED.getValue()) {
+            // apply ddl succeed : do nothing
         } else {
-            log.error("ddlApply failed after ddl finished");
-            return false;
+            throw new PolardbxException("invalid rpl ddl state : " + rplDdl.getState());
         }
     }
 
-    protected boolean dmlApply(List<DBMSEvent> dbmsEvents) throws Throwable {
-        return trivialDmlApply(dbmsEvents);
+    protected void dmlApply(List<DBMSEvent> dbmsEvents) throws Exception {
+        trivialDmlApply(dbmsEvents);
     }
 
-    protected boolean trivialDmlApply(List<DBMSEvent> dbmsEvents) throws Throwable {
+    protected void trivialDmlApply(List<DBMSEvent> dbmsEvents) throws Exception {
         List<SqlContext> allSqlContexts = new ArrayList<>();
         for (DBMSEvent event : dbmsEvents) {
             DBMSRowChange rowChangeEvent = (DBMSRowChange) event;
@@ -215,7 +172,7 @@ public class MysqlApplier extends BaseApplier {
             allSqlContexts.addAll(sqlContexts);
         }
         // todo by jiyue use tran exec for serial apply
-        return execSqlContexts(allSqlContexts);
+        execSqlContexts(allSqlContexts);
     }
 
     protected List<SqlContext> getSqlContexts(DBMSRowChange rowChangeEvent, boolean safeMode) {
@@ -260,64 +217,51 @@ public class MysqlApplier extends BaseApplier {
                 }
             }
             return sqlContexts;
-        } catch (Throwable e) {
-            log.error("getSqlContexts failed, dstTbName: {}",
-                rowChangeEvent.getSchema() + "." + rowChangeEvent.getTable(), e);
-            return null;
+        } catch (Exception e) {
+            throw new PolardbxException("getSqlContexts failed, dstTbName:" + rowChangeEvent.getSchema()
+                + "." + rowChangeEvent.getTable(), e);
         }
     }
 
-    protected boolean execSqlContexts(List<SqlContext> sqlContexts) {
-        if (sqlContexts == null || sqlContexts.size() == 0) {
-            return true;
+    protected void execSqlContexts(List<SqlContext> sqlContexts) throws Exception {
+        if (sqlContexts == null || sqlContexts.isEmpty()) {
+            return;
         }
-        boolean res;
         for (SqlContext sqlContext : sqlContexts) {
             long startTime = System.currentTimeMillis();
-            res = ApplyHelper.execUpdate(defaultDataSource, sqlContext);
-            if (!res) {
-                return false;
-            }
+            DataSource dataSource = StringUtils.isNotBlank(sqlContext.getDstSchema()) ? dbMetaCache
+                .getDataSource(sqlContext.getDstSchema()) : dbMetaCache.getDefaultDataSource();
+            ApplyHelper.execUpdate(dataSource, sqlContext);
             long endTime = System.currentTimeMillis();
-            StatisticalProxy.getInstance().addApplyCount(1);
-            StatisticalProxy.getInstance().addRt(endTime - startTime);
+            StatMetrics.getInstance().addApplyCount(1);
+            StatMetrics.getInstance().addRt(endTime - startTime);
         }
-        return true;
     }
 
-    protected boolean execSqlContextsV2(List<SqlContextV2> sqlContexts) {
-        if (sqlContexts == null || sqlContexts.size() == 0) {
-            return true;
+    protected void execSqlContextsV2(List<SqlContextV2> sqlContexts) {
+        if (sqlContexts == null || sqlContexts.isEmpty()) {
+            return;
         }
-        boolean res;
         for (SqlContextV2 sqlContext : sqlContexts) {
             long startTime = System.currentTimeMillis();
-            res = ApplyHelper.execUpdate(defaultDataSource, sqlContext);
-            if (!res) {
-                return false;
-            }
+            ApplyHelper.execUpdate(defaultDataSource, sqlContext);
             long endTime = System.currentTimeMillis();
-            StatisticalProxy.getInstance().addApplyCount(1);
-            StatisticalProxy.getInstance().addRt(endTime - startTime);
+            StatMetrics.getInstance().addApplyCount(1);
+            StatMetrics.getInstance().addRt(endTime - startTime);
         }
-        return true;
     }
 
-    protected boolean tranExecSqlContexts(List<SqlContext> sqlContexts) {
+    protected void tranExecSqlContexts(List<SqlContext> sqlContexts) throws Exception {
         long startTime = System.currentTimeMillis();
-        boolean res = ApplyHelper.tranExecUpdate(defaultDataSource, sqlContexts);
-        if (res) {
-            long endTime = System.currentTimeMillis();
-            StatisticalProxy.getInstance().addApplyCount(1);
-            StatisticalProxy.getInstance().addRt(endTime - startTime);
-        }
-        return res;
+        ApplyHelper.tranExecUpdate(defaultDataSource, sqlContexts);
+        long endTime = System.currentTimeMillis();
+        StatMetrics.getInstance().addApplyCount(1);
+        StatMetrics.getInstance().addRt(endTime - startTime);
     }
-
 
     protected List<Integer> getIdentifyColumnsIndex(Map<String, List<Integer>> allTbIdentifyColumns,
                                                     String fullTbName,
-                                                    DefaultRowChange rowChange) throws Throwable {
+                                                    DefaultRowChange rowChange) throws Exception {
         if (allTbIdentifyColumns.containsKey(fullTbName)) {
             return allTbIdentifyColumns.get(fullTbName);
         }
@@ -334,7 +278,7 @@ public class MysqlApplier extends BaseApplier {
 
     protected List<Integer> getWhereColumnsIndex(Map<String, List<Integer>> allTbWhereColumns,
                                                  String fullTbName,
-                                                 DefaultRowChange rowChange) throws Throwable {
+                                                 DefaultRowChange rowChange) throws Exception {
         if (allTbWhereColumns.containsKey(fullTbName)) {
             return allTbWhereColumns.get(fullTbName);
         }
@@ -366,17 +310,13 @@ public class MysqlApplier extends BaseApplier {
      * 查询当前db的serverId信息
      */
     protected Long findServerId(MysqlConnection mysqlConnection) {
-        return mysqlConnection.query("show variables like 'server_id'", new MysqlConnection.ProcessJdbcResult<Long>() {
-
-            @Override
-            public Long process(ResultSet rs) throws SQLException {
-                if (rs.next()) {
-                    return rs.getLong(2);
-                } else {
-                    throw new CanalParseException(
-                        "command : show variables like 'server_id' has an error! pls check. you need (at least one "
-                            + "of) the SUPER,REPLICATION CLIENT privilege(s) for this operation");
-                }
+        return mysqlConnection.query("show variables like 'server_id'", rs -> {
+            if (rs.next()) {
+                return rs.getLong(2);
+            } else {
+                throw new CanalParseException(
+                    "command : show variables like 'server_id' has an error! pls check. you need (at least one "
+                        + "of) the SUPER,REPLICATION CLIENT privilege(s) for this operation");
             }
         });
     }

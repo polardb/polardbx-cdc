@@ -33,6 +33,9 @@ package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
@@ -40,7 +43,7 @@ import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
@@ -57,53 +60,49 @@ public class FullCopyApplier extends MysqlApplier {
     }
 
     @Override
-    public boolean apply(List<DBMSEvent> dbmsEvents) {
-        if (dbmsEvents == null || dbmsEvents.size() == 0) {
-            return true;
+    public void apply(List<DBMSEvent> dbmsEvents) throws Exception {
+        if (dbmsEvents == null || dbmsEvents.isEmpty()) {
+            return;
         }
-        try {
-            boolean res = dmlApply(dbmsEvents);
-            if (res) {
-                logCommitInfo(dbmsEvents);
-            }
-            return res;
-        } catch (Throwable e) {
-            log.error("apply failed", e);
-            return false;
-        }
+        dmlApply(dbmsEvents);
+        logCommitInfo(dbmsEvents);
     }
 
     @Override
-    protected boolean dmlApply(List<DBMSEvent> dbmsEvents) throws Throwable {
-        if (dbmsEvents == null || dbmsEvents.size() == 0) {
-            return true;
+    protected void dmlApply(List<DBMSEvent> dbmsEvents) throws Exception {
+        if (dbmsEvents == null || dbmsEvents.isEmpty()) {
+            return;
         }
-        return parallelExecSqlContexts((List<DefaultRowChange>) (List<?>) dbmsEvents);
+        try {
+            parallelExecSqlContexts((List<DefaultRowChange>) (List<?>) dbmsEvents, false);
+        } catch (Exception e) {
+            parallelExecSqlContexts((List<DefaultRowChange>) (List<?>) dbmsEvents, true);
+        }
     }
 
-    private boolean parallelExecSqlContexts(List<DefaultRowChange> allRowChanges) throws Throwable {
-        List<SqlContextV2> sqlContexts = getMergeInsertIgnoreSqlContexts(allRowChanges);
-        List<Future<Boolean>> futures = new ArrayList<>();
+    private void parallelExecSqlContexts(List<DefaultRowChange> allRowChanges, boolean isIgnore) throws Exception {
+        List<SqlContextV2> sqlContexts = getMergeInsertSqlContexts(allRowChanges, isIgnore);
+        List<Future<Void>> futures = new ArrayList<>();
         for (SqlContextV2 sqlContext : sqlContexts) {
-            Callable<Boolean> task = () -> {
-                boolean succeed = execSqlContextsV2(Arrays.asList(sqlContext));
-                sqlContext.setSucceed(succeed);
-                return succeed;
+            Callable<Void> task = () -> {
+                execSqlContextsV2(Collections.singletonList(sqlContext));
+                sqlContext.setSucceed(true);
+                return null;
             };
             futures.add(executorService.submit(task));
             // record merge size
-            StatisticalProxy.getInstance().addMergeBatchSize(sqlContext.getParamsList().size());
+            StatMetrics.getInstance().addMergeBatchSize(sqlContext.getParamsList().size());
         }
-        boolean res = true;
-        for (Future<Boolean> future : futures) {
-            res &= future.get();
+        PolardbxException exception = CommonUtil.waitAllTaskFinishedAndReturn(futures);
+        if (exception != null) {
+            throw exception;
         }
-        return res;
     }
 
-
-    protected List<SqlContextV2> getMergeInsertIgnoreSqlContexts(List<DefaultRowChange> rowChanges)
-        throws Throwable {
+    protected List<SqlContextV2> getMergeInsertSqlContexts(List<DefaultRowChange> rowChanges, boolean isIgnore)
+        throws Exception {
+        int insertMode = isIgnore ? RplConstants.INSERT_MODE_INSERT_IGNORE :
+            RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE;
         List<SqlContextV2> sqlContexts = new ArrayList<>();
         int nowMergeCount = 0;
         DefaultRowChange mergedRowChange = new DefaultRowChange();
@@ -123,10 +122,11 @@ public class FullCopyApplier extends MysqlApplier {
                 nowMergeCount++;
                 // 达到batch数要求 || 是最后一批数据
                 if (nowMergeCount == applierConfig.getMergeBatchSize() ||
-                    (i == rowChanges.size() -1 && j == nowRowChange.getRowSize())) {
-                    TableInfo dstTbInfo = dbMetaCache.getTableInfo(mergedRowChange.getSchema(), mergedRowChange.getTable());
+                    (i == rowChanges.size() - 1 && j == nowRowChange.getRowSize())) {
+                    TableInfo dstTbInfo =
+                        dbMetaCache.getTableInfo(mergedRowChange.getSchema(), mergedRowChange.getTable());
                     SqlContextV2 sqlContext = ApplyHelper.getMergeInsertSqlExecContextV2(mergedRowChange, dstTbInfo,
-                        RplConstants.INSERT_MODE_INSERT_IGNORE);
+                        insertMode);
                     sqlContexts.add(sqlContext);
                     nowMergeCount = 0;
                 }

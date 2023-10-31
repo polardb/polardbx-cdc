@@ -78,12 +78,16 @@ public class WriteItem {
     }
 
     public static TxnMergedToken buildTxnMergedToken(TxnToken token, String newTso) {
-        return TxnMergedToken.newBuilder()
+        TxnMergedToken mergedToken = TxnMergedToken.newBuilder()
             .setType(token.getType())
             .setSchema(token.getSchema())
             .setTso(newTso)
             .setPayload(token.getPayload())
             .setTable(token.getTable())
             .build();
+        if (token.hasServerId()) {
+            mergedToken = mergedToken.toBuilder().setServerId(token.getServerId()).build();
+        }
+        return mergedToken;
     }
 }

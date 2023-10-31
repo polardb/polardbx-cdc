@@ -25,7 +25,7 @@ import org.apache.commons.lang3.StringUtils;
  */
 public class BinlogPosition extends LogPosition {
 
-    private final static long[] pow10 = {
+    private static final long[] pow10 = {
         1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000,
         10000000000L, 100000000000L, 1000000000000L, 10000000000000L,
         100000000000000L, 1000000000000000L, 10000000000000000L, 100000000000000000L,
@@ -84,13 +84,15 @@ public class BinlogPosition extends LogPosition {
         if (StringUtils.isBlank(source)) {
             return null;
         }
-        // 格式： filename:position#masterid.timestamp
+        // 格式： filename:position#masterid.timestamp.T().rtso()#innerOffset
         int colonIndex = source.indexOf(':');
         int miscIndex = colonIndex + 1;
         int sharpIndex = source.indexOf('#', miscIndex);
         // NOTE: 向后兼容
         int semicolonIndex = source.indexOf(';', miscIndex);
-        int dotIndex = source.lastIndexOf('.');
+        int dotIndex = source.indexOf('.', sharpIndex);
+        int tsoIndex = source.indexOf("T(", sharpIndex);
+        int rtsoIndex = source.indexOf("rtso(", sharpIndex);
         // NOTE: 错误的位点
         if (colonIndex == -1) {
             return null;
@@ -121,13 +123,35 @@ public class BinlogPosition extends LogPosition {
 
         long timestamp = 0; // NOTE: 默认值为 0
         if (dotIndex != -1 && dotIndex > colonIndex) {
-            timestamp = Long.parseLong(source.substring(dotIndex + 1));
+            int lastIdx = source.indexOf(".", dotIndex + 1);
+            if (lastIdx > 0) {
+                timestamp = Long.parseLong(source.substring(dotIndex + 1, lastIdx));
+            } else {
+                timestamp = Long.parseLong(source.substring(dotIndex + 1));
+            }
+        }
+
+        Long tso = null;
+        if (tsoIndex > 0) {
+            int tsoEndIndex = source.indexOf(")", tsoIndex);
+            tso = Long.parseLong(source.substring(tsoIndex, tsoEndIndex));
+        }
+
+        String rtso = null;
+        if (rtsoIndex > 0) {
+            int rtsoEndIndex = source.indexOf(")", rtsoIndex);
+            rtso = source.substring(rtsoIndex + 5, rtsoEndIndex);
         }
 
         // NL
-        return new BinlogPosition(binlogSuffix, binlogPosition,
+        BinlogPosition position = new BinlogPosition(binlogSuffix, binlogPosition,
             masterId,
             timestamp);
+        position.setRtso(rtso);
+        if (tso != null) {
+            position.setTso(tso);
+        }
+        return position;
     }
 
     /**

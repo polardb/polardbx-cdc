@@ -25,15 +25,12 @@ import com.aliyun.polardbx.binlog.domain.TaskType;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- *
- **/
 public class TaskBootstrapSingleNodeTest {
 
     // 根据自己的测试需求进行调整
     private static final String START_TSO = "";
 
-    public static void main(String args[]) {
+    public static void main(String[] args) {
         TaskBootStrap bootStrap = new TaskBootStrap();
         bootStrap.setTaskConfigProvider(new TaskConfigProvider("Final") {
 
@@ -51,7 +48,7 @@ public class TaskBootstrapSingleNodeTest {
 
             private List<MergeSourceInfo> buildMergeSources() {
                 List<MergeSourceInfo> list = new ArrayList<>();
-                String storageInstanceList[] = {"polardbx-storage-0-master", "polardbx-storage-1-master"};
+                String[] storageInstanceList = {"polardbx-storage-0-master", "polardbx-storage-1-master"};
                 for (int i = 0; i < 2; i++) {
                     MergeSourceInfo info = new MergeSourceInfo();
                     info.setId(String.valueOf(i));

@@ -28,7 +28,7 @@ else
 fi
 
 get_dir_size() {
-    raw_amount=`du -s $cdc_log_path --exclude="rdsbinlog" --exclude="rocksdb" --exclude="rocksdb_x" | awk '{ print $1}' `
+    raw_amount=`du -s $cdc_log_path --exclude="rdsbinlog" --exclude="rocksdb" --exclude="rocksdb_x" --exclude="rocksdb_meta" --exclude="rocksdb_rpl" --exclude="binlogdump" | awk '{ print $1}' `
     temp=`echo $raw_amount | awk '{printf("%.2f\n",$1/1024^2)}' `
     use=$( printf "%.0f" $temp)
     return $use

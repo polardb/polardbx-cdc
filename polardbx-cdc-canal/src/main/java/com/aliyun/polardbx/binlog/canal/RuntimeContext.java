@@ -49,6 +49,7 @@ public class RuntimeContext {
     private long logPos;
     private String hostAddress;
     private String version;
+    private String sqlMode;
     private BinlogPosition startPosition;
     /**
      * 是否位点回溯启动
@@ -86,7 +87,7 @@ public class RuntimeContext {
 
     public void setAuthenticationInfo(AuthenticationInfo authenticationInfo) {
         this.authenticationInfo = authenticationInfo;
-        this.storageHashCode = Objects.hashCode(this.authenticationInfo.getStorageInstId()) + "";
+        this.storageHashCode = Objects.hashCode(this.authenticationInfo.getStorageMasterInstId()) + "";
     }
 
     public void markBindDnTransferMaxTSOBarrier() {
@@ -110,7 +111,7 @@ public class RuntimeContext {
     }
 
     public String getStorageInstId() {
-        return authenticationInfo.getStorageInstId();
+        return authenticationInfo.getStorageMasterInstId();
     }
 
     public ThreadRecorder getThreadRecorder() {
@@ -195,6 +196,14 @@ public class RuntimeContext {
 
     public void setVersion(String version) {
         this.version = version;
+    }
+
+    public String getSqlMode() {
+        return sqlMode;
+    }
+
+    public void setSqlMode(String sqlMode) {
+        this.sqlMode = sqlMode;
     }
 
     public long getServerId() {

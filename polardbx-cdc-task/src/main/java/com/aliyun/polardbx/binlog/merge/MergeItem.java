@@ -73,4 +73,13 @@ public class MergeItem implements Comparable<MergeItem> {
         target.mergeGroup = this.mergeGroup;
         return target;
     }
+
+    @Override
+    public String toString() {
+        return "MergeItem{" +
+            "sourceId='" + sourceId + '\'' +
+            ", txnToken=" + txnToken +
+            ", mergeGroupId='" + mergeGroupId + '\'' +
+            '}';
+    }
 }

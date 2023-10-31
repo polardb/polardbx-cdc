@@ -31,10 +31,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_LOG_DETAIL_ENABLE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_PARALLELISM;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_QUEUE_SIZE;
-import static com.aliyun.polardbx.binlog.transmit.relay.Constants.MDC_STREAM_SEQ;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_LOG_DETAIL_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_PARALLELISM;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_QUEUE_SIZE;
+import static com.aliyun.polardbx.binlog.Constants.MDC_STREAM_SEQ;
 import static com.aliyun.polardbx.binlog.transmit.relay.RelayKeyUtil.buildMinRelayKeyStr;
 import static com.aliyun.polardbx.binlog.transmit.relay.RelayKeyUtil.buildPrimaryKeyString;
 import static com.aliyun.polardbx.binlog.transmit.relay.RelayKeyUtil.buildRelayKey;
@@ -46,7 +46,7 @@ import static com.aliyun.polardbx.binlog.transmit.relay.RelayKeyUtil.buildRelayK
 @Slf4j
 public class ParallelDataWriter {
     private static final Logger TRANSMIT_WRITE_LOGGER = LoggerFactory.getLogger("transmitWriteLogger");
-    private static final int WRITER_COUNT = DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_WRITE_PARALLELISM);
+    private static final int WRITER_COUNT = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_PARALLELISM);
 
     private final AtomicBoolean running;
     private final Writer[] writers = new Writer[WRITER_COUNT];
@@ -93,7 +93,7 @@ public class ParallelDataWriter {
         private final AtomicLong takeCount;
 
         public Writer(int seq) {
-            int queueSize = DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_WRITE_QUEUE_SIZE);
+            int queueSize = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_QUEUE_SIZE);
             this.queue = new ArrayBlockingQueue<>(queueSize);
             this.metrics = new RelayWriterMetrics();
             this.putCount = new AtomicLong(0);
@@ -147,7 +147,7 @@ public class ParallelDataWriter {
         }
 
         private void logAfter(WriteItem writeItem) {
-            boolean logDetailEnable = DynamicApplicationConfig.getBoolean(BINLOG_X_TRANSMIT_WRITE_LOG_DETAIL_ENABLE);
+            boolean logDetailEnable = DynamicApplicationConfig.getBoolean(BINLOGX_TRANSMIT_WRITE_LOG_DETAIL_ENABLED);
             if (logDetailEnable) {
                 if (writeItem.getTxnToken().getType() == TxnType.DML) {
                     logWriteDml(writeItem.getStreamSeq(), writeItem.getKeyStr(), writeItem.getItemList());

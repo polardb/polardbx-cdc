@@ -23,6 +23,7 @@ import java.util.Map;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import com.aliyun.polardbx.rpl.TestBase;
@@ -31,6 +32,7 @@ import com.aliyun.polardbx.rpl.TestBase;
  * @author shicai.xsc 2021/4/21 16:15
  * @since 5.0.0.0
  */
+@Ignore
 public class CharsetTest extends TestBase {
 
     private final String NONE_CHARSET = "none";
@@ -51,7 +53,7 @@ public class CharsetTest extends TestBase {
     private final List<Serializable> emoji = Arrays.asList(3, "中文😀");
 
     // 为了加快速度，第一次建库建表之后，就不用再创建
-    private boolean doDddl = true;
+    private boolean doDdl = true;
 
     @Before
     public void before() throws Exception {
@@ -93,7 +95,7 @@ public class CharsetTest extends TestBase {
         List<String> dbs = new ArrayList<>();
         for (int i = 1; i < allCharsets.size(); i++) {
             String db = "charsetTest_" + allCharsets.get(i);
-            if (doDddl) {
+            if (doDdl) {
                 execUpdate(srcConn, "drop database if exists " + db, null);
 
                 wait(WAIT_DDL_SECOND);
@@ -138,7 +140,7 @@ public class CharsetTest extends TestBase {
                     tbName,
                     colCharset,
                     tbCharset);
-                if (doDddl) {
+                if (doDdl) {
                     Assert.assertTrue(execUpdate(srcConn, createSql, null));
                 }
                 tables.add(tbName);

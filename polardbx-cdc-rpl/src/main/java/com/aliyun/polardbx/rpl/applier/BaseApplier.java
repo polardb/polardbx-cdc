@@ -23,6 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * @author shicai.xsc 2021/2/18 21:45
@@ -42,19 +43,17 @@ public class BaseApplier {
         this.applierConfig = applierConfig;
     }
 
-    public boolean init() {
-        return true;
+    public void init() throws Exception {
     }
 
-    public boolean apply(List<DBMSEvent> dbmsEvents) {
-        return true;
+    public void apply(List<DBMSEvent> dbmsEvents) throws Exception {
     }
 
-    public boolean tranApply(List<Transaction> transactions) {
-        return true;
+    public void tranApply(List<Transaction> transactions) throws Exception {
     }
 
-    public boolean applyDdlSql(String sql, String schema) throws Exception {return true; }
+    public void applyDdlSql(String sql, String schema) throws Exception {
+    }
 
     public void logCommitInfo(List<DBMSEvent> dbmsEvents) {
         List<String> logs = new ArrayList<>();
@@ -62,10 +61,15 @@ public class BaseApplier {
             for (DBMSEvent event : dbmsEvents) {
                 logs.addAll(LogUtil.generateCommitLog(event, null));
             }
-        } else if (dbmsEvents.size() > 0 && applierConfig.getLogCommitLevel() == RplConstants.LOG_END_COMMIT) {
+        } else if (!dbmsEvents.isEmpty() && applierConfig.getLogCommitLevel() == RplConstants.LOG_END_COMMIT) {
             logs.addAll(LogUtil.generateCommitLog(dbmsEvents.get(dbmsEvents.size() - 1), null));
         }
         LogUtil.writeBatchLogs(logs, LogUtil.getCommitLogger());
     }
 
+    public void start() {
+    }
+
+    public void stop() {
+    }
 }

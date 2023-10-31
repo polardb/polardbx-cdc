@@ -14,11 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.canal.system.PolarxCommandType;
-import com.aliyun.polardbx.binlog.cdc.meta.MetaType;
+import com.aliyun.polardbx.binlog.PolarxCommandType;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapperExtend;
@@ -32,10 +30,10 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.domain.po.BinlogPolarxCommand;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -49,9 +47,8 @@ import java.util.UUID;
  * @author yanfenglin
  */
 @Component
+@Slf4j
 public class TableMetaHistoryDbHelper {
-
-    private static final Logger log = LoggerFactory.getLogger(TableMetaHistoryWatcher.class);
 
     @Resource
     private BinlogLogicMetaHistoryMapper logicMetaHistoryMapper;
@@ -67,6 +64,8 @@ public class TableMetaHistoryDbHelper {
 
     @Resource
     private BinlogOssRecordMapperExtend binlogOssRecordMapperExtend;
+
+    private int buildMetaSnapshotRetryTimes = 0;
 
     @Transactional(rollbackFor = Throwable.class)
     public void tryClean() {
@@ -88,40 +87,40 @@ public class TableMetaHistoryDbHelper {
         if (log.isDebugEnabled()) {
             log.debug("begin to clean logic history");
         }
-        List<BinlogLogicMetaHistory> recentSnapshotMetaHistoryList =
-            // 查找2个
-            logicMetaHistoryMapper.select(s -> s.where(BinlogLogicMetaHistoryDynamicSqlSupport.type,
-                SqlBuilder.isEqualTo(MetaType.SNAPSHOT.getValue()))
-                .orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso.descending()).limit(2));
+        // 查找2个
+        List<String> lastest2SnapshotTsoList = logicMetaHistoryMapperExt.getLatest2SnapshotTso();
 
-        if (!CollectionUtils.isEmpty(recentSnapshotMetaHistoryList) && recentSnapshotMetaHistoryList.size() == 2) {
-            BinlogLogicMetaHistory recentBinlogLogicMetaHistory = recentSnapshotMetaHistoryList.get(1);
+        if (!CollectionUtils.isEmpty(lastest2SnapshotTsoList) && lastest2SnapshotTsoList.size() == 2) {
+            // 倒数第二个tso
+            String secondlyRecentTso = lastest2SnapshotTsoList.get(1);
 
             List<BinlogOssRecord> binlogOssRecordList = binlogOssRecordMapperExtend.selectMaxTso();
             String maxTSO = null;
             for (BinlogOssRecord record : binlogOssRecordList) {
                 if (record == null || StringUtils.isBlank(record.getLastTso())) {
-                    maxTSO = null;
-                    break;
+                    // 可能是某个集群reset了,不能清理
+                    return null;
                 } else {
                     maxTSO = CommonUtils.min(maxTSO, record.getLastTso());
                 }
             }
             if (StringUtils.isBlank(maxTSO)) {
+                // 没有binlog,不能清理
                 return null;
             }
-            if (recentBinlogLogicMetaHistory.getTso().compareTo(maxTSO) > 0) {
+            if (secondlyRecentTso.compareTo(maxTSO) > 0) {
+                // secondly recent snap tso > maxTso  ，不能清理，保障最近一个文件有snap可用
                 return null;
             }
             int deleteCount = 0;
-            if (DynamicApplicationConfig.getBoolean(ConfigKeys.META_DDL_RECORD_LOGIC_SOFTDELETE_ENABLE)) {
-                deleteCount = logicMetaHistoryMapperExt.softClean(recentBinlogLogicMetaHistory.getTso());
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.META_PURGE_LOGIC_DDL_SOFT_DELETE_ENABLED)) {
+                deleteCount = logicMetaHistoryMapperExt.softClean(secondlyRecentTso);
             } else {
                 deleteCount = logicMetaHistoryMapper.delete(s -> s.where(BinlogLogicMetaHistoryDynamicSqlSupport.tso,
-                    SqlBuilder.isLessThan(recentBinlogLogicMetaHistory.getTso())));
+                    SqlBuilder.isLessThan(secondlyRecentTso)));
             }
             log.warn("clean logic meta rows count " + deleteCount);
-            return recentBinlogLogicMetaHistory.getTso();
+            return secondlyRecentTso;
         }
         return null;
     }
@@ -142,21 +141,18 @@ public class TableMetaHistoryDbHelper {
     }
 
     private long getRegionDDLCount() {
-        Optional<BinlogLogicMetaHistory> snapshotLogicMetaOptional = logicMetaHistoryMapper
-            .selectOne(s -> s
-                .where(BinlogLogicMetaHistoryDynamicSqlSupport.type, SqlBuilder.isEqualTo(MetaType.SNAPSHOT.getValue()))
-                .orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso.descending())
-                .limit(1));
+        String latestSnapshotTso = logicMetaHistoryMapperExt.getLatestSnapshotTso();
         long phyCount;
+        String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
         //只计算大于最近一次snap后产生的ddl个数
-        if (snapshotLogicMetaOptional.isPresent()) {
-            BinlogLogicMetaHistory binlogLogicMetaHistory = snapshotLogicMetaOptional.get();
+        if (StringUtils.isNotBlank(latestSnapshotTso)) {
             phyCount = phyDdlHistoryMapper
                 .count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.tso,
-                    SqlBuilder.isGreaterThan(binlogLogicMetaHistory.getTso())));
+                        SqlBuilder.isGreaterThan(latestSnapshotTso))
+                    .and(BinlogPhyDdlHistoryDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
         } else {
             phyCount = phyDdlHistoryMapper
-                .count(s -> s);
+                .count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
         }
         return phyCount;
     }
@@ -164,7 +160,7 @@ public class TableMetaHistoryDbHelper {
     private boolean testLastCommandFinish() {
         Optional<BinlogPolarxCommand> commandOptional = polarxCommandMapper
             .selectOne(s -> s.where(BinlogPolarxCommandDynamicSqlSupport.cmdType, SqlBuilder.isEqualTo(
-                PolarxCommandType.BUILD_META_SNAPSHOT.name()))
+                    PolarxCommandType.BUILD_META_SNAPSHOT.name()))
                 .orderBy(BinlogPolarxCommandDynamicSqlSupport.gmtCreated.descending()).limit(1));
         if (commandOptional.isPresent()) {
             BinlogPolarxCommand command = commandOptional.get();
@@ -172,12 +168,25 @@ public class TableMetaHistoryDbHelper {
                 log.warn("binlog polarx command status is running!");
                 return false;
             }
+
             if (command.getCmdStatus() == 2) {
-                log.warn("binlog polarx command status is error, msg : " + command.getCmdReply());
+                log.error("binlog polarx command status is error, reply:{}, retry times:{}", command.getCmdReply(),
+                    buildMetaSnapshotRetryTimes);
                 MonitorManager.getInstance()
                     .triggerAlarm(MonitorType.META_SNAP_REBUILD_ERROR_WARNNIN, command.getCmdReply());
+
+                // 更改cmd status为0，尝试重新构建
+                if (buildMetaSnapshotRetryTimes < DynamicApplicationConfig.getLong(
+                    ConfigKeys.META_BUILD_SNAPSHOT_RETRY_TIMES)) {
+                    buildMetaSnapshotRetryTimes++;
+                    BinlogPolarxCommand updateCommand = new BinlogPolarxCommand();
+                    updateCommand.setId(command.getId());
+                    updateCommand.setCmdStatus(0L);
+                    polarxCommandMapper.updateByPrimaryKeySelective(updateCommand);
+                }
                 return false;
             }
+
             List<BinlogLogicMetaHistory> selectedList = logicMetaHistoryMapper.select(s -> s
                 .where(BinlogLogicMetaHistoryDynamicSqlSupport.instructionId,
                     SqlBuilder.isEqualTo(command.getCmdId())));
@@ -187,6 +196,9 @@ public class TableMetaHistoryDbHelper {
             }
 
         }
+
+        buildMetaSnapshotRetryTimes = 0;
+
         return true;
 
     }
@@ -210,11 +222,9 @@ public class TableMetaHistoryDbHelper {
         }
         // 查找最近snap后产生的ddl数量
         long phyCount = getRegionDDLCount();
-        if (log.isDebugEnabled()) {
-            log.debug("last phy count : " + phyCount);
-        }
+        log.info("last phy count: " + phyCount);
         // 按照各自的ddl数量判断
-        int limit = DynamicApplicationConfig.getInt(ConfigKeys.META_DDL_RECORD_TABLE_META_COUNT_LIMIT);
+        int limit = DynamicApplicationConfig.getInt(ConfigKeys.META_BUILD_FULL_SNAPSHOT_THRESHOLD);
         if (phyCount > limit) {
             // 检测上一次指令是否执行结束
             if (!testLastCommandFinish()) {

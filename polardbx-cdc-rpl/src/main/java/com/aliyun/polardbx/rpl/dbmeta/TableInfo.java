@@ -52,48 +52,38 @@ public class TableInfo {
         if (CollectionUtils.isEmpty(keyList)) {
             // 无主键表
             if (CollectionUtils.isEmpty(pks)) {
-                for (ColumnInfo column: columns) {
+                for (ColumnInfo column : columns) {
                     keyList.add(column.getName());
                 }
                 return keyList;
             } else {
                 keyList.addAll(pks);
             }
+            extractKey(dbShardKey);
+            extractKey(tbShardKey);
+        }
+        return keyList;
+    }
 
-
-            if (StringUtils.isNotBlank(dbShardKey)) {
-                // use first key in range hash. e.g. CINEMA_UID,TENANT_ID
-                String[] s = dbShardKey.split(",");
-                if (!keyList.contains(s[0])) {
-                    keyList.add(s[0]);
-                }
-                if (s.length >= 2) {
-                    if (!keyList.contains(s[1])) {
-                        keyList.add(s[1]);
-                    }
-                }
+    public void extractKey(String rawString) {
+        if (StringUtils.isNotBlank(rawString)) {
+            // use first key in range hash. e.g. CINEMA_UID,TENANT_ID
+            String[] s = rawString.split("[,;]");
+            if (!keyList.contains(s[0])) {
+                keyList.add(s[0]);
             }
-
-            if (StringUtils.isNotBlank(tbShardKey)) {
-                // use first key in range hash. e.g. CINEMA_UID,TENANT_ID
-                String[] s = tbShardKey.split(",");
-                if (!keyList.contains(s[0])) {
-                    keyList.add(s[0]);
-                }
-                if (s.length >= 2) {
-                    if (!keyList.contains(s[1])) {
-                        keyList.add(s[1]);
-                    }
+            if (s.length >= 2) {
+                if (!keyList.contains(s[1])) {
+                    keyList.add(s[1]);
                 }
             }
         }
-        return keyList;
     }
 
     synchronized public List<String> getIdentifyKeyList() {
         if (CollectionUtils.isEmpty(identifyKeyList)) {
             identifyKeyList = new ArrayList<>(getKeyList());
-            for (String uk: uks) {
+            for (String uk : uks) {
                 if (!identifyKeyList.contains(uk)) {
                     identifyKeyList.add(uk);
                 }

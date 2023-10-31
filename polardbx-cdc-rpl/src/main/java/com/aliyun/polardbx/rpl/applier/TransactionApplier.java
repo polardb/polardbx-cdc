@@ -21,7 +21,7 @@ import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -35,73 +35,59 @@ public class TransactionApplier extends MysqlApplier {
     }
 
     @Override
-    public boolean tranApply(List<Transaction> transactions) {
-        boolean res = true;
-        try {
-            if (transactions.size() == 1 && transactions.get(0).getEventSize() > 0
-                && ApplyHelper.isDdl(transactions.get(0).peekFirst())) {
-                return ddlApply(transactions.get(0).peekFirst());
-            }
+    public void tranApply(List<Transaction> transactions) throws Exception {
+        if (transactions.size() == 1 && transactions.get(0).getEventSize() > 0
+            && ApplyHelper.isDdl(transactions.get(0).peekFirst())) {
+            ddlApply(transactions.get(0).peekFirst());
+        }
 
-            int i = 0;
+        int i = 0;
+        while (i < transactions.size()) {
+            List<SqlContext> sqlContexts = new ArrayList<>();
+            DBMSEvent lastEvent = null;
+            // merge multiple small transactions into one to accelerate
             while (i < transactions.size()) {
-                List<SqlContext> sqlContexts = new ArrayList<>();
-                DBMSEvent lastEvent = null;
-                // merge multiple small transactions into one to accelerate
-                while (i < transactions.size()) {
-                    Transaction curTransaction = transactions.get(i);
-                    if (curTransaction.getEventSize() == 0) {
-                        i++;
-                        continue;
-                    }
-
-                    if (curTransaction.isPersisted()) {
-                        log.info("current transaction is persisted, will apply with stream mode!");
-                        if (sqlContexts.size() > 0) {
-                            res &= tranExecSqlContexts(sqlContexts);
-                            sqlContexts.clear();
-                        }
-
-                        lastEvent = curTransaction.peekLast();
-                        Transaction.RangeIterator iterator = curTransaction.rangeIterator();
-                        while (iterator.hasNext()) {
-                            Transaction.Range range = iterator.next();
-                            for (DBMSEvent event : range.getEvents()) {
-                                DBMSRowChange rowChangeEvent = (DBMSRowChange) event;
-                                List<SqlContext> list = getSqlContexts(rowChangeEvent, safeMode);
-                                res &= tranExecSqlContexts(list);
-                            }
-                        }
-                    } else {
-                        if (sqlContexts.size() == 0
-                            || sqlContexts.size() + curTransaction.getEventSize() < applierConfig.getSendBatchSize()) {
-                            lastEvent = curTransaction.peekLast();
-                            sqlContexts.addAll(getSqlContexts(curTransaction));
-                            i++;
-                        } else {
-                            break;
-                        }
-                    }
-                }
-
-                if (sqlContexts.size() == 0) {
+                Transaction curTransaction = transactions.get(i);
+                if (curTransaction.getEventSize() == 0) {
+                    i++;
                     continue;
                 }
 
-                res &= tranExecSqlContexts(sqlContexts);
-                sqlContexts.clear();
-                if (!res) {
-                    log.error("tranApply failed");
-                    return res;
+                if (curTransaction.isPersisted()) {
+                    log.info("current transaction is persisted, will apply with stream mode!");
+                    if (!sqlContexts.isEmpty()) {
+                        tranExecSqlContexts(sqlContexts);
+                        sqlContexts.clear();
+                    }
+
+                    lastEvent = curTransaction.peekLast();
+                    Transaction.RangeIterator iterator = curTransaction.rangeIterator();
+                    while (iterator.hasNext()) {
+                        Transaction.Range range = iterator.next();
+                        for (DBMSEvent event : range.getEvents()) {
+                            DBMSRowChange rowChangeEvent = (DBMSRowChange) event;
+                            List<SqlContext> list = getSqlContexts(rowChangeEvent, safeMode);
+                            tranExecSqlContexts(list);
+                        }
+                    }
                 } else {
-                    logCommitInfo(Arrays.asList(lastEvent));
+                    if (sqlContexts.isEmpty()
+                        || sqlContexts.size() + curTransaction.getEventSize() < applierConfig.getSendBatchSize()) {
+                        lastEvent = curTransaction.peekLast();
+                        sqlContexts.addAll(getSqlContexts(curTransaction));
+                        i++;
+                    } else {
+                        break;
+                    }
                 }
             }
-        } catch (Throwable e) {
-            log.error("tranApply failed", e);
-            res = false;
+            if (sqlContexts.isEmpty()) {
+                continue;
+            }
+            tranExecSqlContexts(sqlContexts);
+            sqlContexts.clear();
+            logCommitInfo(Collections.singletonList(lastEvent));
         }
-        return res;
     }
 
     private List<SqlContext> getSqlContexts(Transaction transaction) {

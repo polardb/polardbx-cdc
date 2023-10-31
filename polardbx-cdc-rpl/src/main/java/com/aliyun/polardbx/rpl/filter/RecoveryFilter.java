@@ -105,6 +105,7 @@ public class RecoveryFilter {
             return generateEndFlag();
         }
 
+        // 只处理 dbmsRowChange 和 queryLog 两种类型的event
         if (event instanceof DBMSQueryLog) {
             if (!isFuzzySearch) {
                 String traceId = findTraceId((DBMSQueryLog) event);
@@ -116,7 +117,7 @@ public class RecoveryFilter {
 
                 log.info("match: " + match);
             }
-        } else {
+        } else if (event instanceof DBMSRowChange) {
             if (!filterBySchemaAndTable((DBMSRowChange) event)) {
                 return null;
             }

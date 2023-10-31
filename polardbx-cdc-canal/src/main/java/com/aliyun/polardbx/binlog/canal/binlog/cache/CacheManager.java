@@ -25,8 +25,8 @@ import java.io.InputStream;
 import java.util.LinkedList;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RDSBINLOG_DOWNLOAD_DIR;
 
 public class CacheManager {
 
@@ -40,12 +40,12 @@ public class CacheManager {
     private AtomicInteger seq = new AtomicInteger(0);
 
     private CacheManager() {
-        cacheSize = DynamicApplicationConfig.getInt(ConfigKeys.TASK_OSS_CACHE_SIZE);
-        maxCacheSize = DynamicApplicationConfig.getInt(ConfigKeys.TASK_OSS_CACHE_MAXSIZE);
+        cacheSize = DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CACHE_UNIT_SIZE);
+        maxCacheSize = DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CACHE_SIZE_LIMIT);
         bufferLimitCounter.set(maxCacheSize / cacheSize);
-        path = DynamicApplicationConfig.getString(TASK_RDSBINLOG_DOWNLOAD_DIR) + File.separator +
+        path = DynamicApplicationConfig.getString(TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR) + File.separator +
             DynamicApplicationConfig.getString(TASK_NAME) + File.separator + "cache";
-        mode = CacheMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.TASK_OSS_CACHE_MODE));
+        mode = CacheMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CACHE_MODE));
 
         FileUtils.deleteQuietly(new File(path));
     }

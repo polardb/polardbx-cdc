@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.handle.processor;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.WriteRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.handle.ILogEventProcessor;
@@ -22,6 +21,7 @@ import com.aliyun.polardbx.binlog.canal.core.handle.ProcessorContext;
 import com.aliyun.polardbx.binlog.canal.core.model.TranPosition;
 import com.aliyun.polardbx.binlog.canal.system.InstructionCommand;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,26 +29,32 @@ public class WriteRowEventProcessor implements ILogEventProcessor<WriteRowsLogEv
 
     private static final Logger logger = LoggerFactory.getLogger("searchLogger");
 
-    private boolean searchCdcStart;
+    private final boolean searchCdcStart;
+    private final String clusterId;
 
-    public WriteRowEventProcessor(boolean searchCdcStart) {
+    public WriteRowEventProcessor(boolean searchCdcStart, String clusterId) {
         this.searchCdcStart = searchCdcStart;
+        this.clusterId = clusterId;
     }
 
     @Override
     public void handle(WriteRowsLogEvent event, ProcessorContext context) {
+        if (context.getCurrentTran() == null) {
+            return;
+        }
         TableMapLogEvent tm = event.getTable();
         if (SystemDB.isInstruction(tm.getDbName(), tm.getTableName())) {
             if (isTerminalCommand(context.getCommandTran())) {
                 return;
             }
-            InstructionCommand command = SystemDB.getInstance().parseInstructionCommand(event);
+            InstructionCommand command = SystemDB.parseInstructionCommand(event);
             if (searchCdcStart && !command.isCdcStart()) {
                 return;
             }
+
             context.getCurrentTran().setCommand(command);
             context.setCommandTran(context.getCurrentTran());
-            logger.warn("wrep find cdc instruction type : " + command);
+            logger.warn("wrap find cdc instruction type : " + command);
             return;
         }
 

@@ -14,20 +14,13 @@
  */
 package com.aliyun.polardbx.binlog.format;
 
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
 import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
-import com.aliyun.polardbx.binlog.format.utils.SQLModeConsts;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.UnsupportedEncodingException;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DDL_STRICT_TRANS_TABLES_MODE_BLACKLIST_DB;
 
 public class QueryEventBuilder extends BinlogBuilder {
 
@@ -55,8 +48,6 @@ public class QueryEventBuilder extends BinlogBuilder {
 
     public static final String ISO_8859_1 = "ISO-8859-1";
 
-    private static final Set<String> strictModeBlackList = buildBlackList();
-
     /**
      * The ID of the thread that issued this statement.
      * Needed for temporary tables.
@@ -67,7 +58,15 @@ public class QueryEventBuilder extends BinlogBuilder {
      * The time in seconds that the statement took to execute. Only useful for inspection by the DBA.
      */
     private final int executeTime;
-
+    /**
+     * default database name
+     */
+    private final String schema;
+    private final String queryString;
+    private final boolean isDDL;
+    private final int clientCharset;
+    private final int connectionCharset;
+    private final int serverCharset;
     /**
      * The error code resulting from execution of the statement on the master.
      * Error codes are defined in include/mysqld_error.h. 0 means no error.
@@ -84,14 +83,12 @@ public class QueryEventBuilder extends BinlogBuilder {
      * and if they are different it stops replicating (unless --slave-skip-errors was used to ignore the error).
      */
     private int errorCode = 0;
-
     /**
      * If flags2_inited==0, this is an event from 3.23 or 4.0; nothing to
      * print (remember we don't produce mixed relay logs so there cannot be
      * 5.0 events before that one so there is nothing to reset).
      */
     private boolean flags2_inited;
-
     /**
      * Now the session variables;
      * it's more efficient to pass SQL_MODE as a number instead of a
@@ -105,7 +102,6 @@ public class QueryEventBuilder extends BinlogBuilder {
      * gracefully). So this code should always be good.
      */
     private boolean sql_mode_inited;
-
     /**
      * Colleagues: please never free(thd->catalog) in MySQL. This would
      * lead to bugs as here thd->catalog is a part of an alloced block,
@@ -114,7 +110,6 @@ public class QueryEventBuilder extends BinlogBuilder {
      * you.
      */
     private boolean catalog_len;
-
     /**
      * In 5.0.x where x<4 masters we used to store the end zero here. This was
      * a waste of one byte so we don't do it in x>=4 masters. We change code to
@@ -134,56 +129,59 @@ public class QueryEventBuilder extends BinlogBuilder {
      * recognize Q_CATALOG_CODE and have no problem.
      */
     private boolean auto_increment_increment;
-
     /**
      * print the catalog when we feature SET CATALOG
      */
     private boolean charset_inited;
-
     /**
      * Note that our event becomes dependent on the Time_zone object
      * representing the time zone. Fortunately such objects are never deleted
      * or changed during mysqld's lifetime.
      */
     private boolean time_zone_len;
-
     private boolean lc_time_names_number;
-
     private boolean charset_database_number;
-
     /**
      * is used to evaluate the filter rules specified by --replicate-do-table / --replicate-ignore-table
      */
     private boolean table_map_for_update;
-    /**
-     * default database name
-     */
-    private final String schema;
-    private final String queryString;
     private int statusVarStartOffset;
-    private final boolean isDDL;
-    private final int clientCharset;
-    private final int connectionCharset;
-    private final int serverCharset;
+    private long sqlMode;
+
+    private long flags2;
 
     public QueryEventBuilder(String schema, String queryString, int clientCharset, int connectionCharset,
-                             int serverCharset, boolean isDDL, int createTime, long serverId) {
+                             int serverCharset, boolean isDDL, int createTime, long serverId, long sqlMode) {
+        this(schema, queryString, clientCharset, connectionCharset, serverCharset, isDDL, createTime, serverId,
+            sqlMode, 1, 0);
+    }
+
+    public QueryEventBuilder(String schema, String queryString, int clientCharset, int connectionCharset,
+                             int serverCharset, boolean isDDL, int createTime, long serverId, long sqlMode,
+                             int costTime, long flags2) {
         super(createTime, BinlogEventType.QUERY_EVENT.getType(), serverId);
         this.schema = schema;
         this.queryString = queryString;
-        this.executeTime = (int) TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
+        this.executeTime = costTime;
         this.threadId = 1;
         this.eventType = BinlogEventType.QUERY_EVENT.getType();
         this.clientCharset = clientCharset;
         this.connectionCharset = connectionCharset;
         this.serverCharset = serverCharset;
         this.isDDL = isDDL;
+        this.sqlMode = sqlMode;
+        this.flags2 = flags2;
+    }
+
+    public QueryEventBuilder(String schema, String queryString, int clientCharset, int connectionCharset,
+                             int serverCharset, boolean isDDL, int createTime, long serverId) {
+        this(schema, queryString, clientCharset, connectionCharset, serverCharset, isDDL, createTime, serverId, 0);
     }
 
     private int putStatusVars(AutoExpandBuffer outputData) throws UnsupportedEncodingException {
         int begin = outputData.position();
         StatusVarPars statuVarPars = new StatusVarPars(outputData);
-        statuVarPars.putInt(Q_FLAGS2_CODE, 0);
+        statuVarPars.putInt(Q_FLAGS2_CODE, flags2);
         statuVarPars.putLong(Q_SQL_MODE_CODE, buildSqlMode());
         statuVarPars.putString(Q_CATALOG_NZ_CODE, "std");
         statuVarPars.putString(Q_TIME_ZONE_CODE, "SYSTEM");
@@ -218,7 +216,7 @@ public class QueryEventBuilder extends BinlogBuilder {
         // null-terminated for schema
         numberToBytes(outputData, 0, INT8);
         writeString(outputData, queryString, charset, false);
-        outputData.putShort(len, statusVarStartOffset);
+        outputData.putShort(statusVarStartOffset, len);
     }
 
     @Override
@@ -232,23 +230,7 @@ public class QueryEventBuilder extends BinlogBuilder {
     }
 
     private long buildSqlMode() {
-        long mode = SQLModeConsts.MODE_ONLY_FULL_GROUP_BY | SQLModeConsts.MODE_ERROR_FOR_DIVISION_BY_ZERO |
-            SQLModeConsts.MODE_NO_ENGINE_SUBSTITUTION;
-        if (!strictModeBlackList.contains(StringUtils.lowerCase(schema))) {
-            mode |= SQLModeConsts.MODE_STRICT_TRANS_TABLES;
-        }
-        return mode;
-    }
-
-    private static Set<String> buildBlackList() {
-        String configStr = DynamicApplicationConfig.getString(TASK_DDL_STRICT_TRANS_TABLES_MODE_BLACKLIST_DB);
-        if (StringUtils.isBlank(configStr)) {
-            return Sets.newHashSet();
-        } else {
-            configStr = configStr.toLowerCase();
-            String[] array = configStr.split(",");
-            return Sets.newHashSet(array);
-        }
+        return sqlMode;
     }
 
     private static class StatusVarPars {
@@ -290,7 +272,7 @@ public class QueryEventBuilder extends BinlogBuilder {
             outputData.put((byte) v);
         }
 
-        public void putInt(int code, int v) {
+        public void putInt(int code, long v) {
             outputData.put((byte) code);
             outputData.put((byte) (v & 0xFF));
             outputData.put((byte) (v >> 8 & 0xFF));

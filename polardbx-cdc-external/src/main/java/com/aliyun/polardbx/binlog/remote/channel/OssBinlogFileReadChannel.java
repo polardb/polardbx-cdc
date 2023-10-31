@@ -19,6 +19,9 @@ import com.aliyun.oss.model.GetObjectRequest;
 import com.aliyun.oss.model.OSSObject;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
+import java.util.Arrays;
+
 /**
  * @author yudong
  * @since 2022/9/14
@@ -28,6 +31,7 @@ public class OssBinlogFileReadChannel extends AbstractBinlogFileReadChannel {
     private final OSS ossClient;
     private final String bucket;
     private final String fileName;
+    private OSSObject ossObject;
 
     public OssBinlogFileReadChannel(OSS ossClient, String bucket, String fileName) {
         this.ossClient = ossClient;
@@ -41,16 +45,32 @@ public class OssBinlogFileReadChannel extends AbstractBinlogFileReadChannel {
             throw new IllegalArgumentException("invalid argument, start pos:" + startPosition);
         }
 
-        OSSObject ossObject = getRangeHelper(startPosition);
+        ossObject = getRangeHelper(startPosition);
         String contentRange = ossObject.getResponse().getHeaders().get("Content-Range");
         fileSize = getFileSize(contentRange);
         if (fileSize <= startPosition) {
             throw new IllegalArgumentException("file size:" + fileSize
-                    + " is smaller than start pos:" + startPosition);
+                + " is smaller than start pos:" + startPosition);
         }
         inputStream = ossObject.getObjectContent();
         readBuffer = new RemoteBinlogFileReadBuffer(inputStream);
         position = startPosition;
+    }
+
+    @Override
+    public void implCloseChannel() {
+        try {
+            if (ossObject != null) {
+                ossObject.forcedClose();
+            }
+        } catch (IOException e) {
+            log.error("close channel of file {} error", fileName, e);
+            throw new RuntimeException(e);
+        } finally {
+            if (ossClient != null) {
+                ossClient.shutdown();
+            }
+        }
     }
 
     private OSSObject getRangeHelper(long position) {
@@ -65,7 +85,10 @@ public class OssBinlogFileReadChannel extends AbstractBinlogFileReadChannel {
             return -1;
         }
         String[] strs = contentRange.split(" ");
-        assert "bytes".equals(strs[0]);
+        if (strs.length != 2 || !"bytes".equalsIgnoreCase(strs[0])) {
+            log.error("unexpected content range str: {} ", Arrays.toString(strs));
+            throw new RuntimeException("unexpected oss content range str");
+        }
         String[] rangeAndSize = strs[1].split("/");
         return Integer.parseInt(rangeAndSize[1]);
     }

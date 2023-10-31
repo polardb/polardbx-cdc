@@ -30,7 +30,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 
 import java.io.IOException;
-import java.util.Date;
 import java.util.Optional;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_ENGINE_AUTO_START;
@@ -121,10 +120,7 @@ public class TaskController {
         binlogTaskInfo.setContainerId(DynamicApplicationConfig.getString(ConfigKeys.INST_ID));
         binlogTaskInfo.setVersion(taskRuntimeConfig.getBinlogTaskConfig().getVersion());
         binlogTaskInfo.setStatus(0);
-        Date now = new Date();
-        binlogTaskInfo.setGmtHeartbeat(now);
-        binlogTaskInfo.setGmtCreated(now);
-        binlogTaskInfo.setGmtModified(now);
+        binlogTaskInfo.setPolarxInstId(DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID));
 
         Optional<BinlogTaskInfo> info = taskInfoMapper.selectOne(
             s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(cluster))
@@ -134,7 +130,7 @@ public class TaskController {
             RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
             if (info.get().getVersion() == 0 || runtimeMode == RuntimeMode.LOCAL) {
                 binlogTaskInfo.setId(info.get().getId());
-                taskInfoMapper.updateByPrimaryKey(binlogTaskInfo);
+                taskInfoMapper.updateByPrimaryKeySelective(binlogTaskInfo);
             } else {
                 logger.info("Duplicate Task info in database : {}", JSONObject.toJSONString(info));
                 Runtime.getRuntime().halt(1);

@@ -17,6 +17,7 @@ package com.aliyun.polardbx.rpl.extractor.cdc.buffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
+import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.google.protobuf.ByteString;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
@@ -175,12 +176,12 @@ public class StreamObserverBuffer extends LogFetcher implements StreamObserver<D
     @Override
     public void onError(Throwable t) {
         logger.error("dumper error!", t);
-        System.exit(1);
+        TaskContext.getInstance().getPipeline().stop();
     }
 
     @Override
     public void onCompleted() {
         logger.error("dumper completed!");
-        System.exit(1);
+        TaskContext.getInstance().getPipeline().stop();
     }
 }

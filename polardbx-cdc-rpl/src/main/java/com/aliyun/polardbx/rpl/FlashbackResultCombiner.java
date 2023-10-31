@@ -16,18 +16,18 @@ package com.aliyun.polardbx.rpl;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.BinlogBackupTypeEnum;
+import com.aliyun.polardbx.binlog.enums.BinlogBackupType;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.remote.Appender;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.util.LoopRetry;
+import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
@@ -47,9 +47,9 @@ import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static com.aliyun.polardbx.binlog.BinlogBackupTypeEnum.LINDORM;
-import static com.aliyun.polardbx.binlog.BinlogBackupTypeEnum.OSS;
-import static com.aliyun.polardbx.binlog.ConfigKeys.FLASHBACK_DOWNLOAD_LINK_AVAILABLE_INTERVAL;
+import static com.aliyun.polardbx.binlog.enums.BinlogBackupType.LINDORM;
+import static com.aliyun.polardbx.binlog.enums.BinlogBackupType.OSS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.FLASHBACK_DOWNLOAD_LINK_PRESERVE_SECOND;
 import static com.aliyun.polardbx.binlog.ConfigKeys.FLASHBACK_UPLOAD_MULTI_MODE_THRESHOLD;
 import static com.aliyun.polardbx.rpl.common.RplConstants.FLASH_BACK_COMBINE_RESULT_FILE;
 
@@ -87,15 +87,15 @@ public class FlashbackResultCombiner {
         this.combineConfig = JSON.parseObject(taskConfig.getApplierConfig(), RecoveryCombineConfig.class);
         this.resultDir = MessageFormat.format(RplConstants.FLASH_BACK_RESULT_DIR, combineConfig.getRandomUUID());
         this.resultFile = MessageFormat.format(FLASH_BACK_COMBINE_RESULT_FILE, combineConfig.getRandomUUID());
-        this.expireTimeInSec = DynamicApplicationConfig.getLong(FLASHBACK_DOWNLOAD_LINK_AVAILABLE_INTERVAL);
+        this.expireTimeInSec = DynamicApplicationConfig.getLong(FLASHBACK_DOWNLOAD_LINK_PRESERVE_SECOND);
         this.allTaskResultMeta = buildSearchTaskResultMeta();
     }
 
     public void run() {
         RplTask task = DbTaskMetaManager.getTask(taskId);
         if (task.getStatus() != null && task.getStatus() == TaskStatus.FINISHED.getValue()) {
-            log.info("task {} has already finished, sikp execute.", taskId);
-            System.exit(1);
+            log.info("task {} has already finished, skip execute.", taskId);
+            throw new PolardbxException("task has already finished, skip execute");
         }
 
         if (StringUtils.isNotBlank(task.getExtra()) && task.getExtra().contains("injectTroubleCount")) {
@@ -116,7 +116,7 @@ public class FlashbackResultCombiner {
             }
         };
         if (!loopRetry.loop(new AtomicInteger(10))) {
-            MonitorManager.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
                 TaskContext.getInstance().getTaskId(), "mergeResult failed!");
             throw new RuntimeException("mergeResult failed!");
         }
@@ -125,12 +125,11 @@ public class FlashbackResultCombiner {
         tryInjectTrouble();
         recordStateMachineExecuteInfo();
         FSMMetaManager.setTaskFinish(taskId);
-        System.exit(0);
     }
 
     private void configBackupStorage() {
         String backupType = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_BACKUP_TYPE);
-        BinlogBackupTypeEnum backupTypeEnum = BinlogBackupTypeEnum.typeOf(backupType);
+        BinlogBackupType backupTypeEnum = BinlogBackupType.typeOf(backupType);
         if (backupTypeEnum != null) {
             if (backupTypeEnum == OSS) {
                 stateMachineContext.setFileStorageType(OSS.name());
@@ -160,10 +159,11 @@ public class FlashbackResultCombiner {
             return o2.compareTo(o1);
         });
 
-        log.info("Intermediate file: " + objectList.toString());
+        log.info("Intermediate file: " + objectList);
         long totalSize = 0;
         for (String objectName : objectList) {
             checkMd5(objectName);
+            StatisticalProxy.getInstance().heartbeat();
             totalSize += getFileSize(objectName);
         }
         log.info("total size for all files is " + totalSize);
@@ -183,6 +183,7 @@ public class FlashbackResultCombiner {
         appender.begin();
         for (String objectName : objectList) {
             checkMd5(objectName);
+            StatisticalProxy.getInstance().heartbeat();
             byte[] data = RemoteBinlogProxy.getInstance().getFileData(resultDir + objectName);
             appender.append(data, data.length);
             log.info("file is successfully merged : " + objectName);
@@ -198,6 +199,7 @@ public class FlashbackResultCombiner {
         multiAppender.begin();
         for (String objectName : objectList) {
             checkMd5(objectName);
+            StatisticalProxy.getInstance().heartbeat();
             byte[] data = RemoteBinlogProxy.getInstance().getFileData(resultDir + objectName);
             multiAppender.append(data, data.length);
             log.info("file is successfully merged : " + objectName);

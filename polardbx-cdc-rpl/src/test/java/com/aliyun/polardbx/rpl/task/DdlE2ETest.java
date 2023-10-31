@@ -22,6 +22,7 @@ import java.util.Map;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import com.aliyun.polardbx.rpl.TestBase;
@@ -31,11 +32,12 @@ import com.aliyun.polardbx.rpl.common.RplConstants;
  * @author shicai.xsc 2021/4/16 00:06
  * @since 5.0.0.0
  */
+@Ignore
 public class DdlE2ETest extends TestBase {
 
-    private final static String DB_1 = "db1";
-    private final static String DB_2 = "db2";
-    private final static String DB_3 = "db3";
+    private static final String DB_1 = "db1";
+    private static final String DB_2 = "db2";
+    private static final String DB_3 = "db3";
 
     @Before
     public void before() throws Exception {

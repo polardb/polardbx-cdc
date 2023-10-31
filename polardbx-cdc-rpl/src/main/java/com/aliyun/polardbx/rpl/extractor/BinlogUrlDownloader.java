@@ -34,7 +34,10 @@ package com.aliyun.polardbx.rpl.extractor;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
+import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.util.HttpHelper;
+import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
+import com.aliyun.polardbx.rpl.common.TaskContext;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 
@@ -67,14 +70,16 @@ public class BinlogUrlDownloader {
     public BinlogUrlDownloader() {
         maxLocalFileNumber = 3;
         nDownloadThread = 3;
-        localDirectory = DynamicApplicationConfig.getString(ConfigKeys.FLASHBACK_BINLOG_DOWNLOAD_DIR) + System.getProperty(TASK_NAME) + File.separator;
+        localDirectory =
+            DynamicApplicationConfig.getString(ConfigKeys.FLASHBACK_BINLOG_DOWNLOAD_DIR) + System.getProperty(TASK_NAME)
+                + File.separator;
 
         log.info("maxLocalFileNumber: " + maxLocalFileNumber +
             ", nDownloadThread: " + nDownloadThread +
             ", localDirectory: " + localDirectory);
     }
 
-    public void init() {
+    public void init() throws IOException {
         downloadFileQueue.clear();
         nLocalFile.set(0);
         nDownloadedFile.set(0);
@@ -162,12 +167,12 @@ public class BinlogUrlDownloader {
                 Thread.sleep(1000L);
             } catch (Exception e) {
                 log.error("dispatcher download binlog failed!", e);
-                System.exit(1);
+                TaskContext.getInstance().getPipeline().stop();
             }
         }
     }
 
-    private void cleanLocalDirectory() {
+    private void cleanLocalDirectory() throws IOException {
         log.warn("clean local directory");
         File file = new File(localDirectory);
         if (!file.exists()) {
@@ -176,8 +181,8 @@ public class BinlogUrlDownloader {
             try {
                 FileUtils.cleanDirectory(new File(localDirectory));
             } catch (IOException e) {
-                log.error("clean directory error!");
-                System.exit(-1);
+                log.error("clean directory error!", e);
+                throw e;
             }
         }
     }
@@ -205,22 +210,20 @@ public class BinlogUrlDownloader {
                 if (binlogFile == null) {
                     return;
                 }
-                try {
-                    String binlogFileName = binlogFile.getLogname();
-                    String path = localDirectory + File.separator + binlogFileName;
-                    File f = new File(path);
-                    if (!f.exists()) {
-                        HttpHelper
-                            .download(binlogFile.getIntranetDownloadLink(), path);
-                        nDownloadedFile.incrementAndGet();
-                    }
-                } catch (Exception e) {
-                    log.error("download binlog file failed ! ", e);
-                    System.exit(1);
+                String binlogFileName = binlogFile.getLogname();
+                String path = localDirectory + File.separator + binlogFileName;
+                File f = new File(path);
+                if (!f.exists()) {
+                    HttpHelper
+                        .download(binlogFile.getIntranetDownloadLink(), path);
+                    nDownloadedFile.incrementAndGet();
                 }
             } catch (Exception e) {
                 log.error("download binlog file failed ! ", e);
-                System.exit(1);
+                StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                    TaskContext.getInstance().getTaskId(), "download binlog error");
+                StatisticalProxy.getInstance().recordLastError(e.toString());
+                TaskContext.getInstance().getPipeline().stop();
             }
         }
     }

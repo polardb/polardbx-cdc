@@ -30,12 +30,13 @@ import org.rocksdb.RocksDBException;
 import org.rocksdb.util.ByteUtil;
 
 import java.io.File;
+import java.util.Arrays;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_RELAY_FILE_MAX_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_FILE_FLUSH_INTERVAL;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_SLOWDOWN_SPEED;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_SLOWDOWN_THRESHOLD;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_TRANSMIT_WRITE_STOP_THRESHOLD;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_RELAY_FILE_MAX_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_FILE_FLUSH_INTERVAL_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_SLOWDOWN_SPEED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_SLOWDOWN_THRESHOLD;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_STOP_THRESHOLD;
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.MAX_TSO;
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 
@@ -44,11 +45,11 @@ import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_
  **/
 @Slf4j
 public class RelayFileStoreEngine extends StoreEngineBase implements StoreEngine {
-    private final static long RELAY_FILE_MAX_SIZE =
-        DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_RELAY_FILE_MAX_SIZE);
-    private final static long RELAY_FILE_FLUSH_INTERVAL =
-        DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_WRITE_FILE_FLUSH_INTERVAL);
-    private final static RelayFileCounter RELAY_FILE_COUNTER = new RelayFileCounter();
+    private static final long RELAY_FILE_MAX_SIZE =
+        DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_RELAY_FILE_MAX_SIZE);
+    private static final long RELAY_FILE_FLUSH_INTERVAL =
+        DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_FILE_FLUSH_INTERVAL_MS);
+    private static final RelayFileCounter RELAY_FILE_COUNTER = new RelayFileCounter();
 
     private final RelayFileManager relayFileManager;
     private final Pair<byte[], byte[]> boundPair;
@@ -110,6 +111,9 @@ public class RelayFileStoreEngine extends StoreEngineBase implements StoreEngine
             } catch (InvalidProtocolBufferException | RocksDBException e) {
                 throw new PolardbxException("relay data clean error for tso " + tso, e);
             }
+        } else {
+            log.warn("skip clean internal, because can not seek with key:{} between:{}", Arrays.toString(endKey),
+                boundPair);
         }
     }
 
@@ -168,10 +172,10 @@ public class RelayFileStoreEngine extends StoreEngineBase implements StoreEngine
     }
 
     private void checkWriteSlowdown(int size) {
-        int writeSlowDownThreshold = DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_WRITE_SLOWDOWN_THRESHOLD);
+        int writeSlowDownThreshold = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_SLOWDOWN_THRESHOLD);
         if (RELAY_FILE_COUNTER.getTotalRelayFileCount() >= writeSlowDownThreshold) {
             if (!writeSlowDown) {
-                int speed = DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_WRITE_SLOWDOWN_SPEED);
+                int speed = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_SLOWDOWN_SPEED);
                 rateLimiter.setRate(speed);
                 writeSlowDown = true;
                 log.warn("trigger write slowdown with file count " + RELAY_FILE_COUNTER.getTotalRelayFileCount());
@@ -189,7 +193,7 @@ public class RelayFileStoreEngine extends StoreEngineBase implements StoreEngine
     @SneakyThrows
     private void checkWriteStop() {
         while (true) {
-            int writeStopThreshold = DynamicApplicationConfig.getInt(BINLOG_X_TRANSMIT_WRITE_STOP_THRESHOLD);
+            int writeStopThreshold = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_STOP_THRESHOLD);
             if (RELAY_FILE_COUNTER.getTotalRelayFileCount() >= writeStopThreshold) {
                 log.warn("trigger write stop with file count " + RELAY_FILE_COUNTER.getTotalRelayFileCount());
                 Thread.sleep(1000);

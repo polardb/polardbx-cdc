@@ -48,6 +48,7 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
 
     private final Map<Integer, ILogEventProcessor> processorMap = new HashMap<>();
     private final long searchTSO;
+    private final String clusterId;
     private ProcessorContext context;
     private BinlogPosition endPosition;
     private long totalSize;
@@ -60,12 +61,13 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
     private long startCmdTSO;
 
     public SearchTsoEventHandleV2(AuthenticationInfo authenticationInfo, long searchTSO, long startCmdTSO,
-                                  boolean quickMode) {
+                                  boolean quickMode, String clusterId) {
         this.searchTSO = searchTSO;
         this.startCmdTSO = startCmdTSO;
         this.quickMode = quickMode;
         this.context = new ProcessorContext(authenticationInfo, searchTSO, startCmdTSO);
         this.context.setInQuickMode(quickMode);
+        this.clusterId = clusterId;
         logger.info("search position in quickMode mode : " + quickMode);
     }
 
@@ -112,8 +114,8 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
                     new XARollbackEventProcessor()));
             this.processorMap.put(LogEvent.XID_EVENT, new XACommitEventProcessor(searchTSO, startCmdTSO));
             this.processorMap.put(LogEvent.XA_PREPARE_LOG_EVENT, new XAPrepareEventProcessor());
-            this.processorMap.put(LogEvent.WRITE_ROWS_EVENT, new WriteRowEventProcessor(searchTSO == -1));
-            this.processorMap.put(LogEvent.WRITE_ROWS_EVENT_V1, new WriteRowEventProcessor(searchTSO == -1));
+            this.processorMap.put(LogEvent.WRITE_ROWS_EVENT, new WriteRowEventProcessor(searchTSO == -1, clusterId));
+            this.processorMap.put(LogEvent.WRITE_ROWS_EVENT_V1, new WriteRowEventProcessor(searchTSO == -1, clusterId));
             this.processorMap.put(LogEvent.SEQUENCE_EVENT, new SequenceEventProcessor());
             this.processorMap.put(LogEvent.GCN_EVENT, new GcnEventProcessor());
         }
@@ -144,7 +146,7 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
         if (endOfFile(logPosition)) {
             // 如果当前文件找到了pos， 则遇到文件尾，可以退出
             if (context.isPreSelected()) {
-                context.setFind();
+                context.setFind(null);
             }
             logger.info(
                 " finish search binlog : " + context.getCurrentFile() + " result : " + context.printDetail());

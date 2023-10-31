@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.merge;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.Collector;
 import com.aliyun.polardbx.binlog.domain.TaskType;
@@ -40,9 +40,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static com.aliyun.polardbx.binlog.CommonUtils.getTsoPhysicalTime;
-import static com.aliyun.polardbx.binlog.ConfigKeys.ALARM_NODATA_THRESHOLD;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_HB_WINDOW_FORCE_COMPLETE_THRESHOLD;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.getTsoPhysicalTime;
+import static com.aliyun.polardbx.binlog.ConfigKeys.ALARM_NODATA_THRESHOLD_SECOND;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_CHECK_HEARTBEAT_WINDOW_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_FORCE_COMPLETE_HEARTBEAT_WINDOW_TIME_LIMIT;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_EMPTY_LOOP_EXCEED_THRESHOLD;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_LOOP_ERROR;
 import static com.aliyun.polardbx.binlog.util.TxnTokenUtil.cleanTxnBuffer4Token;
@@ -78,6 +79,7 @@ public class LogEventMerger implements Merger {
     private Long latestPassTime;
     private Long latestPassCount;
     private boolean forceCompleteHbWindow;
+    private boolean checkHeartbeatWindow;
     private volatile boolean running;
 
     public LogEventMerger(TaskType taskType, Collector collector, boolean isMergeNoTsoXa, String startTso,
@@ -108,6 +110,7 @@ public class LogEventMerger implements Merger {
         this.heartBeatWindowAwares = new ArrayList<>();
         this.latestPassTime = 0L;
         this.latestPassCount = 0L;
+        this.checkHeartbeatWindow = DynamicApplicationConfig.getBoolean(TASK_MERGE_CHECK_HEARTBEAT_WINDOW_ENABLED);
     }
 
     @Override
@@ -210,7 +213,7 @@ public class LogEventMerger implements Merger {
             // 未对齐之前不进行验证
             if (currentWindow != null && !currentWindow.isSameWindow(item.getTxnToken()) && aligned.get()) {
                 tryForceComplete(item.getTxnToken());
-                if (!currentWindow.isComplete()) {
+                if (!currentWindow.isComplete() && checkHeartbeatWindow) {
                     throw new PolardbxException(
                         "Received heartbeat token for next window，but current window is not complete yet. The received "
                             + "token is " + item.getTxnToken() + ", current window's tokens are "
@@ -225,12 +228,16 @@ public class LogEventMerger implements Merger {
             // 当前Window还未达到complete状态，收到了非心跳Token，属于异常现象，抛异常处理
             if (currentWindow != null && aligned.get()) {// 未对齐之前不进行验证
                 tryForceComplete(item.getTxnToken());
-                if (!currentWindow.isComplete()) {
+                if (!currentWindow.isComplete() && checkHeartbeatWindow) {
                     throw new PolardbxException(
                         "Received none heartbeat token, but current window is not ready yet. The received token is "
                             + item.getTxnToken() + ", current window's tokens are "
                             + currentWindow.getAllHeartBeatTokens());
                 }
+            }
+
+            if (currentWindow != null) {
+                currentWindow.setDirty(true);
             }
         }
     }
@@ -252,7 +259,8 @@ public class LogEventMerger implements Merger {
                 // 新策略：最优的方案是Server内核在打标的时候，确认持有老拓扑的心跳事务都已经排空，然后再执行打标操作，但分布式场景下不太好做，另外
                 // 有很多老版本的Server，需要考略兼容性。考虑到心跳事务和打标事务之间的并发度很低，正常来说打标事务之后只会出现一次基于老拓扑的心跳事务，
                 // 除非Daemon发生脑裂，所以暂时采取一种宽松的策略，如果foreComplete的次数没有超过阈值，则也直接进行force
-                long forceCompleteThreshold = DynamicApplicationConfig.getLong(TASK_HB_WINDOW_FORCE_COMPLETE_THRESHOLD);
+                long forceCompleteThreshold = DynamicApplicationConfig.getLong(
+                    TASK_MERGE_FORCE_COMPLETE_HEARTBEAT_WINDOW_TIME_LIMIT);
                 long interval = getTsoPhysicalTime(latestToken.getTso(), TimeUnit.SECONDS) - getTsoPhysicalTime(
                     lastScaleTso, TimeUnit.SECONDS);
 
@@ -354,7 +362,7 @@ public class LogEventMerger implements Merger {
     }
 
     private void checkEmptyLoopThreshold() {
-        int threshold = DynamicApplicationConfig.getInt(ALARM_NODATA_THRESHOLD);
+        int threshold = DynamicApplicationConfig.getInt(ALARM_NODATA_THRESHOLD_SECOND);
         if (firstToken.get() != null) {
             long noDataTime = System.currentTimeMillis() - latestPassTime;
             if (noDataTime > threshold * 1000) {

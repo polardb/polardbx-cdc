@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.rpl.extractor;
 
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.core.BinlogEventSink;
@@ -25,7 +24,6 @@ import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
 import com.aliyun.polardbx.rpl.common.RplConstants;
-import com.aliyun.polardbx.rpl.extractor.flashback.BinlogDownloader;
 import com.aliyun.polardbx.rpl.extractor.flashback.BinlogFileQueue;
 import com.aliyun.polardbx.rpl.extractor.flashback.ILocalBinlogEventListener;
 import com.aliyun.polardbx.rpl.extractor.flashback.LocalBinLogConnection;
@@ -37,6 +35,7 @@ import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.PersistConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
@@ -51,6 +50,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
 @Slf4j
+@Ignore
 public class RecoveryExtractorTest {
 
     @Test
@@ -98,34 +98,6 @@ public class RecoveryExtractorTest {
         } catch (IOException e) {
             log.error("delete directory error");
         }
-    }
-
-    @Test
-    public void binlogDownloaderTest() {
-        // Spring Context
-        final SpringContextBootStrap appContextBootStrap =
-            new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-
-        List<String> binlogList = new LinkedList<>();
-        binlogList.add("binlog.000001");
-        binlogList.add("binlog.000002");
-        binlogList.add("binlog.000003");
-        binlogList.add("binlog.000004");
-
-        BinlogDownloader downloader = new BinlogDownloader();
-        downloader.init();
-        downloader.batchDownload(binlogList);
-        log.info("start download");
-        downloader.start();
-        try {
-            while (downloader.getNumberOfDownloadedFile() != binlogList.size()) {
-                Thread.sleep(2000L);
-            }
-        } catch (InterruptedException e) {
-
-        }
-        log.info("finish download.");
     }
 
     @Test

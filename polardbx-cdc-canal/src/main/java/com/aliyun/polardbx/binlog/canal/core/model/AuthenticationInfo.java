@@ -30,6 +30,7 @@ public class AuthenticationInfo {
     private String username; // 帐号
     private String password; // 密码
     private String charset = "UTF-8";
+    private String storageMasterInstId;
     private String storageInstId;
     private String uid;
     private String bid;
@@ -47,6 +48,14 @@ public class AuthenticationInfo {
     public AuthenticationInfo(InetSocketAddress address, String username, String password, String charset) {
         this(address, username, password);
         this.charset = charset;
+    }
+
+    public String getStorageMasterInstId() {
+        return storageMasterInstId;
+    }
+
+    public void setStorageMasterInstId(String storageMasterInstId) {
+        this.storageMasterInstId = storageMasterInstId;
     }
 
     public String getStorageInstId() {

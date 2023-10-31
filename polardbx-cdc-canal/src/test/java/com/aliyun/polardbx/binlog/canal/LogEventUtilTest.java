@@ -73,7 +73,7 @@ public class LogEventUtilTest {
     @Test
     public void testGetGroupId() throws Exception {
         String xid1 =
-            "X'647264732d313561653837623164336332333030314031353838643063333036383135303030',X'44425f444f5559494e5f4f524445525f5030303030315f47524f55504030303033',1";
+            "X'647264732d313639633461343764303031    303030304033663966626466653165633638323563',X'5149454b4a5f50415944425f3030303031355f47524f55504030303030',1";
         String xid2 =
             "X'647264732d313464343866633434313030313030304035633337666238343537303130653631',X'544553545f445244535f3030303030345f47524f55504030303033',1";
         String group1 = LogEventUtil.getGroupFromXid(xid1, "UTF-8");
@@ -84,11 +84,18 @@ public class LogEventUtilTest {
     @Test
     public void testGetTxnId() throws Exception {
         String xid =
-            "X'647264732d313531373237333465383430313030314063313636376230393437623738653365',X'445244535f504f4c415258315f504152545f5141544553545f4150505f5030303030305f47524f55504030303030',1";
+            "X'647264732d313632366632663237346330313030304062623236613963383163636433386265',X'5f5f4344435f5f5f3030303030305f47524f55504030303030',1";
         long txnId = LogEventUtil.getTranIdFromXid(xid, "utf-8");
         String txnId2 = Long.toHexString(txnId);
         System.out.println(txnId);
         return;
+    }
+
+    @Test
+    public void testValidXid() {
+        String xid =
+            "X'504f4c415244422d582d5245434f5645522d5441534b4031356534353366646234383031303030',X'6e6f726d616c2d636f6d6d69742d32',2";
+        System.out.println(LogEventUtil.isValidXid(xid));
     }
 
     public String toXidString(long transId, String group, long primaryGroupUid) {
@@ -100,7 +107,7 @@ public class LogEventUtilTest {
     @Test
     public void testGetTranIdFromXid() throws Exception {
         String xid =
-            "X'647264732d313439313539396436613830313030304063313636376230393437623738653365',X'445244535f504f4c415258315f504152545f5141544553545f4150505f5030303030315f47524f55504030303032',1";
+            "X'647264732d313632343862356465643030313030304065333934646132666561323064613231',X'445244535f504f4c415258315f5141544553545f4150505f53494e474c455f47524f55504030303134',1";
         String encoding = "utf8";
         System.out.println(LogEventUtil.getTranIdFromXid(xid, encoding));
         System.out.println(LogEventUtil.getGroupFromXid(xid, encoding));
@@ -109,8 +116,17 @@ public class LogEventUtilTest {
     @Test
     public void testGetHexTranIdFromXid() throws Exception {
         String xid =
-            "X'647264732d313561653837623164336332333030314031353838643063333036383135303030',X'44425f444f5559494e5f4f524445525f5030303030315f47524f55504030303033',1";
+            "X'647264732d313632343862356465643030313030304065333934646132666561323064613231',X'445244535f504f4c415258315f5141544553545f4150505f53494e474c455f47524f55504030303134',1";
         String encoding = "utf8";
         System.out.println(LogEventUtil.getHexTranIdFromXid(xid, encoding));
+    }
+
+    @Test
+    public void testParseTid() throws Exception {
+        String xid =
+            "X'647264732d313261373530636132353030383030324062623236613963383163636433386265',X'5f5f4344435f5f5f3030303030325f47524f5550',1";
+        Long tid = LogEventUtil.getTranIdFromXid(xid, "utf8");
+        String groupName = LogEventUtil.getGroupFromXid(xid, "utf8");
+        System.out.println("tid : " + tid + " , groupName : " + groupName);
     }
 }

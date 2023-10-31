@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.transmit;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.domain.TaskType;
@@ -51,9 +51,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_QUEUE_DUMPING_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMITTER_DRYRUN_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_DRY_RUN_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_DUMPING_QUEUE_SIZE;
 import static com.aliyun.polardbx.binlog.transmit.MessageBuilder.buildDumpReply;
 import static com.aliyun.polardbx.binlog.transmit.MessageBuilder.buildTxnBegin;
 import static com.aliyun.polardbx.binlog.transmit.MessageBuilder.buildTxnMergedToken;
@@ -68,9 +68,9 @@ import static io.grpc.internal.GrpcUtil.getThreadFactory;
  **/
 public class LogEventTransmitter implements Transmitter {
 
-    private final static Logger logger = LoggerFactory.getLogger(LogEventTransmitter.class);
-    private final static int CHUNK_MEM_UNIT = 1024;// memsize的单位，默认为1kb大小
-    private final static int FLUSH_TIME_THRESHOLD = 500;//ms
+    private static final Logger logger = LoggerFactory.getLogger(LogEventTransmitter.class);
+    private static final int CHUNK_MEM_UNIT = 1024;// memsize的单位，默认为1kb大小
+    private static final int FLUSH_TIME_THRESHOLD = 500;//ms
 
     private final TaskType taskType;
     private final Storage storage;
@@ -95,14 +95,14 @@ public class LogEventTransmitter implements Transmitter {
         this.taskType = taskType;
         this.storage = storage;
         this.transmitQueue = new ArrayBlockingQueue<>(transmitBufferSize);
-        this.dumpingQueue = new ArrayBlockingQueue<>(DynamicApplicationConfig.getInt(TASK_QUEUE_DUMPING_SIZE));
+        this.dumpingQueue = new ArrayBlockingQueue<>(DynamicApplicationConfig.getInt(TASK_TRANSMIT_DUMPING_QUEUE_SIZE));
         this.transmitQueueSize = new AtomicLong(0L);
         this.dumpingQueueSize = new AtomicLong(0L);
         this.chunkMode = chunkMode;
         this.chunkItemSize = chunkItemSize;
         this.maxMessageSize = maxMessageSize;
         this.dryRun = dryRun;
-        this.dryRunMode = DynamicApplicationConfig.getInt(TASK_TRANSMITTER_DRYRUN_MODE);
+        this.dryRunMode = DynamicApplicationConfig.getInt(TASK_TRANSMIT_DRY_RUN_MODE);
         this.startTso = startTso;
         this.firstToken = new AtomicReference<>(null);
         this.executor = Executors.newFixedThreadPool(1, getThreadFactory("txn-packet-builder" + "-%d", false));
@@ -324,7 +324,7 @@ public class LogEventTransmitter implements Transmitter {
         }
 
         // 如果超过了flush阈值，messageChunk的size还未达到messageItemSize指定的个数，则不能无休止等待
-        if (FLUSH_TIME_THRESHOLD < DynamicApplicationConfig.getInt(DAEMON_TSO_HEARTBEAT_INTERVAL)
+        if (FLUSH_TIME_THRESHOLD < DynamicApplicationConfig.getInt(DAEMON_TSO_HEARTBEAT_INTERVAL_MS)
             && System.currentTimeMillis() - messageChunk.getStartTimeMills() >= FLUSH_TIME_THRESHOLD) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Flush message chunk triggered by time threshold.");

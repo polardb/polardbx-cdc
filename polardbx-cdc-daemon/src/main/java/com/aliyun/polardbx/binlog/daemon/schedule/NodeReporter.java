@@ -14,26 +14,28 @@
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.dao.BinlogNodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.domain.NodeRole;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
 import com.google.common.collect.Maps;
-import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.mybatis.dynamic.sql.SqlBuilder;
 
-import java.util.Date;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.COMMON_PORTS;
 
 /**
@@ -55,26 +57,32 @@ public class NodeReporter extends AbstractBinlogTimerTask {
     public void exec() {
         boolean isLeader = RuntimeLeaderElector.isDaemonLeader();
         String role = isLeader ? NodeRole.MASTER.getName() : NodeRole.SLAVE.getName();
+        String clusterRole = DynamicApplicationConfig.getClusterRole();
 
         NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
+        BinlogNodeInfoMapper binlogNodeInfoMapper = SpringContextHolder.getObject(BinlogNodeInfoMapper.class);
         NodeInfo nodeInfo = new NodeInfo();
         Optional<NodeInfo> node = nodeInfoMapper.selectOne(
             s -> s.where(NodeInfoDynamicSqlSupport.containerId,
                 SqlBuilder.isEqualTo(instId)));
-        Date now = new Date();
+
         if (node.isPresent()) {
-            NodeInfo record = node.get();
-            record.setGmtHeartbeat(now);
-            record.setRole(role);
-            record.setClusterType(clusterType);
-            nodeInfoMapper.updateByPrimaryKeySelective(record);
+            int result = binlogNodeInfoMapper.updateNodeHeartbeat(node.get().getId(),
+                role,
+                clusterType,
+                clusterRole
+            );
+            if (result == 0) {
+                log.warn("node info has removed from meta db.");
+            }
+
             return;
         }
 
-        ClusterTypeEnum clusterTypeEnum = ClusterTypeEnum.valueOf(clusterType);
+        ClusterType clusterType = ClusterType.valueOf(this.clusterType);
         nodeInfo.setRole(role);
         nodeInfo.setClusterId(clusterId);
-        nodeInfo.setClusterType(clusterTypeEnum.name());
+        nodeInfo.setClusterType(clusterType.name());
         nodeInfo.setContainerId(DynamicApplicationConfig.getString(ConfigKeys.INST_ID));
         nodeInfo.setIp(DynamicApplicationConfig.getString(ConfigKeys.INST_IP));
         nodeInfo.setDaemonPort(DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_PORT));
@@ -82,15 +90,28 @@ public class NodeReporter extends AbstractBinlogTimerTask {
         nodeInfo.setCore(DynamicApplicationConfig.getLong(ConfigKeys.CPU_CORES));
         nodeInfo.setMem(DynamicApplicationConfig.getLong(ConfigKeys.MEM_SIZE));
         nodeInfo.setStatus(0);
-        nodeInfo.setGmtCreated(now);
-        nodeInfo.setGmtHeartbeat(now);
-        nodeInfo.setGmtModified(now);
+        nodeInfo.setPolarxInstId(DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID));
+        nodeInfo.setClusterRole(clusterRole);
+
+        switch (clusterType) {
+        case BINLOG:
+            nodeInfo.setGroupName(CommonConstants.GROUP_NAME_GLOBAL);
+            break;
+        case BINLOG_X:
+            nodeInfo.setGroupName(DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME));
+            break;
+        default:
+            break;
+        }
+
+        log.info("insert into binlog_node_info: {}", nodeInfo);
         nodeInfoMapper.insertSelective(nodeInfo);
     }
 
+    @SuppressWarnings("all")
     private String buildPortStr() {
         Map<String, String> portsConfig =
-            new GsonBuilder().create().fromJson(DynamicApplicationConfig.getString(COMMON_PORTS), Map.class);
+            JSONObject.parseObject(DynamicApplicationConfig.getString(COMMON_PORTS), Map.class);
         return Maps.filterKeys(portsConfig, s -> s.startsWith("cdc")).values().stream().collect(
             Collectors.joining(","));
     }

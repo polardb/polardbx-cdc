@@ -14,15 +14,16 @@
  */
 package com.aliyun.polardbx.rpl.pipeline;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSXATransaction;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
-import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowsQueryLog;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.ApplyHelper;
 import com.aliyun.polardbx.rpl.applier.BaseApplier;
@@ -52,6 +53,8 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DELAY_ALARM_THRESHOLD_SECOND;
+
 /**
  * @author shicai.xsc 2020/11/30 14:59
  * @since 5.0.0.0
@@ -59,6 +62,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @Slf4j
 public class SerialPipeline extends BasePipeline {
 
+    private final long LOG_STAT_PERIOD_MILLS = 10000;
     private RingBuffer<MessageEvent> msgRingBuffer;
     private ExecutorService offerExecutor;
     private BatchEventProcessor<MessageEvent> offerProcessor;
@@ -68,7 +72,6 @@ public class SerialPipeline extends BasePipeline {
     private AtomicLong periodBatchSize = new AtomicLong(0);
     private AtomicLong periodBatchCount = new AtomicLong(0);
     private AtomicLong periodBatchCost = new AtomicLong(0);
-    private final long LOG_STAT_PERIOD_MILLS = 10000;
 
     public SerialPipeline(PipelineConfig pipeLineConfig, BaseExtractor extractor, BaseApplier applier) {
         this.pipeLineConfig = pipeLineConfig;
@@ -77,67 +80,64 @@ public class SerialPipeline extends BasePipeline {
     }
 
     @Override
-    public boolean init() {
-        try {
-            if (!(extractor instanceof MysqlFullExtractor)) {
-                messageEventFactory = new MessageEventFactory();
-                offerExecutor = ThreadPoolUtil.createExecutorWithFixedNum(1, "applier");
-                // create ringBuffer and set ringBuffer eventFactory
-                msgRingBuffer = RingBuffer
-                    .createSingleProducer(messageEventFactory, pipeLineConfig.getBufferSize(),
-                        new BlockingWaitStrategy());
-                EventHandler eventHandler;
-                SequenceBarrier sequenceBarrier = msgRingBuffer.newBarrier();
-                if (pipeLineConfig.isSupportXa()) {
-                    eventHandler = new XaTranRingBufferEventHandler(pipeLineConfig.getBufferSize());
-                } else if (applier instanceof TransactionApplier) {
-                    eventHandler = new TranRingBufferEventHandler(pipeLineConfig.getBufferSize());
-                } else if (applier instanceof RecoveryApplier) {
-                    eventHandler = new RecoveryEventHandler(pipeLineConfig.getBufferSize());
-                } else {
-                    eventHandler = new RingBufferEventHandler(pipeLineConfig.getBufferSize());
-                }
-                offerProcessor = new BatchEventProcessor<>(msgRingBuffer, sequenceBarrier, eventHandler);
-                msgRingBuffer.addGatingSequences(offerProcessor.getSequence());
+    public void init() throws Exception {
+        if (!(extractor instanceof MysqlFullExtractor)) {
+            messageEventFactory = new MessageEventFactory();
+            offerExecutor = ThreadPoolUtil.createExecutorWithFixedNum(1, "applier");
+            // create ringBuffer and set ringBuffer eventFactory
+            msgRingBuffer = RingBuffer
+                .createSingleProducer(messageEventFactory, pipeLineConfig.getBufferSize(),
+                    new BlockingWaitStrategy());
+            EventHandler<MessageEvent> eventHandler;
+            SequenceBarrier sequenceBarrier = msgRingBuffer.newBarrier();
+            if (pipeLineConfig.isSupportXa()) {
+                eventHandler = new XaTranRingBufferEventHandler(pipeLineConfig.getBufferSize());
+            } else if (applier instanceof TransactionApplier) {
+                eventHandler = new TranRingBufferEventHandler(pipeLineConfig.getBufferSize());
+            } else if (applier instanceof RecoveryApplier) {
+                eventHandler = new RecoveryEventHandler(pipeLineConfig.getBufferSize());
+            } else {
+                eventHandler = new RingBufferEventHandler(pipeLineConfig.getBufferSize());
             }
-            return true;
-        } catch (Throwable e) {
-            log.error("SerialPipeline init failed", e);
-            return false;
+            offerProcessor = new BatchEventProcessor<>(msgRingBuffer, sequenceBarrier, eventHandler);
+            msgRingBuffer.addGatingSequences(offerProcessor.getSequence());
         }
     }
 
     @Override
-    public void start() {
+    public void start() throws Exception {
         try {
+            running.compareAndSet(false, true);
             // start extractor thread which will call EXTRACTOR to extract events from
             // binlog and write it to ringBuffer
-            log.info("extractor starting");
+            log.info("extractor and applier starting");
             extractor.start();
-            log.info("extractor started");
+            applier.start();
+            log.info("extractor and applier started");
 
             // start offerProcessor thread which will call APPLIER to consume events from
             // ringBuffer
             if (!(extractor instanceof MysqlFullExtractor)) {
                 offerExecutor.submit(offerProcessor);
             }
-        } catch (Throwable e) {
-            log.error("startDisruptorThread occur error", e);
-            if (extractor instanceof MysqlFullExtractor) {
-                MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_FULL_ERROR,
-                    TaskContext.getInstance().getTaskId(), e.getMessage());
-            } else {
-                MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
-                    TaskContext.getInstance().getTaskId(), e.getMessage());
-            }
+        } catch (Exception e) {
             log.error("start extractor occur error", e);
-            System.exit(-1);
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                TaskContext.getInstance().getTaskId(), "apply error");
+            StatisticalProxy.getInstance().recordLastError(e.toString());
+            throw e;
         }
     }
 
     @Override
     public void stop() {
-        extractor.stop();
+        // only stop once
+        if (running.compareAndSet(true, false)) {
+            extractor.stop();
+            applier.stop();
+            StatisticalProxy.getInstance().stop();
+            System.exit(1);
+        }
     }
 
     @Override
@@ -190,25 +190,12 @@ public class SerialPipeline extends BasePipeline {
     }
 
     @Override
-    public void directApply(List<DBMSEvent> events) {
-        if (!StatisticalProxy.getInstance().apply(events)) {
-            log.error("failed to call applier, exit");
-            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_FULL_ERROR,
-                TaskContext.getInstance().getTaskId(), "apply error");
-            System.exit(-1);
-        }
-        int rowCount = 0;
-        for (DBMSEvent event: events) {
-            rowCount += ((DefaultRowChange)event).getRowSize();
-        }
-        StatisticalProxy.getInstance().addMessageCount(rowCount);
+    public void directApply(List<DBMSEvent> events) throws Exception {
+        StatisticalProxy.getInstance().apply(events);
     }
 
     private void takeStatisticsWithFlowControl(long currentBatchSize, long sequence, long start, int xaNum) {
-        StatisticalProxy.getInstance().recordPosition(position, log.isDebugEnabled());
-        if (currentBatchSize != 0) {
-            StatisticalProxy.getInstance().addMessageCount(currentBatchSize);
-        }
+        StatisticalProxy.getInstance().recordPosition(position);
         long now = System.currentTimeMillis();
         long lastStatisticsTimePre = lastStatisticsTime.get();
         periodBatchSize.addAndGet(currentBatchSize);
@@ -216,7 +203,7 @@ public class SerialPipeline extends BasePipeline {
         if (periodBatchCount.incrementAndGet() % 100 == 0
             || (now > lastStatisticsTimePre + LOG_STAT_PERIOD_MILLS
             && lastStatisticsTime.compareAndSet(lastStatisticsTimePre, now))) {
-            StatisticalProxy.getInstance().recordPosition(position, true);
+            StatisticalProxy.getInstance().recordPosition(position);
             long avgBatchSize = periodBatchSize.get() / periodBatchCount.get();
             long avgCost = periodBatchCost.get() / periodBatchCount.get();
             long queueSize = msgRingBuffer.getCursor() - sequence;
@@ -245,57 +232,48 @@ public class SerialPipeline extends BasePipeline {
         }
 
         @Override
-        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) throws Exception {
-            DBMSEvent dbmsEvent = messageEvent.getDbmsEventWithEffect();
-            if (dbmsEvent instanceof DBMSRowChange) {
-                eventBatch.add(dbmsEvent);
-                position = messageEvent.getPosition();
-            } else if (ApplyHelper.isDdl(dbmsEvent)) {
-                // first apply all existing events
-                long start = System.currentTimeMillis();
-                if (!StatisticalProxy.getInstance().apply(eventBatch)) {
-                    log.error("failed to call applier, exit");
-                    // 延迟半小时以上才报警
-                    if (StatisticalProxy.getInstance().computeTaskDelay() > 1800) {
-                        MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
-                            TaskContext.getInstance().getTaskId(), "apply error");
-                    }
-                    System.exit(-1);
+        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) {
+            try {
+                DBMSEvent dbmsEvent = messageEvent.getDbmsEventWithEffect();
+                if (dbmsEvent instanceof DBMSRowChange) {
+                    eventBatch.add(dbmsEvent);
+                    position = messageEvent.getPosition();
+                } else if (ApplyHelper.isDdl(dbmsEvent)) {
+                    // first apply all existing events
+                    long start = System.currentTimeMillis();
+                    StatisticalProxy.getInstance().apply(eventBatch);
+                    takeStatisticsWithFlowControl(eventBatch.size(), sequence, start, 0);
+                    StatisticalProxy.getInstance().flushPosition();
+                    eventBatch.clear();
+                    // apply DDL one by one
+                    eventBatch.add(dbmsEvent);
+                    endOfBatch = true;
+                    position = messageEvent.getPosition();
+                } else if (dbmsEvent instanceof DBMSTransactionEnd) {
+                    position = messageEvent.getPosition();
+                } else {
+                    position = messageEvent.getPosition();
                 }
-                takeStatisticsWithFlowControl(eventBatch.size(), sequence, start, 0);
-                eventBatch.clear();
-                // apply DDL one by one
-                eventBatch.add(dbmsEvent);
-                endOfBatch = true;
-                position = messageEvent.getPosition();
-            } else if (dbmsEvent instanceof DBMSTransactionEnd) {
-                position = messageEvent.getPosition();
-            } else {
-                position = messageEvent.getPosition();
-            }
-            messageEvent.tryRelease();
+                messageEvent.tryRelease();
 
-            if (endOfBatch) {
-                log.info("pipeline received events, count: {}", eventBatch.size());
-                try {
-                    StatisticalProxy.getInstance()
+                if (endOfBatch) {
+                    StatMetrics.getInstance()
                         .setTotalInCache(msgRingBuffer.getBufferSize() - msgRingBuffer.remainingCapacity());
                     long start = System.currentTimeMillis();
-                    if (!StatisticalProxy.getInstance().apply(eventBatch)) {
-                        log.error("failed to call applier, exit");
-                        // 延迟半小时以上才报警
-                        if (StatisticalProxy.getInstance().computeTaskDelay() > 1800) {
-                            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
-                                TaskContext.getInstance().getTaskId(), "apply error");
-                        }
-                        System.exit(-1);
-                    }
+                    StatisticalProxy.getInstance().apply(eventBatch);
                     takeStatisticsWithFlowControl(eventBatch.size(), sequence, start, 0);
                     eventBatch.clear();
-                } catch (Throwable e) {
-                    log.error("failed to call applier, exit", e);
-                    System.exit(-1);
                 }
+            } catch (Exception e) {
+                log.error("failed to call applier,", e);
+                // 延迟半小时以上才报警
+                if (StatisticalProxy.getInstance().computeTaskDelay() >
+                    DynamicApplicationConfig.getInt(RPL_DELAY_ALARM_THRESHOLD_SECOND)) {
+                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                        TaskContext.getInstance().getTaskId(), "apply error");
+                }
+                StatisticalProxy.getInstance().recordLastError(e.toString());
+                stop();
             }
         }
 
@@ -321,33 +299,33 @@ public class SerialPipeline extends BasePipeline {
         }
 
         @Override
-        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) throws Exception {
-            Transaction transaction = getTransactionToApply();
-            boolean isDdl = false;
-            DBMSEvent dbmsEvent = messageEvent.getDbmsEventWithEffect();
-            if (dbmsEvent instanceof DBMSRowChange) {
-                transaction.appendRowChange(dbmsEvent);
-                eventCount++;
-            } else if (ApplyHelper.isDdl(dbmsEvent)) {
-                // first apply all exist events
-                StatisticalProxy.getInstance().tranApply(transactionBatch);
-                transactionBatch.clear();
-                transaction = getTransactionToApply();
-                transaction.appendQueryLog(dbmsEvent);
-                position = messageEvent.getPosition();
-                transaction.setFinished(true);
-                isDdl = true;
-                endOfBatch = true;
-            } else if (dbmsEvent instanceof DBMSTransactionEnd) {
-                position = messageEvent.getPosition();
-                transaction.setFinished(true);
-            } else {
-                position = messageEvent.getPosition();
-            }
+        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) {
+            try {
+                Transaction transaction = getTransactionToApply();
+                boolean isDdl = false;
+                DBMSEvent dbmsEvent = messageEvent.getDbmsEventWithEffect();
+                if (dbmsEvent instanceof DBMSRowChange) {
+                    transaction.appendRowChange(dbmsEvent);
+                    eventCount++;
+                } else if (ApplyHelper.isDdl(dbmsEvent)) {
+                    // first apply all exist events
+                    StatisticalProxy.getInstance().tranApply(transactionBatch);
+                    transactionBatch.clear();
+                    transaction = getTransactionToApply();
+                    transaction.appendQueryLog(dbmsEvent);
+                    position = messageEvent.getPosition();
+                    transaction.setFinished(true);
+                    isDdl = true;
+                    endOfBatch = true;
+                } else if (dbmsEvent instanceof DBMSTransactionEnd) {
+                    position = messageEvent.getPosition();
+                    transaction.setFinished(true);
+                } else {
+                    position = messageEvent.getPosition();
+                }
 
-            messageEvent.tryRelease();
-            if (endOfBatch) {
-                try {
+                messageEvent.tryRelease();
+                if (endOfBatch) {
                     // do NOT apply unfinished transaction
                     Transaction lastTransaction = null;
                     if (transactionBatch.size() > 0) {
@@ -361,10 +339,7 @@ public class SerialPipeline extends BasePipeline {
                         transactionBatch.size());
                     long start = System.currentTimeMillis();
                     // apply
-                    if (!StatisticalProxy.getInstance().tranApply(transactionBatch)) {
-                        log.error("failed to call applier, exit");
-                        System.exit(-1);
-                    }
+                    StatisticalProxy.getInstance().tranApply(transactionBatch);
                     takeStatisticsWithFlowControl(eventCount, sequence, start, 0);
                     eventCount = 0;
                     // force flush position info if Ddl happened
@@ -377,10 +352,16 @@ public class SerialPipeline extends BasePipeline {
                     if (lastTransaction != null && !lastTransaction.isFinished()) {
                         transactionBatch.add(lastTransaction);
                     }
-                } catch (Throwable e) {
-                    log.error("failed to call applier, exit", e);
-                    System.exit(-1);
                 }
+            } catch (Exception e) {
+                log.error("failed to call applier,", e);
+                if (StatisticalProxy.getInstance().computeTaskDelay() >
+                    DynamicApplicationConfig.getInt(RPL_DELAY_ALARM_THRESHOLD_SECOND)) {
+                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                        TaskContext.getInstance().getTaskId(), "apply error");
+                }
+                StatisticalProxy.getInstance().recordLastError(e.toString());
+                stop();
             }
         }
 
@@ -524,12 +505,7 @@ public class SerialPipeline extends BasePipeline {
 
                     // apply
                     if (applier instanceof TransactionApplier) {
-                        if (!StatisticalProxy.getInstance().tranApply(transactionBatch)) {
-                            log.error("failed to call applier, exit");
-                            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
-                                TaskContext.getInstance().getTaskId(), "apply error");
-                            System.exit(-1);
-                        }
+                        StatisticalProxy.getInstance().tranApply(transactionBatch);
                     } else {
                         // 展开transactionBatch
                         List<DBMSEvent> events = new ArrayList<>();
@@ -565,9 +541,16 @@ public class SerialPipeline extends BasePipeline {
                     if (lastTransaction != null && !lastTransaction.isFinished()) {
                         transactionBatch.add(lastTransaction);
                     }
-                } catch (Throwable e) {
+                } catch (Exception e) {
                     log.error("failed to call applier, exit", e);
-                    System.exit(-1);
+                    // 延迟15分钟以上才报警
+                    if (StatisticalProxy.getInstance().computeTaskDelay() >
+                        DynamicApplicationConfig.getInt(RPL_DELAY_ALARM_THRESHOLD_SECOND)) {
+                        StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                            TaskContext.getInstance().getTaskId(), "apply error");
+                    }
+                    StatisticalProxy.getInstance().recordLastError(e.toString());
+                    stop();
                 }
             }
         }
@@ -591,19 +574,11 @@ public class SerialPipeline extends BasePipeline {
             return transactionBatch.get(transactionBatch.size() - 1);
         }
 
-        private void applyEvents(List<DBMSEvent> events) {
+        private void applyEvents(List<DBMSEvent> events) throws Exception {
             if (events.isEmpty()) {
                 return;
             }
-            if (!StatisticalProxy.getInstance().apply(events)) {
-                log.error("failed to call applier, exit");
-                // 延迟半小时以上才报警
-                if (StatisticalProxy.getInstance().computeTaskDelay() > 1800) {
-                    MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
-                        TaskContext.getInstance().getTaskId(), "apply error");
-                }
-                System.exit(-1);
-            }
+            StatisticalProxy.getInstance().apply(events);
         }
 
         public <K, V> Map.Entry<K, V> getHead(LinkedHashMap<K, V> map) {
@@ -641,25 +616,30 @@ public class SerialPipeline extends BasePipeline {
         }
 
         @Override
-        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) throws Exception {
-            DBMSEvent event = messageEvent.getDbmsEventWithEffect();
-            // 只传给applier dbmsRowChange 和 queryLog 两种类型的event
-            if (event instanceof DBMSRowChange || event instanceof DBMSQueryLog) {
-                eventBatch.add(event);
-                position = messageEvent.getPosition();
-            }
-            messageEvent.tryRelease();
+        public void onEvent(MessageEvent messageEvent, long sequence, boolean endOfBatch) {
+            try {
+                DBMSEvent event = messageEvent.getDbmsEventWithEffect();
+                if (event instanceof DefaultQueryLog || event instanceof DefaultRowsQueryLog
+                    || event instanceof DefaultRowChange) {
+                    eventBatch.add(event);
+                    position = messageEvent.getPosition();
+                }
+                messageEvent.tryRelease();
 
-            if (endOfBatch) {
-                if (log.isDebugEnabled()) {
-                    log.debug("pipeline received events, count: {}", eventBatch.size());
+                if (endOfBatch) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("pipeline received events, count: {}", eventBatch.size());
+                    }
+                    StatisticalProxy.getInstance().apply(eventBatch);
+                    StatisticalProxy.getInstance().recordPosition(position);
+                    eventBatch.clear();
                 }
-                if (!StatisticalProxy.getInstance().apply(eventBatch)) {
-                    log.error("applier return false, stop pipeline");
-                    stop();
-                }
-                StatisticalProxy.getInstance().recordPosition(position, log.isDebugEnabled());
-                eventBatch.clear();
+            } catch (Exception e) {
+                log.error("failed to call applier, exit", e);
+                StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
+                    TaskContext.getInstance().getTaskId(), e.getMessage());
+                StatisticalProxy.getInstance().recordLastError(e.toString());
+                stop();
             }
         }
 

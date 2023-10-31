@@ -36,8 +36,8 @@ import com.aliyun.polardbx.rpl.pipeline.MessageEvent;
  */
 public class ExtractorUtil {
 
-    private final static boolean DEFAULT_NULLABLE = true;
-    private final static boolean DEFAULT_SIGNED = true;
+    private static final boolean DEFAULT_NULLABLE = true;
+    private static final boolean DEFAULT_SIGNED = true;
 
     /**
      * @return Object
@@ -109,7 +109,7 @@ public class ExtractorUtil {
         Map<String, Serializable> fieldValueMap = new HashMap<>(tableInfo.getColumns().size());
         for (ColumnInfo column : tableInfo.getColumns()) {
             Object value = ExtractorUtil.getColumnValue(resultSet, column.getName(), column.getType());
-            fieldValueMap.put(column.getName(), (Serializable)value);
+            fieldValueMap.put(column.getName(), (Serializable) value);
         }
         builder.addRowData(fieldValueMap);
     }

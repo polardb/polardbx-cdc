@@ -15,12 +15,12 @@
 package com.aliyun.polardbx.binlog.daemon.rest.resources.check;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
-import com.aliyun.polardbx.binlog.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.rest.entities.ServerInfo;
+import com.aliyun.polardbx.binlog.dao.BinlogDumperInfoMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogNodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
@@ -28,27 +28,26 @@ import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
-import com.aliyun.polardbx.binlog.dao.TaskHeartbeatMapper;
+import com.aliyun.polardbx.binlog.dao.TaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.XStreamMapper;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
+import com.aliyun.polardbx.binlog.enums.NodeStatus;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
-import org.joda.time.DateTime;
 import org.mybatis.dynamic.sql.SqlBuilder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
@@ -61,18 +60,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+@Slf4j
 public class ClusterStatusChecker {
-
-    private static final Logger logger = LoggerFactory.getLogger(ClusterStatusChecker.class);
-    private final static Gson GSON = new GsonBuilder().create();
-    private StringBuilder errorLog = new StringBuilder();
+    private final StringBuilder errorLog = new StringBuilder();
 
     public String check() {
 
         try {
-            ClusterTypeEnum clusterTypeEnum = ClusterTypeEnum.valueOf(DynamicApplicationConfig.getClusterType());
-            if (clusterTypeEnum != ClusterTypeEnum.BINLOG_X &&
-                clusterTypeEnum != ClusterTypeEnum.BINLOG) {
+            ClusterType clusterType = ClusterType.valueOf(DynamicApplicationConfig.getClusterType());
+            if (clusterType != ClusterType.BINLOG_X &&
+                clusterType != ClusterType.BINLOG) {
                 return "OK";
             }
             ServerInfo serverInfo = buildServerInfo();
@@ -84,17 +81,17 @@ public class ClusterStatusChecker {
             //topology config size
             checkTopologyConfigSize(serverInfo);
 
-            if (clusterTypeEnum == ClusterTypeEnum.BINLOG) {
+            if (clusterType == ClusterType.BINLOG) {
                 //node info
                 checkNodeInfo(serverInfo);
                 //dumper count
                 checkDumperCount(serverInfo);
-            } else if (clusterTypeEnum == ClusterTypeEnum.BINLOG_X) {
+            } else if (clusterType == ClusterType.BINLOG_X) {
                 checkStreamCount(serverInfo);
             }
 
             //task count
-            checkTaskCount(serverInfo, clusterTypeEnum);
+            checkTaskCount(serverInfo, clusterType);
 
             //dumper heartbeat
             checkDumperHeartbeat(serverInfo);
@@ -104,25 +101,25 @@ public class ClusterStatusChecker {
 
             // 如果前面已经失败了，那么下面更高阶的判断就没必要继续了(主要是比较耗时)
             if (errorLog.length() == 0) {
-                if (clusterTypeEnum == ClusterTypeEnum.BINLOG) {
+                if (clusterType == ClusterType.BINLOG) {
                     checkDumperCursorAligned();
-                } else if (clusterTypeEnum == ClusterTypeEnum.BINLOG_X) {
+                } else if (clusterType == ClusterType.BINLOG_X) {
                     checkBinlogXCursorAligned();
                 }
-                queryBinaryLog(clusterTypeEnum);
+                queryBinaryLog(clusterType);
             }
 
             String cause = errorLog.toString();
 
             if (errorLog.length() > 0) {
-                logger.info("server status is abnormal, the cause is " + cause);
+                log.info("server status is abnormal, the cause is " + cause);
             } else {
-                logger.info("server status is ok.");
+                log.info("server status is ok.");
             }
 
             return StringUtils.isBlank(cause) ? "OK" : "ERROR : " + cause;
         } catch (Throwable t) {
-            logger.info("something goes wrong when build status.", t);
+            log.info("something goes wrong when build status.", t);
             errorLog.append(t.getMessage());
             return "ERROR : " + errorLog.toString();
         }
@@ -165,11 +162,11 @@ public class ClusterStatusChecker {
         }
     }
 
-    private void checkTaskCount(ServerInfo serverInfo, ClusterTypeEnum clusterTypeEnum) {
+    private void checkTaskCount(ServerInfo serverInfo, ClusterType clusterType) {
         String taskType = "";
-        if (clusterTypeEnum == ClusterTypeEnum.BINLOG) {
+        if (clusterType == ClusterType.BINLOG) {
             taskType = TaskType.Final.name();
-        } else if (clusterTypeEnum == ClusterTypeEnum.BINLOG_X) {
+        } else if (clusterType == ClusterType.BINLOG_X) {
             taskType = TaskType.Dispatcher.name();
         }
         String finalTaskType = taskType;
@@ -188,10 +185,15 @@ public class ClusterStatusChecker {
 
     private void checkDumperHeartbeat(ServerInfo serverInfo) {
         String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
-        TaskHeartbeatMapper taskHeartbeatMapper = SpringContextHolder.getObject(TaskHeartbeatMapper.class);
+        BinlogDumperInfoMapper binlogDumperInfoMapper = SpringContextHolder.getObject(BinlogDumperInfoMapper.class);
         long time1 = System.currentTimeMillis();
-        boolean status = taskHeartbeatMapper.maxDumperHeartbeatDelay(clusterId)
-            < DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTERVAL) * 2;
+        Long maxDumperHeartbeatDelay = binlogDumperInfoMapper.maxDumperHeartbeatDelay(clusterId);
+        if (maxDumperHeartbeatDelay == null) {
+            errorLog.append("Dumper heartbeat is missing!");
+            return;
+        }
+        boolean status = maxDumperHeartbeatDelay
+            < DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS) * 2;
         if (!status) {
             errorLog.append("Dumper heartbeat time is abnormal, current time is ")
                 .append(time1)
@@ -202,11 +204,17 @@ public class ClusterStatusChecker {
     }
 
     private void checkTaskHeartbeat(ServerInfo serverInfo) {
-        TaskHeartbeatMapper taskHeartbeatMapper = SpringContextHolder.getObject(TaskHeartbeatMapper.class);
+        TaskInfoMapper taskInfoMapper = SpringContextHolder.getObject(
+            TaskInfoMapper.class);
         String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
         long time2 = System.currentTimeMillis();
-        boolean status = taskHeartbeatMapper.maxTaskHeartbeatDelay(clusterId)
-            < DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTERVAL) * 2;
+        Long maxTaskHeartbeatDelay = taskInfoMapper.maxTaskHeartbeatDelay(clusterId);
+        if (maxTaskHeartbeatDelay == null) {
+            errorLog.append("Task heartbeat is missing!");
+            return;
+        }
+        boolean status = maxTaskHeartbeatDelay
+            < DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS) * 2;
         if (!status) {
             errorLog.append("Task heartbeat is abnormal, current time is ")
                 .append(time2)
@@ -216,11 +224,11 @@ public class ClusterStatusChecker {
         }
     }
 
-    private void queryBinaryLog(ClusterTypeEnum clusterTypeEnum) {
+    private void queryBinaryLog(ClusterType clusterType) {
         String sql = null;
-        if (clusterTypeEnum == ClusterTypeEnum.BINLOG) {
+        if (clusterType == ClusterType.BINLOG) {
             sql = "show binary logs";
-        } else if (clusterTypeEnum == ClusterTypeEnum.BINLOG_X) {
+        } else if (clusterType == ClusterType.BINLOG_X) {
             sql = "show binary streams";
         }
         JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
@@ -234,16 +242,16 @@ public class ClusterStatusChecker {
 
         AtomicInteger streamCount = new AtomicInteger(0);
         expectedDumpers.forEach(c -> {
-            ExecutionConfig config = GSON.fromJson(c, ExecutionConfig.class);
+            ExecutionConfig config = JSONObject.parseObject(c, ExecutionConfig.class);
             streamCount.addAndGet(config.getStreamNameSet().size());
         });
 
         boolean status = NumberUtils
-            .compare(streamCount.get(), DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_X_STREAM_COUNT)) == 0;
+            .compare(streamCount.get(), DynamicApplicationConfig.getInt(ConfigKeys.BINLOGX_STREAM_COUNT)) == 0;
         if (!status) {
             errorLog.append(String
                 .format("stream count not equal config count , topology stream count is %s, config count is %s",
-                    streamCount.get(), DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_X_STREAM_COUNT)));
+                    streamCount.get(), DynamicApplicationConfig.getInt(ConfigKeys.BINLOGX_STREAM_COUNT)));
         }
     }
 
@@ -261,7 +269,7 @@ public class ClusterStatusChecker {
                 SqlBuilder.isEqualTo(clusterId)));
         List<NodeInfo> nodeInfoList = nodeInfoMapper
             .select(s -> s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                .and(NodeInfoDynamicSqlSupport.status, SqlBuilder.isEqualTo(0)));
+                .and(NodeInfoDynamicSqlSupport.status, SqlBuilder.isEqualTo(NodeStatus.AVAILABLE.getValue())));
         List<BinlogTaskInfo> taskInfoList = taskInfoMapper
             .select(s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
         List<DumperInfo> dumperInfoList = dumperInfoMapper
@@ -279,30 +287,32 @@ public class ClusterStatusChecker {
     }
 
     private void checkBinlogXCursorAligned() throws Throwable {
-        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_TASK_HEARTBEAT_INTERVAL);
+        int timeoutThresholdMs =
+            DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS);
         XStreamMapper xStreamMapper = SpringContextHolder.getObject(XStreamMapper.class);
         RetryTemplate template = RetryTemplate.builder().maxAttempts(15).fixedBackoff(1000)
             .retryOn(RetryableException.class).build();
 
-        String groupName = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_X_STREAM_GROUP_NAME);
-        final Set<Cursor> allCursors = template.execute((RetryCallback<Set<Cursor>, Throwable>) retryContext -> {
-            List<XStream> xStreamList = xStreamMapper
-                .select(s -> s.where(XStreamDynamicSqlSupport.groupName, SqlBuilder.isEqualTo(groupName)));
+        String groupName = DynamicApplicationConfig.getString(ConfigKeys.BINLOGX_STREAM_GROUP_NAME);
+        final Set<BinlogCursor> allCursors =
+            template.execute((RetryCallback<Set<BinlogCursor>, Throwable>) retryContext -> {
+                List<XStream> xStreamList = xStreamMapper
+                    .select(s -> s.where(XStreamDynamicSqlSupport.groupName, SqlBuilder.isEqualTo(groupName)));
 
-            if (!xStreamList.stream().allMatch(s -> StringUtils.isNotBlank(s.getLatestCursor()))) {
-                logger.warn("wait for log cursor ready failed, ready dumpers are {}",
-                    xStreamList.stream().map(XStream::getStreamName).collect(Collectors.toList()));
-                throw new RetryableException("wait for all dumpers ready failed.");
-            }
+                if (!xStreamList.stream().allMatch(s -> StringUtils.isNotBlank(s.getLatestCursor()))) {
+                    log.warn("wait for log cursor ready failed, ready dumpers are {}",
+                        xStreamList.stream().map(XStream::getStreamName).collect(Collectors.toList()));
+                    throw new RetryableException("wait for all dumpers ready failed.");
+                }
 
-            return xStreamList.stream()
-                .map(XStream::getLatestCursor)
-                .map(i -> JSONObject.parseObject(i, Cursor.class))
-                .collect(Collectors.toSet());
-        });
+                return xStreamList.stream()
+                    .map(XStream::getLatestCursor)
+                    .map(i -> JSONObject.parseObject(i, BinlogCursor.class))
+                    .collect(Collectors.toSet());
+            });
 
-        String maxTSOS = allCursors.stream().map(Cursor::getTso).max(Comparator.comparing(s -> s)).get();
-        String minTSOS = allCursors.stream().map(Cursor::getTso).min(Comparator.comparing(s -> s)).get();
+        String maxTSOS = allCursors.stream().map(BinlogCursor::getTso).max(Comparator.comparing(s -> s)).get();
+        String minTSOS = allCursors.stream().map(BinlogCursor::getTso).min(Comparator.comparing(s -> s)).get();
 
         Long maxTSO = CommonUtils.getTsoPhysicalTime(maxTSOS, TimeUnit.MILLISECONDS);
         Long minTSO = CommonUtils.getTsoPhysicalTime(minTSOS, TimeUnit.MILLISECONDS);
@@ -320,35 +330,33 @@ public class ClusterStatusChecker {
     private void checkDumperCursorAligned() throws Throwable {
         String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
         String instId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
-        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.TOPOLOGY_HEARTBEAT_TIMEOUT_MS);
+        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS);
         NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
+        BinlogNodeInfoMapper binlogNodeInfoMapper = SpringContextHolder.getObject(BinlogNodeInfoMapper.class);
         RetryTemplate template = RetryTemplate.builder().maxAttempts(15).fixedBackoff(1000)
             .retryOn(RetryableException.class).build();
 
-        final Set<Cursor> allCursors = template.execute((RetryCallback<Set<Cursor>, Throwable>) retryContext -> {
-            List<NodeInfo> nodeInfoList = nodeInfoMapper
-                .select(s -> s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                    .and(NodeInfoDynamicSqlSupport.gmtHeartbeat,
-                        SqlBuilder.isGreaterThan(DateTime.now().minusMillis(timeoutThresholdMs).toDate())));
+        final Set<BinlogCursor> allCursors =
+            template.execute((RetryCallback<Set<BinlogCursor>, Throwable>) retryContext -> {
+                List<NodeInfo> nodeInfoList = binlogNodeInfoMapper.getAliveNodes(clusterId, timeoutThresholdMs);
+                if (!nodeInfoList.stream().allMatch(s -> StringUtils.isNotBlank(s.getLatestCursor()))) {
+                    log.warn("wait for log cursor ready failed, ready dumpers are {}",
+                        nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toList()));
+                    throw new RetryableException("wait for all dumpers ready failed.");
+                }
 
-            if (!nodeInfoList.stream().allMatch(s -> StringUtils.isNotBlank(s.getLatestCursor()))) {
-                logger.warn("wait for log cursor ready failed, ready dumpers are {}",
-                    nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toList()));
-                throw new RetryableException("wait for all dumpers ready failed.");
-            }
-
-            return nodeInfoList.stream()
-                .map(NodeInfo::getLatestCursor)
-                .map(i -> JSONObject.parseObject(i, Cursor.class))
-                .collect(Collectors.toSet());
-        });
+                return nodeInfoList.stream()
+                    .map(NodeInfo::getLatestCursor)
+                    .map(i -> JSONObject.parseObject(i, BinlogCursor.class))
+                    .collect(Collectors.toSet());
+            });
 
         template.execute((RetryCallback<Boolean, Throwable>) retryContext -> {
-            Cursor lastMaxCursor = allCursors.stream().max(Comparator.comparing(s -> s)).get();
-            Cursor thisCursor = nodeInfoMapper
+            BinlogCursor lastMaxCursor = allCursors.stream().max(Comparator.comparing(s -> s)).get();
+            BinlogCursor thisCursor = nodeInfoMapper
                 .select(s -> s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                     .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isEqualTo(instId)))
-                .stream().map(NodeInfo::getLatestCursor).map(i -> JSONObject.parseObject(i, Cursor.class))
+                .stream().map(NodeInfo::getLatestCursor).map(i -> JSONObject.parseObject(i, BinlogCursor.class))
                 .findFirst().get();
 
             if (thisCursor.compareTo(lastMaxCursor) >= 0) {

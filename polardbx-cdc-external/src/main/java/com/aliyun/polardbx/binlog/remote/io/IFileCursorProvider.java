@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.remote.io;
 
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 
 public interface IFileCursorProvider {
 
@@ -24,5 +24,5 @@ public interface IFileCursorProvider {
      * @param stream stream name
      * @return Cursor
      */
-    Cursor getCursor(String stream);
+    BinlogCursor getCursor(String stream);
 }

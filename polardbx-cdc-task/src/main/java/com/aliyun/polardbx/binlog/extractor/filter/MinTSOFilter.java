@@ -75,10 +75,11 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
                 logger.error("detected disorderly transaction \r\n" + " current transaction info is " + transaction
                     + "\r\n" + " last transaction info is :" + lastTransaction);
                 throw new PolardbxException("detected disorderly transaction，current tso is: "
-                    + transaction.getVirtualTSO() + ", last tso is :" + lastPushTso);
+                    + transaction.getVirtualTsoStr() + ", last tso is :" + lastPushTso);
             }
-            logger.info("filter:TSO:" + transaction.getVirtualTSO() + ":pos:[" + transaction.getBinlogFileName() + ":"
-                + transaction.getStartLogPos() + "]xid:" + transaction.getXid());
+            logger.info("filter { TSO: [" + transaction.getVirtualTsoStr()
+                + "] , pos: [" + transaction.getBinlogFileName() + ":" + transaction.getStartLogPos()
+                + "] , xid: [" + transaction.getXid() + " ]");
             return false;
         }
 
@@ -105,8 +106,9 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
         lastTransaction = transaction;
 
         if (!processingEvent) {
-            logger.info("****--- ready to push event start with tso " + transaction.getVirtualTSO() + ", at position "
-                + transaction.getBinlogFileName() + ":" + transaction.getStartLogPos());
+            logger
+                .info("****--- ready to push event start with tso " + transaction.getVirtualTsoStr() + ", at position "
+                    + transaction.getBinlogFileName() + ":" + transaction.getStartLogPos());
         }
         processingEvent = true;
     }

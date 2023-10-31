@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
 
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
@@ -21,19 +22,7 @@ import org.junit.Test;
 /**
  * Created by ziyang.lb
  **/
-public class RebuildEventLogFilterTest {
-
-    @Test
-    public void testIsMoveDatabase() {
-        String sql = "move database group1 to 'storage_xxx'";
-        RebuildEventLogFilter filter = new RebuildEventLogFilter(0, null, false, null);
-        boolean result = filter.isMoveDataBaseSql(sql);
-        Assert.assertTrue(result);
-
-        sql = "create table test(id int)";
-        result = filter.isMoveDataBaseSql(sql);
-        Assert.assertFalse(result);
-    }
+public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testTryRewriteSql() {

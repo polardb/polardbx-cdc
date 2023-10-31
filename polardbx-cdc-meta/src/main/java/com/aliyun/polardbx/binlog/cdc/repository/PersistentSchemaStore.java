@@ -14,17 +14,12 @@
  */
 package com.aliyun.polardbx.binlog.cdc.repository;
 
-import com.alibaba.polardbx.druid.DbType;
-import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
-import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
-import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.alibaba.polardbx.druid.sql.repository.Schema;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObject;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObjectStore;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObjectType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.storage.RepoUnit;
-import com.aliyun.polardbx.binlog.util.FastSQLConstant;
 import com.aliyun.polardbx.meta.SchemaObjectEntity;
 import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.SneakyThrows;
@@ -39,6 +34,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
+
+import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
  * created by ziyang.lb
@@ -106,20 +103,10 @@ public class PersistentSchemaStore implements SchemaObjectStore {
         try {
             SchemaObjectEntity entity = SchemaObjectEntity.parseFrom(data);
             return new SchemaObject(schema, entity.getName(), SchemaObjectType.valueOf(entity.getType()),
-                parseStatement(entity.getStmtSql()));
+                parseSQLStatement(entity.getStmtSql()));
         } catch (InvalidProtocolBufferException e) {
             throw new PolardbxException("parse meta data failed!", e);
         }
-    }
-
-    private SQLStatement parseStatement(String sql) {
-        if (log.isDebugEnabled()) {
-            log.debug("sql for parse is : " + sql);
-        }
-        SQLStatementParser parser =
-            SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, FastSQLConstant.FEATURES);
-        List<SQLStatement> statementList = parser.parseStatementList();
-        return statementList.get(0);
     }
 
     private Collection<SchemaObject> buildAll(Set<Long> allObjKey, String keyType) {

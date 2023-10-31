@@ -40,7 +40,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_COLLECTOR_MERGE_STAGE_PARALLELISM;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_COLLECT_MERGE_STAGE_PARALLELISM;
 
 /**
  * created by ziyang.lb
@@ -79,7 +79,7 @@ public class MergeAndSinkStrategy implements CollectStrategy {
         }
         running = true;
 
-        int txnMergeThreadCount = DynamicApplicationConfig.getInt(TASK_COLLECTOR_MERGE_STAGE_PARALLELISM);
+        int txnMergeThreadCount = DynamicApplicationConfig.getInt(TASK_COLLECT_MERGE_STAGE_PARALLELISM);
         this.txnMergeExecutor = Executors.newFixedThreadPool(txnMergeThreadCount,
             new ThreadFactoryBuilder().setNameFormat("collector-merge-%d").build());
 

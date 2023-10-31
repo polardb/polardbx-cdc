@@ -14,49 +14,51 @@
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
-import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.TableCompatibilityProcessor;
-import com.aliyun.polardbx.binlog.util.PasswdUtil;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.github.rholder.retry.Retryer;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
 import lombok.extern.slf4j.Slf4j;
 import org.flywaydb.core.Flyway;
+
+import javax.sql.DataSource;
+
+import java.util.concurrent.TimeUnit;
+
+import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 
 /**
  * Created by Shuguang
  */
 @Slf4j
 public class CdcMetaManager {
-    private final String clusterId;
-    private final String clusterType;
 
-    public CdcMetaManager(String clusterId, String clusterType) {
-        this.clusterId = clusterId;
-        this.clusterType = clusterType;
+    public CdcMetaManager() {
+
     }
 
     public void init() {
         log.info("init cdc meta tables...");
-        // Create the Flyway instance and point it to the database
-        Flyway flyway = Flyway.configure().table("binlog_schema_history").dataSource(
-            SpringContextHolder.getPropertiesValue("metaDb_url"),
-            SpringContextHolder.getPropertiesValue("metaDb_username"),
-            tryDecryptPassword(SpringContextHolder.getPropertiesValue("metaDb_password"))).load();
-
-        flyway.baseline();
-        flyway.repair();
-
-        // Start the migration
-        flyway.migrate();
-
-        // try process compatibility
-        TableCompatibilityProcessor.process();
-
+        try {
+            Retryer<Object> retryer = RetryerBuilder.newBuilder().retryIfException()
+                .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.SECONDS))
+                .withStopStrategy(StopStrategies.stopAfterAttempt(50)).build();
+            retryer.call(() -> {
+                DataSource metaDs = getObject("metaDataSource");
+                Flyway flyway = Flyway.configure().table("binlog_schema_history").dataSource(metaDs).load();
+                flyway.baseline();
+                flyway.repair();
+                flyway.migrate();
+                // 处理不同版本schema兼容性问题
+                TableCompatibilityProcessor.process();
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("flyway error", e);
+            throw new PolardbxException(e);
+        }
         log.info("cdc meta tables init done!");
-    }
-
-    private String tryDecryptPassword(String password) {
-        boolean useEncryptedPassword = DynamicApplicationConfig.getBoolean(ConfigKeys.USE_ENCRYPTED_PASSWORD);
-        return useEncryptedPassword ? PasswdUtil.decryptBase64(password) : password;
     }
 }

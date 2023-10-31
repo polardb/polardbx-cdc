@@ -18,9 +18,11 @@ import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.collect.Maps;
+import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -99,11 +101,25 @@ public class BinlogProcessor {
         HostInsance finalInstance = null;
         for (HostInsance hostInsance : hostInstanceMap.values()) {
             if (startTime == null || startTime == -1 || hostInsance.getBegin() <= startTime) {
-                if (serverId.equals(extractServerId(hostInsance.getBinlogFiles().get(0)))) {
-                    logger.info("detected server id match extractor server id : " + serverId);
-                    finalInstance = hostInsance;
-                    break;
+                while (CollectionUtils.isNotEmpty(hostInsance.getBinlogFiles())) {
+                    try {
+                        if (serverId.equals(extractServerId(hostInsance.getBinlogFiles().get(0)))) {
+                            logger.info("detected server id match extractor server id : " + serverId);
+                            finalInstance = hostInsance;
+                            break;
+                        }
+                        break;
+                    } catch (Exception e) {
+                        if (e.getCause() instanceof FileNotFoundException) {
+                            hostInsance.getBinlogFiles().remove(0);
+                        } else {
+                            throw e;
+                        }
+                    }
                 }
+            }
+            if (finalInstance != null) {
+                break;
             }
         }
         return finalInstance;

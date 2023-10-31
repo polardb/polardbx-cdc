@@ -2,6 +2,7 @@ Replica Reference Manual
 ========================
 
 ## CHANGE MASTER TO
+
 CHANGE MASTER TO option  [, option] ... [channel_option]
 
 option :  {  
@@ -73,6 +74,7 @@ channel_option:
 <br/>
 
 ## RESET SLAVE
+
 RESET SLAVE [ALL] [channel_option]
 
 channel_option:  
@@ -80,8 +82,11 @@ channel_option:
 <br/>
 
 ## Commands supported soon:
+
 SET SQL_SLAVE_SKIP_COUNTER=N
 <br/>
 
 ## More details
-For more details about commands and options, refer to MySQL [official Mysql document](https://dev.mysql.com/doc/refman/5.7/en/replication-statements-replica.html).
+
+For more details about commands and options, refer to
+MySQL [official Mysql document](https://dev.mysql.com/doc/refman/5.7/en/replication-statements-replica.html).

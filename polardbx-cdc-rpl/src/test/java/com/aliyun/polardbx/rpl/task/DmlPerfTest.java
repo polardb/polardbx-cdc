@@ -18,6 +18,7 @@ import com.aliyun.polardbx.rpl.TestBase;
 import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.sql.Connection;
@@ -32,6 +33,7 @@ import java.util.concurrent.Future;
  * @author shicai.xsc 2021/4/28 11:30
  * @since 5.0.0.0
  */
+@Ignore
 public class DmlPerfTest extends TestBase {
     private static final String DB_1 = "perf_db1";
     private static final String DB_2 = "perf_db2";

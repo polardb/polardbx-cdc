@@ -16,30 +16,35 @@ package com.aliyun.polardbx.binlog.storage;
 
 import org.apache.commons.lang3.StringUtils;
 
+import java.io.Serializable;
 import java.util.Objects;
 
 /**
  *
  **/
-public class TxnKey {
+public class TxnKey implements Serializable {
 
     /**
      * 事务标识符，要求全局唯一 <br/>
      * 如果是单机事务，可以构造一个虚拟txnId，如uuid；如果是分布式事务，取xid中的事务标识符即可
      */
-    private final String txnId;
+    private long txnId;
 
     /**
      * 分片标识符，标识LogEvent是在那个物理分片产生
      */
-    private final String partitionId;
+    private String partitionId;
 
-    public TxnKey(String txnId, String partitionId) {
+    public TxnKey() {
+
+    }
+
+    public TxnKey(long txnId, String partitionId) {
         this.txnId = txnId;
         this.partitionId = partitionId;
     }
 
-    public String getTxnId() {
+    public long getTxnId() {
         return txnId;
     }
 
@@ -68,7 +73,7 @@ public class TxnKey {
             return false;
         }
         TxnKey txnKey = (TxnKey) o;
-        return txnId.equals(txnKey.txnId) && partitionId.equals(txnKey.partitionId);
+        return txnId == txnKey.txnId && partitionId.equals(txnKey.partitionId);
     }
 
     @Override

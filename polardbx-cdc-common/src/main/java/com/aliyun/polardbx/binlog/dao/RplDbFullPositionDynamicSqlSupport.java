@@ -17,65 +17,50 @@ package com.aliyun.polardbx.binlog.dao;
 import java.sql.JDBCType;
 import java.util.Date;
 import javax.annotation.Generated;
-
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class RplDbFullPositionDynamicSqlSupport {
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.335+08:00",
-        comments = "Source Table: rpl_db_full_position")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source Table: rpl_db_full_position")
     public static final RplDbFullPosition rplDbFullPosition = new RplDbFullPosition();
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.34+08:00",
-        comments = "Source field: rpl_db_full_position.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source field: rpl_db_full_position.id")
     public static final SqlColumn<Long> id = rplDbFullPosition.id;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.34+08:00",
-        comments = "Source field: rpl_db_full_position.gmt_created")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source field: rpl_db_full_position.gmt_created")
     public static final SqlColumn<Date> gmtCreated = rplDbFullPosition.gmtCreated;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.gmt_modified")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source field: rpl_db_full_position.gmt_modified")
     public static final SqlColumn<Date> gmtModified = rplDbFullPosition.gmtModified;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.state_machine_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source field: rpl_db_full_position.state_machine_id")
     public static final SqlColumn<Long> stateMachineId = rplDbFullPosition.stateMachineId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.service_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source field: rpl_db_full_position.service_id")
     public static final SqlColumn<Long> serviceId = rplDbFullPosition.serviceId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.task_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source field: rpl_db_full_position.task_id")
     public static final SqlColumn<Long> taskId = rplDbFullPosition.taskId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.full_table_name")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source field: rpl_db_full_position.full_table_name")
     public static final SqlColumn<String> fullTableName = rplDbFullPosition.fullTableName;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.total_count")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source field: rpl_db_full_position.total_count")
     public static final SqlColumn<Long> totalCount = rplDbFullPosition.totalCount;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.finished_count")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.939+08:00", comments="Source field: rpl_db_full_position.finished_count")
     public static final SqlColumn<Long> finishedCount = rplDbFullPosition.finishedCount;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.finished")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.939+08:00", comments="Source field: rpl_db_full_position.finished")
     public static final SqlColumn<Integer> finished = rplDbFullPosition.finished;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.position")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.939+08:00", comments="Source field: rpl_db_full_position.position")
     public static final SqlColumn<String> position = rplDbFullPosition.position;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.341+08:00",
-        comments = "Source field: rpl_db_full_position.end_position")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.939+08:00", comments="Source field: rpl_db_full_position.end_position")
     public static final SqlColumn<String> endPosition = rplDbFullPosition.endPosition;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-09-28T19:08:09.339+08:00",
-        comments = "Source Table: rpl_db_full_position")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.938+08:00", comments="Source Table: rpl_db_full_position")
     public static final class RplDbFullPosition extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

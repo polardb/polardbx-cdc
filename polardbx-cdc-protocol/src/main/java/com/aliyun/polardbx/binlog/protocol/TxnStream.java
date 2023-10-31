@@ -120,7 +120,7 @@ public final class TxnStream {
       "ol.TxnTokenH\000\022M\n\016txnMergedToken\030\002 \001(\01323." +
       "com.aliyun.polardbx.binlog.protocol.TxnM" +
       "ergedTokenH\000B\r\n\013token_oneof\"\341\002\n\010TxnToken" +
-      "\022\013\n\003tso\030\001 \001(\t\022\r\n\005txnId\030\002 \001(\t\022\023\n\013partitio" +
+      "\022\013\n\003tso\030\001 \001(\t\022\r\n\005txnId\030\002 \001(\003\022\023\n\013partitio" +
       "nId\030\003 \001(\t\022\033\n\023originMergeSourceId\030\004 \001(\t\022:" +
       "\n\004type\030\005 \001(\0162,.com.aliyun.polardbx.binlo" +
       "g.protocol.TxnType\022\r\n\005xaTxn\030\006 \001(\010\022\026\n\016tso" +
@@ -142,14 +142,14 @@ public final class TxnStream {
       "Name\030\004 \001(\t*/\n\nPacketMode\022\n\n\006OBJECT\020\000\022\t\n\005" +
       "BYTES\020\001\022\n\n\006RANDOM\020\002*?\n\013MessageType\022\t\n\005WH" +
       "OLE\020\000\022\t\n\005BEGIN\020\001\022\010\n\004DATA\020\002\022\007\n\003END\020\003\022\007\n\003T" +
-      "AG\020\004*q\n\007TxnType\022\007\n\003DML\020\000\022\017\n\013FORMAT_DESC\020" +
-      "\001\022\014\n\010META_DDL\020\002\022\016\n\nMETA_SCALE\020\003\022\022\n\016META_" +
-      "HEARTBEAT\020\005\022\032\n\026META_CONFIG_ENV_CHANGE\020\0062" +
-      "z\n\nTxnService\022l\n\004dump\0220.com.aliyun.polar" +
-      "dbx.binlog.protocol.DumpRequest\032..com.al" +
-      "iyun.polardbx.binlog.protocol.DumpReply\"" +
-      "\0000\001B)\n#com.aliyun.polardbx.binlog.protoc" +
-      "olH\001P\001b\006proto3"
+      "AG\020\004*\200\001\n\007TxnType\022\007\n\003DML\020\000\022\017\n\013FORMAT_DESC" +
+      "\020\001\022\014\n\010META_DDL\020\002\022\016\n\nMETA_SCALE\020\003\022\022\n\016META" +
+      "_HEARTBEAT\020\005\022\032\n\026META_CONFIG_ENV_CHANGE\020\006" +
+      "\022\r\n\tFLUSH_LOG\020\0072z\n\nTxnService\022l\n\004dump\0220." +
+      "com.aliyun.polardbx.binlog.protocol.Dump" +
+      "Request\032..com.aliyun.polardbx.binlog.pro" +
+      "tocol.DumpReply\"\0000\001B)\n#com.aliyun.polard" +
+      "bx.binlog.protocolH\001P\001b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

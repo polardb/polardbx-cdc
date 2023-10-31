@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.transmit.relay;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.metrics.RelayStreamMetrics;
 import com.aliyun.polardbx.binlog.storage.RepoUnit;

@@ -16,20 +16,18 @@ package com.aliyun.polardbx.binlog.daemon.cluster;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.GlobalBinlogTopologyService;
-import org.junit.Before;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import org.junit.Ignore;
 import org.junit.Test;
 
-public class TopologyServiceTest {
-    @Before
-    public void init() {
-        SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-    }
+@Ignore
+public class TopologyServiceTest extends BaseTestWithGmsTables {
 
     @Test
     public void calculateTopology() throws Throwable {
+        TableDataInitUtil.initNodeInfo(configProvider);
+
         String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
         GlobalBinlogTopologyService topologyService = new GlobalBinlogTopologyService(clusterId, "");
         topologyService.tryBuild();

@@ -27,11 +27,11 @@ public class BatchEventToken extends EventToken {
     private long notDmlEventSize;
     private final List<SingleEventToken> tokens = new LinkedList<>();
 
-    public boolean hasCapacity(SingleEventToken eventToken, int eventDataBufferSize, int eventDataMaxSize) {
-        if (notDmlEventSize + eventToken.getLength() > eventDataBufferSize) {
+    public boolean hasCapacity(SingleEventToken eventToken, int maxSlotSize, int maxSlotPayloadSize) {
+        if (notDmlEventSize + eventToken.getLength() > maxSlotSize) {
             return false;
         }
-        return dmlEventSize + notDmlEventSize + eventToken.getLength() <= eventDataMaxSize;
+        return dmlEventSize + notDmlEventSize + eventToken.getLength() <= maxSlotPayloadSize;
     }
 
     public void addToken(SingleEventToken eventToken) {

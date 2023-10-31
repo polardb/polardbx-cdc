@@ -16,6 +16,11 @@ package com.aliyun.polardbx.binlog.format.field;
 
 import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.math.BigInteger;
 
 /**
  * case MYSQL_TYPE_BLOB:
@@ -24,6 +29,8 @@ import com.aliyun.polardbx.binlog.format.utils.MySQLType;
  * case MYSQL_TYPE_LONG_BLOB:
  */
 public class BlobField extends Field {
+
+    private static final Logger logger = LoggerFactory.getLogger(BlobField.class);
 
     private static final int MAX_1_B = (1 << 8) - 1;
     private static final int MAX_2_B = (1 << 16) - 1;
@@ -59,7 +66,38 @@ public class BlobField extends Field {
             if (this.data instanceof byte[]) {
                 contents = (byte[]) this.data;
             } else {
-                contents = String.valueOf(this.data).getBytes(charset);
+                if (StringUtils.endsWith(this.realType, "BLOB")) {
+                    BigInteger bigInteger = null;
+                    String dataStr = String.valueOf(this.data);
+                    try {
+                        if (StringUtils.startsWith(dataStr, "b'")) {
+                            dataStr = StringUtils.substringAfter(dataStr, "b'");
+                            dataStr = StringUtils.substringBefore(dataStr, "'");
+                            bigInteger = new BigInteger(dataStr, 2);
+                        } else if (StringUtils.startsWith(dataStr, "0x") || StringUtils.startsWith(dataStr, "0X")) {
+                            dataStr = StringUtils.substring(dataStr, 2);
+                            bigInteger = new BigInteger(dataStr, 16);
+                        } else if (StringUtils.startsWith(dataStr, "x'")) {
+                            dataStr = StringUtils.substringAfter(dataStr, "x'");
+                            dataStr = StringUtils.substringBefore(dataStr, "'");
+                            bigInteger = new BigInteger(dataStr, 16);
+                        } else if (StringUtils.startsWith(dataStr, "X'")) {
+                            dataStr = StringUtils.substringAfter(dataStr, "X'");
+                            dataStr = StringUtils.substringBefore(dataStr, "'");
+                            bigInteger = new BigInteger(dataStr, 16);
+                        }
+                    } catch (Exception e) {
+                        logger.error(
+                            "try convert str 2 blob failed! str is " + this.data + " , real type is " + this.realType,
+                            e);
+                    }
+                    if (bigInteger != null) {
+                        contents = bigInteger.toByteArray();
+                    }
+                }
+                if (StringUtils.contains(this.realType, "TEXT") || contents == null) {
+                    contents = String.valueOf(this.data).getBytes(charset);
+                }
             }
         }
 

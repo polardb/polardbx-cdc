@@ -14,12 +14,11 @@
  */
 package com.aliyun.polardbx.binlog.restore;
 
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang3.ArrayUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -77,8 +76,8 @@ public class BinlogDownloader {
     }
 
     private boolean needDownload() {
-        File[] localFiles = BinlogFileUtil.listBinlogFiles(binlogFullPath, group, stream);
-        return ArrayUtils.isEmpty(localFiles) && !downloadFiles.isEmpty();
+        List<File> localFiles = BinlogFileUtil.listLocalBinlogFiles(binlogFullPath, group, stream);
+        return localFiles.isEmpty() && !downloadFiles.isEmpty();
     }
 
     private void deleteBadFiles() {

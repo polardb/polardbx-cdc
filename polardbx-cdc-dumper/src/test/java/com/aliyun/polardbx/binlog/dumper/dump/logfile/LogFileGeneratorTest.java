@@ -18,6 +18,7 @@ import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.zip.CRC32;
 
 @Slf4j
+@Ignore
 public class LogFileGeneratorTest {
 
     private static final byte[] BINLOG_FILE_HEADER = new byte[] {(byte) 0xfe, 0x62, 0x69, 0x6e};

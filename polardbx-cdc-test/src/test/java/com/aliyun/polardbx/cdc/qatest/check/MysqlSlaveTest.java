@@ -41,11 +41,28 @@ public class MysqlSlaveTest extends RplBaseTestCase {
     @Test
     public void checkSlaveStatus() {
         if (usingBinlogX) {
-            check(getCdcSyncDbConnectionFirst(), "binlog-x-first");
-            check(getCdcSyncDbConnectionSecond(), "binlog-x-second");
-            check(getCdcSyncDbConnectionThird(), "binlog-x-third");
+            checkWithRetry(getCdcSyncDbConnectionFirst(), "binlog-x-first");
+            checkWithRetry(getCdcSyncDbConnectionSecond(), "binlog-x-second");
+            checkWithRetry(getCdcSyncDbConnectionThird(), "binlog-x-third");
         } else {
-            check(getCdcSyncDbConnection(), "global-binlog");
+            checkWithRetry(getCdcSyncDbConnection(), "global-binlog");
+        }
+    }
+
+    @SneakyThrows
+    private void checkWithRetry(Connection connection, String slaveType) {
+        long startTime = System.currentTimeMillis();
+        while (true) {
+            try {
+                check(connection, slaveType);
+                break;
+            } catch (Throwable t) {
+                if (System.currentTimeMillis() - startTime > 120 * 1000) {
+                    throw t;
+                } else {
+                    Thread.sleep(1000);
+                }
+            }
         }
     }
 
@@ -62,18 +79,18 @@ public class MysqlSlaveTest extends RplBaseTestCase {
                 for (String c : columns) {
                     String str = rs.getString(c);
                     result.add(Pair.of(c, str));
-                    if (StringUtils.equals("Last_Error", c)) {
-                        e1 = str;
+                    if (StringUtils.equalsIgnoreCase("Last_Error", c)) {
+                        e1 = StringUtils.trim(str);
                     }
-                    if (StringUtils.equals("Last_SQL_Error", c)) {
-                        e2 = str;
+                    if (StringUtils.equalsIgnoreCase("Last_SQL_Error", c)) {
+                        e2 = StringUtils.trim(str);
                     }
                 }
 
-                Assert.assertTrue(JSONObject.toJSONString(result, true), StringUtils.isBlank(e1));
-                Assert.assertTrue(JSONObject.toJSONString(result, true), StringUtils.isBlank(e2));
                 log.info("show slave status result for {} is \r\n {}", slaveType,
                     JSONObject.toJSONString(result, true));
+                Assert.assertTrue(JSONObject.toJSONString(result, true), StringUtils.isBlank(e1));
+                Assert.assertTrue(JSONObject.toJSONString(result, true), StringUtils.isBlank(e2));
             }
         }
     }

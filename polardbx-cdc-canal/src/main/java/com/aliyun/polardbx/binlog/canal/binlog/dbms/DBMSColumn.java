@@ -78,6 +78,10 @@ public abstract class DBMSColumn implements Serializable {
      */
     public abstract boolean isUniqueKey();
 
+    public abstract boolean isGenerated();
+
+    public abstract boolean isRdsImplicitPk();
+
     /**
      * {@inheritDoc}
      *
@@ -159,6 +163,8 @@ public abstract class DBMSColumn implements Serializable {
         builder.append(this.isPrimaryKey());
         builder.append(", uniqueKey: ");
         builder.append(this.isUniqueKey());
+        builder.append(", generated: ");
+        builder.append(this.isGenerated());
         builder.append(')');
         return builder.toString();
     }

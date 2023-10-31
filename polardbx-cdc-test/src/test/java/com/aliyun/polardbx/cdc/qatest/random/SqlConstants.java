@@ -181,6 +181,8 @@ public class SqlConstants {
         + "`c_char` char(50) DEFAULT 'sjdlfjsdljldfjsldfsd',\n"
         + "`c_char_df` char DEFAULT 'x',\n"
         + "`c_varchar` varchar(50) DEFAULT 'sjdlfjsldhgowuere',\n"
+        + "`c_nchar` nchar(100) DEFAULT '你好',\n"
+        + "`c_nvarchar` nvarchar(100) DEFAULT '北京',\n"
         + "`c_binary_df` binary DEFAULT 'x',\n"
         + "`c_binary` binary(200) DEFAULT 'qoeuroieshdfs',\n"
         + "`c_varbinary` varbinary(200) DEFAULT 'sdfjsljlewwfs',\n"
@@ -230,7 +232,7 @@ public class SqlConstants {
             + "'select t.name,t.age,t.salary 13\\n from employee t\\n where t.region <> \"杭州\"\\n and\\n t.nickname = \"(此处省略300字)\";',\n"
             + "'int a = max(4,5)' ,\n"
             + "'{}' ,\n "
-            + "GeomFromText('POINT(" + RandomUtils.nextFloat() + " " + RandomUtils.nextFloat() + ")')"
+            + "ST_GeomFromText('POINT(" + RandomUtils.nextFloat() + " " + RandomUtils.nextFloat() + ")')"
             + ")";
 
     public static final String T_RANDOM_QUERY_SQL = "select * from `%s`";

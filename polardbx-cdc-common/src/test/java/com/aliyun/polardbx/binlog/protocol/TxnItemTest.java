@@ -14,19 +14,16 @@
  */
 package com.aliyun.polardbx.binlog.protocol;
 
-import com.aliyun.polardbx.binlog.base.BaseTest;
 import com.google.protobuf.AbstractMessageLite;
 import com.google.protobuf.ByteString;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.UUID;
 
-public class TxnItemTest extends BaseTest {
+public class TxnItemTest {
 
     @Test
-    @Ignore
     public void testSerializePerformance() {
         ArrayList<TxnItem> list = new ArrayList<>();
         for (int i = 0; i < 100000; i++) {
@@ -50,7 +47,6 @@ public class TxnItemTest extends BaseTest {
     }
 
     @Test
-    @Ignore
     public void testSizeCalculate() {
         TxnItem item = TxnItem.newBuilder()
             .setTraceId(UUID.randomUUID().toString())

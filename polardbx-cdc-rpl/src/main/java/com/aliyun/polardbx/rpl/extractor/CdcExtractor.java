@@ -22,7 +22,6 @@ import com.aliyun.polardbx.binlog.canal.MySqlInfo;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.handle.EventHandle;
@@ -41,24 +40,24 @@ import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
+import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.util.HttpHelper;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc;
 import com.aliyun.polardbx.rpc.cdc.DumpRequest;
-import com.aliyun.polardbx.rpc.cdc.MasterStatus;
-import com.aliyun.polardbx.rpc.cdc.Request;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
+import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.extractor.cdc.DefaultCdcExtractHandler;
 import com.aliyun.polardbx.rpl.extractor.cdc.buffer.StreamObserverBuffer;
 import com.aliyun.polardbx.rpl.filter.BaseFilter;
 import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
+import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
-import io.grpc.stub.StreamObserver;
 import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,7 +72,6 @@ import java.text.MessageFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -117,7 +115,7 @@ public class CdcExtractor extends BaseExtractor {
     }
 
     @Override
-    public boolean init() throws Exception {
+    public void init() throws Exception {
         super.init();
         DumperInfoMapper mapper = SpringContextHolder.getObject(DumperInfoMapper.class);
         RetryTemplate template = RetryTemplate.builder()
@@ -126,24 +124,19 @@ public class CdcExtractor extends BaseExtractor {
             .retryOn(RetryableException.class)
             .build();
 
-        try {
-            DumperInfo info = template.execute((RetryCallback<DumperInfo, Throwable>) retryContext -> {
-                Optional<DumperInfo> dumperInfo = mapper.selectOne(c -> c
-                    .where(DumperInfoDynamicSqlSupport.role, IsEqualTo.of(() -> "M")));
-                if (!dumperInfo.isPresent()) {
-                    throw new RetryableException("dumper leader is not ready");
-                }
-                return dumperInfo.get();
-            }, retryContext -> null);
-            cdcServerIp = info.getIp();
-            cdcPort = info.getPort();
-            logger.info("override cdc server ip and port " + cdcServerIp + " : " + cdcPort + " success!");
+        DumperInfo info = template.execute((RetryCallback<DumperInfo, Exception>) retryContext -> {
+            Optional<DumperInfo> dumperInfo = mapper.selectOne(c -> c
+                .where(DumperInfoDynamicSqlSupport.role, IsEqualTo.of(() -> "M")));
+            if (!dumperInfo.isPresent()) {
+                throw new RetryableException("dumper leader is not ready");
+            }
+            return dumperInfo.get();
+        }, retryContext -> null);
+        cdcServerIp = info.getIp();
+        cdcPort = info.getPort();
+        logger.info("override cdc server ip and port " + cdcServerIp + " : " + cdcPort + " success!");
 
-            initCharset();
-        } catch (Throwable e) {
-            logger.error("query cdc server ip and port failed, will use define ip and port continue!", e);
-        }
-        return true;
+        initCharset();
     }
 
     private void initCharset() throws IOException {
@@ -182,7 +175,7 @@ public class CdcExtractor extends BaseExtractor {
     }
 
     private void modifyHeartbeatFlushIntervalIfNeed(int sec) {
-        Long interval = DynamicApplicationVersionConfig.getLong(ConfigKeys.HEARTBEAT_FLUSH_INTERVAL);
+        Long interval = DynamicApplicationVersionConfig.getLong(ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL);
         if (interval.intValue() == sec) {
             return;
         }
@@ -194,7 +187,7 @@ public class CdcExtractor extends BaseExtractor {
         String url =
             MessageFormat.format("http://{0}:{1}/system/setConfigEnv", nodeInfo.getIp(), nodeInfo.getDaemonPort() + "");
         Map<String, String> params = Maps.newHashMap();
-        params.put("name", ConfigKeys.HEARTBEAT_FLUSH_INTERVAL);
+        params.put("name", ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL);
         //心跳修改为5s
         params.put("value", sec + "");
         String result = HttpHelper.doPost(url, JSON.toJSONString(params), null);
@@ -217,7 +210,7 @@ public class CdcExtractor extends BaseExtractor {
             .build();
 
         if (position == null) {
-            findStartPosition(channel);
+            position = FSMMetaManager.findStartPosition(channel);
         }
 
         StreamObserverBuffer logBuffer = new StreamObserverBuffer();
@@ -278,38 +271,16 @@ public class CdcExtractor extends BaseExtractor {
                 ex = e;
             } finally {
                 handle.onEnd();
-                System.exit(-1);
+                StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                    TaskContext.getInstance().getTaskId(), "back flow process error");
+                StatisticalProxy.getInstance().recordLastError(ex.toString());
+                TaskContext.getInstance().getPipeline().stop();
             }
 
         }, "parser-thread");
 
         parseThread.start();
         logger.info("start cdc extractor start success");
-    }
-
-    private void findStartPosition(ManagedChannel channel) throws InterruptedException {
-        CountDownLatch countDownLatch = new CountDownLatch(1);
-        CdcServiceGrpc.CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
-        cdcServiceStub.showMasterStatus(Request.newBuilder().build(), new StreamObserver<MasterStatus>() {
-            @Override
-            public void onNext(MasterStatus value) {
-                position = new BinlogPosition(value.getFile(), value.getPosition(), -1, -1);
-                countDownLatch.countDown();
-            }
-
-            @Override
-            public void onError(Throwable t) {
-                logger.error("find start position  error !", t);
-                countDownLatch.countDown();
-                System.exit(1);
-            }
-
-            @Override
-            public void onCompleted() {
-
-            }
-        });
-        countDownLatch.await();
     }
 
     @Override

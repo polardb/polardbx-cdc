@@ -23,9 +23,7 @@ public enum DdlState {
 
     RUNNING(10),
 
-    FAILED(20),
-
-    SUCCEED(30);
+    SUCCEED(20);
 
     private int value;
 
@@ -34,7 +32,7 @@ public enum DdlState {
     }
 
     public boolean isFinished() {
-        return this == FAILED || this == SUCCEED;
+        return this == SUCCEED;
     }
 
     DdlState(int value) {

@@ -34,6 +34,8 @@ public class DefaultColumn extends DBMSColumn {
     protected boolean nullable;
     protected boolean primaryKey;
     protected boolean uniqueKey;
+    protected boolean generated;
+    protected boolean rdsImplicitPk;
 
     /**
      * Create a new <code>SimpleColumn</code> object.
@@ -64,6 +66,14 @@ public class DefaultColumn extends DBMSColumn {
                          boolean primaryKey, boolean uniqueKey) {
         this(name, ordinalIndex, sqlType, signed, nullable, primaryKey);
         this.uniqueKey = uniqueKey;
+    }
+
+    public DefaultColumn(String name, int ordinalIndex, int sqlType, boolean signed, boolean nullable,
+                         boolean primaryKey, boolean uniqueKey, boolean generated, boolean rdsImplicitPk) {
+        this(name, ordinalIndex, sqlType, signed, nullable, primaryKey);
+        this.uniqueKey = uniqueKey;
+        this.generated = generated;
+        this.rdsImplicitPk = rdsImplicitPk;
     }
 
     /**
@@ -159,5 +169,15 @@ public class DefaultColumn extends DBMSColumn {
 
     public void setUniqueKey(boolean uniqueKey) {
         this.uniqueKey = uniqueKey;
+    }
+
+    @Override
+    public boolean isGenerated() {
+        return generated;
+    }
+
+    @Override
+    public boolean isRdsImplicitPk() {
+        return rdsImplicitPk;
     }
 }

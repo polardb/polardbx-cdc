@@ -18,11 +18,8 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
+import com.aliyun.polardbx.binlog.domain.po.RplStatMetrics;
 import com.aliyun.polardbx.rpl.applier.ApplyHelper;
-import com.aliyun.polardbx.rpl.applier.StatisticUnit;
-import com.aliyun.polardbx.rpl.dbmeta.ColumnValue;
-import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,19 +80,30 @@ public class LogUtil {
         return LoggerFactory.getLogger(RPL_LOGGER);
     }
 
-    public static String generateStatisticLog(StatisticUnit unit, String intervalItem, long totalInCache) {
-        StringBuilder logSb = new StringBuilder();
-        logSb.append(CommonUtil.getCurrentTime())
-            .append(" totalConsumeMessageCount: ").append(unit.getTotalConsumeMessageCount().get(intervalItem))
-            .append(" messageRps: ").append(unit.getMessageRps().get(intervalItem))
-            .append(" applyQps: ").append(unit.getApplyQps().get(intervalItem))
-            .append(" applyRt: ").append(unit.getApplyRt().get(intervalItem))
-            .append(" avgMergeBatchSize: ").append(unit.getAvgMergeBatchSize().get(intervalItem))
-            .append(" skipCount: ").append(unit.getSkipCounter())
-            .append(" totalDealWithCount: ").append(unit.getPersistentMessageCounter())
-            .append(" skipExceptionCount: ").append(unit.getSkipExceptionCounter())
-            .append(" totalInCache: ").append(totalInCache);
-        return logSb.toString();
+    public static String generateStatisticLogV2(RplStatMetrics rplStatMetrics) {
+        return
+            new StringBuilder(512).append(CommonUtil.getCurrentTime())
+                .append(" outRps:").append(rplStatMetrics.getOutRps())
+                .append(" applyCount:").append(rplStatMetrics.getApplyCount())
+                .append(" inEps:").append(rplStatMetrics.getInEps())
+                .append(" outBps:").append(rplStatMetrics.getOutBps())
+                .append(" inBps:").append(rplStatMetrics.getInBps())
+                .append(" outInsertRps:").append(rplStatMetrics.getOutInsertRps())
+                .append(" outUpdateRps:").append(rplStatMetrics.getOutUpdateRps())
+                .append(" outDeleteRps:").append(rplStatMetrics.getOutDeleteRps())
+                .append(" receiveDelay:").append(rplStatMetrics.getReceiveDelay())
+                .append(" processDelay:").append(rplStatMetrics.getProcessDelay())
+                .append(" mergeBatchSize:").append(rplStatMetrics.getMergeBatchSize())
+                .append(" rt:").append(rplStatMetrics.getRt())
+                .append(" skipCounter:").append(rplStatMetrics.getSkipCounter())
+                .append(" skipExceptionCounter:").append(rplStatMetrics.getSkipExceptionCounter())
+                .append(" persistMsgCounter:").append(rplStatMetrics.getPersistMsgCounter())
+                .append(" msgCacheSize:").append(rplStatMetrics.getMsgCacheSize())
+                .append(" cpuUseRatio:").append(rplStatMetrics.getCpuUseRatio())
+                .append(" memUseRatio:").append(rplStatMetrics.getMemUseRatio())
+                .append(" fullGcCount:").append(rplStatMetrics.getFullGcCount())
+                .append(" workerIp:").append(rplStatMetrics.getWorkerIp())
+                .toString();
     }
 
     public static void logFullCommitInfo(List<DBMSEvent> dbmsEvents, String physicalInfo) {
@@ -135,7 +143,8 @@ public class LogUtil {
             }
             if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA) != null &&
                 rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA).getValue() != null) {
-                sourceSchema = rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA).getValue().toString();
+                sourceSchema =
+                    rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA).getValue().toString();
             }
             if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_TABLE) != null &&
                 rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_TABLE).getValue() != null) {

@@ -16,6 +16,8 @@ package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 
@@ -36,13 +38,13 @@ public class SplitTransactionApplier extends MysqlApplier {
     }
 
     @Override
-    protected boolean dmlApply(List<DBMSEvent> dbmsEvents) throws Throwable {
-        if (dbmsEvents == null || dbmsEvents.size() == 0) {
-            return true;
+    protected void dmlApply(List<DBMSEvent> dbmsEvents) throws Exception {
+        if (dbmsEvents == null || dbmsEvents.isEmpty()) {
+            return;
         }
 
         Map<String, List<DefaultRowChange>> splitRowChanges = splitByTable(dbmsEvents);
-        return parallelExecSqlContexts(splitRowChanges, true);
+        parallelExecSqlContexts(splitRowChanges, true);
     }
 
     private Map<String, List<DefaultRowChange>> splitByTable(List<DBMSEvent> dbmsEvents) {
@@ -63,10 +65,8 @@ public class SplitTransactionApplier extends MysqlApplier {
         return splitRowChanges;
     }
 
-    protected boolean parallelExecSqlContexts(Map<String, List<DefaultRowChange>> allRowChanges, boolean tbTranExec)
-        throws Throwable {
-        boolean res = true;
-        List<Future<Boolean>> futures = new ArrayList<>();
+    protected void parallelExecSqlContexts(Map<String, List<DefaultRowChange>> allRowChanges, boolean tbTranExec) {
+        List<Future<Void>> futures = new ArrayList<>();
 
         for (String fullTbName : allRowChanges.keySet()) {
             List<DefaultRowChange> tbRowChanges = allRowChanges.get(fullTbName);
@@ -77,19 +77,23 @@ public class SplitTransactionApplier extends MysqlApplier {
             }
 
             // execute
-            final Callable<Boolean> task;
+            final Callable<Void> task;
             if (tbTranExec) {
-                task = () -> tranExecSqlContexts(tbSqlContexts);
+                task = () -> {
+                    tranExecSqlContexts(tbSqlContexts);
+                    return null;
+                };
             } else {
-                task = () -> execSqlContexts(tbSqlContexts);
+                task = () -> {
+                    execSqlContexts(tbSqlContexts);
+                    return null;
+                };
             }
             futures.add(executorService.submit(task));
         }
-
-        for (Future<Boolean> future : futures) {
-            res &= future.get();
+        PolardbxException exception = CommonUtil.waitAllTaskFinishedAndReturn(futures);
+        if (exception != null) {
+            throw exception;
         }
-
-        return res;
     }
 }

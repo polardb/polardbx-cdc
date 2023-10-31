@@ -16,6 +16,7 @@ package com.aliyun.polardbx.rpl.validation;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.domain.po.ValidationTask;
 import com.aliyun.polardbx.rpl.applier.SqlContext;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
@@ -52,7 +53,7 @@ public class TableValidator implements Validator {
     private final ValidationContext ctx;
     private ValSQLGenerator valSQLGenerator;
     private ExecutorService executorService;
-    private final static int perDbParallel = DynamicApplicationConfig
+    private static final int perDbParallel = DynamicApplicationConfig
         .getInt(ConfigKeys.RPL_VALIDATION_PER_DB_PARALLELISM);
 
     public TableValidator(final ValidationContext context) {
@@ -72,34 +73,34 @@ public class TableValidator implements Validator {
                 continue;
             }
             Future<?> future = executorService.submit(() -> {
-                try {
-                    List<Record> diffRowList = findDiffRecords(srcTable);
-                    // persist diff row list
-                    ctx.getRepository().persistDiffRows(srcTable, diffRowList);
-                    ctx.getRepository().updateValTaskState(srcTable, ValidationStateEnum.DONE);
-                    // task status heartbeat
-                    StatisticalProxy.getInstance().heartbeat();
-                } catch (Exception e) {
-                    log.error("exception when find diff rows then persist. src table: {}", srcTable.getName(), e);
                     try {
-                        ctx.getRepository().updateValTaskState(srcTable, ValidationStateEnum.ERROR);
-                    } catch (Exception e1) {
-                        log.error("error when update val task to error state. src table: {}", srcTable.getName(), e1);
+                        List<Record> diffRowList = findDiffRecords(srcTable);
+                        // persist diff row list
+                        ctx.getRepository().persistDiffRows(srcTable, diffRowList);
+                        ctx.getRepository().updateValTaskState(srcTable, ValidationStateEnum.DONE);
+                        // task status heartbeat
+                        StatisticalProxy.getInstance().heartbeat();
+                    } catch (Exception e) {
+                        log.error("exception when find diff rows then persist. src table: {}", srcTable.getName(), e);
+                        try {
+                            ctx.getRepository().updateValTaskState(srcTable, ValidationStateEnum.ERROR);
+                        } catch (Exception e1) {
+                            log.error("error when update val task to error state. src table: {}", srcTable.getName(), e1);
+                        }
                     }
-                }
                 }
             );
             futures.add(future);
         }
-        for(Future<?> future: futures) {
+        for (Future<?> future : futures) {
             future.get();
         }
     }
 
     /**
      * Find diff records of one chunk
+     *
      * @return List<key columns, value>
-     * @throws Exception
      */
     private List<Record> findDiffRecords(TableInfo srcTable) throws Exception {
         List<Record> diffRecords = new ArrayList<>();
@@ -128,28 +129,34 @@ public class TableValidator implements Validator {
                 keyValMap.get(CHECKSUM).add(srcRs.getString(CHECKSUM));
                 for (int i = 0; i < keyList.size(); i++) {
                     String keyCol = keyList.get(i);
-                    ColumnInfo column = srcTable.getColumns().stream().filter(col -> col.getName().equals(keyCol)).findFirst().orElseThrow(
-                            () -> new Exception(String.format("Error to find key column. keyCol: %s", keyCol))
-                    );
+                    ColumnInfo column =
+                        srcTable.getColumns().stream().filter(col -> col.getName().equals(keyCol)).findFirst()
+                            .orElseThrow(
+                                () -> new Exception(String.format("Error to find key column. keyCol: %s", keyCol))
+                            );
                     Object val = ExtractorUtil.getColumnValue(srcRs, column.getName(), column.getType());
-                    keyValMap.get(keyCol).add((Serializable)val);
+                    keyValMap.get(keyCol).add((Serializable) val);
                 }
                 // validate one batch
                 if (keyValMap.get(CHECKSUM).size() >= ctx.getChunkSize()) {
+                    StatisticalProxy.getInstance().acquire();
                     if (!compareBatchChecksum(srcTable, keyValMap)) {
-                        log.info("Finding inconsistent rows one by one for db: {}, src phy table: {}", ctx.getSrcPhyDB(), srcTable.getName());
+                        log.info("Finding inconsistent rows one by one for db: {}, src phy table: {}",
+                            ctx.getSrcPhyDB(), srcTable.getName());
                         diffRecords.addAll(findDiffOneByOne(dstTable, keyValMap));
                     }
-                    StatisticalProxy.getInstance().addMessageCount(keyValMap.get(CHECKSUM).size());
+                    StatMetrics.getInstance().addOutMessageCount(keyValMap.get(CHECKSUM).size());
                     keyValMap.put(CHECKSUM, new ArrayList<>(ctx.getChunkSize()));
                     keyList.forEach(k -> keyValMap.put(k, new ArrayList<>(ctx.getChunkSize())));
                 }
             }
             if (keyValMap.get(CHECKSUM).size() > 0 && !compareBatchChecksum(srcTable, keyValMap)) {
-                log.info("Last batch was inconsistent. Finding diff rows one by one for db: {}, phy src table: {}", ctx.getSrcPhyDB(), srcTable.getName());
+                StatisticalProxy.getInstance().acquire();
+                log.info("Last batch was inconsistent. Finding diff rows one by one for db: {}, phy src table: {}",
+                    ctx.getSrcPhyDB(), srcTable.getName());
                 diffRecords.addAll(findDiffOneByOne(dstTable, keyValMap));
             }
-            StatisticalProxy.getInstance().addMessageCount(keyValMap.get(CHECKSUM).size());
+            StatMetrics.getInstance().addOutMessageCount(keyValMap.get(CHECKSUM).size());
             log.info("finish validation for db: {}, phy src table: {}", ctx.getSrcPhyDB(), srcTable.getName());
 
         } catch (Exception e) {
@@ -169,7 +176,7 @@ public class TableValidator implements Validator {
         SqlContext srcSQLContext = null;
         SqlContext dstSQLContext = null;
         try (Connection srcConn = ctx.getSrcDs().getConnection();
-            Connection dstConn = ctx.getDstDs().getConnection()){
+            Connection dstConn = ctx.getDstDs().getConnection()) {
             srcSQLContext = ctx.getValSQLGenerator().generateChecksumSQL(table, keyValMap, false);
             String srcChecksum = DataSourceUtil.query(srcConn, srcSQLContext, 1, 3, rs -> {
                 rs.next();
@@ -185,7 +192,7 @@ public class TableValidator implements Validator {
             // update task status. heartbeat has 300s timeout setting
             StatisticalProxy.getInstance().heartbeat();
 
-            return StringUtils.equals(srcChecksum,dstChecksum);
+            return StringUtils.equals(srcChecksum, dstChecksum);
         } catch (Exception e) {
             log.error("Compute batch checksum exception. Reduce to row by row comparison. src SQL: {} \n dst SQL: {} \n"
                 , srcSQLContext, dstSQLContext, e);
@@ -193,7 +200,8 @@ public class TableValidator implements Validator {
         }
     }
 
-    private List<Record> findDiffOneByOne(TableInfo dstTable, Map<String, List<Serializable>> keyValMap) throws Exception {
+    private List<Record> findDiffOneByOne(TableInfo dstTable, Map<String, List<Serializable>> keyValMap)
+        throws Exception {
         List<Record> diffList = new ArrayList<>();
         List<Serializable> checksumList = keyValMap.get(CHECKSUM);
         for (int i = 0; i < checksumList.size(); i++) {

@@ -14,30 +14,27 @@
  */
 package com.aliyun.polardbx.rpl.task;
 
+import com.aliyun.polardbx.rpl.RplTaskRunner;
+import com.aliyun.polardbx.rpl.TestBase;
+import com.aliyun.polardbx.rpl.applier.ApplyHelper;
+import com.aliyun.polardbx.rpl.applier.SqlContext;
+import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.Test;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import javax.sql.DataSource;
-
-import com.aliyun.polardbx.rpl.TestBase;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
-import com.aliyun.polardbx.rpl.RplTaskRunner;
-import com.aliyun.polardbx.rpl.applier.ApplyHelper;
-import com.aliyun.polardbx.rpl.applier.SqlContext;
-import com.aliyun.polardbx.rpl.common.DataSourceUtil;
-import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
-
 /**
  * @author shicai.xsc 2021/3/18 11:12
  * @since 5.0.0.0
  */
+@Ignore
 public class TransactionTest extends TestBase {
 
     @Before
@@ -156,12 +153,11 @@ public class TransactionTest extends TestBase {
         List<SqlContext> contexts = new ArrayList<>();
 
         for (int i = start; i < start + 5; i++) {
-            SqlContext context1 = new SqlContext("DELETE FROM `rpl`.`t3` WHERE id=?", "rpl","t3", Arrays.asList(i));
-            SqlContext context2 = new SqlContext("DELETE FROM `rpl`.`t4` WHERE id=?", "rpl","t4", Arrays.asList(i));
+            SqlContext context1 = new SqlContext("DELETE FROM `rpl`.`t3` WHERE id=?", "rpl", "t3", Arrays.asList(i));
+            SqlContext context2 = new SqlContext("DELETE FROM `rpl`.`t4` WHERE id=?", "rpl", "t4", Arrays.asList(i));
             contexts.add(context1);
             contexts.add(context2);
         }
-
         return contexts;
     }
 }

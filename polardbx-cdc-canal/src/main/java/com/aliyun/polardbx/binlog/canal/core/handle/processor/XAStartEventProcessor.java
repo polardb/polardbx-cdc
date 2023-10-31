@@ -42,7 +42,7 @@ public class XAStartEventProcessor implements ILogEventProcessor<QueryLogEvent> 
 
         String xid = LogEventUtil.getXid(event);
 
-        if (xid == null) {
+        if (xid == null || !LogEventUtil.isValidXid(xid)) {
             return;
         }
 
@@ -57,9 +57,6 @@ public class XAStartEventProcessor implements ILogEventProcessor<QueryLogEvent> 
         }
         tranPosition.setXid(xid);
         tranPosition.setBegin(buildPosition(event, context));
-        if (context.getLastTSO() != null) {
-            tranPosition.setTso(context.getLastTSO());
-        }
         context.onStart(tranPosition);
     }
 

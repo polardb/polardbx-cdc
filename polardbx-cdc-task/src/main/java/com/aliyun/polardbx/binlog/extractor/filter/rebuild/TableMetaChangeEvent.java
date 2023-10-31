@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
-import com.aliyun.polardbx.binlog.CommonUtils;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import lombok.Data;

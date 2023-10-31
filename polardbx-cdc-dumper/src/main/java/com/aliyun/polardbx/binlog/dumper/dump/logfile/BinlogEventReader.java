@@ -14,26 +14,23 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
-import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
-import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
+import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.tuple.Pair;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.List;
+
+import static com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet.loadCharactorSetFromCN;
 
 /**
  * Created by ShuGuang
@@ -59,23 +56,28 @@ public class BinlogEventReader {
         this.offset = offset < 0 ? 0 : offset;
         this.rowCount = rowCount < 0 ? Integer.MAX_VALUE : rowCount;
         this.context.setLogPosition(new LogPosition(fileName, pos));
-        this.context.setServerCharactorSet(loadCharactorSet());
+        this.context.setServerCharactorSet(loadCharactorSetFromCN());
         this.channel = cdcFile.getReadChannel();
         log.info("[fixed] show binlog events in {} from {} limit {}, {}", fileName, this.pos, this.offset,
             this.rowCount);
     }
 
+    /**
+     * 检查一下指定的position是否合法，以及位于position的这个event是否合法
+     */
     public void valid() throws IOException {
-        if (pos > channel.size()) {
-            throw new PolardbxException("invalid log position");
-        }
-        if (pos == channel.size()) {
+        long size = channel.size();
+        if (size < pos) {
+            throw new PolardbxException("invalid log position, channel size:" + size + ", start pos:" + pos);
+        } else if (size == pos) {
+            log.info("channel size is equal to start pos:{}", pos);
             return;
         }
+
         byte[] data = new byte[512];
         ByteBuffer buffer = ByteBuffer.wrap(data);
-        final long fixed = pos < 4 ? 4 : pos;
-        channel.read(buffer, fixed);
+        final long startPos = pos < 4 ? 4 : pos;
+        channel.read(buffer, startPos);
         buffer.flip();
         ByteArray ba = new ByteArray(data);
         long timestamp = ba.readLong(4);
@@ -85,15 +87,17 @@ public class BinlogEventReader {
         long endPos = ba.readLong(4);
 
         if (timestamp < 0) {
-            throw new PolardbxException("invalid event");
+            throw new PolardbxException("invalid event timestamp:" + timestamp);
         }
         if (eventType < 0 || eventType > 0x23) {
-            throw new PolardbxException("invalid event type");
+            throw new PolardbxException("invalid event type:" + eventType);
         }
-        if (eventSize != endPos - fixed) {
-            throw new PolardbxException("Found invalid event in binary log");
+        if (eventSize != endPos - startPos) {
+            throw new PolardbxException(
+                "invalid event size, start pos:" + startPos + ", end pos:" + endPos + ", event size:" + eventSize);
         }
-        channel.position(0);
+        // todo @yudong 这个position看起来也是多余的
+        // channel.position(0);
     }
 
     public void formatEvent() throws IOException {
@@ -111,6 +115,9 @@ public class BinlogEventReader {
         log.info("FormatEvent {}", info);
     }
 
+    /**
+     * 如果在命令中指定了from start_pos，则需要跳过一些字节，从start_pos开始读取文件内容
+     */
     public void skipPos() throws IOException {
         if (pos > 4) {
             formatEvent();
@@ -121,6 +128,7 @@ public class BinlogEventReader {
             }
             this.fp = 4;
         }
+
         channel.position(this.fp);
         read();
     }
@@ -205,7 +213,7 @@ public class BinlogEventReader {
         }
     }
 
-    public boolean hasNext() throws IOException {
+    public boolean hasNext() {
         if (rowCount <= 0) {
             return false;
         }
@@ -219,31 +227,6 @@ public class BinlogEventReader {
 
     private String bufferMessage(ByteBuffer buffer) {
         return "[" + buffer.position() + "," + buffer.limit() + "," + buffer.capacity() + "]";
-    }
-
-    private ServerCharactorSet loadCharactorSet() {
-        JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
-        List<Pair<String, String>> list = jdbcTemplate.query("show variables like '%character%'",
-            (rs, rowNum) -> Pair.of(rs.getString(1), rs.getString(2)));
-        ServerCharactorSet set = new ServerCharactorSet();
-        list.forEach(pair -> {
-            String variableName = pair.getLeft();
-            String charset = pair.getRight();
-            if ("utf8mb3".equalsIgnoreCase(charset)) {
-                charset = "utf8";
-            }
-            log.info(variableName + " : " + charset);
-            if ("character_set_client".equalsIgnoreCase(variableName)) {
-                set.setCharacterSetClient(charset);
-            } else if ("character_set_connection".equalsIgnoreCase(variableName)) {
-                set.setCharacterSetConnection(charset);
-            } else if ("character_set_database".equalsIgnoreCase(variableName)) {
-                set.setCharacterSetDatabase(charset);
-            } else if ("character_set_server".equalsIgnoreCase(variableName)) {
-                set.setCharacterSetServer(charset);
-            }
-        });
-        return set;
     }
 
     public void close() {

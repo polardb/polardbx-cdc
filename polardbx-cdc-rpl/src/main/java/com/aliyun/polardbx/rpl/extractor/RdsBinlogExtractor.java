@@ -39,7 +39,7 @@ import com.aliyun.polardbx.binlog.canal.core.AbstractEventParser;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.exception.ServerIdNotMatchException;
-import com.aliyun.polardbx.binlog.monitor.MonitorManager;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.RplConstants;
@@ -48,6 +48,7 @@ import com.aliyun.polardbx.rpl.extractor.flashback.ILocalBinlogEventListener;
 import com.aliyun.polardbx.rpl.extractor.flashback.LocalBinlogEventParser;
 import com.aliyun.polardbx.rpl.filter.BaseFilter;
 import com.aliyun.polardbx.rpl.storage.RplEventRepository;
+import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.RdsExtractorConfig;
@@ -61,6 +62,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author shicai.xsc 2020/11/29 21:19
@@ -80,14 +82,14 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
     private Set<Long> ignoreHostIds = new HashSet<>();
     private Long fixHostInstanceId;
     private long oldServerId;
+    private boolean supportXa;
 
     public RdsBinlogExtractor(RdsExtractorConfig extractorConfig, HostInfo srcHostInfo, HostInfo metaHostInfo,
-                              BinlogPosition position,
-                              BaseFilter filter) {
+                              BinlogPosition position, BaseFilter filter, DataImportMeta meta) {
         super(extractorConfig, srcHostInfo, metaHostInfo, position, filter);
         srcAuthInfo.setUid(extractorConfig.getUid());
         srcAuthInfo.setBid(extractorConfig.getBid());
-        srcAuthInfo.setStorageInstId(extractorConfig.getRdsInstanceId());
+        srcAuthInfo.setStorageMasterInstId(extractorConfig.getRdsInstanceId());
         binlogDownloader = new BinlogUrlDownloader();
         if (extractorConfig.getFixHostInstanceId() != null) {
             fixHostInstanceId = extractorConfig.getFixHostInstanceId();
@@ -96,17 +98,18 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
             allHostIdTestFlag = true;
         }
         oldServerId = position.getMasterId();
+        supportXa = meta.isSupportXa();
     }
 
     @Override
-    public void start() {
+    public void start() throws Exception {
         log.info("start canal binlog extractor start");
         startInternal();
         running = true;
         log.info("start canal binlog extractor finish");
     }
 
-    public void startInternal() {
+    public void startInternal() throws Exception {
         try {
             binlogList = new ArrayList<>();
             binlogDownloader.init();
@@ -138,9 +141,11 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
                 int counts = 0;
                 int pageNumber = 1;
                 List<BinlogFile> binlogFileList;
+                List<BinlogFile> binlogAllFileList = new ArrayList<>();
+                allHostIds = new HashSet<>();
                 do {
                     DescribeBinlogFilesResult result = RdsApi
-                        .describeBinlogFiles(srcAuthInfo.getStorageInstId(),
+                        .describeBinlogFiles(srcAuthInfo.getStorageMasterInstId(),
                             srcAuthInfo.getUid(),
                             srcAuthInfo.getBid(),
                             RdsApi.formatUTCTZ(new Date(begin)),
@@ -152,7 +157,6 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
                         log.error("oss api returns no binlog file info");
                         return;
                     }
-                    allHostIds = new HashSet<>();
                     for (BinlogFile file : result.getItems()) {
                         file.initRegionTime();
                         // 指定instance id
@@ -165,24 +169,25 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
                             allHostIds.add(file.getInstanceID());
                         }
                     }
-                    choosePreferId();
-                    binlogFileList = BinlogProcessor.process(result.getItems(), new HashSet<>(), preferHostId, begin
-                        , null);
-
-                    Iterator<BinlogFile> iterator = binlogFileList.iterator();
-                    while (iterator.hasNext()) {
-                        BinlogFile binlogFile = iterator.next();
-                        String binlogFileName = binlogFile.getLogname();
-                        ossBinlogFileMap.put(binlogFileName, binlogFile);
-                        binlogList.add(binlogFileName);
-                    }
                     counts += result.getItemsNumbers();
-                    binlogDownloader.batchDownload(binlogFileList);
-                    log.warn("binlogfilelist: {}", binlogFileList);
+                    binlogAllFileList.addAll(result.getItems());
                     if (result.getTotalRecords() <= counts) {
                         break;
                     }
                 } while (true);
+
+                choosePreferId();
+                binlogFileList = BinlogProcessor.process(binlogAllFileList, new HashSet<>(), preferHostId, begin
+                    , null);
+                Iterator<BinlogFile> iterator = binlogFileList.iterator();
+                while (iterator.hasNext()) {
+                    BinlogFile binlogFile = iterator.next();
+                    String binlogFileName = binlogFile.getLogname();
+                    ossBinlogFileMap.put(binlogFileName, binlogFile);
+                    binlogList.add(binlogFileName);
+                }
+                binlogDownloader.batchDownload(binlogFileList);
+                log.warn("binlogfilelist: {}", binlogFileList);
 
                 ((LocalBinlogEventParser) localParser).setBinlogList(binlogList);
                 log.warn("binloglist: {}", binlogList);
@@ -205,6 +210,7 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
         } catch (Exception e) {
             log.error("extractor start error: ", e);
             stop();
+            throw e;
         }
 
     }
@@ -225,31 +231,32 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
     private void initRemoteEventParser() {
         remoteParser = new RdsEventParser(extractorConfig.getEventBufferSize(),
             new RplEventRepository(pipeline.getPipeLineConfig().getPersistConfig()));
+        remoteParser.setNeedTransactionPosition(new AtomicBoolean(!supportXa));
     }
 
     private void initLocalEventParser() {
         localParser = new LocalBinlogEventParser(extractorConfig.getEventBufferSize(),
             true, new ILocalBinlogEventListener() {
-                @Override
-                public void onEnd() {
-                    log.info("local file parser end!");
-                }
+            @Override
+            public void onEnd() {
+                log.info("local file parser end!");
+            }
 
-                @Override
-                public void onFinishFile(File binlogFile, BinlogPosition pos) {
-                    log.error("one local file parser finish!: {}, last pos: {}", binlogFile.getName(), pos);
-                    binlogFile.delete();
-                    binlogDownloader.releaseOne();
-                    position = new BinlogPosition(nextBinlogFileName(binlogFile.getName()),
-                        0, pos.getMasterId(), pos.getTimestamp());
-                    log.error("one local file parser finish!: {} with new binlog pos: ", position);
-                    if (binlogDownloader.isFinish()) {
-                        log.error("all local file parser finish , switch parser !: {}", binlogFile.getName());
-                        switchParser();
-                    }
+            @Override
+            public void onFinishFile(File binlogFile, BinlogPosition pos) {
+                log.error("one local file parser finish!: {}, last pos: {}", binlogFile.getName(), pos);
+                binlogFile.delete();
+                binlogDownloader.releaseOne();
+                position = new BinlogPosition(nextBinlogFileName(binlogFile.getName()),
+                    0, pos.getMasterId(), pos.getTimestamp());
+                log.error("one local file parser finish!: {} with new binlog pos: ", position);
+                if (binlogDownloader.isFinish()) {
+                    log.error("all local file parser finish , switch parser !: {}", binlogFile.getName());
+                    switchParser();
                 }
+            }
 
-            }, true, new RplEventRepository(pipeline.getPipeLineConfig().getPersistConfig()));
+        }, true, new RplEventRepository(pipeline.getPipeLineConfig().getPersistConfig()));
         if (allHostIdTestFlag) {
             log.warn("no need to care server id since now");
             localParser.setCurrentServerId(-1);
@@ -276,7 +283,7 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
         return prefix + "." + newSuffix;
     }
 
-    private void switchParserInner() {
+    private void switchParserInner() throws Exception {
         synchronized (this) {
             ((MysqlEventParser) parser).setDirectExitWhenStop(false);
             binlogDownloader.stop();
@@ -311,11 +318,13 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
         log.warn("pre preferHostId: {}", preferHostId);
         allHostIds.removeAll(ignoreHostIds);
         if (allHostIds.isEmpty()) {
-            MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
                 TaskContext.getInstance().getTaskId(),
-                "no appropriate oss binlog or has test all host id but still not find binlog with same server id，需要值班介入");
+                "no appropriate oss binlog or has test all host id but still not find binlog with same server id，"
+                    + "需要值班介入");
             log.warn("has test all host id but still not find binlog with same server id，需要值班介入");
-            System.exit(1);
+            throw new PolardbxException("no appropriate oss binlog or has test all host id but still not find binlog "
+                + "with same server id");
         }
         preferHostId = allHostIds.iterator().next();
         log.warn("allHostId: {}", allHostIds);

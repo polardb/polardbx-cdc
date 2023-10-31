@@ -16,26 +16,21 @@ package com.aliyun.polardbx.binlog.cdc.topology;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
-import com.aliyun.polardbx.binlog.error.PolardbxException;
 import org.apache.commons.lang3.StringUtils;
 
-import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_TOPOLOGY_SHARE_SWITCH;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_TOPOLOGY_SHARE_USE_INTERN;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_WITH_INTERN;
 import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCaseLogicMetaTopology;
 
 /**
  * created by ziyang.lb
  **/
 public class TopologyShareUtil {
-    private final static String SHARE_SWITCH_ON = "ON";
-    private final static String SHARE_SWITCH_OFF = "OFF";
-    private final static String SHARE_SWITCH_RANDOM = "RANDOM";//for test
-    private final static boolean NEED_SHARE_FLAG = parseSwitch();
+    private static final boolean NEED_SHARE_FLAG = parseSwitch();
 
     private static final ConcurrentHashMap<String, LogicMetaTopology> snapshotCache = new ConcurrentHashMap<>();
 
@@ -50,16 +45,7 @@ public class TopologyShareUtil {
     }
 
     private static boolean parseSwitch() {
-        String sw = DynamicApplicationConfig.getString(META_TOPOLOGY_SHARE_SWITCH);
-        if (SHARE_SWITCH_ON.equals(sw)) {
-            return true;
-        } else if (SHARE_SWITCH_OFF.equals(sw)) {
-            return false;
-        } else if (SHARE_SWITCH_RANDOM.equals(sw)) {
-            return new Random().nextBoolean();
-        } else {
-            throw new PolardbxException("invalid intern switch config : " + sw);
-        }
+        return DynamicApplicationConfig.getBoolean(META_BUILD_SHARE_TOPOLOGY_ENABLED);
     }
 
     public static boolean needShareString() {
@@ -67,7 +53,7 @@ public class TopologyShareUtil {
     }
 
     public static boolean needIntern() {
-        return needShareString() && DynamicApplicationConfig.getBoolean(META_TOPOLOGY_SHARE_USE_INTERN);
+        return needShareString() && DynamicApplicationConfig.getBoolean(META_BUILD_SHARE_TOPOLOGY_WITH_INTERN);
     }
 
     public static LogicMetaTopology toShare(LogicMetaTopology topology) {

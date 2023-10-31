@@ -15,13 +15,23 @@
 package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
+import com.github.rholder.retry.RetryException;
 import com.google.common.util.concurrent.RateLimiter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 public class TPSLimiter implements FlowLimiter {
 
+    /*
+     * 关于这里tps的WARNING：
+     * 所有限流均是对该任务（rplTask）而言，对于实例的压力应是所有task之和
+     * 对全量来说以event数目作为限流单位，但全量的event含有多row，默认为5000
+     * 对增量来说以event数目作为限流单位，即真实的rps
+     * 对校验来说以校验的一个batch作为限流单位，默认为1000
+     * 考虑实现方便，暂时未做统一化
+     * */
     private Integer tps;
     private FlowLimiter target;
     private RateLimiter rateLimiter;
@@ -33,7 +43,7 @@ public class TPSLimiter implements FlowLimiter {
     }
 
     @Override
-    public boolean runTask(List<DBMSEvent> events) {
+    public void runTask(List<DBMSEvent> events) throws ExecutionException, RetryException {
 
         List<DBMSEvent> needHandleMsg = new ArrayList<>();
         int handleCount = 0, totalSize = events.size();
@@ -54,18 +64,15 @@ public class TPSLimiter implements FlowLimiter {
             for (int i = start; i < handleCount; i++) {
                 needHandleMsg.add(events.get(i));
             }
-            if (!target.runTask(needHandleMsg)) {
-                return false;
-            }
+            target.runTask(needHandleMsg);
             needSize = totalSize - handleCount;
             needHandleMsg.clear();
             acq = needSize;
         }
-        return true;
     }
 
     @Override
-    public boolean runTranTask(List<Transaction> transactions) {
+    public void runTranTask(List<Transaction> transactions) throws ExecutionException, RetryException {
 
         int nowSize = 0;
         List<Transaction> transferTransactions = new ArrayList<>();
@@ -75,20 +82,20 @@ public class TPSLimiter implements FlowLimiter {
                 transferTransactions.add(transaction);
             } else {
                 rateLimiter.acquire(nowSize);
-                if (!target.runTranTask(transferTransactions)) {
-                    return false;
-                }
+                target.runTranTask(transferTransactions);
                 transferTransactions.clear();
                 nowSize = 0;
             }
         }
         if (!transferTransactions.isEmpty()) {
             rateLimiter.acquire(nowSize);
-            if (!target.runTranTask(transferTransactions)) {
-                return false;
-            }
+            target.runTranTask(transferTransactions);
         }
-        return true;
+    }
+
+    @Override
+    public void acquire() {
+        rateLimiter.acquire(1);
     }
 
 }

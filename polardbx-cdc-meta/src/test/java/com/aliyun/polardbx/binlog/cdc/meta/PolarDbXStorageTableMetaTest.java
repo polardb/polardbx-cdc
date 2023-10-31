@@ -14,48 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
-import com.alibaba.polardbx.druid.DbType;
-import com.alibaba.polardbx.druid.sql.SQLUtils;
-import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
-import com.aliyun.polardbx.binlog.SpringContextBootStrap;
-import com.aliyun.polardbx.binlog.util.FastSQLConstant;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import org.junit.Before;
-import org.junit.Test;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 
-import java.util.List;
+public class PolarDbXStorageTableMetaTest extends BaseTest {
 
-public class PolarDbXStorageTableMetaTest {
-    SpringContextBootStrap appContextBootStrap;
-    Gson gson = new GsonBuilder().create();
-
-    @Before
-    public void init() {
-        System.setProperty("taskName", "Final");
-        appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
-        appContextBootStrap.boot();
-    }
-
-    @Test
-    public void applyHistory() {
-
-        String ddl =
-            "create or replace algorithm=undefined definer=`admin`@`%` sql security definer view `v` as select * from select_base_two_one_db_one_tb";
-
-        System.out.println(ddl);
-
-        List<SQLStatement> statements = SQLUtils.parseStatements(ddl, DbType.mysql, FastSQLConstant.FEATURES);
-        String reformatDDL = statements.get(0).toString();
-        System.out.println(reformatDDL);
-
-        List<SQLStatement> statements1 = SQLUtils.parseStatements(reformatDDL, DbType.mysql, FastSQLConstant.FEATURES);
-//        SQLStatementParser parser =
-//            SQLParserUtils.createSQLStatementParser(ddl, DbType.mysql, FastSQLConstant.FEATURES);
-//        List<SQLStatement> statementList = parser.parseStatementList();
-//        SQLStatement st = statementList.get(0);
-//        System.out.println(st);
-//        PolarDbXStorageTableMeta tableMeta = new PolarDbXStorageTableMeta("", null, new TopologyManager());
-//        tableMeta.apply(new BinlogPosition("000", "000"), "andor_qatest_polarx1", ddl, null);
-    }
 }

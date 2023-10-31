@@ -45,7 +45,7 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
     implements Runnable, ApplicationListener {
 
     private static final Logger logger = LoggerFactory.getLogger(CustomPropertySourcesPlaceholderConfigurer.class);
-    private static final String SCAN_PERIOD = "scanPeriod";
+    private static final String CONFIG_SCAN_PERIOD_SECOND = "config_scan_period_second";
     private static final String CHECKSUM = "Checksum";
     private static final AtomicBoolean start = new AtomicBoolean(false);
     private static ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(
@@ -143,7 +143,6 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
             }
 
             if (isSystemDbChange()) {
-                logger.info("init or detected db system config change");
                 DynamicApplicationConfig.invalidateCache();
                 DynamicApplicationConfig.firePropChange();
             }
@@ -169,7 +168,7 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
     public void onApplicationEvent(ApplicationEvent event) {
         if (start.compareAndSet(false, true)) {
             DynamicApplicationConfig.afterPropSet();
-            String scanPeriod = props.getProperty(SCAN_PERIOD);
+            String scanPeriod = props.getProperty(CONFIG_SCAN_PERIOD_SECOND);
             if (StringUtils.isNotBlank(scanPeriod)) {
                 long period = Long.valueOf(scanPeriod);
                 scheduledExecutorService.scheduleAtFixedRate(this, period, period, TimeUnit.SECONDS);

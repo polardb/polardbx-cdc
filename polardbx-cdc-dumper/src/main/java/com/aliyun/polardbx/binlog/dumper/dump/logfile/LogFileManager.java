@@ -15,10 +15,9 @@
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.domain.Cursor;
+import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
@@ -27,6 +26,9 @@ import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.restore.BinlogRestoreManager;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.task.ICursorProvider;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -38,18 +40,19 @@ import java.util.List;
 import java.util.Random;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_FILE_SEEK_BUFFER_SIZE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
 
 /**
  * Created by ziyang.lb
  **/
+@Setter
+@Getter
 @Slf4j
 public class LogFileManager implements ICursorProvider {
-    private final LogFileListenerWrapper logFileListenerWrapper = new LogFileListenerWrapper();
     private String taskName;
     private TaskType taskType;
     private ExecutionConfig executionConfig;
-    private String binlogFullPath;
+    private String binlogRootPath;
     private Integer binlogFileSize;
     private boolean dryRun;
     private FlushPolicy flushPolicy;
@@ -59,8 +62,9 @@ public class LogFileManager implements ICursorProvider {
     private String streamName;
     private LogFileGenerator logFileGenerator;
     private LogFileCopier logFileCopier;
-    private volatile Cursor latestFileCursor;
+    private volatile BinlogCursor latestFileCursor;
     private CdcFileSystem cdcFileSystem;
+    private BinlogListenerWrapper binlogListeners;
     private volatile boolean running;
 
     public void start() {
@@ -70,20 +74,21 @@ public class LogFileManager implements ICursorProvider {
         running = true;
 
         try {
-            cdcFileSystem = new CdcFileSystem(binlogFullPath, groupName, streamName);
-
-            logFileListenerWrapper.addLogFileListener(
-                new BinlogRecordListener(binlogFullPath, taskName, taskType, groupName, streamName));
+            cdcFileSystem = new CdcFileSystem(binlogRootPath, groupName, streamName);
+            binlogListeners = new BinlogListenerWrapper();
+            binlogListeners.addListener(
+                new BinlogRecordManager(groupName, streamName, taskName, taskType, binlogRootPath));
 
             if (taskType == TaskType.DumperX || RuntimeLeaderElector.isDumperLeader(taskName)) {
                 if (isForceRecover(executionConfig)) {
-                    BinlogFileUtil.deleteBinlogFiles(binlogFullPath);
+                    BinlogFileUtil.deleteBinlogFiles(BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName));
                 } else {
                     if (isForceDownload(executionConfig)) {
-                        BinlogFileUtil.deleteBinlogFiles(binlogFullPath);
+                        BinlogFileUtil.deleteBinlogFiles(
+                            BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName));
                     }
                     BinlogRestoreManager restoreManager =
-                        new BinlogRestoreManager(groupName, streamName, binlogFullPath);
+                        new BinlogRestoreManager(groupName, streamName, binlogRootPath);
                     restoreManager.start();
                 }
 
@@ -102,11 +107,12 @@ public class LogFileManager implements ICursorProvider {
             } else {
                 // 主备Dumper的删除操作要一致
                 if (isForceRecover(executionConfig) || isForceDownload(executionConfig)) {
-                    BinlogFileUtil.deleteBinlogFiles(binlogFullPath);
+                    BinlogFileUtil.deleteBinlogFiles(
+                        BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName));
                 }
 
                 DumperSlaveStartMode startMode = DumperSlaveStartMode.typeOf(
-                    DynamicApplicationConfig.getString(ConfigKeys.BINLOG_DUMPER_SLAVE_START_MODE));
+                    DynamicApplicationConfig.getString(ConfigKeys.BINLOG_RECOVER_MODE_WITH_DUMPER_SLAVE));
                 if (startMode == DumperSlaveStartMode.RANDOM) {
                     startMode = new Random().nextBoolean() ? DumperSlaveStartMode.DOWNLOAD : DumperSlaveStartMode.SYNC;
                 }
@@ -114,7 +120,7 @@ public class LogFileManager implements ICursorProvider {
                 log.info("dumper slave start mode:{}", startMode.name());
                 if (startMode == DumperSlaveStartMode.DOWNLOAD) {
                     BinlogRestoreManager restoreManager =
-                        new BinlogRestoreManager(groupName, streamName, binlogFullPath);
+                        new BinlogRestoreManager(groupName, streamName, binlogRootPath);
                     restoreManager.start();
                 }
                 logFileCopier = new LogFileCopier(this, writeBufferSize,
@@ -144,16 +150,8 @@ public class LogFileManager implements ICursorProvider {
         return cdcFileSystem.getBinlogFile(fileName);
     }
 
-    public CdcFile getLocalBinlogFileByName(String fileName) {
-        return cdcFileSystem.getLocalFile(fileName);
-    }
-
     public CdcFile getMinBinlogFile() {
         return cdcFileSystem.getMinFile();
-    }
-
-    public CdcFile getLocalMinBinlogFile() {
-        return cdcFileSystem.getLocalMinFile();
     }
 
     public CdcFile getMaxBinlogFile() {
@@ -165,7 +163,7 @@ public class LogFileManager implements ICursorProvider {
     }
 
     public List<CdcFile> getAllBinlogFilesOrdered() {
-        return cdcFileSystem.listBinlogFilesOrdered();
+        return cdcFileSystem.listAllFiles();
     }
 
     public List<CdcFile> getAllLocalBinlogFilesOrdered() {
@@ -197,7 +195,7 @@ public class LogFileManager implements ICursorProvider {
                 String.format("File [%s] is not the max binlog file, can't be recreate.", file.getName()));
         }
         FileUtils.forceDelete(file);
-        logFileListenerWrapper.onDeleteFile(file);
+        binlogListeners.onDeleteFile(file);
         return createLocalFile(fileName);
     }
 
@@ -206,16 +204,16 @@ public class LogFileManager implements ICursorProvider {
         return Integer.parseInt(suffix);
     }
 
-    public File rotateFile(File file, LogEndInfo logEndInfo) {
+    public File rotateFile(File file, BinlogEndInfo binlogEndInfo) {
         String maxFileName = getLocalMaxBinlogFileName();
         if (!StringUtils.equals(file.getName(), maxFileName)) {
             throw new IllegalArgumentException(
                 "Rotating file is not the max file, rotating file is " + file.getName() + ", max file is "
                     + maxFileName);
         }
-        logFileListenerWrapper.onFinishFile(file, logEndInfo);
+        binlogListeners.onFinishFile(file, binlogEndInfo);
         String nextBinlogFile = BinlogFileUtil.getNextBinlogFileName(file.getName());
-        logFileListenerWrapper.onRotateFile(file, nextBinlogFile);
+        binlogListeners.onRotateFile(file, nextBinlogFile);
         return createLocalFile(nextBinlogFile);
     }
 
@@ -224,15 +222,14 @@ public class LogFileManager implements ICursorProvider {
     }
 
     public File createLocalFile(String fileName) {
-        CdcFile cdcFile = cdcFileSystem.createLocalFile(fileName);
-        File file = cdcFile.newFile();
+        File file = cdcFileSystem.newLocalFile(fileName);
         return createLocalFileHelper(file);
     }
 
     public File createLocalFileHelper(File file) {
         try {
             file.createNewFile();
-            logFileListenerWrapper.onCreateFile(file);
+            binlogListeners.onCreateFile(file);
             return file;
         } catch (IOException e) {
             throw new PolardbxException("binlog file create failed, file name is " + file.getAbsolutePath(), e);
@@ -245,7 +242,7 @@ public class LogFileManager implements ICursorProvider {
      * 该方法会读取forceRecover字段的值，如果为true，则将本地binlog文件清空，便于后续测试通过recover tso产生binlog
      */
     private boolean isForceRecover(ExecutionConfig taskConfig) {
-        int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS);
+        int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
         if (taskConfig.isForceRecover()
             && System.currentTimeMillis() - taskConfig.getTimestamp() < heartbeatTimeout * 6) {
             log.info(
@@ -256,7 +253,7 @@ public class LogFileManager implements ICursorProvider {
     }
 
     private boolean isForceDownload(ExecutionConfig taskConfig) {
-        int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_TASK_WATCH_HEARTBEAT_TIMEOUT_MS);
+        int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
         if (taskConfig.isForceDownload()
             && System.currentTimeMillis() - taskConfig.getTimestamp() < heartbeatTimeout * 6) {
             log.info(
@@ -266,101 +263,7 @@ public class LogFileManager implements ICursorProvider {
         return false;
     }
 
-    public String getTaskName() {
-        return taskName;
+    public String getBinlogFullPath() {
+        return BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
     }
-
-    public void setTaskName(String taskName) {
-        this.taskName = taskName;
-    }
-
-    public TaskType getTaskType() {
-        return taskType;
-    }
-
-    public void setTaskType(TaskType taskType) {
-        this.taskType = taskType;
-    }
-
-    public ExecutionConfig getExecutionConfig() {
-        return executionConfig;
-    }
-
-    public void setExecutionConfig(ExecutionConfig executionConfig) {
-        this.executionConfig = executionConfig;
-    }
-
-    public String getLocalBinlogPath() {
-        return binlogFullPath;
-    }
-
-    public void setBinlogFullPath(String localPath) {
-        this.binlogFullPath = localPath;
-    }
-
-    public Integer getBinlogFileSize() {
-        return binlogFileSize;
-    }
-
-    public void setBinlogFileSize(Integer binlogFileSize) {
-        this.binlogFileSize = binlogFileSize;
-    }
-
-    public boolean isDryRun() {
-        return dryRun;
-    }
-
-    public void setDryRun(boolean dryRun) {
-        this.dryRun = dryRun;
-    }
-
-    public FlushPolicy getFlushPolicy() {
-        return flushPolicy;
-    }
-
-    public void setFlushPolicy(FlushPolicy flushPolicy) {
-        this.flushPolicy = flushPolicy;
-    }
-
-    public int getFlushInterval() {
-        return flushInterval;
-    }
-
-    public void setFlushInterval(int flushInterval) {
-        this.flushInterval = flushInterval;
-    }
-
-    public int getWriteBufferSize() {
-        return writeBufferSize;
-    }
-
-    public void setWriteBufferSize(int writeBufferSize) {
-        this.writeBufferSize = writeBufferSize;
-    }
-
-    public String getStreamName() {
-        return streamName;
-    }
-
-    public void setStreamName(String streamName) {
-        this.streamName = streamName;
-    }
-
-    public String getGroupName() {
-        return groupName;
-    }
-
-    public void setGroupName(String groupName) {
-        this.groupName = groupName;
-    }
-
-    @Override
-    public Cursor getLatestFileCursor() {
-        return latestFileCursor;
-    }
-
-    public void setLatestFileCursor(Cursor latestFileCursor) {
-        this.latestFileCursor = latestFileCursor;
-    }
-
 }

@@ -14,20 +14,21 @@
  */
 package com.aliyun.polardbx.binlog.restore;
 
-import com.aliyun.polardbx.binlog.BinlogPurgeStatusEnum;
-import com.aliyun.polardbx.binlog.BinlogUploadStatusEnum;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
+import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.mybatis.dynamic.sql.SqlBuilder;
 
-import java.util.ArrayList;
+import java.io.File;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
 /**
  * 负责Dumper重启后的恢复工作
@@ -42,22 +43,24 @@ import java.util.List;
 public class BinlogRestoreManager {
     private final String groupName;
     private final String streamName;
+    private final String clusterId;
     private final String binlogFullPath;
+    private final BinlogOssRecordService recordService;
 
-    public BinlogRestoreManager(String groupName, String streamName, String binlogFullPath) {
+    public BinlogRestoreManager(String groupName, String streamName, String rootPath) {
         this.groupName = groupName;
         this.streamName = streamName;
-        this.binlogFullPath = binlogFullPath;
+        this.clusterId = getString(ConfigKeys.CLUSTER_ID);
+        this.binlogFullPath = BinlogFileUtil.getFullPath(rootPath, groupName, streamName);
+        this.recordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
     }
 
     public void start() {
         log.info("binlog restore manager start to run");
         if (RemoteBinlogProxy.getInstance().isBackupOn()) {
-            int n = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_DOWNLOAD_LAST_NUM);
+            int n = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_LAST_FILE_COUNT);
             List<String> downloadFiles = getDownloadFiles(n);
-            if (log.isDebugEnabled()) {
-                log.info("download file list:{}", downloadFiles);
-            }
+            log.info("download file list:{}", downloadFiles);
             BinlogDownloader downloader = new BinlogDownloader(groupName, streamName, binlogFullPath, downloadFiles);
             downloader.start();
         }
@@ -73,51 +76,21 @@ public class BinlogRestoreManager {
      * @return binlog file name list
      */
     private List<String> getDownloadFiles(int n) {
-        List<String> res = new ArrayList<>();
-        BinlogOssRecordMapper mapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
-        String firstUploadingFile = getFirstUploadingFile();
-        List<BinlogOssRecord> recordList;
-        // firstUploadingFile==null可能有两种情况：
-        // 1. 没有开启远端存储
-        // 2. 开启了远端存储，所有文件都上传成功
-        // 这里把uploadStatus==Success条件加上，就是为了在第一种情况下返回空列表
-        if (firstUploadingFile == null) {
-            recordList = mapper.select(s -> s.
-                where(BinlogOssRecordDynamicSqlSupport.groupId, SqlBuilder.isEqualTo(groupName)).
-                and(BinlogOssRecordDynamicSqlSupport.streamId, SqlBuilder.isEqualTo(streamName)).
-                and(BinlogOssRecordDynamicSqlSupport.uploadStatus,
-                    SqlBuilder.isEqualTo(BinlogUploadStatusEnum.SUCCESS.getValue())).
-                and(BinlogOssRecordDynamicSqlSupport.purgeStatus,
-                    SqlBuilder.isEqualTo(BinlogPurgeStatusEnum.UN_COMPLETE.getValue())).
-                orderBy(BinlogOssRecordDynamicSqlSupport.binlogFile.descending()).
-                limit(n));
+        List<BinlogOssRecord> result;
+        Optional<BinlogOssRecord> firstUploadingFile =
+            recordService.getFirstUploadingRecord(groupName, streamName, clusterId);
+        if (firstUploadingFile.isPresent()) {
+            String fileName = firstUploadingFile.get().getBinlogFile();
+            log.info("first uploading file exists, file name:{}", fileName);
+            result = recordService.getRecordsBefore(groupName, streamName, clusterId, fileName, n + 1);
         } else {
-            recordList = mapper.select(s -> s.
-                where(BinlogOssRecordDynamicSqlSupport.groupId, SqlBuilder.isEqualTo(groupName)).
-                and(BinlogOssRecordDynamicSqlSupport.streamId, SqlBuilder.isEqualTo(streamName)).
-                and(BinlogOssRecordDynamicSqlSupport.purgeStatus,
-                    SqlBuilder.isEqualTo(BinlogPurgeStatusEnum.UN_COMPLETE.getValue())).
-                and(BinlogOssRecordDynamicSqlSupport.binlogFile, SqlBuilder.isLessThanOrEqualTo(firstUploadingFile)).
-                orderBy(BinlogOssRecordDynamicSqlSupport.binlogFile.descending()).
-                limit(n + 1));
+            result = recordService.getLastUploadSuccessRecords(groupName, streamName, clusterId, n);
         }
-        recordList.forEach(r -> res.add(r.getBinlogFile()));
-        return res;
+
+        return result.stream().map(BinlogOssRecord::getBinlogFile).filter(f -> {
+            File file = new File(binlogFullPath, f);
+            return !file.exists();
+        }).collect(Collectors.toList());
     }
 
-    /**
-     * 获得第一个正在上传的binlog文件的文件名
-     * 如果没有正在上传的文件，返回null
-     */
-    private String getFirstUploadingFile() {
-        BinlogOssRecordMapper mapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
-        List<BinlogOssRecord> recordList = mapper.select(s -> s.
-            where(BinlogOssRecordDynamicSqlSupport.groupId, SqlBuilder.isEqualTo(groupName)).
-            and(BinlogOssRecordDynamicSqlSupport.streamId, SqlBuilder.isEqualTo(streamName)).
-            and(BinlogOssRecordDynamicSqlSupport.uploadStatus,
-                SqlBuilder.isEqualTo(BinlogUploadStatusEnum.UPLOADING.getValue())).
-            orderBy(BinlogOssRecordDynamicSqlSupport.binlogFile).
-            limit(1));
-        return recordList.isEmpty() ? null : recordList.get(0).getBinlogFile();
-    }
 }

@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.rpc;
 
-import com.aliyun.polardbx.binlog.base.BaseTest;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.protocol.DumpRequest;
 import com.aliyun.polardbx.binlog.protocol.MessageType;
@@ -24,7 +23,7 @@ import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import org.junit.Ignore;
 import org.junit.Test;
 
-public class TxnStreamRpcClientTest extends BaseTest {
+public class TxnStreamRpcClientTest {
 
     private static final TaskType taskType = TaskType.Final;
 

@@ -34,10 +34,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_CLEAN_RELAY_DATA_ENABLE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_CLEAN_RELAY_DATA_INTERVAL;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_COUNT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_GROUP_NAME;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_CLEAN_RELAY_DATA_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_CLEAN_RELAY_DATA_INTERVAL_MINUTE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_COUNT;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static io.grpc.internal.GrpcUtil.getThreadFactory;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
@@ -62,13 +62,13 @@ public class RelayLogEventCleaner {
     }
 
     public void start() {
-        boolean enable = DynamicApplicationConfig.getBoolean(BINLOG_X_CLEAN_RELAY_DATA_ENABLE);
+        boolean enable = DynamicApplicationConfig.getBoolean(BINLOGX_CLEAN_RELAY_DATA_ENABLED);
         if (!enable) {
             log.info("cleaning relay data is disabled, log event cleaner will not start!");
             return;
         }
 
-        int interval = DynamicApplicationConfig.getInt(BINLOG_X_CLEAN_RELAY_DATA_INTERVAL);
+        int interval = DynamicApplicationConfig.getInt(BINLOGX_CLEAN_RELAY_DATA_INTERVAL_MINUTE);
         if (running.compareAndSet(false, true)) {
             this.executor = Executors.newSingleThreadScheduledExecutor(
                 getThreadFactory("hash-log-event-cleaner" + "-%d", false));
@@ -91,8 +91,8 @@ public class RelayLogEventCleaner {
     }
 
     private void doClean() {
-        String streamGroupName = DynamicApplicationConfig.getString(BINLOG_X_STREAM_GROUP_NAME);
-        int streamCount = DynamicApplicationConfig.getInt(BINLOG_X_STREAM_COUNT);
+        String streamGroupName = DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME);
+        int streamCount = DynamicApplicationConfig.getInt(BINLOGX_STREAM_COUNT);
 
         //check
         List<String> streamsList = X_STREAM_MAPPER.select(

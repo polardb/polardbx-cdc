@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -27,25 +28,27 @@ import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistory;
-import com.aliyun.polardbx.binlog.extractor.filter.RegexUtil;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.EventReformater;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ReformatContext;
 import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
-import com.google.gson.Gson;
-import lombok.extern.slf4j.Slf4j;
+import com.aliyun.polardbx.binlog.util.RegexUtil;
+import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_QUERY_EVENT_BLACKLIST;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_USE_HISTORY_TABLE_FIRST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX;
 
-@Slf4j
 public class QueryEventReformator implements EventReformater<QueryLogEvent> {
+
+    private static final Logger logger = LoggerFactory.getLogger("rebuildEventLogger");
 
     private final PolarDbXTableMetaManager tableMetaManager;
 
@@ -72,11 +75,8 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
             return false;
         }
 
-        if (ignoreQueryEvent(query)) {
-            // 配置黑名单方式过滤解析失败、或不需要处理的queryEvent,比如:grant、savepoint等
-            return false;
-        }
-        return true;
+        // 配置黑名单方式过滤解析失败、或不需要处理的queryEvent,比如:grant、savepoint等
+        return !ignoreQueryEvent(query);
     }
 
     @Override
@@ -93,7 +93,7 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
             query = query.toLowerCase();
         }
 
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DDL_REMOVEHINTS_SUPPORT)) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_REMOVE_HINTS_IN_DDL_SQL)) {
             query = com.aliyun.polardbx.binlog.canal.core.ddl.SQLUtils.removeDDLHints(query);
         }
 
@@ -103,18 +103,18 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
             event.getWhen());
         position.setRtso(context.getVirtualTSO());
 
-        log.info("receive phy ddl " + query + " for pos " + new Gson().toJson(position));
-        boolean useHistoryTableFirst = DynamicApplicationConfig.getBoolean(META_USE_HISTORY_TABLE_FIRST);
+        logger.info("receive phy ddl " + query + " for pos " + JSONObject.toJSONString(position));
+        boolean useHistoryTableFirst = DynamicApplicationConfig.getBoolean(META_BUILD_APPLY_FROM_HISTORY_FIRST);
         if (useHistoryTableFirst) {
-            log.warn("begin to query ddl sql from history table for db {} and tso {}.", event.getDbName(),
+            logger.warn("begin to query ddl sql from history table for db {} and tso {}.", event.getDbName(),
                 position.getRtso());
             String tempSql = getPhySqlFromHistoryTable(event.getDbName(), position.getRtso(),
                 context.getStorageInstanceId());
             if (org.apache.commons.lang.StringUtils.isNotBlank(tempSql)) {
                 query = tempSql;
-                log.warn("ddl sql in history table is " + query);
+                logger.warn("ddl sql in history table is " + query);
             } else {
-                log.warn("ddl sql is not existed in history table, schema name {}, position {}, origin sql {}",
+                logger.warn("ddl sql is not existed in history table, schema name {}, position {}, origin sql {}",
                     event.getDbName(), position.getRtso(), query);
             }
         }
@@ -134,6 +134,10 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
     }
 
     private Boolean ignoreQueryEvent(String query) {
-        return RegexUtil.match(DynamicApplicationConfig.getString(META_QUERY_EVENT_BLACKLIST), query);
+        if (StringUtils.isBlank(query)) {
+            return true;
+        }
+        return RegexUtil.match(
+            DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX), query.trim());
     }
 }

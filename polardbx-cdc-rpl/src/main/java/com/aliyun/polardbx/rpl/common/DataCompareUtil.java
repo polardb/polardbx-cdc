@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.sql.Types;
 import java.util.Date;
 
+import com.aliyun.polardbx.binlog.CommonConstants;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.math.util.MathUtils;
@@ -150,11 +151,11 @@ public class DataCompareUtil {
     }
 
     private static boolean isTrueValue(String value) {
-        return ("true".equalsIgnoreCase(value) || "1".equals(value));
+        return (CommonConstants.TRUE.equalsIgnoreCase(value) || "1".equals(value));
     }
 
     private static boolean isFalseValue(String value) {
-        return ("false".equalsIgnoreCase(value) || "0".equals(value));
+        return (CommonConstants.FALSE.equalsIgnoreCase(value) || "0".equals(value));
     }
 
     private static String getNumberString(Object sourceValue) {

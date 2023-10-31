@@ -17,21 +17,20 @@ package com.aliyun.polardbx.binlog.daemon.rest.resources;
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.ServerConfigUtil;
+import com.aliyun.polardbx.binlog.ResultCode;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.TopologyManager;
-import com.aliyun.polardbx.binlog.TopologyManagerValidator;
 import com.aliyun.polardbx.binlog.daemon.rest.ann.ACL;
 import com.aliyun.polardbx.binlog.daemon.rest.resources.request.ConnectionInfo;
-import com.aliyun.polardbx.binlog.daemon.rest.resources.request.ImportTaskConfigList;
 import com.aliyun.polardbx.binlog.daemon.rest.resources.request.ImportTaskConfig;
+import com.aliyun.polardbx.binlog.daemon.rest.resources.request.ImportTaskConfigList;
 import com.aliyun.polardbx.binlog.dao.ServerInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
-import com.aliyun.polardbx.rpl.common.ResultCode;
+import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.DataImportFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
@@ -41,6 +40,7 @@ import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FullExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
+import com.aliyun.polardbx.rpl.taskmeta.MetaManagerTranProxy;
 import com.aliyun.polardbx.rpl.taskmeta.RdsExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.ReconExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
@@ -65,7 +65,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport.instType;
@@ -78,14 +77,15 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 @Singleton
 public class ImportApiResource {
     private static final Logger logger = LoggerFactory.getLogger(ImportApiResource.class);
+    private static final MetaManagerTranProxy MANAGER = SpringContextHolder.getObject(MetaManagerTranProxy.class);
 
     public ImportApiResource() {
         System.out.println("constructor importApiResource");
     }
+
     private final int REFRESH_ONLY_FULL_COPY = 1;
     private final int REFRESH_ONLY_NOT_FULL_COPY = 2;
     private final int REFRESH_ALL = 3;
-
 
     @POST
     @Path("/service/create")
@@ -97,7 +97,7 @@ public class ImportApiResource {
             importMeta.setRules(new HashMap<>());
             importMeta.setLogicalDbMappings(new HashMap<>());
             importMeta.setSrcLogicalTableList(new HashMap<>());
-            for (ImportTaskConfig oneDbConfig: config.getImportTaskConfigs()) {
+            for (ImportTaskConfig oneDbConfig : config.getImportTaskConfigs()) {
                 importMeta.getSrcLogicalTableList().put(oneDbConfig.getSrcDbName(),
                     oneDbConfig.getTableList().stream().map(String::toLowerCase).collect(Collectors.toList()));
                 importMeta.getRules().put(oneDbConfig.getSrcDbName(), oneDbConfig.getRules());
@@ -140,59 +140,52 @@ public class ImportApiResource {
         String dstUser = DynamicApplicationConfig.getString(ConfigKeys.POLARX_USERNAME);
         String dstPwd = DynamicApplicationConfig.getString(ConfigKeys.POLARX_PASSWORD);
         List<DataImportMeta.PhysicalMeta> metaList = new ArrayList<>();
-        Map<String, DataImportMeta.PhysicalMeta> metaMap = new HashMap<>();
-        for (ImportTaskConfig oneDbConfig: config.getImportTaskConfigs()) {
+        for (ImportTaskConfig oneDbConfig : config.getImportTaskConfigs()) {
             ConnectionInfo srcConn = oneDbConfig.getSrcConn();
             importMeta.getLogicalDbMappings().put(oneDbConfig.getSrcDbName().toLowerCase(),
                 oneDbConfig.getDstDbName().toLowerCase());
-            TopologyManager topologyManager = new TopologyManagerValidator(oneDbConfig.getRules(), srcConn.getIp(),
+            TopologyManager topologyManager = new TopologyManager(srcConn.getIp(),
                 srcConn.getPort(), oneDbConfig.getSrcDbName(), srcConn.getUser(), srcConn.getPwd());
             List<String> logicTableList = importMeta.getSrcLogicalTableList().get(oneDbConfig.getSrcDbName());
             for (ConnectionInfo connectionInfo : oneDbConfig.getSrcPhyConnList()) {
-                DataImportMeta.PhysicalMeta meta;
-                if (metaMap.containsKey(connectionInfo.getDbInstanceId())) {
-                    meta = metaMap.get(connectionInfo.getDbInstanceId());
-                } else {
-                    meta = new DataImportMeta.PhysicalMeta();
-                    meta.setDstHost(dstIp);
-                    meta.setDstPort(dstPort);
-                    meta.setDstUser(dstUser);
-                    meta.setDstPassword(dstPwd);
-                    meta.setDstType(HostType.POLARX2);
-                    meta.setSrcHost(connectionInfo.getIp());
-                    meta.setSrcPort(connectionInfo.getPort());
-                    meta.setSrcUser(connectionInfo.getUser());
-                    meta.setSrcPassword(connectionInfo.getPwd());
-                    meta.setSrcType(HostType.RDS);
-                    meta.setIgnoreServerIds(polarxServerId + "");
-                    meta.setDstServerId(drdsServerId);
-                    meta.setRdsBid(config.getImportTaskConfigs().get(0).getRdsBid());
-                    meta.setRdsUid(config.getImportTaskConfigs().get(0).getRdsUid());
-                    meta.setRdsInstanceId(connectionInfo.getDbInstanceId());
-                    meta.setDstDbMapping(new HashMap<>());
-                    meta.setSrcDbList(new HashSet<>());
-                    meta.setPhysicalDoTableList(new HashMap<>());
-                    meta.setRewriteTableMapping(new HashMap<>());
-                }
-                for (String srcPhysicalDbName: connectionInfo.getDbNameList()) {
-                    meta.getDstDbMapping().put(srcPhysicalDbName.toLowerCase(), oneDbConfig.getDstDbName().toLowerCase());
+                DataImportMeta.PhysicalMeta meta = new DataImportMeta.PhysicalMeta();
+                metaList.add(meta);
+                meta.setDstHost(dstIp);
+                meta.setDstPort(dstPort);
+                meta.setDstUser(dstUser);
+                meta.setDstPassword(dstPwd);
+                meta.setDstType(HostType.POLARX2);
+                meta.setSrcHost(connectionInfo.getIp());
+                meta.setSrcPort(connectionInfo.getPort());
+                meta.setSrcUser(connectionInfo.getUser());
+                meta.setSrcPassword(connectionInfo.getPwd());
+                meta.setSrcType(HostType.RDS);
+                meta.setIgnoreServerIds(polarxServerId + "");
+                meta.setDstServerId(drdsServerId);
+                meta.setRdsBid(config.getImportTaskConfigs().get(0).getRdsBid());
+                meta.setRdsUid(config.getImportTaskConfigs().get(0).getRdsUid());
+                meta.setRdsInstanceId(connectionInfo.getDbInstanceId());
+                meta.setDstDbMapping(new HashMap<>());
+                meta.setSrcDbList(new HashSet<>());
+                meta.setPhysicalDoTableList(new HashMap<>());
+                meta.setRewriteTableMapping(new HashMap<>());
+                for (String srcPhysicalDbName : connectionInfo.getDbNameList()) {
+                    meta.getDstDbMapping()
+                        .put(srcPhysicalDbName.toLowerCase(), oneDbConfig.getDstDbName().toLowerCase());
                 }
                 meta.getSrcDbList().addAll(connectionInfo.getDbNameList());
                 for (String dbName : connectionInfo.getDbNameList()) {
-                    List<String> physicalTableList = topologyManager.getAllPhyTableList(dbName, new HashSet<>(logicTableList));
-                    physicalTableList = physicalTableList.stream().map(String::toLowerCase).collect(Collectors.toList());
+                    List<String> physicalTableList =
+                        topologyManager.getAllPhyTableList(dbName, new HashSet<>(logicTableList));
+                    physicalTableList =
+                        physicalTableList.stream().map(String::toLowerCase).collect(Collectors.toList());
                     dbName = dbName.toLowerCase();
                     meta.getPhysicalDoTableList().put(dbName, new HashSet<>(physicalTableList));
-                }
-                Map<String, String> rewriteTableMap = meta.getRewriteTableMapping();
-                for (Set<String> physicalTables : meta.getPhysicalDoTableList().values()) {
-                    for (String physicalTable : physicalTables) {
+                    for (String physicalTable : physicalTableList) {
                         physicalTable = physicalTable.toLowerCase();
-                        rewriteTableMap.put(physicalTable, topologyManager.getLogicTable(physicalTable));
+                        meta.getRewriteTableMapping().put(physicalTable, topologyManager.getLogicTable(physicalTable));
                     }
                 }
-                metaList.add(meta);
-                metaMap.put(connectionInfo.getDbInstanceId(), meta);
             }
         }
         importMeta.setMetaList(metaList);
@@ -213,7 +206,7 @@ public class ImportApiResource {
         backFlowMeta.setSrcDbList(new HashSet<>());
         backFlowMeta.setDstDbMapping(new HashMap<>());
         backFlowMeta.setPhysicalDoTableList(new HashMap<>());
-        for (ImportTaskConfig oneDbConfig: config.getImportTaskConfigs()) {
+        for (ImportTaskConfig oneDbConfig : config.getImportTaskConfigs()) {
             backFlowMeta.getSrcDbList().add(oneDbConfig.getDstDbName().toLowerCase());
             backFlowMeta.getDstDbMapping().put(oneDbConfig.getDstDbName().toLowerCase(),
                 oneDbConfig.getSrcDbName().toLowerCase());
@@ -235,17 +228,17 @@ public class ImportApiResource {
             // 更新rule和allTableList
             DataImportMeta dataImportMeta = JSON.parseObject(stateMachine.getConfig(), DataImportMeta.class);
             dataImportMeta.setSrcLogicalTableList(new HashMap<>());
-            for (ImportTaskConfig oneDbConfig: config.getImportTaskConfigs()) {
+            for (ImportTaskConfig oneDbConfig : config.getImportTaskConfigs()) {
                 dataImportMeta.getSrcLogicalTableList().put(oneDbConfig.getSrcDbName(),
                     oneDbConfig.getTableList().stream().map(String::toLowerCase).collect(Collectors.toList()));
                 dataImportMeta.getRules().put(oneDbConfig.getSrcDbName(), oneDbConfig.getRules());
             }
 
             // 更新physical meta
-            generatePhysicalMeta(config, dataImportMeta, (int)(dataImportMeta.getMetaList().get(0).getDstServerId()),
-                Integer.valueOf(dataImportMeta.getMetaList().get(0).getIgnoreServerIds()));
-            generateBackFlowMeta(config, dataImportMeta, (int)(dataImportMeta.getMetaList().get(0).getDstServerId()),
-                Integer.valueOf(dataImportMeta.getMetaList().get(0).getIgnoreServerIds()));
+            generatePhysicalMeta(config, dataImportMeta, (int) (dataImportMeta.getMetaList().get(0).getDstServerId()),
+                Integer.parseInt(dataImportMeta.getMetaList().get(0).getIgnoreServerIds()));
+            generateBackFlowMeta(config, dataImportMeta, (int) (dataImportMeta.getMetaList().get(0).getDstServerId()),
+                Integer.parseInt(dataImportMeta.getMetaList().get(0).getIgnoreServerIds()));
 
             stateMachine.setConfig(JSON.toJSONString(dataImportMeta));
             DbTaskMetaManager.updateStateMachine(stateMachine);
@@ -259,10 +252,8 @@ public class ImportApiResource {
         }
     }
 
-
-
     public ResultCode reGenerateSourceToTargetConfigV2(ImportTaskConfigList config, Long fsmId, int option)
-        throws Exception{
+        throws Exception {
         RplStateMachine stateMachine = DbTaskMetaManager.getStateMachine(fsmId);
         logger.info("old fsm config: {}", stateMachine.getConfig());
 
@@ -274,13 +265,14 @@ public class ImportApiResource {
             if (option == REFRESH_ONLY_FULL_COPY || option == REFRESH_ALL) {
                 RplService fullService = DbTaskMetaManager.getService(fsmId, ServiceType.FULL_COPY);
                 List<RplTask> fullTasks = DbTaskMetaManager.listTaskByService(fullService.getId());
-                RplTaskConfig config1 =  DbTaskMetaManager.getTaskConfig(fullTasks.get(i).getId());
+                RplTaskConfig config1 = DbTaskMetaManager.getTaskConfig(fullTasks.get(i).getId());
                 logger.info("old full config1: {}", config1.getExtractorConfig());
                 FullExtractorConfig fullExtractorConfig = JSON.parseObject(config1.getExtractorConfig(),
                     FullExtractorConfig.class);
                 fullExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(meta));
                 extractorConfigStr = JSON.toJSONString(fullExtractorConfig);
-                DbTaskMetaManager.updateTaskConfig(fullTasks.get(i).getId(), extractorConfigStr, null, null);
+                DbTaskMetaManager.updateTaskConfig(fullTasks.get(i).getId(), extractorConfigStr, null,
+                    null, null);
             }
             if (option == REFRESH_ONLY_NOT_FULL_COPY || option == REFRESH_ALL) {
                 stateMachine.setConfig(JSON.toJSONString(dataImportMeta));
@@ -288,54 +280,57 @@ public class ImportApiResource {
 
                 RplService incService = DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY);
                 List<RplTask> incTasks = DbTaskMetaManager.listTaskByService(incService.getId());
-                RplTaskConfig config3 =  DbTaskMetaManager.getTaskConfig(incTasks.get(i).getId());
+                RplTaskConfig config3 = DbTaskMetaManager.getTaskConfig(incTasks.get(i).getId());
                 logger.info("old inc config3: {}", config3.getExtractorConfig());
                 RdsExtractorConfig incExtractorConfig1 = JSON.parseObject(config3.getExtractorConfig(),
                     RdsExtractorConfig.class);
                 incExtractorConfig1.setSourceToTargetConfig(JSON.toJSONString(meta));
                 extractorConfigStr = JSON.toJSONString(incExtractorConfig1);
-                DbTaskMetaManager.updateTaskConfig(incTasks.get(i).getId(), extractorConfigStr, null, null);
+                DbTaskMetaManager.updateTaskConfig(incTasks.get(i).getId(), extractorConfigStr, null,
+                    null, null);
 
                 RplService validService = DbTaskMetaManager.getService(fsmId, ServiceType.FULL_VALIDATION);
                 List<RplTask> validTasks = DbTaskMetaManager.listTaskByService(validService.getId());
-                RplTaskConfig config5 =  DbTaskMetaManager.getTaskConfig(validTasks.get(i).getId());
+                RplTaskConfig config5 = DbTaskMetaManager.getTaskConfig(validTasks.get(i).getId());
                 logger.info("old valid config5: {}", config5.getExtractorConfig());
                 ValidationExtractorConfig validExtractorConfig1 = JSON.parseObject(config5.getExtractorConfig(),
                     ValidationExtractorConfig.class);
                 validExtractorConfig1.setSourceToTargetConfig(JSON.toJSONString(meta));
                 extractorConfigStr = JSON.toJSONString(validExtractorConfig1);
-                DbTaskMetaManager.updateTaskConfig(validTasks.get(i).getId(), extractorConfigStr, null, null);
+                DbTaskMetaManager.updateTaskConfig(validTasks.get(i).getId(), extractorConfigStr, null,
+                    null, null);
 
                 RplService reconService = DbTaskMetaManager.getService(fsmId, ServiceType.RECONCILIATION);
                 List<RplTask> reconTasks = DbTaskMetaManager.listTaskByService(reconService.getId());
-                RplTaskConfig config7 =  DbTaskMetaManager.getTaskConfig(reconTasks.get(i).getId());
+                RplTaskConfig config7 = DbTaskMetaManager.getTaskConfig(reconTasks.get(i).getId());
                 logger.info("old recon config7: {}", config7.getExtractorConfig());
                 ReconExtractorConfig reconExtractorConfig1 = JSON.parseObject(config7.getExtractorConfig(),
                     ReconExtractorConfig.class);
                 reconExtractorConfig1.setSourceToTargetConfig(JSON.toJSONString(meta));
                 extractorConfigStr = JSON.toJSONString(reconExtractorConfig1);
-                DbTaskMetaManager.updateTaskConfig(reconTasks.get(i).getId(), extractorConfigStr, null, null);
+                DbTaskMetaManager.updateTaskConfig(reconTasks.get(i).getId(), extractorConfigStr, null,
+                    null, null);
             }
         }
 
         String extractorConfigStr;
         RplService backFlowService = DbTaskMetaManager.getService(fsmId, ServiceType.CDC_INC);
         List<RplTask> backFlowTasks = DbTaskMetaManager.listTaskByService(backFlowService.getId());
-        RplTaskConfig taskConfig =  DbTaskMetaManager.getTaskConfig(backFlowTasks.get(0).getId());
+        RplTaskConfig taskConfig = DbTaskMetaManager.getTaskConfig(backFlowTasks.get(0).getId());
         logger.info("old backFlow config: {}", taskConfig.getExtractorConfig());
         CdcExtractorConfig cdcExtractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(),
             CdcExtractorConfig.class);
         cdcExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(dataImportMeta.getBackFlowMeta()));
         extractorConfigStr = JSON.toJSONString(cdcExtractorConfig);
         DbTaskMetaManager.updateTaskConfig(backFlowTasks.get(0).getId(),
-            extractorConfigStr, null, null);
+            extractorConfigStr, null, null, null);
 
         RplService validCrossService = DbTaskMetaManager.getService(fsmId, ServiceType.FULL_VALIDATION_CROSSCHECK);
         RplService reconCrossService = DbTaskMetaManager.getService(fsmId, ServiceType.RECONCILIATION_CROSSCHECK);
         List<RplTask> validCrossTasks = DbTaskMetaManager.listTaskByService(validCrossService.getId());
         List<RplTask> reconCrossTasks = DbTaskMetaManager.listTaskByService(reconCrossService.getId());
-        RplTaskConfig config1 =  DbTaskMetaManager.getTaskConfig(validCrossTasks.get(0).getId());
-        RplTaskConfig config2 =  DbTaskMetaManager.getTaskConfig(reconCrossTasks.get(0).getId());
+        RplTaskConfig config1 = DbTaskMetaManager.getTaskConfig(validCrossTasks.get(0).getId());
+        RplTaskConfig config2 = DbTaskMetaManager.getTaskConfig(reconCrossTasks.get(0).getId());
         logger.info("old validation config: {}", config1.getExtractorConfig());
         logger.info("old recon config: {}", config2.getExtractorConfig());
         ValidationExtractorConfig validExtractorConfig = JSON.parseObject(config1.getExtractorConfig(),
@@ -347,16 +342,13 @@ public class ImportApiResource {
         reconExtractorConfig.setSourceToTargetConfig(JSON.toJSONString(dataImportMeta.getBackFlowMeta()));
         extractorConfigStr = JSON.toJSONString(validExtractorConfig);
         DbTaskMetaManager.updateTaskConfig(validCrossTasks.get(0).getId(),
-            extractorConfigStr, null, null);
+            extractorConfigStr, null, null, null);
         extractorConfigStr = JSON.toJSONString(reconExtractorConfig);
         DbTaskMetaManager.updateTaskConfig(reconCrossTasks.get(0).getId(),
-            extractorConfigStr, null, null);
+            extractorConfigStr, null, null, null);
 
         return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(fsmId).build();
     }
-
-
-
 
     @POST
     @Path("/service/start/{fsmId}")
@@ -383,7 +375,7 @@ public class ImportApiResource {
     @Path("/service/delete/{fsmId}")
     public ResultCode delete(@PathParam("fsmId") Long fsmId) {
         logger.warn("receive delete fsm request " + fsmId);
-        return FSMMetaManager.deleteStateMachine(fsmId);
+        return MANAGER.deleteStateMachine(fsmId);
     }
 
     @POST
@@ -416,7 +408,8 @@ public class ImportApiResource {
             return ResultCode.builder().code(RplConstants.FAILURE_CODE).msg("fsm not exist")
                 .data(RplConstants.FAILURE).build();
         }
-        if (stateMachine.getState() != FSMState.BACK_FLOW.getValue()) {
+        if (stateMachine.getState() != FSMState.BACK_FLOW.getValue() &&
+            stateMachine.getState() != FSMState.BACK_FLOW_CATCH_UP.getValue()) {
             return ResultCode.builder().code(RplConstants.FAILURE_CODE).msg("state not support this action")
                 .data(RplConstants.FAILURE).build();
         }
@@ -433,13 +426,6 @@ public class ImportApiResource {
     public ResultCode detail(@PathParam("fsmId") Long fsmId) {
         logger.warn("receive detail fsm request " + fsmId);
         return FSMMetaManager.getStateMachineDetail(fsmId);
-    }
-
-    @POST
-    @Path("/service/addtaskconfig/{fsmId}")
-    public ResultCode addTaskConfig(@PathParam("fsmId") Long fsmId) {
-        FSMMetaManager.addTaskConfig(fsmId);
-        return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(RplConstants.SUCCESS).build();
     }
 
     @POST
@@ -465,22 +451,33 @@ public class ImportApiResource {
         RplTaskConfig taskConfig = DbTaskMetaManager.getTaskConfig(task.getId());
         RdsExtractorConfig config = JSON.parseObject(taskConfig.getExtractorConfig(), RdsExtractorConfig.class);
         config.setFixHostInstanceId(instanceId);
-        DbTaskMetaManager.updateTaskConfig(task.getId(), JSON.toJSONString(config), null, null);
+        DbTaskMetaManager.updateTaskConfig(task.getId(), JSON.toJSONString(config), null,
+            null, null);
         return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(RplConstants.SUCCESS).build();
     }
 
     @POST
-    @Path("/task/removeossinstanceid/{taskId}/{instanceId}")
+    @Path("/task/removeossinstanceid/{taskId}")
     public ResultCode removeOssInstanceId(@PathParam("taskId") Long taskId) {
         logger.warn("receive remove rds info request for task" + taskId);
         RplTask task = DbTaskMetaManager.getTask(taskId);
         RplTaskConfig taskConfig = DbTaskMetaManager.getTaskConfig(task.getId());
         RdsExtractorConfig config = JSON.parseObject(taskConfig.getExtractorConfig(), RdsExtractorConfig.class);
         config.setFixHostInstanceId(null);
-        DbTaskMetaManager.updateTaskConfig(task.getId(), JSON.toJSONString(config), null, null);
+        DbTaskMetaManager.updateTaskConfig(task.getId(), JSON.toJSONString(config), null,
+            null, null);
         return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(RplConstants.SUCCESS).build();
     }
 
+    @POST
+    @Path("/task/modifyextractorhostinfo/{taskId}/{ip}/{port}")
+    public ResultCode modifyExtractorHostInfo(@PathParam("taskId") Long taskId,
+                                              @PathParam("ip") String ip,
+                                              @PathParam("port") Integer port) {
+        logger.warn("receive modify extractor host info request for task" + taskId);
+        FSMMetaManager.modifyExtractorHostInfo(taskId, ip, port);
+        return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(RplConstants.SUCCESS).build();
+    }
 
     @POST
     @Path("task/exception/skip/start/{taskId}")
@@ -531,6 +528,26 @@ public class ImportApiResource {
         return FSMMetaManager.setEventBufferSize(fsmId, size);
     }
 
+    @POST
+    @Path("service/fullreadbatchsize/{fsmId}")
+    public ResultCode setFullReadBatchSize(@PathParam("fsmId") Long fsmId, @QueryParam("size") Integer size) {
+        logger.warn("receive set full read batch size request for fsm: " + fsmId);
+        return FSMMetaManager.setFullReadBatchSize(fsmId, size);
+    }
+
+    @POST
+    @Path("service/writebatchsize/{fsmId}")
+    public ResultCode setWriteBatchSize(@PathParam("fsmId") Long fsmId, @QueryParam("size") Integer size) {
+        logger.warn("receive set write batch size request for fsm: " + fsmId);
+        return FSMMetaManager.setWriteBatchSize(fsmId, size);
+    }
+
+    @POST
+    @Path("service/writeparallelcount/{fsmId}")
+    public ResultCode setWriteParallelCount(@PathParam("fsmId") Long fsmId, @QueryParam("size") Integer size) {
+        logger.warn("receive set write parallel count request for fsm: " + fsmId);
+        return FSMMetaManager.setWriteParallelCount(fsmId, size);
+    }
 
     @POST
     @Path("task/memory/{taskId}")
@@ -565,6 +582,27 @@ public class ImportApiResource {
     public ResultCode getTaskConfig(@PathParam("taskId") Long taskId) {
         logger.warn("receive getTaskConfig task request " + taskId);
         return FSMMetaManager.getTaskDetail(taskId);
+    }
+
+    @POST
+    @Path("service/markbackflow/{fsmId}")
+    public ResultCode markBackFlowPosition(@PathParam("fsmId") Long fsmId) {
+        logger.warn("receive mark back flow position request " + fsmId);
+        return FSMMetaManager.markBackFlowPosition(fsmId);
+    }
+
+    @POST
+    @Path("service/lock/{fsmId}")
+    public ResultCode lockDbs(@PathParam("fsmId") Long fsmId) {
+        logger.warn("receive lock dbs request " + fsmId);
+        return FSMMetaManager.lockDbs(fsmId);
+    }
+
+    @POST
+    @Path("service/unlock/{fsmId}")
+    public ResultCode unlockDbs(@PathParam("fsmId") Long fsmId) {
+        logger.warn("receive unlock dbs request " + fsmId);
+        return FSMMetaManager.unlockDbs(fsmId);
     }
 
     @Data

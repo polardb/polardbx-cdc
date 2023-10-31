@@ -14,8 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.util;
 
-import com.aliyun.polardbx.binlog.BinlogUploadStatusEnum;
-import com.aliyun.polardbx.binlog.ClusterTypeEnum;
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -41,12 +40,12 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryDetailInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
+import com.aliyun.polardbx.binlog.enums.BinlogUploadStatus;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Sets;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.DuplicateKeyException;
@@ -59,12 +58,12 @@ import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_X_STREAM_GROUP_NAME;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.EXPECTED_STORAGE_TSO_KEY;
-import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_SCALE_REPAIR_STORAGE_ENABLE;
-import static com.aliyun.polardbx.binlog.Constants.GROUP_NAME_GLOBAL;
-import static com.aliyun.polardbx.binlog.Constants.STREAM_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_REPAIR_STORAGE_WITH_SCALE_ENABLE;
+import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.util.StorageUtil.buildExpectedStorageTso;
@@ -78,8 +77,6 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
  **/
 @Slf4j
 public class MetaScaleUtil {
-    private static final Gson GSON = new GsonBuilder().create();
-
     public static void recordStorageHistory(String tsoParam, String instructionIdParam, List<String> storageList,
                                             String streamNameParam, Supplier<Boolean> runningSupplier)
         throws InterruptedException {
@@ -110,14 +107,14 @@ public class MetaScaleUtil {
                     info = new StorageHistoryInfo();
                     info.setStatus(-1);
                     info.setTso(tsoParam);
-                    info.setStorageContent(GSON.toJson(content));
+                    info.setStorageContent(JSONObject.toJSONString(content));
                     info.setInstructionId(instructionIdParam);
                     info.setClusterId(getString(CLUSTER_ID));
                     info.setGroupName(buildStreamGroupId());
                     storageHistoryMapper.insert(info);
-                    log.info("record storage history : " + GSON.toJson(info));
+                    log.info("record storage history : " + JSONObject.toJSONString(info));
                 } catch (DuplicateKeyException e) {
-                    log.warn("storage history is already existing , {}.", GSON.toJson(info));
+                    log.warn("storage history is already existing , {}.", JSONObject.toJSONString(info));
                 }
             } else {
                 log.info("storage history with tso {} or instruction id {} is already exist, ignored.", tsoParam,
@@ -168,7 +165,7 @@ public class MetaScaleUtil {
                     storageHistoryMapper.update(
                         u -> u.set(StorageHistoryInfoDynamicSqlSupport.status).equalTo(0)
                             .where(StorageHistoryInfoDynamicSqlSupport.id, isEqualTo(i.getId())));
-                    log.info("commit storage history : " + GSON.toJson(i));
+                    log.info("commit storage history : " + JSONObject.toJSONString(i));
                 });
             }
 
@@ -184,7 +181,7 @@ public class MetaScaleUtil {
                         historyDetailMapper.update(
                             u -> u.set(StorageHistoryDetailInfoDynamicSqlSupport.status).equalTo(0)
                                 .where(StorageHistoryDetailInfoDynamicSqlSupport.id, isEqualTo(i.getId())));
-                        log.info("commit storage history detail : " + GSON.toJson(i));
+                        log.info("commit storage history detail : " + JSONObject.toJSONString(i));
                     });
                 }
             }
@@ -234,11 +231,11 @@ public class MetaScaleUtil {
         long start = System.currentTimeMillis();
         while (true) {
             List<BinlogTaskConfig> taskConfigs = taskConfigMapper.select(
-                    t -> t.where(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(getString(ConfigKeys.CLUSTER_ID)))
-                        .and(BinlogTaskConfigDynamicSqlSupport.role, isIn(
-                            TaskType.Final.name(), TaskType.Relay.name(), TaskType.Dispatcher.name())))
+                t -> t.where(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(getString(ConfigKeys.CLUSTER_ID)))
+                    .and(BinlogTaskConfigDynamicSqlSupport.role, isIn(
+                        TaskType.Final.name(), TaskType.Relay.name(), TaskType.Dispatcher.name())))
                 .stream().filter(tc -> {
-                    ExecutionConfig config = GSON.fromJson(tc.getConfig(), ExecutionConfig.class);
+                    ExecutionConfig config = JSONObject.parseObject(tc.getConfig(), ExecutionConfig.class);
                     return !expectedStorageTso.equals(config.getTso());
                 }).collect(Collectors.toList());
 
@@ -272,9 +269,10 @@ public class MetaScaleUtil {
         BinlogOssRecordMapper mapper = getObject(BinlogOssRecordMapper.class);
         while (true) {
             List<BinlogOssRecord> list = mapper.select(s -> s.where(BinlogOssRecordDynamicSqlSupport.uploadStatus,
-                    isIn(BinlogUploadStatusEnum.SUCCESS.getValue(), BinlogUploadStatusEnum.IGNORE.getValue()))
+                isIn(BinlogUploadStatus.SUCCESS.getValue(), BinlogUploadStatus.IGNORE.getValue()))
                 .and(BinlogOssRecordDynamicSqlSupport.binlogFile, isLessThanOrEqualTo(fileName))
-                .and(BinlogOssRecordDynamicSqlSupport.streamId, isEqualTo(streamName)));
+                .and(BinlogOssRecordDynamicSqlSupport.streamId, isEqualTo(streamName))
+                .and(BinlogOssRecordDynamicSqlSupport.clusterId, isEqualTo(getString(CLUSTER_ID))));
             if (!list.isEmpty()) {
                 break;
             } else {
@@ -320,7 +318,7 @@ public class MetaScaleUtil {
                         .and(StorageInfoDynamicSqlSupport.gmtCreated, isLessThanOrEqualTo(command.getGmtCreated()))
                         .orderBy(StorageInfoDynamicSqlSupport.id));
                 Set<String> storageIdsInDb = storageInfosInDb.stream().collect(
-                        Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1, (s1, s2) -> s1)).values().stream()
+                    Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1, (s1, s2) -> s1)).values().stream()
                     .map(StorageInfo::getStorageInstId)
                     .collect(Collectors.toSet());
 
@@ -342,7 +340,7 @@ public class MetaScaleUtil {
     }
 
     private static boolean needTryRepairStorage() {
-        boolean enableRepair = DynamicApplicationConfig.getBoolean(TOPOLOGY_SCALE_REPAIR_STORAGE_ENABLE);
+        boolean enableRepair = DynamicApplicationConfig.getBoolean(TOPOLOGY_REPAIR_STORAGE_WITH_SCALE_ENABLE);
         if (enableRepair) {
             Set<String> needRepairVersions = Sets.newHashSet("5.4.9", "5.4.10", "5.4.11");
             JdbcTemplate polarxTemplate = getObject("polarxJdbcTemplate");
@@ -359,10 +357,10 @@ public class MetaScaleUtil {
 
     private static String buildStreamGroupId() {
         String clusterType = DynamicApplicationConfig.getClusterType();
-        if (StringUtils.equals(ClusterTypeEnum.BINLOG.name(), clusterType)) {
+        if (StringUtils.equals(ClusterType.BINLOG.name(), clusterType)) {
             return GROUP_NAME_GLOBAL;
         } else {
-            return getString(BINLOG_X_STREAM_GROUP_NAME);
+            return getString(BINLOGX_STREAM_GROUP_NAME);
         }
     }
 

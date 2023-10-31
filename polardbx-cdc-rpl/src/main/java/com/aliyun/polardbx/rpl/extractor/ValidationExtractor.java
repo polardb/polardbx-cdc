@@ -15,14 +15,15 @@
 package com.aliyun.polardbx.rpl.extractor;
 
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+
 import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.*;
 import static org.mybatis.dynamic.sql.SqlBuilder.count;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
-import static org.mybatis.dynamic.sql.SqlBuilder.or;
 import static org.mybatis.dynamic.sql.SqlBuilder.select;
 
 import com.aliyun.polardbx.binlog.dao.ValidationTaskMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.filter.DataImportFilter;
@@ -34,10 +35,8 @@ import com.aliyun.polardbx.rpl.validation.ValidationCoordinator;
 import com.aliyun.polardbx.rpl.validation.common.ValidationStateEnum;
 import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
 import lombok.extern.slf4j.Slf4j;
-import org.mybatis.dynamic.sql.SqlBuilder;
 import org.mybatis.dynamic.sql.render.RenderingStrategy;
 import org.mybatis.dynamic.sql.select.render.SelectStatementProvider;
-import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
 
 import javax.sql.DataSource;
 import java.util.ArrayList;
@@ -63,7 +62,8 @@ public class ValidationExtractor extends BaseExtractor {
     private DataImportFilter filter;
     private List<ValidationContext> contextList;
 
-    public ValidationExtractor(ValidationExtractorConfig extractorConfig, HostInfo srcHost, HostInfo dstHost, DataImportFilter filter) {
+    public ValidationExtractor(ValidationExtractorConfig extractorConfig, HostInfo srcHost, HostInfo dstHost,
+                               DataImportFilter filter) {
         super(extractorConfig);
         this.extractorName = "ValidationExtractor";
         this.extractorConfig = extractorConfig;
@@ -71,16 +71,15 @@ public class ValidationExtractor extends BaseExtractor {
         this.dstHost = dstHost;
         this.filter = filter;
         executorService = ThreadPoolUtil.createExecutorWithFixedNum(extractorConfig.getParallelCount(),
-                                                                    extractorName);
+            extractorName);
         runningProcessors = new ArrayList<>();
     }
 
     @Override
-    public boolean init() throws Exception {
-        log.info("Initializing extractor {}", extractorName);
+    public void init() throws Exception {
+        super.init();
         contextList = ValidationContext.getFactory().createCtxList(srcHost, dstHost, filter);
         log.info("Validation context list constructed. size: {}", contextList.size());
-        return true;
     }
 
     @Override
@@ -88,9 +87,10 @@ public class ValidationExtractor extends BaseExtractor {
         log.info("Starting extractor {}, src physical db number: {}", extractorName, contextList.size());
         for (ValidationContext context : contextList) {
             ValidationCoordinator coordinator = new ValidationCoordinator(context);
-            Future future = executorService.submit(() -> coordinator.validateTable());
+            Future<?> future = executorService.submit(coordinator::validateTable);
             runningProcessors.add(future);
-            log.info("Running validation for src DB {} and dst DB {}", context.getSrcPhyDB(), context.getDstLogicalDB());
+            log.info("Running validation for src DB {} and dst DB {}", context.getSrcPhyDB(),
+                context.getDstLogicalDB());
         }
     }
 
@@ -100,12 +100,12 @@ public class ValidationExtractor extends BaseExtractor {
         for (Future future : runningProcessors) {
             allDone &= future.isDone();
         }
-        if (allDone)  {
+        if (allDone) {
             if (isVTaskFinished()) {
                 return true;
             } else {
                 log.error("All futures have been done but some tasks are not finished");
-                System.exit(-1);
+                throw new PolardbxException("All futures have been done but some tasks are not finished");
             }
         }
         return false;
@@ -124,11 +124,11 @@ public class ValidationExtractor extends BaseExtractor {
             .and(deleted, isEqualTo(false)));
 
         SelectStatementProvider selectStmt = select(count()).from(validationTask).where(stateMachineId, isEqualTo(smid))
-                .and(serviceId, isEqualTo(sid))
-                .and(taskId, isEqualTo(tid))
-                .and(type, isEqualTo(getType().getValue()))
-                .and(deleted, isEqualTo(false))
-                .and(state, isEqualTo(ValidationStateEnum.DONE.getValue())).build()
+            .and(serviceId, isEqualTo(sid))
+            .and(taskId, isEqualTo(tid))
+            .and(type, isEqualTo(getType().getValue()))
+            .and(deleted, isEqualTo(false))
+            .and(state, isEqualTo(ValidationStateEnum.DONE.getValue())).build()
             .render(RenderingStrategy.MYBATIS3);
 
         long doneCount = mapper.count(selectStmt);

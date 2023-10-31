@@ -55,7 +55,8 @@ public class ColumnTypeUtil {
 
     public static boolean isVarCharOrBinary(String columnType) {
         return columnType.startsWith("varchar") || columnType.startsWith("char") ||
-            columnType.startsWith("binary") || columnType.startsWith("varbinary");
+            columnType.startsWith("binary") || columnType.startsWith("varbinary") ||
+            columnType.startsWith("nvarchar") || columnType.startsWith("nchar");
     }
 
     public static boolean isNumberic(String columnType) {

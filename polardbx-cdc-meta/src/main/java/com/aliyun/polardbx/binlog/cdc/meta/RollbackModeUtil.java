@@ -21,8 +21,8 @@ import java.util.Collections;
 import java.util.List;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_ROLLBACK_MODE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_ROLLBACK_MODE_FORCE_USE_SNAPSHOT_EXACTLY;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_RECOVER_FORCE_USE_SNAPSHOT_EXACTLY_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_RECOVER_ROLLBACK_MODE;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_EXACTLY;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_SEMI;
@@ -33,10 +33,10 @@ import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_SEMI;
 public class RollbackModeUtil {
 
     public static RollbackMode getRollbackMode() {
-        String rollbackModeStr = DynamicApplicationConfig.getString(META_ROLLBACK_MODE);
+        String rollbackModeStr = DynamicApplicationConfig.getString(META_RECOVER_ROLLBACK_MODE);
         RollbackMode mode = RollbackMode.valueOf(rollbackModeStr);
         boolean enableCdcBuildSnapshot = getBoolean(ENABLE_CDC_META_BUILD_SNAPSHOT);
-        boolean forceUseSnapshotExactly = getBoolean(META_ROLLBACK_MODE_FORCE_USE_SNAPSHOT_EXACTLY);
+        boolean forceUseSnapshotExactly = getBoolean(META_RECOVER_FORCE_USE_SNAPSHOT_EXACTLY_MODE);
 
         if (mode == RollbackMode.RANDOM) {
             List<RollbackMode> list = Lists.newArrayList(SNAPSHOT_SEMI, SNAPSHOT_EXACTLY);
