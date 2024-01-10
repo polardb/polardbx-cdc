@@ -63,5 +63,4 @@
             <outputDirectory>polardbx-binlog.standalone/lib</outputDirectory>
         </dependencySet>
     </dependencySets>
-    <id>assembly-id</id>
 </assembly>
