@@ -72,7 +72,7 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
 
     private static final String METADB_URL_SCAN_SQL = "SHOW STORAGE";
 
-    private static final String CN_URL_TEMPLATE = "jdbc:mysql://%s/__cdc__";
+    private static final String CN_URL_TEMPLATE = "jdbc:mysql://%s/__cdc__?useSSL=false";
 
     private boolean bootstrap = true;
 
@@ -113,7 +113,11 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
 
             bootstrap = false;
             this.metaDbUrlScanService = Executors.newSingleThreadExecutor
-                (r -> new Thread(r, "metadb-url-scanner"));
+                (r -> {
+                    Thread t = new Thread(r, "metadb-url-scanner");
+                    t.setDaemon(true);
+                    return t;
+                });
             this.metaDbUrlScanService.submit(() -> {
                 //等5s，spring初始化完毕
                 sleep(5000);

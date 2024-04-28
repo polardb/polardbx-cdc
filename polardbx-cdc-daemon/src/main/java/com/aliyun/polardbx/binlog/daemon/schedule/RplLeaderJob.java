@@ -14,12 +14,14 @@
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
 import com.aliyun.polardbx.rpl.common.LogUtil;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMManager;
-import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
+import com.aliyun.polardbx.rpl.taskmeta.DynamicEndpointWatcher;
+import com.aliyun.polardbx.rpl.taskmeta.MetaManagerTranProxy;
 import org.slf4j.Logger;
 
 /**
@@ -29,6 +31,8 @@ import org.slf4j.Logger;
 public class RplLeaderJob extends AbstractBinlogTimerTask {
 
     private static Logger metaLogger = LogUtil.getMetaLogger();
+    private static final MetaManagerTranProxy TRANSACTION_MANAGER =
+        SpringContextHolder.getObject(MetaManagerTranProxy.class);
 
     public RplLeaderJob(String cluster, String clusterType, String name, int interval) {
         super(cluster, clusterType, name, interval);
@@ -44,8 +48,8 @@ public class RplLeaderJob extends AbstractBinlogTimerTask {
             }
 
             FSMManager.update();
-            FSMMetaManager.distributeTasks();
-
+            TRANSACTION_MANAGER.distributeTasks();
+            DynamicEndpointWatcher.checkAvailableEndpoint();
         } catch (Throwable th) {
             metaLogger.error("RplLeaderJob fail {} {} {}", clusterId, name, interval, th);
             throw new PolardbxException("RplLeaderJob fail", th);

@@ -333,6 +333,14 @@ public class BaseTestCase implements BaseTestMode {
         }
     }
 
+    public synchronized Connection getCdcSyncDbConnection(String user, String password) {
+        checkClosedCdcSyncDbConnections();
+        Connection connection = ConnectionManager.getInstance().newCdcSyncDbConnection(user, password);
+        ConnectionWrap connectionWrap = new ConnectionWrap(connection);
+        this.cdcSyncDbConnections.add(connectionWrap);
+        return connectionWrap;
+    }
+
     public synchronized Connection getCdcSyncDbConnectionFirst() {
         return getCdcSyncDbConnectionFirst("mysql");
     }

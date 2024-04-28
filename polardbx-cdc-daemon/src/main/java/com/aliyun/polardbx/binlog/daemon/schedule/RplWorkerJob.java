@@ -17,7 +17,7 @@ package com.aliyun.polardbx.binlog.daemon.schedule;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
 import com.aliyun.polardbx.rpl.common.LogUtil;
-import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
+import com.aliyun.polardbx.rpl.taskmeta.TaskDistributor;
 import org.slf4j.Logger;
 
 /**
@@ -39,7 +39,7 @@ public class RplWorkerJob extends AbstractBinlogTimerTask {
 
     public void refresh() {
         try {
-            FSMMetaManager.checkAndRunLocalTasks(clusterId);
+            TaskDistributor.checkAndRunLocalTasks(clusterId);
         } catch (Throwable e) {
             metaLogger.error("RplWorkerJob fail {} {} {}", clusterId, name, interval, e);
             throw new PolardbxException("RplWorkerJob fail", e);

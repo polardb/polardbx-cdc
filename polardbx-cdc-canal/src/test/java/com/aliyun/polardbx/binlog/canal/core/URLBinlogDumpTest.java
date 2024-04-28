@@ -16,15 +16,15 @@ package com.aliyun.polardbx.binlog.canal.core;
 
 import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
-import com.aliyun.polardbx.binlog.canal.binlog.ContinuesURLLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
-import com.aliyun.polardbx.binlog.canal.binlog.URLLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.XaPrepareLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.ContinuesURLLogFetcher;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.URLLogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;

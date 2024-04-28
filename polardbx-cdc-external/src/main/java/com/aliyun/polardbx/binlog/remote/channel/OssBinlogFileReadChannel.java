@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.remote.channel;
 
 import com.aliyun.oss.OSS;
+import com.aliyun.oss.OSSException;
 import com.aliyun.oss.model.GetObjectRequest;
 import com.aliyun.oss.model.OSSObject;
 import lombok.extern.slf4j.Slf4j;
@@ -42,14 +43,14 @@ public class OssBinlogFileReadChannel extends AbstractBinlogFileReadChannel {
     @Override
     protected void getRange(long startPosition) {
         if (startPosition < 0) {
-            throw new IllegalArgumentException("invalid argument, start pos:" + startPosition);
+            throw new IllegalArgumentException("invalid start position:" + startPosition);
         }
 
         ossObject = getRangeHelper(startPosition);
         String contentRange = ossObject.getResponse().getHeaders().get("Content-Range");
         fileSize = getFileSize(contentRange);
         if (fileSize <= startPosition) {
-            throw new IllegalArgumentException("file size:" + fileSize
+            throw new IllegalArgumentException("oss file size:" + fileSize
                 + " is smaller than start pos:" + startPosition);
         }
         inputStream = ossObject.getObjectContent();
@@ -65,7 +66,7 @@ public class OssBinlogFileReadChannel extends AbstractBinlogFileReadChannel {
             }
         } catch (IOException e) {
             log.error("close channel of file {} error", fileName, e);
-            throw new RuntimeException(e);
+            throw new OSSException("Close oss channel error!");
         } finally {
             if (ossClient != null) {
                 ossClient.shutdown();
@@ -77,7 +78,13 @@ public class OssBinlogFileReadChannel extends AbstractBinlogFileReadChannel {
         GetObjectRequest request = new GetObjectRequest(bucket, fileName);
         String range = "bytes=" + position + "-";
         request.addHeader("Range", range);
-        return ossClient.getObject(request);
+
+        try {
+            return ossClient.getObject(request);
+        } catch (Exception ossException) {
+            log.error("get oss range with position:{} error", position, ossException);
+            throw new OSSException("Get file content from oss error!");
+        }
     }
 
     private long getFileSize(String contentRange) {
@@ -87,7 +94,7 @@ public class OssBinlogFileReadChannel extends AbstractBinlogFileReadChannel {
         String[] strs = contentRange.split(" ");
         if (strs.length != 2 || !"bytes".equalsIgnoreCase(strs[0])) {
             log.error("unexpected content range str: {} ", Arrays.toString(strs));
-            throw new RuntimeException("unexpected oss content range str");
+            throw new OSSException("Get file size from oss error!");
         }
         String[] rangeAndSize = strs[1].split("/");
         return Integer.parseInt(rangeAndSize[1]);

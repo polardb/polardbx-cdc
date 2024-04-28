@@ -28,6 +28,7 @@ import java.util.List;
  * @version 1.0
  */
 @Slf4j
+@Deprecated
 public abstract class DBMSRowChange extends DBMSEvent {
 
     private static final long serialVersionUID = -5725119493653542602L;

@@ -73,7 +73,7 @@ public class EventTransactionBuffer {
     }
 
     public void add(MySQLDBMSEvent entry) throws InterruptedException {
-        DBMSEvent event = entry.getDbMessageWithEffect();
+        DBMSEvent event = entry.getDbmsEventPayload();
         if (event instanceof DBMSTransactionBegin) {
             flush();// 刷新上一次的数据
             put(entry);

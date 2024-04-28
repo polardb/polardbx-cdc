@@ -19,32 +19,9 @@ package com.aliyun.polardbx.rpl.taskmeta;
  * @since 5.0.0.0
  */
 public enum StateMachineType {
-    NULL(0),
+    DATA_IMPORT,
 
-    DATA_IMPORT(10),
+    REPLICA,
 
-    // DATA_EXPORT(20),
-
-    REPLICA(30),
-
-    RECOVERY(40);
-
-    private int value;
-
-    public int getValue() {
-        return value;
-    }
-
-    StateMachineType(int value) {
-        this.value = value;
-    }
-
-    public static StateMachineType from(int state) {
-        for (StateMachineType i : StateMachineType.values()) {
-            if (i.value == state) {
-                return i;
-            }
-        }
-        return null;
-    }
+    RECOVERY
 }

@@ -20,7 +20,7 @@ import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_GROUP_MAX_LEVEL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_GROUP_UNIT_SIZE;
-import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getInt;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 
 /**
  * created by ziyang.lb

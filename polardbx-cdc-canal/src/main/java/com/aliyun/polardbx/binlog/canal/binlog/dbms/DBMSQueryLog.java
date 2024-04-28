@@ -22,6 +22,7 @@ import java.sql.Timestamp;
  * @author Changyuan.lh
  * @version 1.0
  */
+@Deprecated
 public abstract class DBMSQueryLog extends DBMSEvent {
     private static final long serialVersionUID = -2075483176427758922L;
 

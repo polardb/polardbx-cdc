@@ -21,9 +21,9 @@ import com.aliyun.polardbx.binlog.storage.Storage;
 public class ExtractorBuilder {
 
     public static BinlogExtractor buildExtractor(BinlogParameter parameter, Storage storage, MergeSource mergeSource,
-                                                 String rdsBinlogPath) {
+                                                 String rdsBinlogPath, long serverId) {
         BinlogExtractor extractor = new BinlogExtractor();
-        extractor.init(parameter, rdsBinlogPath);
+        extractor.init(parameter, rdsBinlogPath, serverId);
         DefaultOutputMergeSourceHandler logEventHandler = new DefaultOutputMergeSourceHandler(mergeSource, storage);
         extractor.setLogEventHandler(logEventHandler);
         return extractor;

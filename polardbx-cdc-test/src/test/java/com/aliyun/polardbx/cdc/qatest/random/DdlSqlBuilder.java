@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.isBit;
 import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.isBoolean;
+import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.isCharacterSetSensitive;
 import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.isCompatibleTime;
 import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.isFloatingType;
 import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.isFloatingWithZeroFraction;
@@ -102,6 +103,14 @@ public class DdlSqlBuilder {
         return String.format("alter table `%s` drop column `%s`", tableName, columnName);
     }
 
+    String buildAlterTableCharsetSql() {
+        if (RandomUtils.nextBoolean()) {
+            return String.format("alter table `%s` DEFAULT CHARACTER SET %s", tableName, columnSeeds.nextCharset());
+        } else {
+            return String.format("alter table `%s` CONVERT TO CHARACTER SET %s", tableName, columnSeeds.nextCharset());
+        }
+    }
+
     Pair<Pair<String, String>, String> buildModifyColumnSql() {
         Pair<String, String> columnSeed = findSeedColumn4Modify();
         Map.Entry<String, List<String>> targetColumnType;
@@ -126,10 +135,20 @@ public class DdlSqlBuilder {
             throw new PolardbxException("invalid column type for modify " + columnSeed.getValue());
         }
 
+        String charset = null;
+
+        if (isCharacterSetSensitive(targetColumnType.getKey())) {
+            charset = columnSeeds.randomCharset();
+        }
+
         String defaultValue =
             getDefaultValue(targetColumnType.getKey(), getRandomDefaultValue(targetColumnType.getValue()), "MODIFY");
+        String characterSet = "";
+        if (StringUtils.isNotBlank(charset) && RandomUtils.nextBoolean()) {
+            characterSet = String.format(" CHARACTER SET %s", charset);
+        }
         String sql = String.format("alter table `%s` modify column `%s` %s DEFAULT %s", tableName,
-            columnSeed.getKey(), targetColumnType.getKey(),
+            columnSeed.getKey(), targetColumnType.getKey() + characterSet,
             needQuota(targetColumnType.getKey(), defaultValue) ? "'" + defaultValue + "'" : defaultValue);
         return Pair.of(Pair.of(columnSeed.getKey(), targetColumnType.getKey()), sql);
     }

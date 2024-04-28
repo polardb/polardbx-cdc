@@ -21,8 +21,8 @@ import java.util.Map;
 
 /**
  * DBMSEvent represents DB event from the source DB, which Contains DBMS updates information that
- * must be replicated. We replicate 2 kinds of event - query log {@link DBMSQueryLog DBMSQueryLog} and
- * row change {@link DBMSRowChange DBMSRowChange} now.
+ * must be replicated. We replicate 2 kinds of event - query log {@link DefaultQueryLog DefaultQueryLog} and
+ * row change {@link DefaultRowChange DefaultRowChange} now.
  *
  * @author Changyuan.lh
  * @version 1.0
@@ -30,8 +30,13 @@ import java.util.Map;
 public abstract class DBMSEvent implements Serializable {
     private static final long serialVersionUID = 6951115875657148365L;
     protected transient Map<String, DBMSOption> optionDict;
-    private Long sourceTimeStamp;
+    // ms
+    private long sourceTimeStamp;
+    // ms
+    private long extractTimeStamp;
     private long eventSize;
+    private String position;
+    private String rtso;
 
     /**
      * Build option information as needed.
@@ -112,12 +117,20 @@ public abstract class DBMSEvent implements Serializable {
      */
     public abstract void setOptionValue(String name, Serializable value);
 
-    public Long getSourceTimeStamp() {
+    public long getSourceTimeStamp() {
         return sourceTimeStamp;
     }
 
     public void setSourceTimeStamp(long sourceTimeStamp) {
         this.sourceTimeStamp = sourceTimeStamp;
+    }
+
+    public long getExtractTimeStamp() {
+        return extractTimeStamp;
+    }
+
+    public void setExtractTimeStamp(Long extractTimeStamp) {
+        this.extractTimeStamp = extractTimeStamp;
     }
 
     public long getEventSize() {
@@ -126,6 +139,22 @@ public abstract class DBMSEvent implements Serializable {
 
     public void setEventSize(long eventSize) {
         this.eventSize = eventSize;
+    }
+
+    public void setPosition(String position) {
+        this.position = position;
+    }
+
+    public String getPosition() {
+        return position;
+    }
+
+    public String getRtso() {
+        return rtso;
+    }
+
+    public void setRtso(String rtso) {
+        this.rtso = rtso;
     }
 
     /**

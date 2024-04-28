@@ -15,12 +15,14 @@
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.MockData;
 import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import com.google.common.collect.Sets;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -73,6 +75,61 @@ public class PolarDbXTableMetaManagerTest_Basic extends BaseTestWithGmsTables {
         Assert.assertEquals(
             Sets.newHashSet("__drds_heartbeat___GOBU", "accounts_ap0Y", "user_Gvli", "accounts_SuV2"),
             set2);
+    }
+
+    @Test
+    public void testFindPhyTable() {
+        // prepare data
+        LogicMetaTopology x = buildTopology("000",
+            () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
+
+        // remove some physical table
+        Set<Pair<String, String>> seeds = new HashSet<>();
+        x.getLogicDbMetas().forEach(d -> {
+            d.getLogicTableMetas().forEach(t -> {
+                t.getPhySchemas().forEach(p -> {
+                    if (STORAGE_INST_ID.equals(p.getStorageInstId())) {
+                        String phyTable = p.getPhyTables().get(0);
+                        seeds.add(Pair.of(p.getSchema(), phyTable));
+                    }
+                });
+            });
+        });
+
+        // do apply
+        metaManager.applyBase(new BinlogPosition(null, "1"), x, "000");
+        seeds.forEach(s -> {
+            metaManager.applyPhysical(new BinlogPosition(null, "1"), s.getKey(), "drop table " + s.getValue(), null);
+        });
+
+        // check
+        x = buildTopology("000",
+            () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
+        Set<Pair<String, String>> checkSet = new HashSet<>();
+        x.getLogicDbMetas().forEach(d -> {
+            d.getLogicTableMetas().forEach(t -> {
+                t.getPhySchemas().forEach(p -> {
+                    if (STORAGE_INST_ID.equals(p.getStorageInstId())) {
+                        p.getPhyTables().forEach(s -> {
+                            Pair<String, String> pair = Pair.of(p.getSchema(), s);
+                            if (seeds.contains(pair)) {
+                                TableMeta tableMeta = metaManager.findPhyTable(p.getSchema(), s, false);
+                                Assert.assertNull(tableMeta);
+
+                                tableMeta = metaManager.findPhyTable(p.getSchema(), s, true);
+                                Assert.assertNotNull(tableMeta);
+
+                                checkSet.add(pair);
+                            } else {
+                                TableMeta tableMeta = metaManager.findPhyTable(p.getSchema(), s, false);
+                                Assert.assertNotNull(tableMeta);
+                            }
+                        });
+                    }
+                });
+            });
+        });
+        Assert.assertEquals(seeds, checkSet);
     }
 
     private void buildMetaManager() {

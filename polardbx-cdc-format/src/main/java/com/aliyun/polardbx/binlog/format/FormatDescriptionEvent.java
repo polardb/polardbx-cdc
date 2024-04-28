@@ -114,7 +114,7 @@ public class FormatDescriptionEvent extends BinlogBuilder {
         this.mysqlServerVersion = mysqlServerVersion;
         this.timestamp = (int) (System.currentTimeMillis() / 1000);
         this.eventType = BinlogEventType.FORMAT_DESCRIPTION_EVENT.getType();
-//        this.flags = LOG_EVENT_BINLOG_IN_USE_F;//去掉flag配置
+        this.flags = 0;
     }
 
     @Override

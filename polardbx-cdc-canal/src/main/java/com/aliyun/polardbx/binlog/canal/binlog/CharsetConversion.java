@@ -419,10 +419,10 @@ public final class CharsetConversion {
 
     public static String getJavaCharset(String mysqlCharset) {
         if (StringUtils.isBlank(mysqlCharset)) {
-            return mysqlCharset;
+            return "";
         }
-        mysqlCharset = SQLUtils.normalize(mysqlCharset);
 
+        mysqlCharset = SQLUtils.normalize(mysqlCharset);
         Entry entry = mysqlCharsetMap.get(mysqlCharset.toUpperCase());
         if (entry == null) {
             logger.warn("Unexpect mysql charset: " + mysqlCharset);

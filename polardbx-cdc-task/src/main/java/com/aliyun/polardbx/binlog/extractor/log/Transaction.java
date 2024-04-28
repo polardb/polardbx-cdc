@@ -482,7 +482,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         String sqlKind = (String) binlogParser.getField(DDL_RECORD_FIELD_SQL_KIND);
         String logicSchema = (String) binlogParser.getField(DDL_RECORD_FIELD_SCHEMA_NAME);
         String tableName = (String) binlogParser.getField(DDL_RECORD_FIELD_TABLE_NAME);
-        String visible = (String) binlogParser.getField(DDL_RECORD_FIELD_VISIBILITY);
+        int visibility = Integer.parseInt((String) binlogParser.getField(DDL_RECORD_FIELD_VISIBILITY));
         String ext = (String) binlogParser.getField(DDL_RECORD_FIELD_EXT);
         DDLExtInfo ddlExtInfo = null;
         if (StringUtils.isNotBlank(ext)) {
@@ -500,6 +500,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             .sqlKind(sqlKind)
             .schemaName(StringUtils.lowerCase(logicSchema))
             .tableName(StringUtils.lowerCase(tableName))
+            .visibility(visibility)
             .metaInfo(metaInfo)
             .extInfo(ddlExtInfo)
             .build();
@@ -512,7 +513,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         ddlEvent.setExt(ext);
         ddlEvent.setPosition(new BinlogPosition(rc.getBinlogFile(), event.getLogPos(), -1,
             event.getHeader().getWhen()));
-        ddlEvent.initVisible(Integer.parseInt(visible));
+        ddlEvent.initVisible(visibility, ddlExtInfo);
 
         if (logger.isDebugEnabled()) {
             logger.debug("receive logic ddl " + JSONObject.toJSONString(ddlRecord));

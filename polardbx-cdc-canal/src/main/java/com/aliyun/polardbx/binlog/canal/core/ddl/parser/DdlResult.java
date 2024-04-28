@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.parser;
 
+import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import lombok.Data;
 
@@ -27,11 +28,9 @@ public class DdlResult {
 
     private String schemaName;
     private String tableName;
-    private String oriSchemaName; // rename ddl中的源表
-    private String oriTableName; // rename ddl中的目标表
     private DBMSAction type;
-    private DdlResult renameTableResult; // 多个rename table的存储
     private Boolean hasIfExistsOrNotExists = false;
+    private SQLStatement sqlStatement;
 
     /*
      * RENAME TABLE tbl_name TO new_tbl_name [, tbl_name2 TO new_tbl_name2] ...
@@ -40,50 +39,28 @@ public class DdlResult {
     public DdlResult() {
     }
 
-    public DdlResult(String schemaName) {
-        this.schemaName = schemaName;
-    }
-
     public DdlResult(String schemaName, String tableName) {
         this.schemaName = schemaName;
         this.tableName = tableName;
     }
 
-    public DdlResult(String schemaName, String tableName, String oriSchemaName, String oriTableName) {
-        this.schemaName = schemaName;
-        this.tableName = tableName;
-        this.oriSchemaName = oriSchemaName;
-        this.oriTableName = oriTableName;
-    }
-
-
-
-
-
+    @Override
     public DdlResult clone() {
         DdlResult result = new DdlResult();
-        result.setOriSchemaName(oriSchemaName);
-        result.setOriTableName(oriTableName);
         result.setSchemaName(schemaName);
         result.setTableName(tableName);
         result.setType(type);
+        result.setSqlStatement(sqlStatement);
         return result;
     }
 
     @Override
     public String toString() {
         DdlResult ddlResult = this;
-        StringBuffer sb = new StringBuffer();
-        do {
-            sb.append(String
-                .format("DdlResult [schemaName=%s , tableName=%s , oriSchemaName=%s , oriTableName=%s , type=%s ];",
-                    ddlResult.schemaName,
-                    ddlResult.tableName,
-                    ddlResult.oriSchemaName,
-                    ddlResult.oriTableName,
-                    ddlResult.type));
-            ddlResult = ddlResult.renameTableResult;
-        } while (ddlResult != null);
-        return sb.toString();
+        return String.format(
+            "DdlResult [schemaName=%s , tableName=%s , type=%s];",
+            ddlResult.schemaName,
+            ddlResult.tableName,
+            ddlResult.type);
     }
 }

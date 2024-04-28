@@ -15,12 +15,11 @@
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.google.protobuf.ByteString;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -37,10 +36,9 @@ public class BinlogSyncReader extends BinlogDumpReader {
     private final EventSplitMode eventSplitMode;
 
     public BinlogSyncReader(LogFileManager logFileManager, String fileName, long pos, EventSplitMode eventSplitMode,
-                            int maxPacketSize, int readBufferSize)
+                            int maxPacketSize, int readBufferSize, EnumBinlogChecksumAlg slaveChecksumAlg)
         throws IOException {
-        super(logFileManager, fileName, pos, maxPacketSize, readBufferSize);
-        super.init();
+        super(logFileManager, fileName, pos, maxPacketSize, readBufferSize, slaveChecksumAlg);
         this.eventSplitMode = eventSplitMode;
         log.info("event split mode for binlog sync is " + eventSplitMode);
     }
@@ -68,7 +66,7 @@ public class BinlogSyncReader extends BinlogDumpReader {
         try {
             if (buffer.remaining() == 0) {
                 buffer.clear();
-                if (fp == channel.size() && hasNext()) {
+                if (lastPosition == channel.size() && hasNext()) {
                     log.info("transfer, buffer={}, {}, {}<->{}, {}", buffer, hasNext(), channel.position(),
                         channel.size(), logFileManager.getLatestFileCursor());
                     rotate();
@@ -80,10 +78,10 @@ public class BinlogSyncReader extends BinlogDumpReader {
             int length = buffer.limit() - buffer.position();
             ByteString byteString = ByteString.copyFrom(buffer);
             buffer.position(buffer.limit());
-            fp += length;
+            lastPosition += length;
             return byteString;
         } catch (Exception e) {
-            log.warn("buffer parse fail with client split mode {}@{} {}", fileName, fp, buffer, e);
+            log.warn("buffer parse fail with client split mode {}@{} {}", fileName, lastPosition, buffer, e);
             throw new PolardbxException(e);
         }
 
@@ -100,7 +98,7 @@ public class BinlogSyncReader extends BinlogDumpReader {
                 buffer.compact();
                 this.read();
             }
-            if (buffer.remaining() == 0 && hasNext() && fp == channel.size()) {
+            if (buffer.remaining() == 0 && hasNext() && lastPosition == channel.size()) {
                 log.info("transfer, buffer={}, {}, {}<->{}", buffer, hasNext(), channel.position(), channel.size());
                 rotate();
             }
@@ -124,28 +122,28 @@ public class BinlogSyncReader extends BinlogDumpReader {
                 if (log.isDebugEnabled()) {
                     log.debug("buffer.remaining() < length - 13  cause read, length={},buffer={}", length, buffer);
                 }
-                channel.position(fp);
+                channel.position(lastPosition);
                 channel.read(ByteBuffer.wrap(data));
                 buffer.position(buffer.limit());
             } else {
                 buffer.position(cur);
                 buffer.get(data);
             }
-            fp += length;
+            lastPosition += length;
             ByteString bytes = ByteString.copyFrom(data);
             if (log.isDebugEnabled()) {
-                log.debug("dumpPack {}@{}#{}", fileName, fp - length, fp);
+                log.debug("dumpPack {}@{}#{}", fileName, lastPosition - length, lastPosition);
             }
             return bytes;
         } catch (Exception e) {
-            log.warn("buffer parse fail with server split mode {}@{} {} {}", fileName, fp, length, buffer, e);
+            log.warn("buffer parse fail with server split mode {}@{} {} {}", fileName, lastPosition, length, buffer, e);
             throw new PolardbxException(e);
         }
     }
 
     @Override
-    public ByteString heartbeatEvent() {
-        Pair<byte[], Integer> heartBeat = EventGenerator.makeHeartBeat(this.fileName, this.fp, true);
-        return ByteString.copyFrom(heartBeat.getLeft(), 0, heartBeat.getRight());
+    public void start() throws Exception {
+        super.init();
+        super.start();
     }
 }

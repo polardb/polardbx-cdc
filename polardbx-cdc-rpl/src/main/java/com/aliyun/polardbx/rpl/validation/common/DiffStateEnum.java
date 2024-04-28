@@ -20,30 +20,7 @@ package com.aliyun.polardbx.rpl.validation.common;
  * @author siyu.yusi
  */
 public enum DiffStateEnum {
-    INIT(201),
-    FIXED(202),
-    RECHECKED(203);
-
-    private final int value;
-
-    DiffStateEnum(int value) {
-        this.value = value;
-    }
-
-    public static DiffStateEnum from(int value) {
-        switch (value) {
-        case 201:
-            return INIT;
-        case 202:
-            return FIXED;
-        case 203:
-            return RECHECKED;
-        default:
-            return null;
-        }
-    }
-
-    public int getValue() {
-        return value;
-    }
+    INIT,
+    FIXED,
+    RECHECKED;
 }

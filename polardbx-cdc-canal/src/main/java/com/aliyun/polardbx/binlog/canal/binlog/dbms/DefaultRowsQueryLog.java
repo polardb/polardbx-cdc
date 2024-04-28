@@ -19,8 +19,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Defines a SQL statement from query-log that must be replicated. Default implementation of {@link DBMSQueryLog
- * DBMSQueryLog}
+ * Defines a SQL statement from query-log that must be replicated. Default implementation of {@link DefaultQueryLog
+ * DefaultQueryLog}
  *
  * @author Changyuan.lh
  * @version 1.0

@@ -14,6 +14,8 @@
  */
 package com.aliyun.polardbx.rpl.dbmeta;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
@@ -45,10 +47,13 @@ public class DbMetaManager {
 
     private static final String SHOW_RULE = "SHOW RULE FROM `%s`;";
     private static final String SHOW_INDEXES = "SHOW INDEXES FROM `%s`.`%s` WHERE Non_unique=0";
+    private static final String SHOW_GLOBAL_INDEX = "SHOW GLOBAL INDEX FROM `%s`.`%s`";
     private static final String SHOW_DATABASES = "SHOW DATABASES";
     private static final String SHOW_CREATE_TABLE = "SHOW CREATE TABLE `%s`.`%s`";
     private static final String SHOW_TABLES = "SHOW TABLES";
     private static final String PRIMARY = "PRIMARY";
+
+    private static final boolean isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
 
     public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
                                          HostType hostType) throws SQLException {
@@ -56,20 +61,29 @@ public class DbMetaManager {
     }
 
     public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
-                                         HostType hostType, boolean needUk) throws SQLException {
+                                         HostType hostType, boolean needUkAndGsi) throws SQLException {
         TableInfo tableInfo = new TableInfo(schema, tbName);
         List<ColumnInfo> columns = getTableColumnInfos(dataSource, schema, tbName);
         List<String> pks = getTablePks(dataSource, schema, tbName);
         tableInfo.setColumns(columns);
         tableInfo.setPks(pks);
-        if (needUk) {
+        if (needUkAndGsi) {
             List<String> uks = getTableUks(dataSource, schema, tbName);
             tableInfo.setUks(uks);
+            if (isLabEnv && hostType == HostType.POLARX2) {
+                for (ColumnInfo column : columns) {
+                    if (column.isGenerated() && uks.contains(column.getName())) {
+                        tableInfo.setHasGeneratedUk(true);
+                        break;
+                    }
+                }
+                tableInfo.setGsiNum(getGsiNum(dataSource, schema, tbName));
+            }
         }
 
-        if (hostType.getValue() == HostType.POLARX1.getValue() || hostType.getValue() == HostType.POLARX2.getValue()) {
+        if (hostType == HostType.POLARX1 || hostType == HostType.POLARX2) {
             List<String> shardKeys = getTableShardKeys(dataSource, tbName);
-            if (shardKeys.size() > 0) {
+            if (!shardKeys.isEmpty()) {
                 tableInfo.setDbShardKey(shardKeys.get(0));
             }
             if (shardKeys.size() > 1) {
@@ -171,11 +185,11 @@ public class DbMetaManager {
 
                 // unsigned types
                 if (typeSplit.length > 1) {
-                    if (columnType == Types.INTEGER && typeSplit[1].toUpperCase().equals("UNSIGNED")) {
+                    if (columnType == Types.INTEGER && typeSplit[1].equalsIgnoreCase("UNSIGNED")) {
                         columnType = Types.BIGINT;
                     }
 
-                    if (columnType == Types.BIGINT && typeSplit[1].toUpperCase().equals("UNSIGNED")) {
+                    if (columnType == Types.BIGINT && typeSplit[1].equalsIgnoreCase("UNSIGNED")) {
                         columnType = Types.BIGINT;
                     }
                 }
@@ -185,6 +199,8 @@ public class DbMetaManager {
                         columnType = Types.TINYINT;
                     }
                 }
+
+                int size = rs.getInt("COLUMN_SIZE");
 
                 if (columnType == Types.OTHER) {
                     switch (typeName) {
@@ -212,7 +228,8 @@ public class DbMetaManager {
                     continue;
                 }
                 columnList.add(new ColumnInfo(columnName.toLowerCase(), columnType, "",
-                    (nullable != DatabaseMetaData.columnNoNulls), StringUtils.equals(isGeneratedColumn, "YES")));
+                    (nullable != DatabaseMetaData.columnNoNulls), StringUtils.equals(isGeneratedColumn, "YES"),
+                    typeName, size));
             }
         } catch (Throwable e) {
             log.error("failed in getTableColumnInfos, schema:{}, tbName:{}", schema, tbName);
@@ -224,9 +241,6 @@ public class DbMetaManager {
         return columnList;
     }
 
-    /**
-     *
-     */
     private static List<String> getTablePks(DataSource dataSource, String schema, String tbName) throws SQLException {
         List<String> pks = new ArrayList<>();
         Connection conn = null;
@@ -357,8 +371,31 @@ public class DbMetaManager {
         } finally {
             DataSourceUtil.closeQuery(res, stmt, conn);
         }
-
         return ukGroups;
+    }
+
+    private static int getGsiNum(DataSource dataSource, String schema, String tbName) throws SQLException {
+        Connection conn = null;
+        PreparedStatement stmt = null;
+        ResultSet res = null;
+
+        String sql = String.format(SHOW_GLOBAL_INDEX, CommonUtils.escape(schema), CommonUtils.escape(tbName));
+
+        int gsiNum = 0;
+        try {
+            conn = dataSource.getConnection();
+            stmt = conn.prepareStatement(sql);
+            res = stmt.executeQuery(sql);
+            while (res.next()) {
+                gsiNum++;
+            }
+        } catch (Throwable e) {
+            log.error("failed in get global index: {}", sql, e);
+            throw e;
+        } finally {
+            DataSourceUtil.closeQuery(res, stmt, conn);
+        }
+        return gsiNum;
     }
 
     /**

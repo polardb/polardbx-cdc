@@ -28,6 +28,7 @@ public class DBMSTransactionEnd extends DBMSEvent {
     private static final long serialVersionUID = -5072768643669142562L;
 
     private Long transactionId;
+    private String tso;
 
     @Override
     public DBMSAction getAction() {
@@ -60,6 +61,14 @@ public class DBMSTransactionEnd extends DBMSEvent {
 
     public void setTransactionId(Long transactionId) {
         this.transactionId = transactionId;
+    }
+
+    public String getTso() {
+        return tso;
+    }
+
+    public void setTso(String tso) {
+        this.tso = tso;
     }
 
     public String toString() {

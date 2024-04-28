@@ -18,32 +18,37 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
-import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.filesys.LocalFileSystem;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
-import com.github.rholder.retry.Retryer;
+import com.aliyun.polardbx.binlog.util.Timer;
+import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.github.rholder.retry.RetryerBuilder;
-import com.github.rholder.retry.StopStrategies;
 import com.github.rholder.retry.WaitStrategies;
+import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import io.grpc.stub.ServerCallStreamObserver;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
+import org.slf4j.MDC;
 
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_DOWNLOAD_ERROR_RETRY_TIMES;
+import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_KEY;
+import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP;
 
 /**
  * 滑动窗口文件下载器
@@ -103,12 +108,23 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
     private boolean finished = false;
 
     private final LocalFileSystem fileSystem;
+    private final long masterHeartbeatPeriod;
 
-    public BinlogDumpDownloader(LogFileManager logFileManager, String downloadPath, int windowSize, String startFile) {
+    private final ServerCallStreamObserver<DumpStream> observer;
+
+    // used to send heartbeat while waiting
+    private final BinlogDumpReader dumpReader;
+
+    public BinlogDumpDownloader(LogFileManager logFileManager, String downloadPath, int windowSize, String startFile,
+                                long masterHeartbeatPeriod, ServerCallStreamObserver<DumpStream> observer,
+                                BinlogDumpReader dumpReader) {
         this.logFileManager = logFileManager;
         this.windowSize = windowSize;
         this.startFile = startFile;
         this.downloadPath = downloadPath;
+        this.masterHeartbeatPeriod = masterHeartbeatPeriod;
+        this.observer = observer;
+        this.dumpReader = dumpReader;
         this.downloadList = new ArrayList<>();
         this.downloadThreadPool =
             new ThreadPoolExecutor(windowSize, windowSize * 2, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(),
@@ -116,7 +132,7 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
                 new ThreadPoolExecutor.CallerRunsPolicy());
         this.fileSystem =
             new LocalFileSystem(downloadPath, logFileManager.getGroupName(), logFileManager.getStreamName());
-        this.fileDownLoadErrorMap = new HashMap<>();
+        this.fileDownLoadErrorMap = new ConcurrentHashMap<>();
 
         log.info("start file:{}, window size:{}, download path:{}", startFile, windowSize, downloadPath);
     }
@@ -139,7 +155,18 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
         }
 
         log.info("shutting down binlog dump downloader...");
-        downloadThreadPool.shutdown();
+        downloadThreadPool.shutdownNow();
+
+        // 等待所有下载线程退出之后再清理临时目录，否则清理之后线程再下载，会导致临时文件残留
+        try {
+            boolean res = downloadThreadPool.awaitTermination(60, TimeUnit.SECONDS);
+            if (!res) {
+                log.warn("failed to wait download thread pool close!");
+            }
+        } catch (InterruptedException e) {
+            log.warn("failed to wait download thread pool close!");
+        }
+
         cleanUp();
         finished = true;
     }
@@ -170,7 +197,7 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
         }
     }
 
-    public CdcFile getFile(String fileName) {
+    public CdcFile getFile(String fileName) throws Exception {
         if (isFinished()) {
             log.warn("try to get file:{} from binlog dump downloader after finished!", fileName);
             return null;
@@ -180,22 +207,44 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
         return fileSystem.get(fileName);
     }
 
-    /**
-     * 等待文件下载完成
-     */
-    private void wait(String fileName) {
+    private void wait(String fileName) throws Exception {
         try {
             File f = fileSystem.newFile(fileName);
-            while (!f.exists()) {
+            long maxWaitSeconds =
+                DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DUMP_DOWNLOAD_MAX_WAIT_TIME_SECONDS);
+            Timer waitTimeoutTimer = new Timer(maxWaitSeconds * 1000);
+            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000);
+            long sleepTime = Math.min(1000, masterHeartbeatPeriod / 1000);
+            long start = System.currentTimeMillis();
+            while (!observer.isCancelled() && !f.exists()) {
                 if (fileDownLoadErrorMap.containsKey(fileName)) {
-                    throw new PolardbxException("meet error when download binlog file " + fileName,
+                    throw new IOException("download file " + fileName + " from oss error!",
                         fileDownLoadErrorMap.get(fileName));
                 }
-                Thread.sleep(1000);
+
+                if (waitTimeoutTimer.isTimeout()) {
+                    throw new IOException("download file " + fileName + " from oss timeout!");
+                }
+
+                // 等待文件下载过程中需要向slave发送心跳，防止下载时间过长导致slave等待超时
+                if (heartbeatTimer.isTimeout()) {
+                    observer.onNext(DumpStream.newBuilder().setPayload(dumpReader.heartbeatEventPacket()).build());
+                }
+
                 log.info("waiting for file {} download finished", fileName);
+                Thread.sleep(sleepTime);
             }
+
+            if (observer.isCancelled()) {
+                throw new InterruptedException("remote close");
+            }
+
+        } catch (InterruptedException e) {
+            log.info("download file {} has been interrupted.", fileName);
+            throw new InterruptedException();
         } catch (Exception e) {
-            log.error("wait for file meet error", e);
+            log.error("download file from oss error!", e);
+            throw new Exception(e);
         }
     }
 
@@ -208,21 +257,26 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
         String remoteFileName = BinlogFileUtil.buildRemoteFilePartName(pureFileName, logFileManager.getGroupName(),
             logFileManager.getStreamName());
         downloadThreadPool.submit(() -> {
-            int retryTimes = 0;
             try {
+                MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
                 fileDownLoadErrorMap.remove(pureFileName);
-                retryTimes = DynamicApplicationConfig.getInt(BINLOG_DUMP_DOWNLOAD_ERROR_RETRY_TIMES);
-                Retryer<Object> retryer = RetryerBuilder.newBuilder().retryIfException()
-                    .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.SECONDS))
-                    .withStopStrategy(StopStrategies.stopAfterAttempt(retryTimes)).build();
-
-                retryer.call(() -> {
-                    RemoteBinlogProxy.getInstance().download(remoteFileName, downloadPath);
-                    return null;
-                });
-            } catch (Throwable t) {
-                fileDownLoadErrorMap.put(pureFileName, t);
-                log.error("binlog file {} download failed after retry {} times.", pureFileName, retryTimes, t);
+                log.info("start to download file {}", pureFileName);
+                Stopwatch stopwatch = Stopwatch.createStarted();
+                RemoteBinlogProxy.getInstance().download(remoteFileName, downloadPath);
+                stopwatch.stop();
+                long elapsedSeconds = stopwatch.elapsed(TimeUnit.SECONDS);
+                log.info("download file {} cost {} s", pureFileName, elapsedSeconds);
+            } catch (InterruptedException interruptedException) {
+                fileDownLoadErrorMap.put(pureFileName, interruptedException);
+                log.info("download file {} has been interrupted.", pureFileName);
+            } catch (FileNotFoundException fileNotFoundException) {
+                fileDownLoadErrorMap.put(pureFileName, fileNotFoundException);
+                log.info("download file {} failed because dump download dir has been deleted.", pureFileName);
+            } catch (Throwable e) {
+                fileDownLoadErrorMap.put(pureFileName, e);
+                log.warn("binlog file {} download failed!", pureFileName, e);
+            } finally {
+                MDC.remove(MDC_THREAD_LOGGER_KEY);
             }
         });
     }

@@ -14,16 +14,14 @@
  */
 package com.aliyun.polardbx.rpl.common;
 
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowsQueryLog;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.rpl.applier.ApplyHelper;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.MutablePair;
+import org.apache.commons.lang3.tuple.MutableTriple;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -35,9 +33,11 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * @author shicai.xsc 2021/1/14 17:50
@@ -47,7 +47,7 @@ import java.util.regex.Pattern;
 public class CommonUtil {
 
     private static final String SHOW_COMPUTE_NODE =
-        "select ip, port from metadb.server_info where inst_type=0 and status=0";
+        "select ip, port, inst_id from metadb.server_info where inst_type=0 and status=0";
     private static final String SHOW_BINARY_STREAMS =
         "show binary streams";
     private static final String SHOW_MASTER_STATUS =
@@ -162,7 +162,7 @@ public class CommonUtil {
      */
     public static String buildRplTaskName(RplTask rplTask) {
         StringBuilder sb = new StringBuilder();
-        sb.append("F").append(rplTask.getStateMachineId()).append("_").append(ServiceType.from(rplTask.getType()))
+        sb.append("F").append(rplTask.getStateMachineId()).append("_").append(ServiceType.valueOf(rplTask.getType()))
             .append("_").append(rplTask.getId());
         return sb.toString();
     }
@@ -171,27 +171,26 @@ public class CommonUtil {
         return "0:4#0.0";
     }
 
-    public static boolean isPolarDBXHeartbeat(DBMSEvent event) {
-        return (event instanceof DefaultRowsQueryLog && ((DefaultRowsQueryLog) event).getRowsQuery().contains("CTS::"));
-    }
-
-    public static boolean isDDL(DBMSEvent event) {
-        return ApplyHelper.isDdl(event);
-    }
-
-    public static List<MutablePair<String, Integer>> getComputeNodes(Connection connection) {
-        List<MutablePair<String, Integer>> computeNodes = new ArrayList<>();
+    public static List<MutableTriple<String, Integer, String>> getComputeNodes(Connection connection) {
+        List<MutableTriple<String, Integer, String>> computeNodes = new ArrayList<>();
         try (Statement st = connection.createStatement()) {
             ResultSet rs = st.executeQuery(SHOW_COMPUTE_NODE);
             while (rs.next()) {
                 String host = rs.getString(1);
                 Integer port = rs.getInt(2);
-                computeNodes.add(new MutablePair<>(host, port));
+                String instId = rs.getString(3);
+                computeNodes.add(new MutableTriple<>(host, port, instId));
             }
         } catch (SQLException e) {
             throw new PolardbxException("connect to master failed ", e);
         }
         return computeNodes;
+    }
+
+    public static List<MutableTriple<String, Integer, String>> getComputeNodesWithFixedInstId(Connection connection,
+                                                                                              String instId) {
+        List<MutableTriple<String, Integer, String>> computeNodes = getComputeNodes(connection);
+        return computeNodes.stream().filter(triple -> instId.equals(triple.getRight())).collect(Collectors.toList());
     }
 
     public static List<MutablePair<String, Integer>> getDumperNodes(Connection connection) {
@@ -258,5 +257,14 @@ public class CommonUtil {
         if (!matcher.matches()) {
             throw new PolardbxException(String.format("invalid host name : %s", host));
         }
+    }
+
+    public static <T> T getRandomElementFromList(List<T> list) {
+        if (list == null || list.isEmpty()) {
+            return null;
+        }
+        Random random = new Random();
+        int index = random.nextInt(list.size());
+        return list.get(index);
     }
 }

@@ -23,7 +23,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * @author shicai.xsc 2021/2/18 21:45
@@ -33,11 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public class BaseApplier {
 
-    protected ApplierConfig applierConfig;
-
-    protected boolean skipAllException;
-
-    protected boolean safeMode;
+    protected final ApplierConfig applierConfig;
 
     public BaseApplier(ApplierConfig applierConfig) {
         this.applierConfig = applierConfig;
@@ -65,6 +60,14 @@ public class BaseApplier {
             logs.addAll(LogUtil.generateCommitLog(dbmsEvents.get(dbmsEvents.size() - 1), null));
         }
         LogUtil.writeBatchLogs(logs, LogUtil.getCommitLogger());
+    }
+
+    public void logTransactionCommit() {
+        LogUtil.getCommitLogger().info("COMMIT");
+    }
+
+    public void logTransactionRollback() {
+        LogUtil.getCommitLogger().info("ROLLBACK");
     }
 
     public void start() {

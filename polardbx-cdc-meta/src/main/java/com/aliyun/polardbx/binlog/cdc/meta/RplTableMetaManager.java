@@ -60,7 +60,7 @@ public class RplTableMetaManager {
             + " tso <= '%s' and type = '" + MetaType.SNAPSHOT.getValue() + "'";
         this.SELECT_SNAPSHOT_TOPOLOGY_SQL = "select topology from " + DEFAULT_TABLE_NAME + " where tso = '%s'";
         this.SELECT_DDL_HISTORY_SQL = "select * from " + DEFAULT_TABLE_NAME +
-            " where tso > '%s' and tso <= '%s' and type = '" + MetaType.DDL.getValue() + "'";
+            " where tso > '%s' and tso <= '%s' and type = '" + MetaType.DDL.getValue() + "' and need_apply = 1";
     }
 
     public TableMeta getTableMeta(String schema, String table) {
@@ -87,6 +87,8 @@ public class RplTableMetaManager {
         LogicMetaTopology topology = getSnapshotTopology(maxSnapshotCts);
         topology.getLogicDbMetas().forEach(s -> {
             String schema = s.getSchema();
+            String charset = s.getCharset();
+            memoryTableMeta.getRepository().setDefaultSchemaWithCharset(schema, charset);
             s.getLogicTableMetas().forEach(t -> {
                 String createSql = t.getCreateSql();
                 memoryTableMeta.apply(null, schema, createSql, null);

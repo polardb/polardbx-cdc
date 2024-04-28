@@ -135,20 +135,13 @@ public class RuntimeLeaderElector {
 
         try {
             if (!getConnection().isValid(1)) {
-                connection = null;
+                tryCloseConnection();
                 log.warn("connection is invalid, {} return false directly", name);
                 return false;
             }
         } catch (Throwable t) {
             log.warn("leader check fail {}", name, t);
-            // 释放connection
-            if (connection != null) {
-                try {
-                    connection.close();
-                } catch (Throwable e) {
-                }
-                connection = null;
-            }
+            tryCloseConnection();
             return false;
         }
 
@@ -164,17 +157,9 @@ public class RuntimeLeaderElector {
             }
         } catch (SQLException e) {
             log.warn("leader check fail {}", name, e);
-            // 释放connection
-            if (connection != null) {
-                try {
-                    connection.close();
-                } catch (Throwable e1) {
-                }
-                connection = null;
-            }
+            tryCloseConnection();
             return false;
         }
-
     }
 
     private static void buildConn() {
@@ -184,6 +169,17 @@ public class RuntimeLeaderElector {
         } catch (SQLException e) {
             connection = null;
             log.error("RuntimeLeaderElector init connection fail", e);
+        }
+    }
+
+    private static void tryCloseConnection() {
+        // 释放connection
+        if (connection != null) {
+            try {
+                connection.close();
+            } catch (Throwable e1) {
+            }
+            connection = null;
         }
     }
 }

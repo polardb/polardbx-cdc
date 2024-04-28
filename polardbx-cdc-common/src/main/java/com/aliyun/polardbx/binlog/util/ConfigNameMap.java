@@ -43,4 +43,17 @@ public class ConfigNameMap {
     public static String getOldConfigName(String newConfigName) {
         return StringUtils.defaultIfBlank(CONFIG_MAP.get(newConfigName), "");
     }
+
+    public static boolean isOldConfigName(String configName) {
+        return CONFIG_MAP.containsValue(configName);
+    }
+
+    public static String getNewConfigName(String oldConfigName) {
+        for (Map.Entry<String, String> entry : CONFIG_MAP.entrySet()) {
+            if (entry.getValue().equals(oldConfigName)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
 }

@@ -48,26 +48,26 @@ import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
 
 @Mapper
 public interface ValidationDiffMapper {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.015+08:00", comments="Source Table: validation_diff")
     BasicColumn[] selectList = BasicColumn.columnList(id, stateMachineId, serviceId, taskId, validationTaskId, type, state, srcLogicalDb, srcLogicalTable, srcLogicalKeyCol, srcPhyDb, srcPhyTable, srcPhyKeyCol, srcKeyColVal, dstLogicalDb, dstLogicalTable, dstLogicalKeyCol, dstKeyColVal, deleted, createTime, updateTime, diff);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.011+08:00", comments="Source Table: validation_diff")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     long count(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.947+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.011+08:00", comments="Source Table: validation_diff")
     @DeleteProvider(type=SqlProviderAdapter.class, method="delete")
     int delete(DeleteStatementProvider deleteStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.011+08:00", comments="Source Table: validation_diff")
     @InsertProvider(type=SqlProviderAdapter.class, method="insert")
     int insert(InsertStatementProvider<ValidationDiff> insertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.011+08:00", comments="Source Table: validation_diff")
     @InsertProvider(type=SqlProviderAdapter.class, method="insertMultiple")
     int insertMultiple(MultiRowInsertStatementProvider<ValidationDiff> multipleInsertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.011+08:00", comments="Source Table: validation_diff")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Long.class, jdbcType=JdbcType.BIGINT, id=true),
@@ -75,8 +75,8 @@ public interface ValidationDiffMapper {
         @Arg(column="service_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="task_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="validation_task_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
-        @Arg(column="type", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
-        @Arg(column="state", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
+        @Arg(column="type", javaType=String.class, jdbcType=JdbcType.VARCHAR),
+        @Arg(column="state", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="src_logical_db", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="src_logical_table", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="src_logical_key_col", javaType=String.class, jdbcType=JdbcType.VARCHAR),
@@ -95,7 +95,7 @@ public interface ValidationDiffMapper {
     })
     Optional<ValidationDiff> selectOne(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.012+08:00", comments="Source Table: validation_diff")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Long.class, jdbcType=JdbcType.BIGINT, id=true),
@@ -103,8 +103,8 @@ public interface ValidationDiffMapper {
         @Arg(column="service_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="task_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="validation_task_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
-        @Arg(column="type", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
-        @Arg(column="state", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
+        @Arg(column="type", javaType=String.class, jdbcType=JdbcType.VARCHAR),
+        @Arg(column="state", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="src_logical_db", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="src_logical_table", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="src_logical_key_col", javaType=String.class, jdbcType=JdbcType.VARCHAR),
@@ -123,28 +123,28 @@ public interface ValidationDiffMapper {
     })
     List<ValidationDiff> selectMany(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.012+08:00", comments="Source Table: validation_diff")
     @UpdateProvider(type=SqlProviderAdapter.class, method="update")
     int update(UpdateStatementProvider updateStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.012+08:00", comments="Source Table: validation_diff")
     default long count(CountDSLCompleter completer) {
         return MyBatis3Utils.countFrom(this::count, validationDiff, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.012+08:00", comments="Source Table: validation_diff")
     default int delete(DeleteDSLCompleter completer) {
         return MyBatis3Utils.deleteFrom(this::delete, validationDiff, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.012+08:00", comments="Source Table: validation_diff")
     default int deleteByPrimaryKey(Long id_) {
         return delete(c -> 
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.012+08:00", comments="Source Table: validation_diff")
     default int insert(ValidationDiff record) {
         return MyBatis3Utils.insert(this::insert, record, validationDiff, c ->
             c.map(id).toProperty("id")
@@ -172,7 +172,7 @@ public interface ValidationDiffMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.012+08:00", comments="Source Table: validation_diff")
     default int insertMultiple(Collection<ValidationDiff> records) {
         return MyBatis3Utils.insertMultiple(this::insertMultiple, records, validationDiff, c ->
             c.map(id).toProperty("id")
@@ -200,7 +200,7 @@ public interface ValidationDiffMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.012+08:00", comments="Source Table: validation_diff")
     default int insertSelective(ValidationDiff record) {
         return MyBatis3Utils.insert(this::insert, record, validationDiff, c ->
             c.map(id).toPropertyWhenPresent("id", record::getId)
@@ -228,34 +228,34 @@ public interface ValidationDiffMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.015+08:00", comments="Source Table: validation_diff")
     default Optional<ValidationDiff> selectOne(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectOne(this::selectOne, selectList, validationDiff, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.015+08:00", comments="Source Table: validation_diff")
     default List<ValidationDiff> select(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectList(this::selectMany, selectList, validationDiff, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.015+08:00", comments="Source Table: validation_diff")
     default List<ValidationDiff> selectDistinct(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectDistinct(this::selectMany, selectList, validationDiff, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.015+08:00", comments="Source Table: validation_diff")
     default Optional<ValidationDiff> selectByPrimaryKey(Long id_) {
         return selectOne(c ->
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.015+08:00", comments="Source Table: validation_diff")
     default int update(UpdateDSLCompleter completer) {
         return MyBatis3Utils.update(this::update, validationDiff, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.015+08:00", comments="Source Table: validation_diff")
     static UpdateDSL<UpdateModel> updateAllColumns(ValidationDiff record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(id).equalTo(record::getId)
                 .set(stateMachineId).equalTo(record::getStateMachineId)
@@ -281,7 +281,7 @@ public interface ValidationDiffMapper {
                 .set(diff).equalTo(record::getDiff);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.948+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.016+08:00", comments="Source Table: validation_diff")
     static UpdateDSL<UpdateModel> updateSelectiveColumns(ValidationDiff record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(id).equalToWhenPresent(record::getId)
                 .set(stateMachineId).equalToWhenPresent(record::getStateMachineId)
@@ -307,7 +307,7 @@ public interface ValidationDiffMapper {
                 .set(diff).equalToWhenPresent(record::getDiff);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.949+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.016+08:00", comments="Source Table: validation_diff")
     default int updateByPrimaryKey(ValidationDiff record) {
         return update(c ->
             c.set(stateMachineId).equalTo(record::getStateMachineId)
@@ -335,7 +335,7 @@ public interface ValidationDiffMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.949+08:00", comments="Source Table: validation_diff")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:50.016+08:00", comments="Source Table: validation_diff")
     default int updateByPrimaryKeySelective(ValidationDiff record) {
         return update(c ->
             c.set(stateMachineId).equalToWhenPresent(record::getStateMachineId)

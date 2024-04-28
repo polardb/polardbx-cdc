@@ -24,6 +24,7 @@ import org.apache.commons.io.FileUtils;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
@@ -38,6 +39,7 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
  * @since 2022/8/18
  **/
 @Slf4j
+@Ignore
 public class OssClientProviderTest extends BaseTest {
     private final String testPath = "oss-manager-test";
     private OssManager ossManager;

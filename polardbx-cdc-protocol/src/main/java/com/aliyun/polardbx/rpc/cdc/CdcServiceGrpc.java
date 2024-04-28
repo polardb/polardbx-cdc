@@ -73,6 +73,37 @@ public final class CdcServiceGrpc {
   }
 
   private static volatile io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.Request,
+      com.aliyun.polardbx.rpc.cdc.FullBinaryLog> getShowFullBinaryLogsMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "ShowFullBinaryLogs",
+      requestType = com.aliyun.polardbx.rpc.cdc.Request.class,
+      responseType = com.aliyun.polardbx.rpc.cdc.FullBinaryLog.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.SERVER_STREAMING)
+  public static io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.Request,
+      com.aliyun.polardbx.rpc.cdc.FullBinaryLog> getShowFullBinaryLogsMethod() {
+    io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.Request, com.aliyun.polardbx.rpc.cdc.FullBinaryLog> getShowFullBinaryLogsMethod;
+    if ((getShowFullBinaryLogsMethod = CdcServiceGrpc.getShowFullBinaryLogsMethod) == null) {
+      synchronized (CdcServiceGrpc.class) {
+        if ((getShowFullBinaryLogsMethod = CdcServiceGrpc.getShowFullBinaryLogsMethod) == null) {
+          CdcServiceGrpc.getShowFullBinaryLogsMethod = getShowFullBinaryLogsMethod =
+              io.grpc.MethodDescriptor.<com.aliyun.polardbx.rpc.cdc.Request, com.aliyun.polardbx.rpc.cdc.FullBinaryLog>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.SERVER_STREAMING)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "ShowFullBinaryLogs"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.aliyun.polardbx.rpc.cdc.Request.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.aliyun.polardbx.rpc.cdc.FullBinaryLog.getDefaultInstance()))
+              .setSchemaDescriptor(new CdcServiceMethodDescriptorSupplier("ShowFullBinaryLogs"))
+              .build();
+        }
+      }
+    }
+    return getShowFullBinaryLogsMethod;
+  }
+
+  private static volatile io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.Request,
       com.aliyun.polardbx.rpc.cdc.MasterStatus> getShowMasterStatusMethod;
 
   @io.grpc.stub.annotations.RpcMethod(
@@ -101,6 +132,37 @@ public final class CdcServiceGrpc {
       }
     }
     return getShowMasterStatusMethod;
+  }
+
+  private static volatile io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.Request,
+      com.aliyun.polardbx.rpc.cdc.FullMasterStatus> getShowFullMasterStatusMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "ShowFullMasterStatus",
+      requestType = com.aliyun.polardbx.rpc.cdc.Request.class,
+      responseType = com.aliyun.polardbx.rpc.cdc.FullMasterStatus.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.UNARY)
+  public static io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.Request,
+      com.aliyun.polardbx.rpc.cdc.FullMasterStatus> getShowFullMasterStatusMethod() {
+    io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.Request, com.aliyun.polardbx.rpc.cdc.FullMasterStatus> getShowFullMasterStatusMethod;
+    if ((getShowFullMasterStatusMethod = CdcServiceGrpc.getShowFullMasterStatusMethod) == null) {
+      synchronized (CdcServiceGrpc.class) {
+        if ((getShowFullMasterStatusMethod = CdcServiceGrpc.getShowFullMasterStatusMethod) == null) {
+          CdcServiceGrpc.getShowFullMasterStatusMethod = getShowFullMasterStatusMethod =
+              io.grpc.MethodDescriptor.<com.aliyun.polardbx.rpc.cdc.Request, com.aliyun.polardbx.rpc.cdc.FullMasterStatus>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "ShowFullMasterStatus"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.aliyun.polardbx.rpc.cdc.Request.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.aliyun.polardbx.rpc.cdc.FullMasterStatus.getDefaultInstance()))
+              .setSchemaDescriptor(new CdcServiceMethodDescriptorSupplier("ShowFullMasterStatus"))
+              .build();
+        }
+      }
+    }
+    return getShowFullMasterStatusMethod;
   }
 
   private static volatile io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.ShowBinlogEventsRequest,
@@ -431,9 +493,6 @@ public final class CdcServiceGrpc {
   public static abstract class CdcServiceImplBase implements io.grpc.BindableService {
 
     /**
-     * <pre>
-     * ShowBinaryLogs + ShowMasterLogs
-     * </pre>
      */
     public void showBinaryLogs(com.aliyun.polardbx.rpc.cdc.Request request,
         io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.BinaryLog> responseObserver) {
@@ -442,9 +501,23 @@ public final class CdcServiceGrpc {
 
     /**
      */
+    public void showFullBinaryLogs(com.aliyun.polardbx.rpc.cdc.Request request,
+        io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.FullBinaryLog> responseObserver) {
+      asyncUnimplementedUnaryCall(getShowFullBinaryLogsMethod(), responseObserver);
+    }
+
+    /**
+     */
     public void showMasterStatus(com.aliyun.polardbx.rpc.cdc.Request request,
         io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.MasterStatus> responseObserver) {
       asyncUnimplementedUnaryCall(getShowMasterStatusMethod(), responseObserver);
+    }
+
+    /**
+     */
+    public void showFullMasterStatus(com.aliyun.polardbx.rpc.cdc.Request request,
+        io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.FullMasterStatus> responseObserver) {
+      asyncUnimplementedUnaryCall(getShowFullMasterStatusMethod(), responseObserver);
     }
 
     /**
@@ -469,9 +542,6 @@ public final class CdcServiceGrpc {
     }
 
     /**
-     * <pre>
-     *&#47;/////////////////////////// replicate   ///////////////////////////
-     * </pre>
      */
     public void changeMaster(com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest request,
         io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.RplCommandResponse> responseObserver) {
@@ -523,12 +593,26 @@ public final class CdcServiceGrpc {
                 com.aliyun.polardbx.rpc.cdc.BinaryLog>(
                   this, METHODID_SHOW_BINARY_LOGS)))
           .addMethod(
+            getShowFullBinaryLogsMethod(),
+            asyncServerStreamingCall(
+              new MethodHandlers<
+                com.aliyun.polardbx.rpc.cdc.Request,
+                com.aliyun.polardbx.rpc.cdc.FullBinaryLog>(
+                  this, METHODID_SHOW_FULL_BINARY_LOGS)))
+          .addMethod(
             getShowMasterStatusMethod(),
             asyncUnaryCall(
               new MethodHandlers<
                 com.aliyun.polardbx.rpc.cdc.Request,
                 com.aliyun.polardbx.rpc.cdc.MasterStatus>(
                   this, METHODID_SHOW_MASTER_STATUS)))
+          .addMethod(
+            getShowFullMasterStatusMethod(),
+            asyncUnaryCall(
+              new MethodHandlers<
+                com.aliyun.polardbx.rpc.cdc.Request,
+                com.aliyun.polardbx.rpc.cdc.FullMasterStatus>(
+                  this, METHODID_SHOW_FULL_MASTER_STATUS)))
           .addMethod(
             getShowBinlogEventsMethod(),
             asyncServerStreamingCall(
@@ -611,9 +695,6 @@ public final class CdcServiceGrpc {
     }
 
     /**
-     * <pre>
-     * ShowBinaryLogs + ShowMasterLogs
-     * </pre>
      */
     public void showBinaryLogs(com.aliyun.polardbx.rpc.cdc.Request request,
         io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.BinaryLog> responseObserver) {
@@ -623,10 +704,26 @@ public final class CdcServiceGrpc {
 
     /**
      */
+    public void showFullBinaryLogs(com.aliyun.polardbx.rpc.cdc.Request request,
+        io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.FullBinaryLog> responseObserver) {
+      asyncServerStreamingCall(
+          getChannel().newCall(getShowFullBinaryLogsMethod(), getCallOptions()), request, responseObserver);
+    }
+
+    /**
+     */
     public void showMasterStatus(com.aliyun.polardbx.rpc.cdc.Request request,
         io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.MasterStatus> responseObserver) {
       asyncUnaryCall(
           getChannel().newCall(getShowMasterStatusMethod(), getCallOptions()), request, responseObserver);
+    }
+
+    /**
+     */
+    public void showFullMasterStatus(com.aliyun.polardbx.rpc.cdc.Request request,
+        io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.FullMasterStatus> responseObserver) {
+      asyncUnaryCall(
+          getChannel().newCall(getShowFullMasterStatusMethod(), getCallOptions()), request, responseObserver);
     }
 
     /**
@@ -654,9 +751,6 @@ public final class CdcServiceGrpc {
     }
 
     /**
-     * <pre>
-     *&#47;/////////////////////////// replicate   ///////////////////////////
-     * </pre>
      */
     public void changeMaster(com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest request,
         io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.RplCommandResponse> responseObserver) {
@@ -720,9 +814,6 @@ public final class CdcServiceGrpc {
     }
 
     /**
-     * <pre>
-     * ShowBinaryLogs + ShowMasterLogs
-     * </pre>
      */
     public java.util.Iterator<com.aliyun.polardbx.rpc.cdc.BinaryLog> showBinaryLogs(
         com.aliyun.polardbx.rpc.cdc.Request request) {
@@ -732,9 +823,24 @@ public final class CdcServiceGrpc {
 
     /**
      */
+    public java.util.Iterator<com.aliyun.polardbx.rpc.cdc.FullBinaryLog> showFullBinaryLogs(
+        com.aliyun.polardbx.rpc.cdc.Request request) {
+      return blockingServerStreamingCall(
+          getChannel(), getShowFullBinaryLogsMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
     public com.aliyun.polardbx.rpc.cdc.MasterStatus showMasterStatus(com.aliyun.polardbx.rpc.cdc.Request request) {
       return blockingUnaryCall(
           getChannel(), getShowMasterStatusMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.aliyun.polardbx.rpc.cdc.FullMasterStatus showFullMasterStatus(com.aliyun.polardbx.rpc.cdc.Request request) {
+      return blockingUnaryCall(
+          getChannel(), getShowFullMasterStatusMethod(), getCallOptions(), request);
     }
 
     /**
@@ -762,9 +868,6 @@ public final class CdcServiceGrpc {
     }
 
     /**
-     * <pre>
-     *&#47;/////////////////////////// replicate   ///////////////////////////
-     * </pre>
      */
     public com.aliyun.polardbx.rpc.cdc.RplCommandResponse changeMaster(com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest request) {
       return blockingUnaryCall(
@@ -831,9 +934,14 @@ public final class CdcServiceGrpc {
     }
 
     /**
-     * <pre>
-     *&#47;/////////////////////////// replicate   ///////////////////////////
-     * </pre>
+     */
+    public com.google.common.util.concurrent.ListenableFuture<com.aliyun.polardbx.rpc.cdc.FullMasterStatus> showFullMasterStatus(
+        com.aliyun.polardbx.rpc.cdc.Request request) {
+      return futureUnaryCall(
+          getChannel().newCall(getShowFullMasterStatusMethod(), getCallOptions()), request);
+    }
+
+    /**
      */
     public com.google.common.util.concurrent.ListenableFuture<com.aliyun.polardbx.rpc.cdc.RplCommandResponse> changeMaster(
         com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest request) {
@@ -875,16 +983,18 @@ public final class CdcServiceGrpc {
   }
 
   private static final int METHODID_SHOW_BINARY_LOGS = 0;
-  private static final int METHODID_SHOW_MASTER_STATUS = 1;
-  private static final int METHODID_SHOW_BINLOG_EVENTS = 2;
-  private static final int METHODID_DUMP = 3;
-  private static final int METHODID_SYNC = 4;
-  private static final int METHODID_CHANGE_MASTER = 5;
-  private static final int METHODID_CHANGE_REPLICATION_FILTER = 6;
-  private static final int METHODID_START_SLAVE = 7;
-  private static final int METHODID_STOP_SLAVE = 8;
-  private static final int METHODID_RESET_SLAVE = 9;
-  private static final int METHODID_SHOW_SLAVE_STATUS = 10;
+  private static final int METHODID_SHOW_FULL_BINARY_LOGS = 1;
+  private static final int METHODID_SHOW_MASTER_STATUS = 2;
+  private static final int METHODID_SHOW_FULL_MASTER_STATUS = 3;
+  private static final int METHODID_SHOW_BINLOG_EVENTS = 4;
+  private static final int METHODID_DUMP = 5;
+  private static final int METHODID_SYNC = 6;
+  private static final int METHODID_CHANGE_MASTER = 7;
+  private static final int METHODID_CHANGE_REPLICATION_FILTER = 8;
+  private static final int METHODID_START_SLAVE = 9;
+  private static final int METHODID_STOP_SLAVE = 10;
+  private static final int METHODID_RESET_SLAVE = 11;
+  private static final int METHODID_SHOW_SLAVE_STATUS = 12;
 
   private static final class MethodHandlers<Req, Resp> implements
       io.grpc.stub.ServerCalls.UnaryMethod<Req, Resp>,
@@ -907,9 +1017,17 @@ public final class CdcServiceGrpc {
           serviceImpl.showBinaryLogs((com.aliyun.polardbx.rpc.cdc.Request) request,
               (io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.BinaryLog>) responseObserver);
           break;
+        case METHODID_SHOW_FULL_BINARY_LOGS:
+          serviceImpl.showFullBinaryLogs((com.aliyun.polardbx.rpc.cdc.Request) request,
+              (io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.FullBinaryLog>) responseObserver);
+          break;
         case METHODID_SHOW_MASTER_STATUS:
           serviceImpl.showMasterStatus((com.aliyun.polardbx.rpc.cdc.Request) request,
               (io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.MasterStatus>) responseObserver);
+          break;
+        case METHODID_SHOW_FULL_MASTER_STATUS:
+          serviceImpl.showFullMasterStatus((com.aliyun.polardbx.rpc.cdc.Request) request,
+              (io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.FullMasterStatus>) responseObserver);
           break;
         case METHODID_SHOW_BINLOG_EVENTS:
           serviceImpl.showBinlogEvents((com.aliyun.polardbx.rpc.cdc.ShowBinlogEventsRequest) request,
@@ -1009,7 +1127,9 @@ public final class CdcServiceGrpc {
           serviceDescriptor = result = io.grpc.ServiceDescriptor.newBuilder(SERVICE_NAME)
               .setSchemaDescriptor(new CdcServiceFileDescriptorSupplier())
               .addMethod(getShowBinaryLogsMethod())
+              .addMethod(getShowFullBinaryLogsMethod())
               .addMethod(getShowMasterStatusMethod())
+              .addMethod(getShowFullMasterStatusMethod())
               .addMethod(getShowBinlogEventsMethod())
               .addMethod(getDumpMethod())
               .addMethod(getSyncMethod())

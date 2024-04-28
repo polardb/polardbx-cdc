@@ -19,32 +19,12 @@ package com.aliyun.polardbx.rpl.taskmeta;
  * @since 5.0.0.0
  */
 public enum StateMachineStatus {
-    NULL(0),
 
-    RUNNING(20),
+    RUNNING,
 
-    STOPPED(30),
+    STOPPED,
 
-    FINISHED(40),
+    FINISHED,
 
-    DEPRECATED(50);
-
-    private int value;
-
-    public int getValue() {
-        return value;
-    }
-
-    StateMachineStatus(int value) {
-        this.value = value;
-    }
-
-    public static StateMachineStatus from(int value) {
-        for (StateMachineStatus i : StateMachineStatus.values()) {
-            if (i.value == value) {
-                return i;
-            }
-        }
-        return NULL;
-    }
+    DEPRECATED
 }

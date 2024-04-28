@@ -17,6 +17,7 @@ package com.aliyun.polardbx.rpl;
 import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
@@ -25,6 +26,7 @@ import com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator;
 import com.aliyun.polardbx.rpl.storage.RplStorage;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
+import com.aliyun.polardbx.rpl.validation.fullvalid.ReplicaFullValidRunner;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
@@ -56,8 +58,8 @@ public class RplTaskEngine {
             log.info("Spring context loaded");
 
             if (!RuntimeLeaderElector.isLeader(RplConstants.RPL_TASK_LEADER_LOCK_PREFIX + taskId)) {
-                log.error("another process is already running, exit");
-                return;
+                log.error("find another process is already running in startup progress, will exit");
+                throw new PolardbxException("duplicate replica task process error!!");
             }
 
             MonitorManager.getInstance().startup();
@@ -65,6 +67,7 @@ public class RplTaskEngine {
                 try {
                     log.info("## stop rpl task.");
                     MonitorManager.getInstance().shutdown();
+                    appContextBootStrap.close();
                 } catch (Throwable e) {
                     log.warn("##something goes wrong when stopping rpl task.", e);
                 } finally {
@@ -76,9 +79,14 @@ public class RplTaskEngine {
             RplStorage.init();
 
             RplTask task = DbTaskMetaManager.getTask(Long.parseLong(taskId));
-            if (task.getType().equals(ServiceType.REC_COMBINE.getValue())) {
+            if (ServiceType.valueOf(task.getType()) == ServiceType.REC_COMBINE) {
                 FlashbackResultCombiner taskRunner = new FlashbackResultCombiner(Long.parseLong(taskId));
                 taskRunner.run();
+            } else if (ServiceType.valueOf(task.getType()) == ServiceType.REPLICA_FULL_VALIDATION) {
+                ReplicaFullValidRunner runner = ReplicaFullValidRunner.getInstance();
+                runner.setFsmId(task.getStateMachineId());
+                runner.setRplTaskId(task.getId());
+                runner.run();
             } else {
                 RplTaskRunner taskRunner = new RplTaskRunner(Long.parseLong(taskId));
                 taskRunner.start();

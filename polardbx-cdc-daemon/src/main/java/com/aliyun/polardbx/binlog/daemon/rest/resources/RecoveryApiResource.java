@@ -31,7 +31,6 @@ import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.rpl.common.RplConstants;
-import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
 import com.aliyun.polardbx.rpl.common.fsmutil.RecoveryFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.ServiceDetail;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
@@ -39,9 +38,6 @@ import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.MetaManagerTranProxy;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryMeta;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryStateMachineContext;
-import com.aliyun.polardbx.rpl.taskmeta.ServiceStatus;
-import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
-import com.aliyun.polardbx.rpl.taskmeta.StateMachineStatus;
 import com.aliyun.polardbx.rpl.taskmeta.TaskStatus;
 import com.sun.jersey.spi.resource.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -79,8 +75,6 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 public class RecoveryApiResource {
 
     private static final Logger logger = LoggerFactory.getLogger(RecoveryApiResource.class);
-    private static final MetaManagerTranProxy MANAGER = SpringContextHolder.getObject(MetaManagerTranProxy.class);
-
 
     public static void main(String args[]) {
         FlashBackCleanFileParameter parameter = new FlashBackCleanFileParameter();
@@ -153,7 +147,8 @@ public class RecoveryApiResource {
     @Path("/service/delete/{fsmId}")
     public ResultCode delete(@PathParam("fsmId") Long fsmId) {
         logger.warn("receive delete fsm request " + fsmId);
-        return MANAGER.deleteStateMachine(fsmId);
+        MetaManagerTranProxy manager = SpringContextHolder.getObject(MetaManagerTranProxy.class);
+        return manager.deleteStateMachine(fsmId);
     }
 
     @POST
@@ -177,15 +172,15 @@ public class RecoveryApiResource {
 
         //基础信息
         info.setFsmId(stateMachine.getId());
-        info.setFsmState(FSMState.from(stateMachine.getState()).name());
-        info.setFsmStatus(StateMachineStatus.from(stateMachine.getStatus()).name());
+        info.setFsmState(stateMachine.getState());
+        info.setFsmStatus(stateMachine.getStatus());
         info.setServiceDetailList(new ArrayList<>());
         List<RplService> services = DbTaskMetaManager.listService(fsmId);
         for (RplService service : services) {
             ServiceDetail serviceDetail = new ServiceDetail();
             serviceDetail.setId(service.getId());
-            serviceDetail.setStatus(ServiceStatus.nameFrom(service.getStatus()));
-            serviceDetail.setType(ServiceType.from(service.getServiceType()).name());
+            serviceDetail.setStatus(service.getStatus());
+            serviceDetail.setType(service.getServiceType());
             serviceDetail.setTaskDetailList(new ArrayList<>());
             List<RplTask> tasks = DbTaskMetaManager.listTaskByService(service.getId());
             for (RplTask task : tasks) {

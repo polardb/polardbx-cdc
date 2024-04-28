@@ -20,22 +20,25 @@ import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.MetaManagerTranProxy;
 import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import com.aliyun.polardbx.rpl.taskmeta.StateMachineType;
+import lombok.Getter;
 
 import java.util.Arrays;
 
 public class ReplicaFSM extends AbstractFSM<ReplicaMeta> {
 
+    @Getter
     private static ReplicaFSM instance = new ReplicaFSM();
-    private static MetaManagerTranProxy manager = SpringContextHolder.getObject(MetaManagerTranProxy.class);
-
-    public static ReplicaFSM getInstance() {
-        return instance;
-    }
+    private static final MetaManagerTranProxy manager = SpringContextHolder.getObject(MetaManagerTranProxy.class);
 
     private ReplicaFSM() {
-        super(Arrays.asList(new ReplicaTransitions.IncrementalModeInitTransition(),
+        super(Arrays.asList(
+            new ReplicaTransitions.IncrementalModeInitTransition(),
             new ReplicaTransitions.ImageModeInitTransition(),
-            new ReplicaTransitions.ReplicaFullFinishTransition()), FSMState.REPLICA_INIT);
+            new ReplicaTransitions.ReplicaFullFinishTransition(),
+            new ReplicaTransitions.ReplicaIncCatchUpTransition(),
+            new ReplicaTransitions.ReplicaFullValidStartTransition(),
+            new ReplicaTransitions.ReplicaFullValidFinishedTransition()
+        ), FSMState.REPLICA_INIT);
     }
 
     @Override

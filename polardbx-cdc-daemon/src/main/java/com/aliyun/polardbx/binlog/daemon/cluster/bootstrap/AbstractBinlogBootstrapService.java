@@ -24,13 +24,14 @@ import com.aliyun.polardbx.binlog.daemon.schedule.TableMetaHistoryWatcher;
 import com.aliyun.polardbx.binlog.daemon.schedule.TaskAliveWatcher;
 import com.aliyun.polardbx.binlog.daemon.schedule.TopologyWatcher;
 import com.aliyun.polardbx.binlog.enums.ClusterRole;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.heartbeat.TsoHeartbeatTimer;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.task.IScheduleJob;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 
 import java.util.LinkedList;
@@ -38,10 +39,8 @@ import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_CLUSTER_INTERVAL_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_INTERVAL_MS;
-import static com.aliyun.polardbx.binlog.ConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_FULL_SNAPSHOT_CHECK_INTERVAL_SEC;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_RECOVER_ROLLBACK_MODE;
-import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
@@ -79,13 +78,15 @@ public abstract class AbstractBinlogBootstrapService implements ClusterBootstrap
         String clusterRole = DynamicApplicationConfig.getClusterRole();
         log.info("CLUSTER_ROLE : " + clusterRole);
         // 全局Binlog的Slave集群不启动元数据snapshot和清理功能
-        if (!ClusterRole.slave.name().equalsIgnoreCase(clusterRole)) {
+        // 只有binlog相关集群才会启动
+        if (!ClusterRole.slave.name().equalsIgnoreCase(clusterRole) &&
+            StringUtils.equalsAny(clusterType, ClusterType.BINLOG.name(),
+                ClusterType.BINLOG_X.name())) {
             // 元数据管理
             jobList.add(new MetaDataMonitor());
             // Table Meta History Watcher
             if (StringUtils.equalsIgnoreCase(getString(META_RECOVER_ROLLBACK_MODE),
-                RollbackMode.SNAPSHOT_EXACTLY.name())
-                && getBoolean(ENABLE_CDC_META_BUILD_SNAPSHOT)) {
+                RollbackMode.SNAPSHOT_EXACTLY.name())) {
                 jobList.add(new TableMetaHistoryWatcher(getString(ConfigKeys.CLUSTER_ID), clusterType,
                     "TableMetaWatcher", getInt(META_BUILD_FULL_SNAPSHOT_CHECK_INTERVAL_SEC)));
             }

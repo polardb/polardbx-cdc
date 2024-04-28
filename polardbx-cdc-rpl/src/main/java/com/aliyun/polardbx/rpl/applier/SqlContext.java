@@ -32,6 +32,9 @@ public class SqlContext {
     protected String fullTable;
     protected List<Serializable> params;
     protected String sqlMode;
+    protected boolean asyncDdl;
+    protected String ddlEventSchema;
+    protected int ddlParallelSeq = 0;
 
     public SqlContext(String sql, String dstSchema, String dstTable, List<Serializable> params) {
         this.sql = sql;
@@ -48,5 +51,19 @@ public class SqlContext {
         this.params = params;
         this.fullTable = dstSchema + "." + dstTable;
         this.sqlMode = sqlMode;
+    }
+
+    @Override
+    public String toString() {
+        return "SqlContext{" +
+            "sql='" + sql + '\'' +
+            ", dstSchema='" + dstSchema + '\'' +
+            ", dstTable='" + dstTable + '\'' +
+            ", fullTable='" + fullTable + '\'' +
+            ", params=" + params +
+            ", sqlMode='" + sqlMode + '\'' +
+            ", asyncDdl=" + asyncDdl +
+            ", ddlEventSchema='" + ddlEventSchema + '\'' +
+            '}';
     }
 }

@@ -19,34 +19,15 @@ package com.aliyun.polardbx.rpl.taskmeta;
  * @since 5.0.0.0
  */
 public enum TaskStatus {
-    NULL(0),
+    NULL,
 
-    READY(10),
+    READY,
 
-    RUNNING(20),
+    RUNNING,
 
-    STOPPED(30),
+    STOPPED,
 
-    FINISHED(40),
+    FINISHED,
 
-    RESTART(50);
-
-    private int value;
-
-    public int getValue() {
-        return value;
-    }
-
-    TaskStatus(int value) {
-        this.value = value;
-    }
-
-    public static TaskStatus from(int value) {
-        for (TaskStatus i : TaskStatus.values()) {
-            if (i.value == value) {
-                return i;
-            }
-        }
-        return NULL;
-    }
+    RESTART;
 }

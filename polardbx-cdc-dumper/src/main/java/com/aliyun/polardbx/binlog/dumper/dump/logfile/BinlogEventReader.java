@@ -213,7 +213,7 @@ public class BinlogEventReader {
         }
     }
 
-    public boolean hasNext() {
+    public boolean hasNext() throws IOException {
         if (rowCount <= 0) {
             return false;
         }

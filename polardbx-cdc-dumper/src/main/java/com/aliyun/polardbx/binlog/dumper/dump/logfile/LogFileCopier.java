@@ -14,12 +14,10 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.TimelineEnvConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
@@ -39,6 +37,8 @@ import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -63,6 +63,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CLIENT_ASYNC_ENABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CLIENT_RECEIVE_QUEUE_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_EVENT_SPLIT_MODE;
@@ -70,7 +71,6 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_FLOW_CONTROL_WIN
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_INJECT_TROUBLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_BUFFER_DIRECT_ENABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_DRY_RUN_ENABLE;
-import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 
 /**
  * Created by ziyang.lb
@@ -101,6 +101,7 @@ public class LogFileCopier {
     private ContactContext currentContactContext;
     private EventSplitMode splitMode;
     private long lastInjectTroubleTime;
+    private TimelineEnvConfig timelineEnvConfig;
     private volatile boolean running;
 
     public LogFileCopier(LogFileManager logFileManager, int writeBufferSize, int seekBufferSize) {
@@ -194,7 +195,8 @@ public class LogFileCopier {
         buildBinlogFile();
         String lastTso = seekLastTso();
         if (StringUtils.isNotBlank(lastTso)) {
-            DynamicApplicationVersionConfig.applyConfigByTso(lastTso);
+            timelineEnvConfig = new TimelineEnvConfig();
+            timelineEnvConfig.initConfigByTso(lastTso);
         }
         metrics.setLatestDelayTimeOnCommit(0);
     }

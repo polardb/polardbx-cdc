@@ -15,10 +15,17 @@
 package com.aliyun.polardbx.binlog.canal.core.ddl;
 
 import com.alibaba.polardbx.druid.sql.SQLUtils;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
 import org.apache.commons.lang3.StringUtils;
 
+import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -34,7 +41,7 @@ import java.util.Objects;
  * @author jianghang 2013-1-18 下午12:24:59
  * @version 1.0.0
  */
-public class TableMeta {
+public class TableMeta implements Serializable {
 
     private String schema;
     private String table;
@@ -42,6 +49,7 @@ public class TableMeta {
     private String ddl;                                // 表结构的DDL语句
     private String charset;
     private boolean useImplicitPk = false;
+    private Map<String, IndexMeta> indexes = new HashMap<>();
 
     public TableMeta() {
 
@@ -51,6 +59,13 @@ public class TableMeta {
         this.schema = schema;
         this.table = table;
         this.fields = fields;
+        initParent();
+    }
+
+    private void initParent() {
+        for (FieldMeta fm : fields) {
+            fm.setParent(this);
+        }
     }
 
     public String getFullName() {
@@ -77,8 +92,18 @@ public class TableMeta {
         return fields;
     }
 
+    public Map<String, IndexMeta> getIndexes() {
+        return indexes;
+    }
+
+    public void setIndexes(
+        Map<String, IndexMeta> indexes) {
+        this.indexes = indexes;
+    }
+
     public void setFields(List<FieldMeta> fields) {
         this.fields = fields;
+        initParent();
     }
 
     public FieldMeta getFieldMetaByName(String name) {
@@ -119,6 +144,7 @@ public class TableMeta {
     }
 
     public void addFieldMeta(FieldMeta fieldMeta) {
+        fieldMeta.setParent(this);
         this.fields.add(fieldMeta);
     }
 
@@ -153,11 +179,34 @@ public class TableMeta {
         for (FieldMeta field : fields) {
             data.append("\n\t").append(field.toString());
         }
+        for (IndexMeta indexMeta : indexes.values()) {
+            data.append("\n\t").append(indexMeta.toString());
+        }
         data.append("\n]");
         return data.toString();
     }
 
-    public static class FieldMeta {
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        TableMeta tableMeta = (TableMeta) o;
+        return useImplicitPk == tableMeta.useImplicitPk && Objects.equals(schema, tableMeta.schema)
+            && Objects.equals(table, tableMeta.table) && Objects.equals(fields, tableMeta.fields)
+            && Objects.equals(ddl, tableMeta.ddl) && Objects.equals(charset, tableMeta.charset)
+            && Objects.equals(indexes, tableMeta.indexes);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(schema, table, fields, ddl, charset, useImplicitPk, indexes);
+    }
+
+    public static class FieldMeta implements Serializable {
 
         private String columnName;
         private String columnType;
@@ -170,6 +219,7 @@ public class TableMeta {
         private boolean unsigned;
         private boolean generated;
         private boolean implicitPk;
+        private TableMeta parent;
 
         public FieldMeta() {
 
@@ -199,6 +249,10 @@ public class TableMeta {
             preProcessColumnName();
             preProcessCharset();
             preProcessColumnType();
+        }
+
+        public void setParent(TableMeta parent) {
+            this.parent = parent;
         }
 
         private void preProcessColumnType() {
@@ -274,7 +328,13 @@ public class TableMeta {
         }
 
         public String getCharset() {
-            return charset;
+            if (StringUtils.isNotBlank(charset)) {
+                return charset;
+            }
+            if (parent != null) {
+                return parent.getCharset();
+            }
+            return null;
         }
 
         public void setCharset(String charset) {
@@ -350,4 +410,31 @@ public class TableMeta {
 
     }
 
+    @Data
+    @ToString
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class IndexMeta implements Serializable {
+        private String indexName;
+        private String indexType;
+        private boolean columnar;
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            IndexMeta indexMeta = (IndexMeta) o;
+            return columnar == indexMeta.columnar && Objects.equals(indexName, indexMeta.indexName)
+                && Objects.equals(indexType, indexMeta.indexType);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(indexName, indexType, columnar);
+        }
+    }
 }

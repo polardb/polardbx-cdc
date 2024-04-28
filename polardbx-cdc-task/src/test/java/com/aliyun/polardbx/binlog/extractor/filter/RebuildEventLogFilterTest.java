@@ -26,7 +26,7 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testTryRewriteSql() {
-        RebuildEventLogFilter filter = new RebuildEventLogFilter(0, null, false, null);
+        RebuildEventLogFilter filter = new RebuildEventLogFilter(1, null, false, null);
         String s1 = filter.tryRewriteDropTableSql("aa", "bb", "drop table aa.bb");
         String s2 = filter.tryRewriteDropTableSql("aa", "bb", "drop table aa.bb,aa.zz,xx.bb");
         String s3 = filter.tryRewriteDropTableSql("a`a", "b`b", "drop table `a``a`.`b``b`,`vv`.`b``b`,`a``a`.cc");
@@ -50,7 +50,7 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
     @Test
     public void testTryRewriteDropTableSql() {
         String sql = " /* //1/ *//*+tddl:cmd_extra(truncate_table_with_gsi=true)*/truncate table truncate_gsi_test_7";
-        RebuildEventLogFilter filter = new RebuildEventLogFilter(0, null, false, null);
+        RebuildEventLogFilter filter = new RebuildEventLogFilter(1, null, false, null);
 
         String rewriteSql = filter.tryRewriteTruncateSql("__test_truncate_gsi_test_7", sql);
         Assert.assertEquals(

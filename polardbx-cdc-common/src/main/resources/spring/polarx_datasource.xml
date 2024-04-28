@@ -62,7 +62,7 @@
             <value>-1</value>
         </property>
         <property name="urlTemplate">
-            <value>jdbc:mysql://%s/__cdc__</value>
+            <value>jdbc:mysql://%s/__cdc__?useSSL=false</value>
         </property>
     </bean>
 

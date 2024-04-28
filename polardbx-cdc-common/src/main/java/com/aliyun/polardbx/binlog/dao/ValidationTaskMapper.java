@@ -47,23 +47,23 @@ import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
 
 @Mapper
 public interface ValidationTaskMapper {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     BasicColumn[] selectList = BasicColumn.columnList(id, externalId, stateMachineId, serviceId, taskId, type, state, drdsInsId, rdsInsId, srcLogicalDb, srcLogicalTable, srcLogicalKeyCol, srcPhyDb, srcPhyTable, srcPhyKeyCol, polardbxInsId, dstLogicalDb, dstLogicalTable, dstLogicalKeyCol, taskRange, deleted, createTime, updateTime, config, stats);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     long count(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     @DeleteProvider(type=SqlProviderAdapter.class, method="delete")
     int delete(DeleteStatementProvider deleteStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     @InsertProvider(type=SqlProviderAdapter.class, method="insert")
     @SelectKey(statement="SELECT LAST_INSERT_ID()", keyProperty="record.id", before=false, resultType=Long.class)
     int insert(InsertStatementProvider<ValidationTask> insertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Long.class, jdbcType=JdbcType.BIGINT, id=true),
@@ -71,8 +71,8 @@ public interface ValidationTaskMapper {
         @Arg(column="state_machine_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="service_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="task_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
-        @Arg(column="type", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
-        @Arg(column="state", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
+        @Arg(column="type", javaType=String.class, jdbcType=JdbcType.VARCHAR),
+        @Arg(column="state", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="drds_ins_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="rds_ins_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="src_logical_db", javaType=String.class, jdbcType=JdbcType.VARCHAR),
@@ -94,7 +94,7 @@ public interface ValidationTaskMapper {
     })
     Optional<ValidationTask> selectOne(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.943+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Long.class, jdbcType=JdbcType.BIGINT, id=true),
@@ -102,8 +102,8 @@ public interface ValidationTaskMapper {
         @Arg(column="state_machine_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="service_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="task_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
-        @Arg(column="type", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
-        @Arg(column="state", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
+        @Arg(column="type", javaType=String.class, jdbcType=JdbcType.VARCHAR),
+        @Arg(column="state", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="drds_ins_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="rds_ins_id", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="src_logical_db", javaType=String.class, jdbcType=JdbcType.VARCHAR),
@@ -125,28 +125,28 @@ public interface ValidationTaskMapper {
     })
     List<ValidationTask> selectMany(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     @UpdateProvider(type=SqlProviderAdapter.class, method="update")
     int update(UpdateStatementProvider updateStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     default long count(CountDSLCompleter completer) {
         return MyBatis3Utils.countFrom(this::count, validationTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     default int delete(DeleteDSLCompleter completer) {
         return MyBatis3Utils.deleteFrom(this::delete, validationTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.995+08:00", comments="Source Table: validation_task")
     default int deleteByPrimaryKey(Long id_) {
         return delete(c -> 
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     default int insert(ValidationTask record) {
         return MyBatis3Utils.insert(this::insert, record, validationTask, c ->
             c.map(externalId).toProperty("externalId")
@@ -176,7 +176,7 @@ public interface ValidationTaskMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     default int insertSelective(ValidationTask record) {
         return MyBatis3Utils.insert(this::insert, record, validationTask, c ->
             c.map(externalId).toPropertyWhenPresent("externalId", record::getExternalId)
@@ -206,34 +206,34 @@ public interface ValidationTaskMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     default Optional<ValidationTask> selectOne(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectOne(this::selectOne, selectList, validationTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     default List<ValidationTask> select(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectList(this::selectMany, selectList, validationTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     default List<ValidationTask> selectDistinct(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectDistinct(this::selectMany, selectList, validationTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     default Optional<ValidationTask> selectByPrimaryKey(Long id_) {
         return selectOne(c ->
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     default int update(UpdateDSLCompleter completer) {
         return MyBatis3Utils.update(this::update, validationTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.996+08:00", comments="Source Table: validation_task")
     static UpdateDSL<UpdateModel> updateAllColumns(ValidationTask record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(externalId).equalTo(record::getExternalId)
                 .set(stateMachineId).equalTo(record::getStateMachineId)
@@ -261,7 +261,7 @@ public interface ValidationTaskMapper {
                 .set(stats).equalTo(record::getStats);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.997+08:00", comments="Source Table: validation_task")
     static UpdateDSL<UpdateModel> updateSelectiveColumns(ValidationTask record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(externalId).equalToWhenPresent(record::getExternalId)
                 .set(stateMachineId).equalToWhenPresent(record::getStateMachineId)
@@ -289,7 +289,7 @@ public interface ValidationTaskMapper {
                 .set(stats).equalToWhenPresent(record::getStats);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.997+08:00", comments="Source Table: validation_task")
     default int updateByPrimaryKey(ValidationTask record) {
         return update(c ->
             c.set(externalId).equalTo(record::getExternalId)
@@ -320,7 +320,7 @@ public interface ValidationTaskMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.944+08:00", comments="Source Table: validation_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.998+08:00", comments="Source Table: validation_task")
     default int updateByPrimaryKeySelective(ValidationTask record) {
         return update(c ->
             c.set(externalId).equalToWhenPresent(record::getExternalId)

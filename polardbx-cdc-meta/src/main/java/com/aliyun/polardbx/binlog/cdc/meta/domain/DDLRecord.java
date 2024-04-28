@@ -36,5 +36,6 @@ public class DDLRecord {
     private String tableName;
     private String ddlSql;
     private String metaInfo;
+    private int visibility;
     private DDLExtInfo extInfo;
 }

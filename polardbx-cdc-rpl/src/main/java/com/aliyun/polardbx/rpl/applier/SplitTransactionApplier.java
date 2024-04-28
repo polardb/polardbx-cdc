@@ -21,6 +21,8 @@ import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -33,8 +35,8 @@ import java.util.concurrent.Future;
  * @since 5.0.0.0
  */
 public class SplitTransactionApplier extends MysqlApplier {
-    public SplitTransactionApplier(ApplierConfig applierConfig, HostInfo hostInfo) {
-        super(applierConfig, hostInfo);
+    public SplitTransactionApplier(ApplierConfig applierConfig, HostInfo hostInfo, HostInfo srcHostInfo) {
+        super(applierConfig, hostInfo, srcHostInfo);
     }
 
     @Override
@@ -70,22 +72,30 @@ public class SplitTransactionApplier extends MysqlApplier {
 
         for (String fullTbName : allRowChanges.keySet()) {
             List<DefaultRowChange> tbRowChanges = allRowChanges.get(fullTbName);
-            List<SqlContext> tbSqlContexts = new ArrayList<>();
-
-            for (DefaultRowChange rowChange : tbRowChanges) {
-                tbSqlContexts.addAll(getSqlContexts(rowChange, safeMode));
-            }
 
             // execute
             final Callable<Void> task;
             if (tbTranExec) {
                 task = () -> {
-                    tranExecSqlContexts(tbSqlContexts);
+                    DataSource dataSource = dbMetaCache.getDataSource(tbRowChanges.get(0).getSchema());
+                    try (Connection conn = dataSource.getConnection()) {
+                        conn.setAutoCommit(false);
+                        try {
+                            DmlApplyHelper.executeDML(conn, tbRowChanges, conflictStrategy);
+                            conn.commit();
+                        } catch (Exception e) {
+                            conn.rollback();
+                            throw e;
+                        }
+                    }
                     return null;
                 };
             } else {
                 task = () -> {
-                    execSqlContexts(tbSqlContexts);
+                    DataSource dataSource = dbMetaCache.getDataSource(tbRowChanges.get(0).getSchema());
+                    try (Connection conn = dataSource.getConnection()) {
+                        DmlApplyHelper.executeDML(conn, tbRowChanges, conflictStrategy);
+                    }
                     return null;
                 };
             }

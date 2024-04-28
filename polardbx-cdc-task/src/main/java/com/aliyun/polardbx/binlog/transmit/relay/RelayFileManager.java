@@ -27,8 +27,8 @@ import java.util.List;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_FILE_BUFFER_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_FILE_BUFFER_USE_DIRECT_MEM;
-import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getBoolean;
-import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getInt;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 
 /**
  * created by ziyang.lb

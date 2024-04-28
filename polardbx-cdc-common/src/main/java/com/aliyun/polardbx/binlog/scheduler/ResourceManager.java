@@ -18,6 +18,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.dao.BinlogNodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
@@ -33,9 +34,9 @@ import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.enums.NodeStatus;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.dao.BinlogNodeInfoMapper;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.Resource;
+import com.aliyun.polardbx.binlog.util.GmsTimeUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
@@ -115,9 +116,11 @@ public class ResourceManager {
             LinkedList<Integer> ports = Lists.newLinkedList(portList);
 
             Container container = Container.builder().containerId(nodeInfo.getContainerId())
-                .nodeHttpAddress(nodeInfo.getIp()).daemonPort(nodeInfo.getDaemonPort()).availablePorts(ports)
+                .ip(nodeInfo.getIp()).daemonPort(nodeInfo.getDaemonPort()).availablePorts(ports)
                 .capability(Resource.builder().cpu(nodeInfo.getCore().intValue())
-                    .memory_mb(nodeInfo.getMem().intValue()).build()).build();
+                    .memory_mb(nodeInfo.getMem().intValue()).build())
+                .hostString(nodeInfo.getIp() + ":" + nodeInfo.getDaemonPort())
+                .build();
             result.add(container);
         }
         return result;
@@ -180,12 +183,12 @@ public class ResourceManager {
     }
 
     public boolean isHeartbeatTimeOut(long timeMills) {
-        return System.currentTimeMillis() - timeMills > DynamicApplicationConfig
+        return GmsTimeUtil.getCurrentTimeMillis() - timeMills > DynamicApplicationConfig
             .getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS);
     }
 
     public boolean isStartTimeOut(long timeMills) {
-        return System.currentTimeMillis() - timeMills > DynamicApplicationConfig
+        return GmsTimeUtil.getCurrentTimeMillis() - timeMills > DynamicApplicationConfig
             .getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_WAIT_START_TIMEOUT_MS);
     }
 

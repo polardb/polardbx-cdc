@@ -20,8 +20,8 @@ package com.aliyun.polardbx.binlog.enums;
 public enum ClusterType {
 
     /* note that '-' should not exist in type name*/
-    BINLOG(1), IMPORT(2), BINLOG_X(3), REPLICA(4), FLASHBACK(5);
-    private final int value;
+    BINLOG(1), IMPORT(2), BINLOG_X(3), REPLICA(4), FLASHBACK(5), COLUMNAR(6);
+    private int value;
 
     ClusterType(int value) {
         this.value = value;

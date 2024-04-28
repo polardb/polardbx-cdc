@@ -17,13 +17,14 @@ package com.aliyun.polardbx.rpl.applier;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.aliyun.polardbx.binlog.storage.RepoUnit;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.taskmeta.PersistConfig;
 import com.google.common.collect.Lists;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.SerializationUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -32,6 +33,7 @@ import org.rocksdb.RocksDBException;
 import org.rocksdb.util.ByteUtil;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -41,7 +43,13 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+
+import static com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction.DELETE;
+import static com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction.INSERT;
+import static com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction.UPDATE;
 
 /**
  * @author shicai.xsc 2021/3/17 16:30
@@ -49,12 +57,29 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 public class Transaction {
+
+    private static final int DESERIALIZE_PARALLELISM = DynamicApplicationConfig
+        .getInt(ConfigKeys.RPL_ROCKSDB_DESERIALIZE_PARALLELISM);
+    private static final ExecutorService executorForDeserialize = ThreadPoolUtil
+        .createExecutorWithFixedNum(DESERIALIZE_PARALLELISM, "deserializer");
+    private static final ExecutorService executorForCompact = ThreadPoolUtil
+        .createExecutorWithFixedNum(1, "compactor");
+
     //常规属性
     private final Set<String> tables = new HashSet<>();
     private final List<DBMSEvent> events = new ArrayList<>();
     private boolean finished = false;
     private boolean prepared = false;
-    private long eventSize;
+    private long eventCount;
+
+    @Getter
+    private long insertCount;
+    @Getter
+    private long updateCount;
+    @Getter
+    private long deleteCount;
+    @Getter
+    private long byteSize;
 
     // 持久化相关
     private RepoUnit repoUnit;
@@ -66,15 +91,6 @@ public class Transaction {
     private List<Range> rangeList;
     private boolean alreadyIteration;
     private PersistConfig persistConfig;
-    private static final int DESERIALIZE_PARALLELISM = DynamicApplicationConfig
-        .getInt(ConfigKeys.RPL_ROCKSDB_DESERIALIZE_PARALLELISM);
-    private static final ExecutorService executorForDeserialize = ThreadPoolUtil
-        .createExecutorWithFixedNum(DESERIALIZE_PARALLELISM, "deserializer");
-    private static final ExecutorService executorForCompact = ThreadPoolUtil
-        .createExecutorWithFixedNum(1, "compactor");
-
-    public Transaction() {
-    }
 
     public Transaction(RepoUnit repoUnit, PersistConfig persistConfig) {
         this.repoUnit = repoUnit;
@@ -84,31 +100,44 @@ public class Transaction {
     public void appendRowChange(DBMSEvent event) {
         checkOperation();
         appendInternal(event);
-        DBMSRowChange rowChange = (DBMSRowChange) event;
+        DefaultRowChange rowChange = (DefaultRowChange) event;
         String fullTableName = rowChange.getSchema() + "." + rowChange.getTable();
         tables.add(fullTableName);
-        eventSize++;
+        eventCount++;
+
+        if (event.getAction() == INSERT) {
+            insertCount += rowChange.getRowSize();
+        } else if (event.getAction() == UPDATE) {
+            updateCount += rowChange.getRowSize();
+        } else if (event.getAction() == DELETE) {
+            deleteCount += rowChange.getRowSize();
+        }
+        byteSize += rowChange.getEventSize();
     }
 
     public void appendQueryLog(DBMSEvent event) {
         checkOperation();
         appendInternal(event);
-        eventSize++;
+        eventCount++;
+    }
+
+    public void close() {
+        if (isPersisted && rangeList != null) {
+            rangeList.forEach(Range::close);
+        }
     }
 
     public DBMSEvent peekFirst() {
-        checkOperation();
         if (isPersisted) {
-            return eventSize < 1 ? null : getByKey(persistKeyPrefix + "_" + StringUtils.leftPad(0 + "", 19, "0"));
+            return eventCount < 1 ? null : getByKey(persistKeyPrefix + "_" + StringUtils.leftPad(0 + "", 19, "0"));
         } else {
             return events.isEmpty() ? null : events.get(0);
         }
     }
 
     public DBMSEvent peekLast() {
-        checkOperation();
         if (isPersisted) {
-            return eventSize < 1 ? null :
+            return eventCount < 1 ? null :
                 getByKey(persistKeyPrefix + "_" + StringUtils.leftPad((saveCursor - 1) + "", 19, "0"));
         } else {
             return events.isEmpty() ? null : events.get(events.size() - 1);
@@ -127,8 +156,8 @@ public class Transaction {
         return prepared;
     }
 
-    public long getEventSize() {
-        return eventSize;
+    public long getEventCount() {
+        return eventCount;
     }
 
     public boolean isPersisted() {
@@ -143,25 +172,17 @@ public class Transaction {
         this.prepared = prepared;
     }
 
-    // just call once
-    public RangeIterator rangeIterator() {
-        if (alreadyIteration) {
-            throw new PolardbxException("can`t retrieve iteration again!!");
-        }
-
+    public synchronized RangeIterator rangeIterator() {
         RangeIterator result;
         if (isPersisted) {
-            result = new RangeIterator(rangeList.iterator());
+            result = new RangeIterator(
+                Lists.newArrayList(rangeList.stream().map(Range::copy).collect(Collectors.toList())).iterator());
         } else {
             Range range = new Range();
-            range.events = this.events;
+            range.events = Lists.newArrayList(this.events);
             result = new RangeIterator(Lists.newArrayList(range).iterator());
         }
         alreadyIteration = true;
-        if (log.isDebugEnabled()) {
-            log.debug("build range iterator for transaction, with persist key prefix " + persistKeyPrefix
-                + " eventSize : " + eventSize);
-        }
         return result;
     }
 
@@ -246,15 +267,21 @@ public class Transaction {
 
     public class Range {
         private long start;
-        private final AtomicInteger count = new AtomicInteger(0);
-        private final AtomicInteger byteSize = new AtomicInteger();
+        private AtomicInteger count = new AtomicInteger(0);
+        private AtomicInteger byteSize = new AtomicInteger();
+        private AtomicBoolean closed = new AtomicBoolean();
         private List<DBMSEvent> events;
 
         public List<DBMSEvent> getEvents() {
+            if (closed.get()) {
+                throw new PolardbxException(
+                    "transaction range has closed!!, start key {" + start + "}, count {" + count.get() + "}.");
+            }
+
             if (events == null) {
                 restore();
             }
-            return events;
+            return Collections.unmodifiableList(events);
         }
 
         private void restore() {
@@ -277,20 +304,53 @@ public class Transaction {
                 for (Future<DBMSEvent> future : futures) {
                     events.add(future.get());
                 }
+
+                log.info("transaction range is restored, tranId {}, start key {}, count {}.",
+                    persistKeyPrefix, start, count);
+            } catch (InterruptedException | ExecutionException e) {
+                throw new PolardbxException("restore range data failed !", e);
+            }
+        }
+
+        private void close() {
+            if (!closed.compareAndSet(false, true)) {
+                log.warn("transaction range has already closed, tranId {}, start key {}, count {}.",
+                    persistKeyPrefix, start, count.get());
+                return;
+            }
+
+            try {
+                String beginKey = persistKeyPrefix + "_" + StringUtils.leftPad(start + "", 19, "0");
+                String endKey =
+                    persistKeyPrefix + "_" + StringUtils.leftPad(start + count.intValue() + "", 19, "0");
+                byte[] beginKeyBytes = ByteUtil.bytes(beginKey);
+                byte[] endKeyBytes = ByteUtil.bytes(endKey);
+
                 repoUnit.deleteRange(beginKeyBytes, endKeyBytes);
-                // todo by jiyue 能否合并compactRange
                 executorForCompact.submit(() -> {
                         try {
                             repoUnit.compactRange(beginKeyBytes, endKeyBytes);
                         } catch (RocksDBException e) {
-                            throw new PolardbxException("compact range failed !", e);
+                            log.error("compact range failed !", e);
                         }
                     }
                 );
-
-            } catch (InterruptedException | ExecutionException | RocksDBException e) {
-                throw new PolardbxException("restore range data failed !", e);
+                log.info("transaction range is closed, tranId {}, start key {}, count {}.",
+                    persistKeyPrefix, start, count.get());
+            } catch (Throwable t) {
+                log.error("transaction range close failed, tranId {}, start key {}, count {}.",
+                    persistKeyPrefix, start, count.get(), t);
             }
+        }
+
+        private Range copy() {
+            Range range = new Range();
+            range.start = this.start;
+            range.count = new AtomicInteger(count.get());
+            range.byteSize = new AtomicInteger(byteSize.get());
+            range.closed = new AtomicBoolean(closed.get());
+            range.events = this.events;
+            return range;
         }
     }
 
@@ -309,6 +369,10 @@ public class Transaction {
         public Range next() {
             if (currentRange != null) {
                 wrappedIterator.remove();
+                if (isPersisted) {
+                    log.info("transaction range is removed from iterator, tranId {}, start key {}, count {}.",
+                        persistKeyPrefix, currentRange.start, currentRange.count);
+                }
             }
             currentRange = wrappedIterator.next();
             return currentRange;

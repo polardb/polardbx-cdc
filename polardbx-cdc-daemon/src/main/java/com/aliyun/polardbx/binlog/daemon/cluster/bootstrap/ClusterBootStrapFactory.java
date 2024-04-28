@@ -24,6 +24,7 @@ import static com.aliyun.polardbx.binlog.enums.ClusterType.BINLOG_X;
 import static com.aliyun.polardbx.binlog.enums.ClusterType.FLASHBACK;
 import static com.aliyun.polardbx.binlog.enums.ClusterType.IMPORT;
 import static com.aliyun.polardbx.binlog.enums.ClusterType.REPLICA;
+import static com.aliyun.polardbx.binlog.enums.ClusterType.COLUMNAR;
 
 public class ClusterBootStrapFactory {
     private static final ConcurrentHashMap<ClusterType, ClusterBootstrapService> map = new ConcurrentHashMap<>();
@@ -45,6 +46,9 @@ public class ClusterBootStrapFactory {
         case BINLOG_X:
             map.computeIfAbsent(BINLOG_X, k -> new BinlogXBootStrapService());
             return map.get(BINLOG_X);
+        case COLUMNAR:
+            map.computeIfAbsent(COLUMNAR, k -> new ColumnarBootstrapService());
+            return map.get(COLUMNAR);
         default:
             throw new PolardbxException("not supported cluster type " + clusterType);
         }

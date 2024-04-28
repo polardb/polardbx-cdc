@@ -42,6 +42,7 @@ import com.aliyun.polardbx.rpl.filter.DataImportFilter;
 import com.aliyun.polardbx.rpl.filter.ReplicaFilter;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
+import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FullExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 
@@ -73,6 +74,8 @@ public class MysqlFullExtractor extends BaseExtractor {
     protected Set<String> defaultIgnoreDbList;
     private static final String CREATE_DB = "CREATE DATABASE IF NOT EXISTS `%s` mode='auto'";
     protected Map<String, Map<String, String>> structureImportDdl;
+    boolean setMaxStatementTimeOption = DynamicApplicationConfig.getBoolean(
+        ConfigKeys.RPL_SET_MAX_STATEMENT_TIME_OPTION, false);
 
     public MysqlFullExtractor(FullExtractorConfig extractorConfig, HostInfo hostInfo, DataImportFilter filter) {
         super(extractorConfig);
@@ -116,7 +119,9 @@ public class MysqlFullExtractor extends BaseExtractor {
 
         List<String> newConnectionSqls = new ArrayList<>(1);
         // 老版本rds需要执行该语句
-        // newConnectionSqls.add("set max_statement_time=0");
+        if (setMaxStatementTimeOption) {
+            newConnectionSqls.add("set max_statement_time=0");
+        }
 
         dataSourceMap = new HashMap<>(4);
         for (String db : dataImportFilter.getDoDbs()) {
@@ -186,6 +191,8 @@ public class MysqlFullExtractor extends BaseExtractor {
         // need to exit process to retry tasks failed
         if (allDone) {
             if (isAllDataTransferred()) {
+                FSMMetaManager.setFullCopyFinishTime(TaskContext.getInstance().getStateMachineId(),
+                    System.currentTimeMillis());
                 return true;
             } else {
                 log.error("All futures have been done but some tasks are not finished");

@@ -15,7 +15,6 @@
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
-import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
@@ -24,9 +23,13 @@ import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_DDL_HINT_BLACKLIST;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSql;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSqlForMysqlPart;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSqlForPolarPart;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql;
+import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.tryRemoveAutoShardKey;
 
 /**
  * created by ziyang.lb
@@ -45,6 +48,7 @@ public class DDLConverterTest extends BaseTest {
         String ddlEventSql = buildDdlEventSql(null, sql, "utf8mb4", "utf8mb4_unicode_520_ci", "111", sql);
         String expectResult = "# POLARX_ORIGIN_SQL=ALTER TABLE modify_sk_simple_checker_test_tblPF \n"
             + "# POLARX_TSO=111\n"
+            + "# POLARX_DDL_ID=0\n"
             + "ALTER TABLE modify_sk_simple_checker_test_tblPF ";
         Assert.assertEquals(expectResult, ddlEventSql);
     }
@@ -417,9 +421,83 @@ public class DDLConverterTest extends BaseTest {
         Assert.assertEquals(
             "CREATE TABLE __test_truncate_gsi_test_7 ( id int PRIMARY KEY, name varchar(20), INDEX __test_g_i_truncate_test_7(name) ) DEFAULT CHARACTER SET = utf8 DEFAULT COLLATE = utf8_general_cs",
             sb.toString());
+    }
 
-        System.out.println(sb.toString());
+    @Test
+    public void testAddKeyForAutoIncrement() {
+        StringBuilder sb = new StringBuilder();
+        String ddl = "CREATE TABLE `wy6uo8g` (\n"
+            + "  `y` INT(3) PRIMARY KEY AUTO_INCREMENT,\n"
+            + "  `ZW2JPD` DATETIME(0) NOT NULL UNIQUE\n"
+            + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci\n"
+            + "DBPARTITION BY HASH(`y`)\n"
+            + "TBPARTITION BY MM(`ZW2JPD`) TBPARTITIONS 3";
+        buildDdlEventSqlForMysqlPart(sb, "wy6uo8g", "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals("CREATE TABLE `wy6uo8g` "
+            + "( `y` INT(3) PRIMARY KEY AUTO_INCREMENT, "
+            + "`ZW2JPD` DATETIME(0) NOT NULL UNIQUE )"
+            + " DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci", sb.toString());
 
+        sb = new StringBuilder();
+        ddl = "CREATE TABLE `wy6uo8g` (\n"
+            + "  `y` INT(3) AUTO_INCREMENT UNIQUE,\n"
+            + "  `ZW2JPD` DATETIME(0) NOT NULL UNIQUE\n"
+            + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci\n"
+            + "DBPARTITION BY HASH(`y`)\n"
+            + "TBPARTITION BY MM(`ZW2JPD`) TBPARTITIONS 3";
+        buildDdlEventSqlForMysqlPart(sb, "wy6uo8g", "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals(
+            "CREATE TABLE `wy6uo8g` ("
+                + " `y` INT(3) UNIQUE AUTO_INCREMENT, "
+                + "`ZW2JPD` DATETIME(0) NOT NULL UNIQUE ) "
+                + "DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci", sb.toString());
+
+        sb = new StringBuilder();
+        ddl = "CREATE TABLE `wy6uo8g` (\n"
+            + "  `y` INT(3) AUTO_INCREMENT,\n"
+            + "  `ZW2JPD` DATETIME(0) NOT NULL UNIQUE\n"
+            + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci\n"
+            + "DBPARTITION BY HASH(`y`)\n"
+            + "TBPARTITION BY MM(`ZW2JPD`) TBPARTITIONS 3";
+        buildDdlEventSqlForMysqlPart(sb, "wy6uo8g", "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals(
+            "CREATE TABLE `wy6uo8g` ("
+                + " `y` INT(3) AUTO_INCREMENT, "
+                + "`ZW2JPD` DATETIME(0) NOT NULL UNIQUE, "
+                + "KEY (`y`) ) DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci", sb.toString());
+
+        sb = new StringBuilder();
+        ddl = "CREATE TABLE `wy6uo8g` (\n"
+            + "  `y` INT(3) AUTO_INCREMENT,\n"
+            + "  `ZW2JPD` DATETIME(0) NOT NULL UNIQUE,\n"
+            + "  key k1(`y`,`ZW2JPD`)"
+            + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci\n"
+            + "DBPARTITION BY HASH(`y`)\n"
+            + "TBPARTITION BY MM(`ZW2JPD`) TBPARTITIONS 3";
+        buildDdlEventSqlForMysqlPart(sb, "wy6uo8g", "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals(
+            "CREATE TABLE `wy6uo8g` ("
+                + " `y` INT(3) AUTO_INCREMENT,"
+                + " `ZW2JPD` DATETIME(0) NOT NULL UNIQUE,"
+                + " KEY k1 (`y`, `ZW2JPD`) ) DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci",
+            sb.toString());
+
+        sb = new StringBuilder();
+        ddl = "CREATE TABLE `wy6uo8g` (\n"
+            + "  `y` INT(3) AUTO_INCREMENT,\n"
+            + "  `ZW2JPD` DATETIME(0) NOT NULL UNIQUE,\n"
+            + "  key k1(`ZW2JPD`,`y`)"
+            + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci\n"
+            + "DBPARTITION BY HASH(`y`)\n"
+            + "TBPARTITION BY MM(`ZW2JPD`) TBPARTITIONS 3";
+        buildDdlEventSqlForMysqlPart(sb, "wy6uo8g", "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals(
+            "CREATE TABLE `wy6uo8g` ("
+                + " `y` INT(3) AUTO_INCREMENT,"
+                + " `ZW2JPD` DATETIME(0) NOT NULL UNIQUE,"
+                + " KEY k1 (`ZW2JPD`, `y`),"
+                + " KEY (`y`) ) DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci",
+            sb.toString());
     }
 
     @Test
@@ -430,25 +508,26 @@ public class DDLConverterTest extends BaseTest {
         StringBuilder sb = new StringBuilder();
         String ddl = "ALTER TABLE `dkx0zjr` SET tablegroup = `Zmn` FORCE";
         buildDdlEventSqlForPolarPart(sb, ddl, "utf8mb4", "utf8_general_cs", "");
-        Assert.assertEquals("# POLARX_ORIGIN_SQL=ALTER TABLE `dkx0zjr`\n"
-            + "# POLARX_TSO=\n", sb.toString());
+        Assert.assertEquals("# POLARX_ORIGIN_SQL=ALTER TABLE `dkx0zjr` SET tablegroup = `Zmn` FORCE\n"
+            + "# POLARX_TSO=\n# POLARX_DDL_ID=0\n", sb.toString());
 
         /*
          * test hints
          */
-        ddl = "/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*//!tddl:enable_recyclebin=true*/"
+        ddl = "/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*//!tddl:enable_recyclebin=true*//*DDL_ID=1234*/"
             + "drop table test_recyclebin_tb";
         String sql = buildDdlEventSql("", ddl, "utf8mb4", "utf8_general_cs", "111111", ddl);
         Assert.assertEquals(
             "# POLARX_ORIGIN_SQL=/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*/ /*tddl:enable_recyclebin=true*/ DROP TABLE test_recyclebin_tb\n"
                 + "# POLARX_TSO=111111\n"
-                + "/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*/ /*tddl:enable_recyclebin=true*/ DROP TABLE test_recyclebin_tb",
+                + "# POLARX_DDL_ID=1234\n"
+                + "/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*/\n/*tddl:enable_recyclebin=true*/\nDROP TABLE test_recyclebin_tb",
             sql);
     }
 
     @Test
     public void testPrivateDDLSwitch() {
-        setConfig(ConfigKeys.TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
         String sql1 =
             "ALTER TABLE t_order ADD UNIQUE GLOBAL INDEX `g_i_buyer` (`buyer_id`) COVERING (`order_snapshot`) PARTITION BY KEY (`buyer_id`) PARTITIONS 4";
         String sql2 = buildDdlEventSql("", sql1, null, "", "",
@@ -456,7 +535,7 @@ public class DDLConverterTest extends BaseTest {
         Assert.assertTrue(sql2.contains("# POLARX_ORIGIN_SQL="));
         Assert.assertTrue(sql2.contains("# POLARX_TSO="));
 
-        setConfig(ConfigKeys.TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "false");
+        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "false");
         String sql3 = "alter table nnn change column b bb bigint ALGORITHM=XXX";
         String sql4 = buildDdlEventSql(sql3, null, null, "");
         Assert.assertFalse(sql4.contains("# POLARX_ORIGIN_SQL="));
@@ -477,8 +556,7 @@ public class DDLConverterTest extends BaseTest {
             + ") ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='云挂机人群包配置';";
 
         String convertSql = buildDdlEventSql(sql, "utf8", "utf8", "123456");
-        convertSql = StringUtils.substringAfter(convertSql, "# POLARX_ORIGIN_SQL=");
-        convertSql = StringUtils.substringBefore(convertSql, ";");
+        convertSql = extractPolarxOriginSql(convertSql, false);
         Assert.assertFalse(StringUtils.contains(convertSql, "\n"));
     }
 
@@ -491,8 +569,7 @@ public class DDLConverterTest extends BaseTest {
             + " id varchar(24),\n"
             + " k int \n) "
             + " DEFAULT CHARACTER SET = utf8 DEFAULT COLLATE = utf8_general_ci \n"
-            + " PARTITION BY KEY (id, k)PARTITIONS 1 \n"
-            + " AUTO_SPLIT 'ON'";
+            + " PARTITION BY KEY (id, k)PARTITIONS 1";
         sql = DDLConverter.processDdlSqlCharacters(sql, "utf8mb4", "utf8mb4_general_ci");
         memoryTableMeta.apply(null, "test_db", sql, null);
         TableMeta tableMeta = memoryTableMeta.find("test_db", "lbkkfddjvc");
@@ -502,8 +579,7 @@ public class DDLConverterTest extends BaseTest {
         sql = "CREATE TABLE xxvvzz (\n"
             + " id varchar(24),\n"
             + " k int \n) "
-            + " PARTITION BY KEY (id, k)PARTITIONS 1 \n"
-            + " AUTO_SPLIT 'ON'";
+            + " PARTITION BY KEY (id, k)PARTITIONS 1";
         sql = DDLConverter.processDdlSqlCharacters(sql, "utf8mb4", "utf8mb4_general_ci");
         memoryTableMeta.apply(null, "test_db", sql, null);
         tableMeta = memoryTableMeta.find("test_db", "xxvvzz");
@@ -512,11 +588,409 @@ public class DDLConverterTest extends BaseTest {
         sql = "CREATE TABLE xxvvzz (\n"
             + " id varchar(24),\n"
             + " k int \n) "
-            + " PARTITION BY KEY (id, k)PARTITIONS 1 \n"
-            + " AUTO_SPLIT 'ON'";
+            + " PARTITION BY KEY (id, k)PARTITIONS 1";
         sql = DDLConverter.processDdlSqlCharacters(sql, null, "utf8mb4_general_ci");
         memoryTableMeta.apply(null, "test_db", sql, null);
         tableMeta = memoryTableMeta.find("test_db", "xxvvzz");
         Assert.assertEquals("utf8mb4", tableMeta.getCharset());
+    }
+
+    @Test
+    public void testHintsFilter() {
+        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        setConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST, "GSI_BACKFILL_POSITION_MARK,GSI_BACKFILL_BATCH_SIZE,ALLOW_ADD_GSI");
+        String sql =
+            "/*+TDDL:CMD_EXTRA(GSI_BACKFILL_BATCH_SIZE=2, gsi_backfill_position_mark = \"[{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100001\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_0\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100002\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_1\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_2\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_3\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_4\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100000\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_5\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"}]\", ALLOW_ADD_GSI=TRUE)*/ "
+                + "CREATE GLOBAL INDEX g_resume_id ON gsi_backfill_resume_primary (id) COVERING (c_bit_1, c_bit_8, c_bit_16, c_bit_32, c_bit_64, c_tinyint_1, c_tinyint_1_un, c_tinyint_4, c_tinyint_4_un, c_tinyint_8, c_tinyint_8_un, c_smallint_1, c_smallint_16, c_smallint_16_un, c_mediumint_1, c_mediumint_24, c_mediumint_24_un, c_int_1, c_int_32, c_int_32_un, c_bigint_1, c_bigint_64, c_bigint_64_un, c_decimal, c_decimal_pr, c_float, c_float_pr, c_float_un, c_double, c_double_pr, c_double_un, c_date, c_datetime, c_datetime_1, c_datetime_3, c_datetime_6, c_timestamp_1, c_timestamp_3, c_timestamp_6, c_time, c_time_1, c_time_3, c_time_6, c_year, c_year_4, c_char, c_varchar, c_binary, c_varbinary, c_blob_tiny, c_blob, c_blob_medium, c_blob_long, c_text_tiny, c_text, c_text_medium, c_text_long, c_enum, c_set, c_json, c_geometory, c_point, c_linestring, c_polygon, c_multipoint, c_multilinestring, c_multipolygon) DBPARTITION BY HASH(id) TBPARTITION BY HASH(id) TBPARTITIONS 7";
+        StringBuilder sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        String expectSql =
+            "# POLARX_ORIGIN_SQL=/*+TDDL:CMD_EXTRA(  )*/ CREATE GLOBAL INDEX g_resume_id ON gsi_backfill_resume_primary (id) COVERING (c_bit_1, c_bit_8, c_bit_16, c_bit_32, c_bit_64, c_tinyint_1, c_tinyint_1_un, c_tinyint_4, c_tinyint_4_un, c_tinyint_8, c_tinyint_8_un, c_smallint_1, c_smallint_16, c_smallint_16_un, c_mediumint_1, c_mediumint_24, c_mediumint_24_un, c_int_1, c_int_32, c_int_32_un, c_bigint_1, c_bigint_64, c_bigint_64_un, c_decimal, c_decimal_pr, c_float, c_float_pr, c_float_un, c_double, c_double_pr, c_double_un, c_date, c_datetime, c_datetime_1, c_datetime_3, c_datetime_6, c_timestamp_1, c_timestamp_3, c_timestamp_6, c_time, c_time_1, c_time_3, c_time_6, c_year, c_year_4, c_char, c_varchar, c_binary, c_varbinary, c_blob_tiny, c_blob, c_blob_medium, c_blob_long, c_text_tiny, c_text, c_text_medium, c_text_long, c_enum, c_set, c_json, c_geometory, c_point, c_linestring, c_polygon, c_multipoint, c_multilinestring, c_multipolygon) DBPARTITION BY HASH(id) TBPARTITION BY HASH(id) TBPARTITIONS 7\n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+
+        setConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST,
+            "GSI_BACKFILL_POSITION_MARK,FP_PAUSE_AFTER_DDL_TASK_EXECUTION,FP_STATISTIC_SAMPLE_ERROR");
+        sql = "/*+TDDL:cmd_extra(FP_PAUSE_AFTER_DDL_TASK_EXECUTION='AlterTablePhyDdlTask')*/ "
+            + "ALTER TABLE wumu_test DROP COLUMN b";
+        sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        expectSql =
+            "# POLARX_ORIGIN_SQL=/*+TDDL:cmd_extra()*/ ALTER TABLE wumu_test DROP COLUMN b\n"
+                + "# POLARX_TSO=\n" + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+
+        sql = "/*+TDDL:cmd_extra(FP_STATISTIC_SAMPLE_ERROR=true)*/ "
+            + "ALTER TABLE t1 ADD GLOBAL INDEX gsi1 (a) PARTITION BY KEY (a) PARTITIONS 5 WITH TABLEGROUP= tg4723 IMPLICIT";
+        sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        expectSql =
+            "# POLARX_ORIGIN_SQL=/*+TDDL:cmd_extra()*/ ALTER TABLE t1 ADD GLOBAL INDEX gsi1 (a) PARTITION BY KEY (a) PARTITIONS 5 WITH TABLEGROUP= tg4723 IMPLICIT\n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+    }
+
+    @Test
+    public void testRemoveLocalityForCreateTableGroup() {
+        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        String sql = "CREATE TABLEGROUP tg1 "
+            + "LOCALITY = 'dn=xgdn-ddl-230916222943-5eb4-xv8f-dn-0, xgdn-ddl-230916222943-5eb4-xv8f-dn-1'";
+        StringBuilder sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        String expectSql = "# POLARX_ORIGIN_SQL=CREATE TABLEGROUP tg1\n" + "# POLARX_TSO=\n" + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+
+        sql = "CREATE TABLEGROUP sellerid_tg "
+            + "PARTITION BY LIST COLUMNS ( BIGINT) SUBPARTITION BY KEY ( BIGINT,  BIGINT) "
+            + "( PARTITION p1 VALUES IN (1, 2) LOCALITY 'dn=ziyang-116-do-not-delete-kwmg-dn-0' SUBPARTITIONS 1,  "
+            + "  PARTITION p2 VALUES IN (3, 4) LOCALITY 'dn=ziyang-116-do-not-delete-kwmg-dn-1' SUBPARTITIONS 2,  "
+            + "  PARTITION p3 VALUES IN (5, 6) LOCALITY 'dn=ziyang-116-do-not-delete-kwmg-dn-0' SUBPARTITIONS 4,  "
+            + "  PARTITION p_default VALUES IN (DEFAULT) LOCALITY'dn=ziyang-116-do-not-delete-kwmg-dn-1' SUBPARTITIONS 4 )";
+        sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        expectSql = "# POLARX_ORIGIN_SQL=CREATE TABLEGROUP sellerid_tg PARTITION BY LIST COLUMNS ( BIGINT) "
+            + "SUBPARTITION BY KEY ( BIGINT,  BIGINT) ( "
+            + "PARTITION p1 VALUES IN (1, 2) SUBPARTITIONS 1,  "
+            + "PARTITION p2 VALUES IN (3, 4) SUBPARTITIONS 2,  "
+            + "PARTITION p3 VALUES IN (5, 6) SUBPARTITIONS 4,  "
+            + "PARTITION p_default VALUES IN (DEFAULT) SUBPARTITIONS 4 )\n" + "# POLARX_TSO=\n" + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+    }
+
+    @Test
+    public void testRemoveLocalityForGlobalIndex() {
+        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+
+        // create index
+        String sql = "CREATE UNIQUE GLOBAL INDEX `W9H4uo` ON `8f6` (`Du3z` DESC)"
+            + "PARTITION BY LIST (`Du3z`) ( "
+            + "     PARTITION `4JUbhOvlVLPrXZ` VALUES IN (11) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-0  ',  "
+            + "     PARTITION `GcFjzi29FV0Nr` VALUES IN (86, 72) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-1 , ziyang-107-do-not-delete-l4rm-dn-1, ziyang-107-do-not-delete-l4rm-dn-0 ',  "
+            + "     PARTITION `BmEnjPq` VALUES IN (68, 118) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-0  ', "
+            + "     PARTITION `t61YgnWpjT` VALUES IN (47) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-1  ' ) "
+            + "USING HASH";
+        StringBuilder sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        String expectSql =
+            "# POLARX_ORIGIN_SQL=CREATE UNIQUE GLOBAL INDEX `W9H4uo` ON `8f6` (`Du3z` DESC) PARTITION BY LIST (`Du3z`) ( PARTITION `4JUbhOvlVLPrXZ` VALUES IN (11),  PARTITION `GcFjzi29FV0Nr` VALUES IN (86, 72),  PARTITION `BmEnjPq` VALUES IN (68, 118),  PARTITION `t61YgnWpjT` VALUES IN (47) ) USING HASH\n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+
+        // alter table add index
+        sql = "alter table t1 add UNIQUE GLOBAL INDEX `W9H4uo` (`Du3z` DESC)"
+            + "PARTITION BY LIST (`Du3z`) ( "
+            + "     PARTITION `4JUbhOvlVLPrXZ` VALUES IN (11) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-0  ',  "
+            + "     PARTITION `GcFjzi29FV0Nr` VALUES IN (86, 72) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-1 , ziyang-107-do-not-delete-l4rm-dn-1, ziyang-107-do-not-delete-l4rm-dn-0 ',  "
+            + "     PARTITION `BmEnjPq` VALUES IN (68, 118) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-0  ', "
+            + "     PARTITION `t61YgnWpjT` VALUES IN (47) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-1  ' ) "
+            + "USING HASH";
+        sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        expectSql =
+            "# POLARX_ORIGIN_SQL=ALTER TABLE t1 ADD UNIQUE GLOBAL INDEX `W9H4uo` USING HASH (`Du3z` DESC) PARTITION BY LIST (`Du3z`) ( PARTITION `4JUbhOvlVLPrXZ` VALUES IN (11),  PARTITION `GcFjzi29FV0Nr` VALUES IN (86, 72),  PARTITION `BmEnjPq` VALUES IN (68, 118),  PARTITION `t61YgnWpjT` VALUES IN (47) )\n"
+                + "# POLARX_TSO=\n" + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+
+        // create table with gsi
+        sql = "create table t1 ("
+            + "id bigint primary key , "
+            + "Du3z bigint not null, "
+            + "global index `W9H4uo` (`Du3z` DESC)"
+            + "PARTITION BY LIST (`Du3z`) ( "
+            + "     PARTITION `4JUbhOvlVLPrXZ` VALUES IN (11) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-0  ',  "
+            + "     PARTITION `GcFjzi29FV0Nr` VALUES IN (86, 72) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-1 , ziyang-107-do-not-delete-l4rm-dn-1, ziyang-107-do-not-delete-l4rm-dn-0 ',  "
+            + "     PARTITION `BmEnjPq` VALUES IN (68, 118) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-0  ', "
+            + "     PARTITION `t61YgnWpjT` VALUES IN (47) LOCALITY 'dn= ziyang-107-do-not-delete-l4rm-dn-1  ' ) "
+            + "USING HASH" + ")";
+        sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        expectSql =
+            "# POLARX_ORIGIN_SQL=CREATE TABLE t1 ( id bigint PRIMARY KEY, Du3z bigint NOT NULL, GLOBAL INDEX `W9H4uo` USING HASH(`Du3z` DESC) PARTITION BY LIST (`Du3z`) ( PARTITION `4JUbhOvlVLPrXZ` VALUES IN (11),  PARTITION `GcFjzi29FV0Nr` VALUES IN (86, 72),  PARTITION `BmEnjPq` VALUES IN (68, 118),  PARTITION `t61YgnWpjT` VALUES IN (47) ) ) DEFAULT CHARACTER SET = utf8 DEFAULT COLLATE = utf8_general_cs\n"
+                + "# POLARX_TSO=\n" + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+    }
+
+    @Test
+    public void testRemoveLocalityForPartitionBy() {
+        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+
+        String sql = "ALTER TABLE t1 PARTITION BY HASH (a) "
+            + "PARTITIONS 16 LOCALITY = 'DN=ZIYANG-128-DO-NOT-DELETE-JCCK-DN-1' WITH TABLEGROUP=tg3588 IMPLICIT";
+        StringBuilder sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        String expectSql = "# POLARX_ORIGIN_SQL=ALTER TABLE t1 PARTITION BY HASH (a) PARTITIONS 16 "
+            + "WITH TABLEGROUP=tg3588 IMPLICIT\n" + "# POLARX_TSO=\n" + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+
+        sql = "ALTER TABLE t1 SINGLE "
+            + "LOCALITY = 'DN=ZIYANG-129-DO-NOT-DELETE-RLP2-DN-1' WITH TABLEGROUP=single_tg4465 IMPLICIT";
+        sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        expectSql = "# POLARX_ORIGIN_SQL=ALTER TABLE t1 SINGLE WITH TABLEGROUP=single_tg4465 IMPLICIT\n"
+            + "# POLARX_TSO=\n" + "# POLARX_DDL_ID=0\n";
+        Assert.assertEquals(expectSql, sb.toString());
+    }
+
+    @Test
+    public void testNewlineEscape() {
+        String sql = "create table t1 \n "
+            + "(id bigint comment 'ssdd\ndddd' \n,"
+            + "name varchar(100) comment 'uiui\nwerw' \n,"
+            + " primary key(id) \n"
+            + ")";
+        StringBuilder sb = new StringBuilder();
+        DDLConverter.buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        Assert.assertEquals("# POLARX_ORIGIN_SQL_ENCODE=BASE64\n"
+            + "# POLARX_ORIGIN_SQL=Q1JFQVRFIFRBQkxFIHQxICggaWQgYmlnaW50IENPTU1FTlQgJ3NzZGQKZGRkZCcsIG5hbWUgdmFyY2hhcigxMDApIENPTU1FTlQgJ3VpdWkKd2VydycsIFBSSU1BUlkgS0VZIChpZCkgKSBERUZBVUxUIENIQVJBQ1RFUiBTRVQgPSB1dGY4IERFRkFVTFQgQ09MTEFURSA9IHV0ZjhfZ2VuZXJhbF9jcw==\n"
+            + "# POLARX_TSO=\n"
+            + "# POLARX_DDL_ID=0\n", sb.toString());
+
+        String decodeSql = extractPolarxOriginSql(sb.toString());
+        Assert.assertEquals("CREATE TABLE t1 ( id bigint COMMENT 'ssdd\n"
+            + "dddd', name varchar(100) COMMENT 'uiui\n"
+            + "werw', PRIMARY KEY (id) ) DEFAULT CHARACTER SET = utf8 DEFAULT COLLATE = utf8_general_cs", decodeSql);
+    }
+
+    @Test
+    public void testModifyWithTableGroup() {
+        String ddl = "ALTER TABLE t_modify MODIFY COLUMN b mediumint WITH TABLEGROUP=tg1216 IMPLICIT, "
+            + "INDEX gsi_2 WITH TABLEGROUP=tg1221 IMPLICIT, INDEX gsi_1 WITH TABLEGROUP=tg1219 IMPLICIT";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "t_modify", "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals("ALTER TABLE t_modify MODIFY COLUMN b mediumint", sb.toString());
+    }
+
+    @Test
+    public void testRemoveIndexVisible() {
+        String sql = "CREATE TABLE t_order ( "
+            + "`id` bigint(11), "
+            + "`order_id` varchar(20),"
+            + "`buyer_id` varchar(20), "
+            + "INDEX `g_order_id`(order_id) INVISIBLE  ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "wp_users_user_email", "utf8mb4", "utf8_general_cs", sql);
+        Assert.assertEquals(
+            "CREATE TABLE `wp_users_user_email` ( "
+                + "`id` bigint(11), "
+                + "`order_id` varchar(20), "
+                + "`buyer_id` varchar(20), "
+                + "INDEX `g_order_id`(order_id) ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci",
+            sb.toString());
+    }
+
+    @Test
+    public void testAutoIncrementUnitCount() {
+        String sql = "CREATE TABLE group_seq_unit_partition ( id int PRIMARY KEY AUTO_INCREMENT UNIT COUNT 4 INDEX 3 ) "
+            + "DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "t_modify", "utf8mb4", "utf8_general_cs", sql);
+        Assert.assertEquals("CREATE TABLE `t_modify` ("
+                + " id int PRIMARY KEY AUTO_INCREMENT ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci",
+            sb.toString());
+    }
+
+    @Test
+    public void testColumnarIndex() {
+        String sql = "CREATE TABLE `check_cci_meta_test_prim_auto_1` ( "
+            + "`pk` int(11) NOT NULL AUTO_INCREMENT, "
+            + "`c1` int(11) DEFAULT NULL, "
+            + "`c2` int(11) DEFAULT NULL, "
+            + "`c3` int(11) DEFAULT NULL, "
+            + "PRIMARY KEY (`pk`), "
+            + "CLUSTERED COLUMNAR INDEX `check_cci_meta_test_cci_auto_1`(`c2`) WITH TABLEGROUP=columnar_tg1612 IMPLICIT ) "
+            + "ENGINE = 'INNODB' DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci WITH TABLEGROUP = tg1611 IMPLICIT ";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "t_modify", "utf8mb4", "utf8_general_cs", sql);
+        Assert.assertEquals(
+            "CREATE TABLE `t_modify` ( "
+                + "`pk` int(11) NOT NULL AUTO_INCREMENT, "
+                + "`c1` int(11) DEFAULT NULL, "
+                + "`c2` int(11) DEFAULT NULL, "
+                + "`c3` int(11) DEFAULT NULL, "
+                + "PRIMARY KEY (`pk`), "
+                + "INDEX `check_cci_meta_test_cci_auto_1`(`c2`) ) "
+                + "ENGINE = 'INNODB' DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci",
+            sb.toString());
+    }
+
+    @Test
+    public void testDictionaryColumn() {
+        String sql = "CREATE TABLE `region` ("
+            + "`r_regionkey` int(11) NOT NULL, "
+            + "`r_name` varchar(25) NOT NULL, "
+            + "`r_comment` varchar(152) DEFAULT NULL, "
+            + "PRIMARY KEY (`r_regionkey`), "
+            + "INDEX `region_col_index`(`r_regionkey`) DICTIONARY_COLUMNS = 'r_name' ) "
+            + "ENGINE = 'INNODB' DEFAULT CHARSET = latin1 DEFAULT COLLATE = latin1_swedish_ci";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "t_modify", "utf8mb4", "utf8_general_cs", sql);
+        Assert.assertEquals("CREATE TABLE `t_modify` ( "
+                + "`r_regionkey` int(11) NOT NULL, "
+                + "`r_name` varchar(25) NOT NULL, "
+                + "`r_comment` varchar(152) DEFAULT NULL, "
+                + "PRIMARY KEY (`r_regionkey`), "
+                + "INDEX `region_col_index`(`r_regionkey`) ) ENGINE = 'INNODB' DEFAULT CHARSET = latin1 DEFAULT COLLATE = latin1_swedish_ci",
+            sb.toString());
+    }
+
+    @Test
+    public void testAddAutoShardKey() {
+        String sql1 = "create table t2(id bigint primary key,name varchar(100))partition by key(name) partitions 4;";
+        String sql2 = "CREATE TABLE t2 (\n"
+            + "  id bigint PRIMARY KEY,\n"
+            + "  name varchar(100),\n"
+            + "  INDEX `auto_shard_key_name` USING BTREE(`NAME`(100))\n"
+            + ") DEFAULT CHARSET = `utf8mb4` DEFAULT COLLATE = `utf8mb4_general_ci`\n"
+            + "PARTITION BY KEY (name) PARTITIONS 4";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "t_modify", "utf8mb4", "utf8_general_cs", sql1, sql2);
+        Assert.assertEquals(
+            "CREATE TABLE `t_modify` ( "
+                + "id bigint PRIMARY KEY, "
+                + "name varchar(100), "
+                + "INDEX `auto_shard_key_name` USING BTREE(`NAME`(100)) ) "
+                + "DEFAULT CHARACTER SET = utf8 DEFAULT COLLATE = utf8_general_cs;",
+            sb.toString());
+
+        String sql3 =
+            "CREATE TABLE `__test_gsi_dml_no_unique_one_index_base` ( "
+                + "`pk` bigint(12) NOT NULL, "
+                + "`integer_test` int(11) DEFAULT NULL, "
+                + "`varchar_test` varchar(255) DEFAULT NULL, "
+                + "`char_test` char(255) DEFAULT NULL, "
+                + "`blob_test` blob, "
+                + "`tinyint_test` tinyint(4) DEFAULT NULL, "
+                + "`tinyint_1bit_test` tinyint(1) DEFAULT NULL, "
+                + "`smallint_test` smallint(6) DEFAULT NULL, "
+                + "`mediumint_test` mediumint(9) DEFAULT NULL, "
+                + "`bit_test` bit(1) DEFAULT NULL, "
+                + "`bigint_test` bigint(20) UNSIGNED DEFAULT NULL, "
+                + "`float_test` float DEFAULT NULL, "
+                + "`double_test` double DEFAULT NULL, "
+                + "`decimal_test` decimal(10, 0) DEFAULT NULL, "
+                + "`date_test` date DEFAULT NULL, "
+                + "`time_test` time DEFAULT NULL, "
+                + "`datetime_test` datetime DEFAULT NULL, "
+                + "`timestamp_test` timestamp NULL DEFAULT NULL, "
+                + "`year_test` year(4) DEFAULT NULL, "
+                + "`mediumtext_test` mediumtext, "
+                + "PRIMARY KEY (`pk`), KEY `auto_shard_key_integer_test` USING BTREE (`integer_test`), "
+                + "GLOBAL INDEX `__test_gsi_dml_no_unique_one_index_index1`(`bigint_test`) COVERING (`pk`, `integer_test`, `varchar_test`, `char_test`, `blob_test`, `tinyint_test`, `tinyint_1bit_test`, `smallint_test`, `mediumint_test`, `bit_test`, `float_test`, `double_test`, `decimal_test`, `date_test`, `time_test`, `datetime_test`, `timestamp_test`, `year_test`, `mediumtext_test`) "
+                + "DBPARTITION BY HASH(`bigint_test`) TBPARTITION BY HASH(`bigint_test`) TBPARTITIONS 4 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci DBPARTITION BY hash(`integer_test`) TBPARTITION BY hash(`integer_test`) TBPARTITIONS 4;";
+        String sql4 = "CREATE TABLE `__test_gsi_dml_no_unique_one_index_base` (\n"
+            + "  `pk` bigint(12) NOT NULL,\n"
+            + "  `integer_test` int(11) DEFAULT NULL,\n"
+            + "  `varchar_test` varchar(255) DEFAULT NULL,\n"
+            + "  `char_test` char(255) DEFAULT NULL,\n"
+            + "  `blob_test` blob,\n"
+            + "  `tinyint_test` tinyint(4) DEFAULT NULL,\n"
+            + "  `tinyint_1bit_test` tinyint(1) DEFAULT NULL,\n"
+            + "  `smallint_test` smallint(6) DEFAULT NULL,\n"
+            + "  `mediumint_test` mediumint(9) DEFAULT NULL,\n"
+            + "  `bit_test` bit(1) DEFAULT NULL,\n"
+            + "  `bigint_test` bigint(20) UNSIGNED DEFAULT NULL,\n"
+            + "  `float_test` float DEFAULT NULL,\n"
+            + "  `double_test` double DEFAULT NULL,\n"
+            + "  `decimal_test` decimal(10, 0) DEFAULT NULL,\n"
+            + "  `date_test` date DEFAULT NULL,\n"
+            + "  `time_test` time DEFAULT NULL,\n"
+            + "  `datetime_test` datetime DEFAULT NULL,\n"
+            + "  `timestamp_test` timestamp NULL DEFAULT NULL,\n"
+            + "  `year_test` year(4) DEFAULT NULL,\n"
+            + "  `mediumtext_test` mediumtext,\n"
+            + "  PRIMARY KEY (`pk`),\n"
+            + "  KEY `auto_shard_key_integer_test` USING BTREE (`integer_test`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4\n"
+            + "DBPARTITION BY hash(`integer_test`)\n"
+            + "TBPARTITION BY hash(`integer_test`) TBPARTITIONS 4 COLLATE `utf8mb4_general_ci`";
+        StringBuilder sb2 = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb2, "t_modify", "utf8mb4", "utf8_general_cs", sql3, sql4);
+        Assert.assertEquals(
+            "CREATE TABLE `t_modify` ( "
+                + "`pk` bigint(12) NOT NULL, "
+                + "`integer_test` int(11) DEFAULT NULL, "
+                + "`varchar_test` varchar(255) DEFAULT NULL, "
+                + "`char_test` char(255) DEFAULT NULL, "
+                + "`blob_test` blob, "
+                + "`tinyint_test` tinyint(4) DEFAULT NULL, "
+                + "`tinyint_1bit_test` tinyint(1) DEFAULT NULL, "
+                + "`smallint_test` smallint(6) DEFAULT NULL, "
+                + "`mediumint_test` mediumint(9) DEFAULT NULL, "
+                + "`bit_test` bit(1) DEFAULT NULL, "
+                + "`bigint_test` bigint(20) UNSIGNED DEFAULT NULL, "
+                + "`float_test` float DEFAULT NULL, "
+                + "`double_test` double DEFAULT NULL, "
+                + "`decimal_test` decimal(10, 0) DEFAULT NULL, "
+                + "`date_test` date DEFAULT NULL, "
+                + "`time_test` time DEFAULT NULL, "
+                + "`datetime_test` datetime DEFAULT NULL, "
+                + "`timestamp_test` timestamp NULL DEFAULT NULL, "
+                + "`year_test` year(4) DEFAULT NULL, "
+                + "`mediumtext_test` mediumtext, "
+                + "PRIMARY KEY (`pk`), "
+                + "KEY `auto_shard_key_integer_test` USING BTREE (`integer_test`), "
+                + "INDEX `__test_gsi_dml_no_unique_one_index_index1`(`bigint_test`) ) "
+                + "ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci;",
+            sb2.toString());
+
+        String sql5 = "CREATE TABLE t_normal_new_tmp_test_1713070247515 LIKE t_normal_new";
+        String sql6 = "CREATE TABLE `t_normal_new_tmp_test_1713070247515` (\n"
+            + "  `ID` bigint(20) NOT NULL AUTO_INCREMENT,\n"
+            + "  `JOB_ID` bigint(20) NOT NULL DEFAULT '0',\n"
+            + "  `EXT_ID` bigint(20) NOT NULL DEFAULT '0',\n"
+            + "  `TV_ID` bigint(20) NOT NULL DEFAULT '0',\n"
+            + "  `SCHEMA_NAME` varchar(200) NOT NULL,\n"
+            + "  `TABLE_NAME` varchar(200) NOT NULL,\n"
+            + "  `GMT_CREATED` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+            + "  `DDL_SQL` text NOT NULL,\n"
+            + "  PRIMARY KEY (`ID`),\n"
+            + "  UNIQUE KEY `idx_job` (`JOB_ID`),\n"
+            + "  KEY `idx1` (`SCHEMA_NAME`),\n"
+            + "  KEY `auto_shard_key_job_id` USING BTREE (`JOB_ID`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 AUTO_INCREMENT = 1900011\n"
+            + "DBPARTITION BY hash(`ID`)\n"
+            + "TBPARTITION BY hash(`ID`) TBPARTITIONS 8 COLLATE `utf8mb4_general_ci`";
+        StringBuilder sb3 = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb3, "t_normal_new_tmp_test_1713070247515", "utf8mb4",
+            "utf8_general_cs", sql5, sql6);
+        Assert.assertEquals("CREATE TABLE t_normal_new_tmp_test_1713070247515 LIKE t_normal_new", sb3.toString());
+    }
+
+    @Test
+    public void testAutoIncrementSep() {
+        String sql = "create table if not exists shardingDestWithGroup5_fn4n ("
+            + "c1 int auto_increment unit count 1 index 0 step 100, "
+            + "c2 int, primary key (c1)) dbpartition by hash(c1)";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "shardingdestwithgroup5_fn4n", "utf8mb4",
+            "utf8mb4_general_ci", sql);
+        Assert.assertEquals(
+            "CREATE TABLE IF NOT EXISTS `shardingdestwithgroup5_fn4n` ( "
+                + "c1 int AUTO_INCREMENT, "
+                + "c2 int, PRIMARY KEY (c1) ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci",
+            sb.toString());
+    }
+
+    @Test
+    public void testTryRemoveAutoShardKey() {
+        String dropIndexSql1 = "drop index auto_shard_key_xx on t1";
+        String dropIndexSql2 = "alter table t1 drop index auto_shard_key_xx";
+        String dropIndexSql3 = "drop index idx on t1";
+        String dropIndexSql4 = "alter table t1 drop index idx";
+        String str1 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql1, i -> false);
+        String str2 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql2, i -> false);
+        String str3 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql3, i -> false);
+        String str4 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql4, i -> false);
+        String str5 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql1, i -> true);
+        String str6 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql2, i -> true);
+        Assert.assertNull(str1);
+        Assert.assertEquals("ALTER TABLE t1", str2);
+        Assert.assertEquals(dropIndexSql3, str3);
+        Assert.assertEquals(dropIndexSql4, str4);
+        Assert.assertEquals(dropIndexSql1, str5);
+        Assert.assertEquals(dropIndexSql2, str6);
     }
 }

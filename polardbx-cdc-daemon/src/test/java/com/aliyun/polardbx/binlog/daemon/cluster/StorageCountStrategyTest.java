@@ -25,6 +25,7 @@ import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -52,8 +53,8 @@ public class StorageCountStrategyTest extends BaseTestWithGmsTables {
         );
         GlobalBinlogTopologyBuilder storageCountStrategy =
             new GlobalBinlogTopologyBuilder(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID));
-        List<BinlogTaskConfig> apply =
-            storageCountStrategy.buildTopology(capacity, storageInfo, ExecutionConfig.ORIGIN_TSO, 100, "");
-        Assert.assertEquals(3, apply.size());
+        Pair<Long, List<BinlogTaskConfig>> apply =
+            storageCountStrategy.buildTopology(capacity, storageInfo, ExecutionConfig.ORIGIN_TSO, 100, "", 1);
+        Assert.assertEquals(3, apply.getValue().size());
     }
 }

@@ -17,6 +17,7 @@ package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Constructor;
@@ -24,6 +25,7 @@ import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.util.Map;
 
+@Slf4j
 public class PolarxTableMetaProxy implements TableMetaTSDB {
 
     private Object rplTableMeta;
@@ -34,6 +36,7 @@ public class PolarxTableMetaProxy implements TableMetaTSDB {
 
     public PolarxTableMetaProxy(DataSource dataSource) {
         this.dataSource = dataSource;
+        log.info("polardbx table meta proxy is created");
     }
 
     @Override

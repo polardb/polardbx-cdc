@@ -122,6 +122,19 @@
         <table schema="polardbx_meta_db_polardbx" tableName="rpl_stat_metrics" domainObjectName="RplStatMetrics">
             <generatedKey column="id" sqlStatement="MySql" identity="true"/>
         </table>
+        <table schema="polardbx_meta_db_polardbx" tableName="rpl_full_valid_task" domainObjectName="RplFullValidTask"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="rpl_full_valid_sub_task"
+               domainObjectName="RplFullValidSubTask"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="rpl_full_valid_diff" domainObjectName="RplFullValidDiff"/>
         -->
+
+        <!-- Columnar 相关表 -->
+        <!--
+        <table schema="polardbx_meta_db_polardbx" tableName="columnar_node_info" domainObjectName="ColumnarNodeInfo"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="columnar_task" domainObjectName="ColumnarTask"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="columnar_task_config" domainObjectName="ColumnarTaskConfig"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="columnar_checkpoints" domainObjectName="ColumnarCheckpoints"/>
+        -->
+        
     </context>
 </generatorConfiguration>

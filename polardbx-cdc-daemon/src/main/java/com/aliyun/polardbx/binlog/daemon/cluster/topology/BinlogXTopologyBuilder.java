@@ -31,6 +31,7 @@ import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.google.common.collect.Lists;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -68,9 +69,10 @@ public class BinlogXTopologyBuilder {
         this.clusterId = clusterId;
     }
 
-    public List<BinlogTaskConfig> buildTopology(List<Container> containerList, List<StorageInfo> storageInfoList,
-                                                String expectedStorageTso, long newVersion,
-                                                ClusterSnapshot preClusterSnapshot) {
+    public Pair<Long, List<BinlogTaskConfig>> buildTopology(List<Container> containerList,
+                                                            List<StorageInfo> storageInfoList,
+                                                            String expectedStorageTso, long newVersion,
+                                                            ClusterSnapshot preClusterSnapshot, long serverId) {
         List<BinlogTaskConfig> result = Lists.newArrayList();
 
         prepareRecoverInfo(expectedStorageTso);
@@ -79,10 +81,10 @@ public class BinlogXTopologyBuilder {
         // 测试binlog下载功能开关
         boolean forceDownload = isForceDownload();
 
-        List<BinlogTaskConfig> dumperList =
-            buildDumpers(containerList, expectedStorageTso, newVersion, forceRecover, forceDownload);
+        List<BinlogTaskConfig> dumperList = buildDumpers(containerList, expectedStorageTso, newVersion,
+            forceRecover, forceDownload, serverId);
         List<BinlogTaskConfig> dispatcherList = buildDispatchers(containerList, storageInfoList,
-            expectedStorageTso, newVersion);
+            expectedStorageTso, newVersion, serverId);
 
         dumperList.forEach(d -> {
             ExecutionConfig executionConfig = JSONObject.parseObject(d.getConfig(), ExecutionConfig.class);
@@ -101,7 +103,7 @@ public class BinlogXTopologyBuilder {
                 .and(BinlogTaskConfigDynamicSqlSupport.role, isEqualTo(TaskType.DumperX.name())));
         compareDumperConfigAndReset(preDumperList, dumperList, forceRecover);
 
-        return result;
+        return Pair.of(serverId, result);
     }
 
     private static BinlogTaskConfig createTask(long id, TaskType taskType, Container container, String exeConfigStr,
@@ -109,7 +111,7 @@ public class BinlogXTopologyBuilder {
         return BinlogTaskConfig.builder()
             .taskName(taskType.name() + "-" + Math.abs(id))
             .containerId(container.getContainerId())
-            .ip(container.getNodeHttpAddress())
+            .ip(container.getIp())
             .port(container.holdPort())
             .config(exeConfigStr)
             .role(taskType.name())
@@ -119,7 +121,8 @@ public class BinlogXTopologyBuilder {
     }
 
     private List<BinlogTaskConfig> buildDumpers(List<Container> containerList, String expectedStorageTso,
-                                                long newVersion, boolean forceRecover, boolean forceDownload) {
+                                                long newVersion, boolean forceRecover, boolean forceDownload,
+                                                long serverId) {
         List<BinlogTaskConfig> result = new ArrayList<>();
         int dumperWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_DUMPER_WEIGHT);
         int taskWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_TASK_WEIGHT);
@@ -157,6 +160,7 @@ public class BinlogXTopologyBuilder {
             exeConfig.setTimestamp(System.currentTimeMillis());
             exeConfig.setStreamNameSet(v);
             exeConfig.setRuntimeVersion(newVersion);
+            exeConfig.setServerId(serverId);
 
             BinlogTaskConfig taskConfig = createTask(container.getContainerId().hashCode(), TaskType.DumperX,
                 container, JSONObject.toJSONString(exeConfig), newVersion);
@@ -194,7 +198,7 @@ public class BinlogXTopologyBuilder {
     }
 
     private List<BinlogTaskConfig> buildDispatchers(List<Container> containerList, List<StorageInfo> storageInfoList,
-                                                    String expectedStorageTso, long newVersion) {
+                                                    String expectedStorageTso, long newVersion, long serverId) {
         sortByFreeResourceDesc(containerList);
         int dispatcherMemUnit = DynamicApplicationConfig.getInt(BINLOGX_SCHEDULE_DISPATCHER_MEMORY_UNIT);
         int dispatcherMinMem = DynamicApplicationConfig.getInt(BINLOGX_SCHEDULE_DISPATCHER_MEMORY_MIN);
@@ -264,6 +268,7 @@ public class BinlogXTopologyBuilder {
                 config.setRecoverTsoMap(this.recoverTsoMap);
                 config.setRuntimeVersion(newVersion);
                 config.setSources(new ArrayList<>());
+                config.setServerId(serverId);
                 return config;
             });
             executionConfig.getSources().add(storageInfoList.get(i).getStorageInstId());

@@ -34,12 +34,14 @@ public class ClusterSnapshot {
     private String dumperMaster;
     private String dumperMasterNode;
     private String storageHistoryTso;
+    private Long serverId;
 
     public ClusterSnapshot() {
     }
 
     public ClusterSnapshot(long version, Long timestamp, Set<String> containers, Set<String> storages,
-                           String dumperMasterNode, String dumperMaster, String storageHistoryTso, String clusterType) {
+                           String dumperMasterNode, String dumperMaster, String storageHistoryTso,
+                           String clusterType, Long serverId) {
         if (version != 1L && timestamp == null) {
             throw new PolardbxException("timestamp can not be null.");
         }
@@ -60,6 +62,9 @@ public class ClusterSnapshot {
         if (version != 1L && StringUtils.isBlank(storageHistoryTso)) {
             throw new PolardbxException("storageHistoryTso can not be null or empty.");
         }
+        if (version != 1L && serverId == null) {
+            throw new PolardbxException("server_id can not be null.");
+        }
 
         this.version = version;
         this.timestamp = timestamp;
@@ -68,6 +73,7 @@ public class ClusterSnapshot {
         this.dumperMasterNode = dumperMasterNode;
         this.dumperMaster = dumperMaster;
         this.storageHistoryTso = storageHistoryTso;
+        this.serverId = serverId;
     }
 
     /**
@@ -131,5 +137,13 @@ public class ClusterSnapshot {
 
     public void setStorageHistoryTso(String storageHistoryTso) {
         this.storageHistoryTso = storageHistoryTso;
+    }
+
+    public Long getServerId() {
+        return serverId;
+    }
+
+    public void setServerId(Long serverId) {
+        this.serverId = serverId;
     }
 }

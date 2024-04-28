@@ -95,7 +95,7 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             }
 
             RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
-            if (runtimeMode == RuntimeMode.LOCAL) {
+            if (RuntimeMode.isLocalMode(runtimeMode)) {
                 return;
             }
 

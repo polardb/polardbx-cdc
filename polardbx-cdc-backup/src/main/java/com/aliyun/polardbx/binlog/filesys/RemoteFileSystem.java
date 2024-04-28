@@ -27,7 +27,9 @@ import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import org.mybatis.dynamic.sql.SqlBuilder;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -94,9 +96,16 @@ public class RemoteFileSystem implements IFileSystem {
     public List<CdcFile> listFiles() {
         List<CdcFile> result = new ArrayList<>();
         List<BinlogOssRecord> records = recordService.getRecordsOfExistingFiles(group, stream, clusterId);
+        int preserveDays = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_FILE_PRESERVE_DAYS);
+        // fix #52758531 避免正在dump的文件被清理掉
+        Date expireTime = new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(preserveDays - 1));
         for (BinlogOssRecord r : records) {
+            if (r.getGmtModified().before(expireTime)) {
+                continue;
+            }
             CdcFile f = new CdcFile(r.getBinlogFile(), this);
             f.setRecord(r);
+            f.setLocation("REMOTE");
             result.add(f);
         }
         return result;

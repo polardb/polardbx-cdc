@@ -21,6 +21,7 @@ import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.TableMetaTSDB;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
+import lombok.SneakyThrows;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,7 +81,8 @@ public class TableMetaCache {
         }
     }
 
-    public TableMeta getTableMeta(String schema, String table) throws Throwable {
+    @SneakyThrows
+    public TableMeta getTableMeta(String schema, String table) {
         TableMeta tableMeta = memoryTableMeta.find(schema, table);
         if (tableMeta == null) {
             tableMeta = getTableMetaFromDb(schema, table);
@@ -91,6 +93,10 @@ public class TableMetaCache {
             tableMeta.setCharset(dbCharset);
         }
         return tableMeta;
+    }
+
+    public TableMeta getTableMetaIfPresent(String schema, String table) {
+        return memoryTableMeta.find(schema, table);
     }
 
     public boolean apply(BinlogPosition position, String schema, String ddl) {

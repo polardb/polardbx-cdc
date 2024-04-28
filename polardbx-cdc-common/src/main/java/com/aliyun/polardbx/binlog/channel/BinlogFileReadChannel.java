@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.channel;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.math.NumberUtils;
 
 import java.io.Closeable;
@@ -26,6 +27,7 @@ import java.nio.channels.FileChannel;
 /**
  * @author chengjin
  */
+@Slf4j
 public class BinlogFileReadChannel {
     private final Channel channel;
     private final Closeable closeable;
@@ -71,7 +73,8 @@ public class BinlogFileReadChannel {
         try {
             return (int) parse(readWithPos.invoke(channel, dst, position));
         } catch (Exception e) {
-            throw new UnsupportedOperationException(e);
+            log.error("read from binlog file error", e);
+            throw new IOException("Read from file channel error!");
         }
     }
 
@@ -79,35 +82,35 @@ public class BinlogFileReadChannel {
         try {
             return (int) parse(read.invoke(channel, dst));
         } catch (Exception e) {
-            throw new UnsupportedOperationException(e);
+            log.error("read from binlog file error", e);
+            throw new IOException("Read from file channel error!");
         }
     }
 
-    public long position() {
+    public long position() throws IOException {
         try {
             return parse(getPos.invoke(channel));
         } catch (Exception e) {
-            throw new UnsupportedOperationException(e);
+            log.error("invoke position method error", e);
+            throw new IOException("Get position of file channel error!");
         }
     }
 
-    public long size() {
-        try {
-            return parse(size.invoke(channel));
-        } catch (Exception e) {
-            throw new UnsupportedOperationException(e);
-        }
-    }
-
-    private long parse(Object o) {
-        return NumberUtils.createLong(String.valueOf(o));
-    }
-
-    public void position(long newPos) {
+    public void position(long newPos) throws IOException {
         try {
             setPos.invoke(channel, newPos);
         } catch (Exception e) {
-            throw new UnsupportedOperationException(e);
+            log.error("invoke position method error", e);
+            throw new IOException("Set position of file channel error!");
+        }
+    }
+
+    public long size() throws IOException {
+        try {
+            return parse(size.invoke(channel));
+        } catch (Exception e) {
+            log.error("invoke size method error", e);
+            throw new IOException("Get size of file channel error!");
         }
     }
 
@@ -120,7 +123,12 @@ public class BinlogFileReadChannel {
                 closeable.close();
             }
         } catch (Exception e) {
-            throw new IOException(e);
+            log.error("invoke close method error", e);
+            throw new IOException("Close file channel error!");
         }
+    }
+
+    private long parse(Object o) {
+        return NumberUtils.createLong(String.valueOf(o));
     }
 }

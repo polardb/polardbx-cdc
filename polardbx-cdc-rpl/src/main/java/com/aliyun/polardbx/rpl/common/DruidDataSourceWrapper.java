@@ -74,6 +74,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
         // 关闭每次读取read-only状态,提升batch性能
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("readOnlyPropagatesToServer", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("connectTimeout", "1000");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("socketTimeout", "60000");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("autoReconnect", "true");
         // 将0000-00-00的时间类型返回null
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("zeroDateTimeBehavior", "convertToNull");
@@ -128,6 +129,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
         setValidConnectionCheckerClassName(MySqlValidConnectionChecker.class.getName());
         setExceptionSorterClassName(MySqlExceptionSorter.class.getName());
         setValidationQuery("SELECT 1");
+        setValidationQueryTimeout(2000);
         setInitialSize(minPoolSize);
         setMinIdle(minPoolSize);
         setMaxActive(maxPoolSize);

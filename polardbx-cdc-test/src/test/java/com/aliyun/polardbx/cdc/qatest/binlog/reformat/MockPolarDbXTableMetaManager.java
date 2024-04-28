@@ -39,7 +39,7 @@ public class MockPolarDbXTableMetaManager extends PolarDbXTableMetaManager {
     }
 
     @Override
-    public TableMeta findPhyTable(String schema, String table) {
+    public TableMeta findPhyTable(String schema, String table, boolean creatIfNotExist) {
         return phyTableMeta;
     }
 

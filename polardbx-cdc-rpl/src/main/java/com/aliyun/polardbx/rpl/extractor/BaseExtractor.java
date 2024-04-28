@@ -58,7 +58,7 @@ public class BaseExtractor {
         return running;
     }
 
-    protected void tryPersist(MessageEvent messageEvent, MySQLDBMSEvent mySQLDBMSEvent) {
+    public void tryPersist(MessageEvent messageEvent, MySQLDBMSEvent mySQLDBMSEvent) {
         if (mySQLDBMSEvent.isPersisted()) {
             messageEvent.persist();
         }

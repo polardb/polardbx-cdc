@@ -32,9 +32,9 @@ public class TPSLimiter implements FlowLimiter {
      * 对校验来说以校验的一个batch作为限流单位，默认为1000
      * 考虑实现方便，暂时未做统一化
      * */
-    private Integer tps;
-    private FlowLimiter target;
-    private RateLimiter rateLimiter;
+    private final Integer tps;
+    private final FlowLimiter target;
+    private final RateLimiter rateLimiter;
 
     public TPSLimiter(Integer tps, FlowLimiter target) {
         this.tps = tps;
@@ -77,8 +77,8 @@ public class TPSLimiter implements FlowLimiter {
         int nowSize = 0;
         List<Transaction> transferTransactions = new ArrayList<>();
         for (Transaction transaction : transactions) {
-            if (nowSize == 0 || nowSize + transaction.getEventSize() <= tps) {
-                nowSize += transaction.getEventSize();
+            if (nowSize == 0 || nowSize + transaction.getEventCount() <= tps) {
+                nowSize += transaction.getEventCount();
                 transferTransactions.add(transaction);
             } else {
                 rateLimiter.acquire(nowSize);

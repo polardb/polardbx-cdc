@@ -28,6 +28,7 @@ import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -60,9 +61,10 @@ public class GlobalBinlogTopologyBuilder {
     /**
      * 给定一个容器列表，确定每个容器中运行哪些Task或Dumper
      */
-    public List<BinlogTaskConfig> buildTopology(List<Container> containerList, List<StorageInfo> storageInfoList,
-                                                String expectedStorageTso, long newVersion, String dumperMasterNodeId) {
-
+    public Pair<Long, List<BinlogTaskConfig>> buildTopology(List<Container> containerList,
+                                                            List<StorageInfo> storageInfoList,
+                                                            String expectedStorageTso, long newVersion,
+                                                            String dumperMasterNodeId, long serverId) {
         int containerCount = containerList.size();
 
         // (m * Dumper) + (1 * Final) + (n * Relay)
@@ -103,6 +105,7 @@ public class GlobalBinlogTopologyBuilder {
             tc.setForceDownload(forceDownload);
             tc.setTimestamp(System.currentTimeMillis());
             tc.setRuntimeVersion(newVersion);
+            tc.setServerId(serverId);
 
             Container container = containerList.get(i);
             container.deductMem(memPerDumper);
@@ -118,15 +121,15 @@ public class GlobalBinlogTopologyBuilder {
         // 如果DN节点数目超过阈值，启用RelayTask，计算每个RelayTask的配置
         Container finalContainer = selectContainer4Final(containerList, dumperMasterNodeId);
         List<BinlogTaskConfig> relayTaskList = new ArrayList<>();
-        if (relayStorageList.size() > 0) {
+        if (!relayStorageList.isEmpty()) {
             AtomicLong index = new AtomicLong(0);
             Iterator<List<StorageInfo>> iterator = relayStorageList.iterator();
             for (Container container : containerList) {
                 relayTaskList.add(buildRelayTask(clusterId, memPerTask, vcpu, expectedStorageTso,
-                    newVersion, container, index, iterator.next()));
+                    newVersion, container, index, iterator.next(), serverId));
                 if (container != finalContainer) {
                     relayTaskList.add(buildRelayTask(clusterId, memPerTask, vcpu, expectedStorageTso,
-                        newVersion, container, index, iterator.next()));
+                        newVersion, container, index, iterator.next(), serverId));
                 }
             }
             if (iterator.hasNext()) {
@@ -139,14 +142,15 @@ public class GlobalBinlogTopologyBuilder {
         // Final
         finalContainer.deductMem(memPerTask);
         ExecutionConfig config = new ExecutionConfig();
-        config.setType(relayTaskList.size() > 0 ? MergeSourceType.RPC.name() : MergeSourceType.BINLOG.name());
-        if (relayTaskList.size() > 0) {
+        config.setType(!relayTaskList.isEmpty() ? MergeSourceType.RPC.name() : MergeSourceType.BINLOG.name());
+        if (!relayTaskList.isEmpty()) {
             config.setSources(relayTaskList.stream().map(BinlogTaskConfig::getTaskName).collect(Collectors.toList()));
         } else {
             config.setSources(storageInfoList.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toList()));
         }
         config.setTso(expectedStorageTso);
         config.setRuntimeVersion(newVersion);
+        config.setServerId(serverId);
         BinlogTaskConfig finalConfig = makeTask(0L, TaskType.Final, finalContainer,
             JSONObject.toJSONString(config), newVersion);
         finalConfig.setClusterId(clusterId);
@@ -183,18 +187,20 @@ public class GlobalBinlogTopologyBuilder {
                 }
             }
         }
-        return result;
+        return Pair.of(serverId, result);
     }
 
     private static BinlogTaskConfig buildRelayTask(String clusterId, int mem, int vcpu, String expectedStorageTso,
                                                    long newVersion, Container container, AtomicLong index,
-                                                   List<StorageInfo> storageInfoList) {
+                                                   List<StorageInfo> storageInfoList, long serverId) {
         container.deductMem(mem);
         ExecutionConfig config = new ExecutionConfig();
         config.setType(MergeSourceType.BINLOG.name());
         config.setSources(
             storageInfoList.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toList()));
         config.setTso(expectedStorageTso);
+        config.setServerId(serverId);
+
         BinlogTaskConfig relayTaskConfig =
             makeTask(index.incrementAndGet(), TaskType.Relay, container, JSONObject.toJSONString(config), newVersion);
         relayTaskConfig.setClusterId(clusterId);
@@ -209,7 +215,7 @@ public class GlobalBinlogTopologyBuilder {
         return BinlogTaskConfig.builder()
             .taskName(id == 0 ? taskType.name() : taskType.name() + "-" + id)
             .containerId(container.getContainerId())
-            .ip(container.getNodeHttpAddress())
+            .ip(container.getIp())
             .port(container.holdPort())
             .config(ext)
             .role(taskType.name())

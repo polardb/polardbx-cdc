@@ -186,4 +186,15 @@ public class BinlogFileUtilTest extends BaseTest {
         assertTrue(isValidFullPath(fullPath, groupName, streamName));
     }
 
+    @Test
+    public void extractStreamNameTest() {
+        String fileName = "binlog.000001";
+        assertEquals(STREAM_NAME_GLOBAL, BinlogFileUtil.extractStreamName(fileName));
+
+        String groupName = "group1";
+        String streamName = "group1_stream1";
+        fileName = getFirstBinlogFileName(groupName, streamName);
+        assertEquals(streamName, BinlogFileUtil.extractStreamName(fileName));
+    }
+
 }

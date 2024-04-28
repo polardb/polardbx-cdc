@@ -73,7 +73,7 @@ public class RemoteBinlogProxy {
         return delegate.prepareDownloadLink(fileName, interval);
     }
 
-    public void download(String fileName, String localPath) {
+    public void download(String fileName, String localPath) throws Throwable {
         checkDelegator();
         delegate.download(fileName, localPath);
     }
@@ -194,10 +194,9 @@ public class RemoteBinlogProxy {
 
     // 实验室环境专用
     private String buildPolarxInstId() {
-        // todo @yudong 如果使用Lindorm的话 用ossBucket来判断有些不妥
         String ossBucket = DynamicApplicationConfig.getString(ConfigKeys.OSS_BUCKET);
         String polarxInstId = DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID);
-        if (StringUtils.equals(ossBucket, "polarx-cdc-lab-test-bucket")) {
+        if (StringUtils.equals(ossBucket, "polarx-cdc-lab-bucket")) {
             waitClusterReady();
             String randomPolarxInstId = polarxInstId + "-" + getServerUid();
             logger.info("random polarx instance id for lab test is " + randomPolarxInstId);

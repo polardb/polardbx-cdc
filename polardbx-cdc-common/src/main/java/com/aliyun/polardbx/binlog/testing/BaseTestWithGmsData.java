@@ -20,11 +20,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.Resource;
 
-import java.io.ByteArrayOutputStream;
-import java.io.FileInputStream;
+import java.io.File;
 import java.sql.Connection;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.zip.GZIPInputStream;
 
 /**
  * created by ziyang.lb
@@ -40,8 +38,14 @@ public class BaseTestWithGmsData extends BaseTest {
         if (GMS_TABLE_INITED.compareAndSet(false, true)) {
             long start = System.currentTimeMillis();
             try (Connection connection = getGmsDataSource().getConnection()) {
-                H2Util.executeBatchSql(connection, uncompressSqlFile());
+                H2Util.executeBatchSqlGzip(connection, getCompressSqlFile());
+
+                Resource resource2 = new DefaultResourceLoader().getResource(
+                    "classpath:testing-conf/gms_additional.sql");
+                H2Util.executeBatchSql(connection, resource2.getFile());
             }
+            H2Util.execUpdate(getGmsDataSource(), "alter table binlog_logic_meta_history "
+                + "add column `need_apply` tinyint(1) default 1 not null");
 
             if (log.isDebugEnabled()) {
                 log.debug("successfully init gms cdc tables and data, cost time {} (ms)",
@@ -51,21 +55,9 @@ public class BaseTestWithGmsData extends BaseTest {
     }
 
     @SneakyThrows
-    private String uncompressSqlFile() {
+    private File getCompressSqlFile() {
         Resource resource = new DefaultResourceLoader().getResource(
             "classpath:testing-conf/gms_cdc_tables_and_data.sql.gz");
-
-        try (FileInputStream fileInputStream = new FileInputStream(resource.getFile());
-            GZIPInputStream gzipInputStream = new GZIPInputStream(fileInputStream);
-            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream()) {
-
-            byte[] buffer = new byte[1024];
-            int len;
-            while ((len = gzipInputStream.read(buffer)) > 0) {
-                byteArrayOutputStream.write(buffer, 0, len);
-            }
-
-            return byteArrayOutputStream.toString();
-        }
+        return resource.getFile();
     }
 }

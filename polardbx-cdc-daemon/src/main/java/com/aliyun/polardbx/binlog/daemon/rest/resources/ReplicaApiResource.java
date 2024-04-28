@@ -19,8 +19,6 @@ import com.aliyun.polardbx.binlog.ResultCode;
 import com.aliyun.polardbx.binlog.daemon.rest.ann.ACL;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
-import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.ReplicaFSM;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
@@ -28,10 +26,10 @@ import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import com.aliyun.polardbx.rpl.taskmeta.RplServiceManager;
+import com.aliyun.polardbx.rpl.validation.fullvalid.task.ReplicaFullValidTaskManager;
+import com.aliyun.polardbx.rpl.validation.fullvalid.task.ReplicaFullValidType;
 import com.sun.jersey.spi.resource.Singleton;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.tuple.MutablePair;
-
+import lombok.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,10 +39,6 @@ import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
-import lombok.NonNull;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 
@@ -54,52 +48,52 @@ import static com.aliyun.polardbx.rpl.taskmeta.RplServiceManager.findActiveRepli
 @Produces(MediaType.APPLICATION_JSON)
 @ACL
 @Singleton
-@Slf4j
 public class ReplicaApiResource {
     private static final Logger logger = LoggerFactory.getLogger(ReplicaApiResource.class);
+
+    private static final Logger fullValidLogger = LoggerFactory.getLogger("fullValidLogger");
 
     @POST
     @Path("/changeMaster")
     public ResultCode<?> changeMaster(Map<String, String> params) {
-        log.info("changeMaster: " + params);
+        logger.info("changeMaster: " + params);
         return RplServiceManager.changeMaster(params);
     }
 
     @POST
     @Path("/changeReplicationFilter")
     public String changeReplicationFilter(Map<String, String> params) {
-        log.info("changeReplicationFilter: " + params);
+        logger.info("changeReplicationFilter: " + params);
         return JSON.toJSONString(RplServiceManager.changeReplicationFilter(params));
     }
 
     @POST
     @Path("/showSlaveStatus")
     public ResultCode<?> showSlaveStatus(Map<String, String> params) {
-        log.info("showSlaveStatus: " + params);
+        logger.info("showSlaveStatus: " + params);
         return RplServiceManager.showSlaveStatus(params);
     }
 
     @POST
     @Path("/resetSlave")
     public ResultCode<?> resetSlave(Map<String, String> params) {
-        log.info("resetSlave: " + params);
+        logger.info("resetSlave: " + params);
         return RplServiceManager.resetSlave(params);
     }
 
     @POST
     @Path("/startSlave")
     public ResultCode<?> startSlave(Map<String, String> params) {
-        log.info("startSlave: " + params);
+        logger.info("startSlave: " + params);
         return RplServiceManager.startSlave(params);
     }
 
     @POST
     @Path("/stopSlave")
     public ResultCode<?> stopSlave(Map<String, String> params) {
-        log.info("stopSlave: " + params);
+        logger.info("stopSlave: " + params);
         return RplServiceManager.stopSlave(params);
     }
-
 
     @POST
     @Path("/service/create")
@@ -281,4 +275,87 @@ public class ReplicaApiResource {
         return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("success").data(RplConstants.SUCCESS).build();
     }
 
+    @POST
+    @Path("/fullValidation/create")
+    public ResultCode<?> createFullValidTask(Map<String, String> params) {
+        // todo by yudong 如果想要检查所有的表呢
+        fullValidLogger.info("create full validation task, params:{}", params);
+        return ReplicaFullValidTaskManager.createTask(params.get(RplConstants.CHANNEL),
+            params.get(RplConstants.RPL_FULL_VALID_DB), params.get(RplConstants.RPL_FULL_VALID_TB));
+    }
+
+    @POST
+    @Path("/fullValidationSchema/create")
+    public ResultCode<?> createFullValidSchemaTask(Map<String, String> params) {
+        fullValidLogger.info("create full validation schema task, params:{}", params);
+        return ReplicaFullValidTaskManager.createSchemaCheckTask(params.get(RplConstants.CHANNEL));
+    }
+
+    @POST
+    @Path("/fullValidation/cancel")
+    public ResultCode<?> cancelFullValidTask(Map<String, String> params) {
+        fullValidLogger.info("cancel full validation task, params:{}", params);
+        return ReplicaFullValidTaskManager.cancelTask(params.get(RplConstants.RPL_FULL_VALID_DB),
+            params.get(RplConstants.RPL_FULL_VALID_TB));
+    }
+
+    @POST
+    @Path("/fullValidationSchema/cancel")
+    public ResultCode<?> cancelFullValidSchemaTask() {
+        fullValidLogger.info("cancel full validation schema task");
+        return ReplicaFullValidTaskManager.cancelSchemaCheckTask();
+    }
+
+    @POST
+    @Path("/fullValidation/pause")
+    public ResultCode<?> pauseFullValidTask(Map<String, String> params) {
+        fullValidLogger.info("pause full validation task, params:{}", params);
+        return ReplicaFullValidTaskManager.pauseTask(params.get(RplConstants.RPL_FULL_VALID_DB),
+            params.get(RplConstants.RPL_FULL_VALID_TB));
+    }
+
+    @POST
+    @Path("/fullValidationSchema/pause")
+    public ResultCode<?> pauseFullValidSchemaTask() {
+        fullValidLogger.info("pause full validation schema task");
+        return ReplicaFullValidTaskManager.pauseSchemaCheckTask();
+    }
+
+    @POST
+    @Path("/fullValidation/continue")
+    public ResultCode<?> continueFullValidTask(Map<String, String> params) {
+        fullValidLogger.info("continue full validation task, params:{}", params);
+        return ReplicaFullValidTaskManager.continueTask(params.get(RplConstants.RPL_FULL_VALID_DB),
+            params.get(RplConstants.RPL_FULL_VALID_TB));
+    }
+
+    @POST
+    @Path("/fullValidationSchema/continue")
+    public ResultCode<?> continueFullValidSchemaTask() {
+        fullValidLogger.info("continue full validation schema task");
+        return ReplicaFullValidTaskManager.continueSchemaCheckTask();
+    }
+
+    @POST
+    @Path("/fullValidation/reset")
+    public ResultCode<?> resetFullValidTask(Map<String, String> params) {
+        fullValidLogger.info("reset full validation task, params:{}", params);
+        return ReplicaFullValidTaskManager.resetTask(params.get(RplConstants.RPL_FULL_VALID_DB),
+            params.get(RplConstants.RPL_FULL_VALID_TB));
+    }
+
+    @POST
+    @Path("/fullValidationSchema/reset")
+    public ResultCode<?> resetFullValidSchemaTask() {
+        fullValidLogger.info("reset full validation schema task");
+        return ReplicaFullValidTaskManager.resetSchemaCheckTask();
+    }
+
+    @POST
+    @Path("/fullValidation/progress")
+    public ResultCode<?> showFullValidProgress(Map<String, String> params) {
+        fullValidLogger.info("show full validation progress, params:{}", params);
+        return ReplicaFullValidTaskManager.showProgress(params.get(RplConstants.RPL_FULL_VALID_DB),
+            params.get(RplConstants.RPL_FULL_VALID_TB));
+    }
 }

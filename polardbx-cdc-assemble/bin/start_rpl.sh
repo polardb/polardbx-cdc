@@ -12,7 +12,6 @@ TASK_ID=$1
 TASK_NAME=$2
 MEMORY=$3
 YOUNG_MEMORY=$(($3*5/8))
-PERM_MEMORY=256
 LOG_DIR=$HOME/logs/polardbx-rpl/$TASK_NAME
 
 #get param from 16th to end
@@ -49,10 +48,6 @@ export LANG=zh_CN.GB18030
 logback_configurationFile=${BASE_HOME}/conf/rpl-logback.xml
 
 JAVA_OPTS="${JAVA_OPTS} -server -Xms${MEMORY}m -Xmx${MEMORY}m -Xmn${YOUNG_MEMORY}m -Xss1m -Djute.maxbuffer=10240000 -DtaskId=$TASK_ID -Dlogback.configurationFile=$logback_configurationFile"
-if [[ ! "$JVM_PARAMS" =~ "PermSize" ]]; then
-  JAVA_OPTS="${JAVA_OPTS} -XX:PermSize=${PERM_MEMORY}m -XX:MaxPermSize=${PERM_MEMORY}m"
-fi
-#JAVA_OPTS="${JAVA_OPTS} -XX:+UseConcMarkSweepGC -XX:-UseAdaptiveSizePolicy"
 JAVA_OPTS="${JAVA_OPTS} -XX:+UseParallelGC"
 JAVA_OPTS="${JAVA_OPTS} -XX:SurvivorRatio=2 -XX:ParallelGCThreads=6"
 JAVA_OPTS="${JAVA_OPTS} -XX:-OmitStackTraceInFastThrow"

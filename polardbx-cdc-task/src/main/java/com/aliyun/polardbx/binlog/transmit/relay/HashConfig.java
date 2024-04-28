@@ -179,12 +179,15 @@ public class HashConfig {
         tableName = StringUtils.isNotBlank(tableName) ? tableName.toLowerCase() : tableName;
         String fullTableName = dbName + "." + tableName;
 
-        if (RECORD_LEVEL_HASH_DB_SET.contains(dbName)) {
-            return HashLevel.RECORD;
+        // 库级拆分最优先，如果某个库已经设定为库级拆分，则该库和其下面的表，不能再单独设置为其它模式的拆分规则
+        if (DB_LEVEL_HASH_DB_SET.contains(dbName)) {
+            return HashLevel.DATABASE;
         }
-        if (StringUtils.isNotBlank(tableName) && RECORD_LEVEL_HASH_TABLE_SET.contains(fullTableName)) {
-            return HashLevel.RECORD;
+        if (StringUtils.isNotBlank(tableName) && DB_LEVEL_HASH_TABLE_SET.contains(fullTableName)) {
+            return HashLevel.DATABASE;
         }
+
+        // 表级别拆分其次
         if (TABLE_LEVEL_HASH_DB_SET.contains(dbName)) {
             return HashLevel.TABLE;
         }
@@ -201,11 +204,13 @@ public class HashConfig {
         if (TABLE_STREAM_MAPPING.getUnchecked(MAPPING_KEY).containsKey(fullTableName)) {
             return HashLevel.TABLE;
         }
-        if (DB_LEVEL_HASH_DB_SET.contains(dbName)) {
-            return HashLevel.DATABASE;
+
+        // 记录级拆分优先级最后
+        if (RECORD_LEVEL_HASH_DB_SET.contains(dbName)) {
+            return HashLevel.RECORD;
         }
-        if (StringUtils.isNotBlank(tableName) && DB_LEVEL_HASH_TABLE_SET.contains(fullTableName)) {
-            return HashLevel.DATABASE;
+        if (StringUtils.isNotBlank(tableName) && RECORD_LEVEL_HASH_TABLE_SET.contains(fullTableName)) {
+            return HashLevel.RECORD;
         }
 
         return DEFAULT_HASH_LEVEL;

@@ -35,7 +35,7 @@ import com.aliyun.polardbx.binlog.extractor.filter.RtRecordFilter;
 import com.aliyun.polardbx.binlog.extractor.filter.TransactionBufferEventFilter;
 import com.aliyun.polardbx.binlog.metrics.ExtractorMetrics;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
-import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -65,10 +65,12 @@ public class BinlogExtractor implements Extractor {
 
     private final HashSet<String> cdcSchemaSet = new HashSet<>();
     private AuthenticationInfo authenticationInfo;
+    @Setter
     private LogEventHandler<?> logEventHandler;
     private String localBinlogFilePath;
     private CanalBootstrap canalBootstrap;
     private String startCmdTso = null;
+    private long serverId;
     private DnHost dnHost;
 
     private static String getCnVersion() {
@@ -76,15 +78,12 @@ public class BinlogExtractor implements Extractor {
         return polarxTemplate.queryForObject(QUERY_FOR_VERSION, String.class);
     }
 
-    public void setLogEventHandler(LogEventHandler<?> logEventHandler) {
-        this.logEventHandler = logEventHandler;
-    }
-
-    public void init(BinlogParameter binlogParameter, String rdsBinlogPath) {
+    public void init(BinlogParameter binlogParameter, String rdsBinlogPath, long serverId) {
         assertNotNull(binlogParameter, "binlog parameter should not be null");
         assertNotNull(binlogParameter.getStorageInstId(), "storageInstId should not be null");
 
         this.localBinlogFilePath = rdsBinlogPath;
+        this.serverId = serverId;
         String storageInstId = binlogParameter.getStorageInstId();
         JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
 
@@ -160,18 +159,25 @@ public class BinlogExtractor implements Extractor {
      * binlog event -> acceptFilter -> ddlFilter -> disruptor -> rtFilter -> recordTso -> rebuildEvent -> transaction
      */
     private void addDefaultFilter(String startTSO) {
-
-        long serverId = ServerConfigUtil.getGlobalNumberVar("SERVER_ID");
         String clusterType = DynamicApplicationConfig.getClusterType();
 
-        log.info("starting binlog extractor serverId : " + serverId);
-
-        PolarDbXTableMetaManager dbTableMetaManager =
-            new PolarDbXTableMetaManager(authenticationInfo.getStorageMasterInstId());
+        PolarDbXTableMetaManager dbTableMetaManager = new PolarDbXTableMetaManager(
+            authenticationInfo.getStorageMasterInstId());
         dbTableMetaManager.init();
 
-        EventAcceptFilter acceptFilter =
-            new EventAcceptFilter(authenticationInfo.getStorageMasterInstId(), true, dbTableMetaManager, cdcSchemaSet);
+        EventAcceptFilter acceptFilter = getEventAcceptFilter(dbTableMetaManager);
+
+        canalBootstrap.addLogFilter(new RtRecordFilter());
+        canalBootstrap.addLogFilter(new TransactionBufferEventFilter());
+        canalBootstrap.addLogFilter(new RebuildEventLogFilter(serverId, acceptFilter,
+            ClusterType.BINLOG_X.name().equals(clusterType), dbTableMetaManager));
+        canalBootstrap.addLogFilter(new MinTSOFilter(startTSO));
+    }
+
+    private EventAcceptFilter getEventAcceptFilter(PolarDbXTableMetaManager dbTableMetaManager) {
+        EventAcceptFilter acceptFilter = new EventAcceptFilter(authenticationInfo.getStorageMasterInstId(),
+            true, dbTableMetaManager, cdcSchemaSet);
+
         acceptFilter.addAcceptEvent(LogEvent.FORMAT_DESCRIPTION_EVENT);
         // accept dml
         acceptFilter.addAcceptEvent(LogEvent.WRITE_ROWS_EVENT);
@@ -191,24 +197,14 @@ public class BinlogExtractor implements Extractor {
         acceptFilter.addAcceptEvent(LogEvent.GCN_EVENT);
         acceptFilter.addAcceptEvent(LogEvent.TABLE_MAP_EVENT);
         acceptFilter.addAcceptEvent(LogEvent.XID_EVENT);
-
-        // 记录RT
-        canalBootstrap.addLogFilter(new RtRecordFilter());
-        // 先合并事务
-        // 合并完事务后,要在合并事务是识别出逻辑DDL，，可以并发整形
-        canalBootstrap.addLogFilter(new TransactionBufferEventFilter());
-        // 整形
-        canalBootstrap.addLogFilter(new RebuildEventLogFilter(serverId, acceptFilter,
-            ClusterType.BINLOG_X.name().equals(clusterType), dbTableMetaManager));
-
-        canalBootstrap.addLogFilter(new MinTSOFilter(startTSO));
+        return acceptFilter;
     }
 
     @Override
     public void stop() {
-        log.info("stopping binlog extrator");
+        log.info("stopping binlog extractor");
         canalBootstrap.stop();
-        log.info("binlog binlog extrator stopped");
+        log.info("binlog binlog extractor stopped");
     }
 
     private void assertNotNull(Object o, String msg) {

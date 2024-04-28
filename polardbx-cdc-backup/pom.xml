@@ -5,7 +5,7 @@
     <parent>
         <artifactId>polardbx-cdc</artifactId>
         <groupId>com.aliyun.polardbx</groupId>
-        <version>2.3.0-SNAPSHOT</version>
+        <version>5.4.19-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>polardbx-cdc-backup</artifactId>
@@ -23,11 +23,6 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-external</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.aliyun.polardbx</groupId>
-            <artifactId>polardbx-cdc-monitor</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

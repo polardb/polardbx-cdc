@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.dump;
 
-import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.gtid.GTIDSet;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 

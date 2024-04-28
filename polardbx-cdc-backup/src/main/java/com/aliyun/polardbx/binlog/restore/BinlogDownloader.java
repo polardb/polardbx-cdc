@@ -98,14 +98,16 @@ public class BinlogDownloader {
     private void startDownload() {
         try {
             lock();
-            downloadFiles.forEach(this::doDownload);
+            for (String fileName : downloadFiles) {
+                doDownload(fileName);
+            }
             unlock();
-        } catch (Exception e) {
+        } catch (Throwable e) {
             log.error("download files error", e);
         }
     }
 
-    private void doDownload(String fileName) {
+    private void doDownload(String fileName) throws Throwable {
         String binlogRootPath = BinlogFileUtil.extractRootPathFromFullPath(binlogFullPath, group, stream);
         String remoteFileName = BinlogFileUtil.buildRemoteFilePartName(fileName, group, stream);
         if (RemoteBinlogProxy.getInstance().isObjectsExistForPrefix(remoteFileName)) {

@@ -43,13 +43,46 @@ public class MemoryTableMetaTest_DataType extends MemoryTableMetaBase {
                 Assert.assertEquals("varchar(255)", f.getColumnType());
                 Assert.assertEquals("utf8", f.getCharset());
             } else if (name.equalsIgnoreCase("b")) {
-                Assert.assertNull(f.getCharset());
+                Assert.assertEquals("utf8mb4", f.getCharset());
             } else if (name.equalsIgnoreCase("c")) {
                 Assert.assertEquals("char(255)", f.getColumnType());
                 Assert.assertEquals("utf8", f.getCharset());
             } else if (name.equalsIgnoreCase("d")) {
-                Assert.assertNull(f.getCharset());
+                Assert.assertEquals("utf8mb4", f.getCharset());
             }
         });
+    }
+
+    @Test
+    public void testDefaultNull() {
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
+        String sql = "create table t1("
+            + "id bigint primary key, "
+            + "c1 varchar(100) default null, "
+            + "c2 varchar(100) default 'null')";
+        applySql(memoryTableMeta, "d1", sql);
+        TableMeta tableMeta = memoryTableMeta.find("d1", "t1");
+        TableMeta.FieldMeta c1 = tableMeta.getFieldMetaByName("c1");
+        TableMeta.FieldMeta c2 = tableMeta.getFieldMetaByName("c2");
+        Assert.assertNull(c1.getDefaultValue());
+        Assert.assertEquals("null", c2.getDefaultValue());
+        Assert.assertEquals("null", String.valueOf(c1.getDefaultValue()));
+        Assert.assertEquals("null", String.valueOf(c2.getDefaultValue()));
+    }
+
+    @Test
+    public void testCharsetInherit() {
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
+        String sql = "create table t1("
+            + "id bigint primary key, "
+            + "c1 varchar(100) default null, "
+            + "c2 varchar(100) default 'null') "
+            + "default collate = utf8mb4_bin default character set = utf8mb4";
+        applySql(memoryTableMeta, "d1", sql);
+        applySql(memoryTableMeta, "d1", "create table t2 like t1");
+        TableMeta tableMeta1 = memoryTableMeta.find("d1", "t1");
+        TableMeta tableMeta2 = memoryTableMeta.find("d1", "t2");
+        Assert.assertEquals("utf8mb4", tableMeta1.getCharset());
+        Assert.assertEquals("utf8mb4", tableMeta2.getCharset());
     }
 }

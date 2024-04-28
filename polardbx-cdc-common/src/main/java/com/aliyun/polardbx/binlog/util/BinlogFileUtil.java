@@ -21,6 +21,7 @@ import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.File;
@@ -82,6 +83,22 @@ public class BinlogFileUtil {
         } else {
             // aws s3协议不支持'#'字符
             return streamName + "_" + BINLOG_FILE_PREFIX;
+        }
+    }
+
+    public static String extractStreamName(String fileName) {
+        if (StringUtils.isEmpty(fileName)) {
+            // show binlog events 默认输出单流binlog
+            return CommonConstants.STREAM_NAME_GLOBAL;
+        }
+        if (!isBinlogFile(fileName)) {
+            throw new IllegalArgumentException("invalid binlog file name " + fileName);
+        }
+        int idx = fileName.lastIndexOf('_');
+        if (idx == -1) {
+            return CommonConstants.STREAM_NAME_GLOBAL;
+        } else {
+            return fileName.substring(0, idx);
         }
     }
 

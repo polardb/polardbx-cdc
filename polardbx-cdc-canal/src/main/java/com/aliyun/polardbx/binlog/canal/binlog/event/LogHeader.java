@@ -278,6 +278,10 @@ public final class LogHeader {
         return checksumAlg;
     }
 
+    public void setChecksumAlg(int checksumAlg) {
+        this.checksumAlg = checksumAlg;
+    }
+
     public void processCheckSum(LogBuffer buffer) {
         if (checksumAlg != LogEvent.BINLOG_CHECKSUM_ALG_OFF && checksumAlg != LogEvent.BINLOG_CHECKSUM_ALG_UNDEF) {
             crc = buffer.getUint32(eventLen - LogEvent.BINLOG_CHECKSUM_LEN);

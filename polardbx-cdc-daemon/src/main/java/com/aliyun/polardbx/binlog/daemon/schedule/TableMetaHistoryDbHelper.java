@@ -25,7 +25,6 @@ import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandMapper;
-import com.aliyun.polardbx.binlog.domain.po.BinlogLogicMetaHistory;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.domain.po.BinlogPolarxCommand;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
@@ -143,16 +142,12 @@ public class TableMetaHistoryDbHelper {
     private long getRegionDDLCount() {
         String latestSnapshotTso = logicMetaHistoryMapperExt.getLatestSnapshotTso();
         long phyCount;
-        String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
         //只计算大于最近一次snap后产生的ddl个数
         if (StringUtils.isNotBlank(latestSnapshotTso)) {
-            phyCount = phyDdlHistoryMapper
-                .count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.tso,
-                        SqlBuilder.isGreaterThan(latestSnapshotTso))
-                    .and(BinlogPhyDdlHistoryDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
+            phyCount = phyDdlHistoryMapper.count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.tso,
+                SqlBuilder.isGreaterThan(latestSnapshotTso)));
         } else {
-            phyCount = phyDdlHistoryMapper
-                .count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
+            phyCount = phyDdlHistoryMapper.count(s -> s);
         }
         return phyCount;
     }
@@ -187,10 +182,10 @@ public class TableMetaHistoryDbHelper {
                 return false;
             }
 
-            List<BinlogLogicMetaHistory> selectedList = logicMetaHistoryMapper.select(s -> s
+            long snapshotCount = logicMetaHistoryMapper.count(s -> s
                 .where(BinlogLogicMetaHistoryDynamicSqlSupport.instructionId,
                     SqlBuilder.isEqualTo(command.getCmdId())));
-            if (selectedList.isEmpty()) {
+            if (snapshotCount == 0) {
                 log.warn("last build meta command not finish! cmdId : " + command.getCmdId());
                 return false;
             }

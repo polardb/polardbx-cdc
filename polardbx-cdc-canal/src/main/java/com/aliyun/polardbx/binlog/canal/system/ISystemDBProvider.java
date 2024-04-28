@@ -50,7 +50,6 @@ public interface ISystemDBProvider {
     String CDC_SINGLE_GROUP_NAME = "__CDC___SINGLE_GROUP";
 
     String DRDS_IMPLICIT_ID = "_drds_implicit_id_";
-    String AUTO_LOCAL_INDEX_PREFIX = "_local_";
 
     String CREATE_DRDS_GLOBAL_TX_LOG =
         String.format("CREATE TABLE `%s` (\n" + "  `TXID` bigint(20) NOT NULL,\n"

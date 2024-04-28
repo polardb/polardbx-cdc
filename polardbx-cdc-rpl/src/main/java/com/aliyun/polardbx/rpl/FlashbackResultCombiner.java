@@ -93,7 +93,7 @@ public class FlashbackResultCombiner {
 
     public void run() {
         RplTask task = DbTaskMetaManager.getTask(taskId);
-        if (task.getStatus() != null && task.getStatus() == TaskStatus.FINISHED.getValue()) {
+        if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.FINISHED) {
             log.info("task {} has already finished, skip execute.", taskId);
             throw new PolardbxException("task has already finished, skip execute");
         }

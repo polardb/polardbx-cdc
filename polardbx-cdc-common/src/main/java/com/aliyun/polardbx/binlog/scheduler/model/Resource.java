@@ -47,6 +47,10 @@ public class Resource {
         return Double.valueOf(mem).intValue() - used;
     }
 
+    public int getFreeMemMbWithoutRatio() {
+        return memory_mb - used;
+    }
+
     //如果节点的内存比较小，ratio则不能太大，需要给daemon和rocksdb预留一部分空间
     private double getRatio() {
         double ratio = DynamicApplicationConfig.getDouble(TOPOLOGY_RESOURCE_USE_RATIO);

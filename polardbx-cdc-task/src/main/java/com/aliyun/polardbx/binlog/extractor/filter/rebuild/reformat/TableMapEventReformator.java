@@ -32,7 +32,6 @@ import com.aliyun.polardbx.binlog.format.utils.BitMap;
 import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.google.protobuf.UnsafeByteOperations;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -138,11 +137,10 @@ public class TableMapEventReformator implements EventReformater<TableMapLogEvent
                 newMetaDef[logicIndex] = metaDef[phyIndex];
                 newNullBitMap.set(logicIndex, nullBitmap.get(phyIndex));
             } else {
-                String charset =
-                    getCharset(fieldMetaExt, tableMeta.getLogicSchema(), tableMeta.getLogicTable(), defaultCharset);
+                String mysqlCharset = fieldMetaExt.getCharset();
                 Field field = MakeFieldFactory.makeField(fieldMetaExt.getColumnType(),
                     null,
-                    charset,
+                    mysqlCharset,
                     fieldMetaExt.isNullable(),
                     fieldMetaExt.isUnsigned());
                 if (field == null) {
@@ -161,18 +159,6 @@ public class TableMapEventReformator implements EventReformater<TableMapLogEvent
         tme.setColumnDefType(newTypeDef);
         tme.setColumnMetaData(newMetaDef);
         tme.setNullBitmap(newNullBitMap);
-    }
-
-    private String getCharset(LogicTableMeta.FieldMetaExt fieldMetaExt, String db, String table,
-                              String defaultCharset) {
-        String charset = fieldMetaExt.getCharset();
-        if (StringUtils.isBlank(charset)) {
-            charset = tableMetaManager.findLogicTable(db, table).getCharset();
-        }
-        if (StringUtils.isBlank(charset)) {
-            charset = defaultCharset;
-        }
-        return charset;
     }
 
 }

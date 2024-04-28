@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
 import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.CnInstConfigKeys;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -107,7 +108,7 @@ public class RootResource {
         String finalPxcId = pxcId;
         Optional<InstConfig> instConfigOptional =
             instConfigMapper.selectOne(s -> s.where(InstConfigDynamicSqlSupport.paramKey, SqlBuilder
-                    .isEqualTo(ConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT))
+                    .isEqualTo(CnInstConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT))
                 .and(InstConfigDynamicSqlSupport.instId, SqlBuilder.isEqualTo(finalPxcId)).limit(1));
 
         return instConfigOptional.isPresent() && Boolean

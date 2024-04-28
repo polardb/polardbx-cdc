@@ -46,6 +46,9 @@ public class DDLExtInfo {
      */
     private String originalDdl;
     private String orginalDdl;
+    private int ddlScope;
+    private Boolean manuallyCreatedTableGroup;
+    private boolean enableImplicitTableGroup;
 
     /**
      * 外键DDL标记
@@ -151,6 +154,14 @@ public class DDLExtInfo {
         this.groupName = groupName;
     }
 
+    public int getDdlScope() {
+        return ddlScope;
+    }
+
+    public void setDdlScope(int ddlScope) {
+        this.ddlScope = ddlScope;
+    }
+
     public boolean isOldVersionOriginalSql() {
         return StringUtils.isNotBlank(orginalDdl);
     }
@@ -169,6 +180,22 @@ public class DDLExtInfo {
 
     public void setForeignKeysDdl(Boolean foreignKeysDdl) {
         this.foreignKeysDdl = foreignKeysDdl;
+    }
+
+    public Boolean getManuallyCreatedTableGroup() {
+        return manuallyCreatedTableGroup;
+    }
+
+    public void setManuallyCreatedTableGroup(Boolean manuallyCreatedTableGroup) {
+        this.manuallyCreatedTableGroup = manuallyCreatedTableGroup;
+    }
+
+    public boolean isEnableImplicitTableGroup() {
+        return enableImplicitTableGroup;
+    }
+
+    public void setEnableImplicitTableGroup(boolean enableImplicitTableGroup) {
+        this.enableImplicitTableGroup = enableImplicitTableGroup;
     }
 
     public void resetOriginalSql(String newSql) {

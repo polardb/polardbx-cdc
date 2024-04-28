@@ -32,6 +32,7 @@ import com.aliyun.polardbx.binlog.extractor.TransactionStorage;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.extractor.log.processor.EventFilter;
 import com.aliyun.polardbx.binlog.extractor.log.processor.FilterBlacklistTableFilter;
+import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
 import com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -236,10 +237,11 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         if (receiveFormatDesc) {
             return;
         }
-        Transaction transaction = new Transaction(fde,
-            BinlogGenerateUtil.buildFormatDescriptionEvent(context.getRuntimeContext().getServerId(),
-                context.getRuntimeContext().getVersion()),
-            context.getRuntimeContext());
+
+        FormatDescriptionEvent formatDescriptionEvent = BinlogGenerateUtil.buildFormatDescriptionEvent(
+            context.getRuntimeContext().getServerId(),
+            context.getRuntimeContext().getVersion());
+        Transaction transaction = new Transaction(fde, formatDescriptionEvent, context.getRuntimeContext());
         transactionStorage.add(transaction);
         transaction.setCommit(context.getRuntimeContext());
         receiveFormatDesc = true;

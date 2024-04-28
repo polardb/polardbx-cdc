@@ -31,7 +31,8 @@ public enum LabEventType {
     RPL_SEARCH_POSITION("replica搜索位点"),
     TEST_IS_METADB_LEADER("测试是否是leader节点"),
     TASK_TRANSACTION_PERSIST_ERROR("Transaction对象发生持久化异常"),
-    EXCEPTION_RE_WRITE_DDL("异常重写DDL");
+    EXCEPTION_RE_WRITE_DDL("异常重写DDL"),
+    SQL_STATMENT_DB_TYPE_NOT_MYSQL("FastSql.dbType设置为非MySQL");
 
     private final String desc;
 

@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.bootstrap;
 
-import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.CnInstConfigUtil;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.XStreamGroupMapper;
@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import static com.aliyun.polardbx.binlog.CnInstConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_AUTO_INIT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_COUNT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
@@ -40,7 +41,7 @@ public class BinlogXBootStrapService extends AbstractBinlogBootstrapService {
     @Override
     protected void beforeInitCommon() {
         log.info("Init Binlog-X-Stream Job!");
-        if (!DynamicApplicationConfig.getBoolean(ConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT)) {
+        if (!CnInstConfigUtil.getBoolean(ENABLE_CDC_META_BUILD_SNAPSHOT)) {
             throw new PolardbxException("cn version not support binlog x");
         }
     }

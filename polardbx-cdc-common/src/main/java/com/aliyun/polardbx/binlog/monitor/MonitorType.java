@@ -294,7 +294,71 @@ public enum MonitorType {
         1,
         30,
         false
-    );
+    ),
+    COLUMNAR_FATAL_ERROR(
+        "polarx_cdc_binlog_fatal_error",
+        true,
+        "Columnar链路异常，已升级为电话报警，请尽快排查, 原报警信息： %s",
+        1,
+        5,
+        false,
+        true
+    ),
+    COLUMNAR_PROCESS_DEAD_ERROR(
+        "polarx_columnar_process_dead_error",
+        true,
+        "Columnar进程探活异常，进程可能已退出，请尽快排查，所属容器ID：%s",
+        5,
+        10,
+        false,
+        true
+    ),
+    COLUMNAR_JVM_HEARTBEAT_TIMEOUT_ERROR(
+        "polarx_columnar_jvm_heartbeat_timeout_error",
+        true,
+        "Columnar进程出现了心跳超时，触发了自动重启，请及时关注.",
+        5,
+        10,
+        false,
+        true
+    ),
+    COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_WARNING(
+        "polarx_columnar_process_heartbeat_warning",
+        true,
+        "Columnar已连续%s秒未更新update_time，请尽快排查进程是否Hang住",
+        1,
+        5,
+        false,
+        true
+    ),
+    COLUMNAR_PROCESS_OOM_WARNING(
+        "polarx_columnar_out_of_memory_warning",
+        true,
+        "Columnar内存占用率持续超过95%，请及时关注，防止OOM",
+        4,
+        5,
+        false,
+        true
+    ),
+    COLUMNAR_EXCESSIVE_LATENCY_WARNING(
+        "polarx_excessive_latency_warning",
+        true,
+        "Columnar offset延迟已经超过10分钟，请及时关注",
+        4,
+        5,
+        false,
+        true
+    ),
+    COLUMNAR_BINLOG_POSITION_WARNING(
+        "polarx_columnar_binlog_position_warning",
+        true,
+        "Columnar 消费的binlog position已经10分钟没有变化，请及时关注",
+        4,
+        5,
+        false,
+        true
+    ),
+    ;
 
     private String desc;
     private boolean expirable;
@@ -302,6 +366,7 @@ public enum MonitorType {
     private int alarmThreshold;
     private int alarmInterval;
     private boolean fatalAlarmIfExistsConsumer;
+    private boolean isColumnar;
 
     MonitorType(String desc, boolean expirable, String msgTemplate, int alarmThreshold, int alarmInterval,
                 boolean fatalAlarmIfExistsConsumer) {
@@ -311,6 +376,18 @@ public enum MonitorType {
         this.alarmThreshold = alarmThreshold;
         this.alarmInterval = alarmInterval;
         this.fatalAlarmIfExistsConsumer = fatalAlarmIfExistsConsumer;
+        this.isColumnar = false;
+    }
+
+    MonitorType(String desc, boolean expirable, String msgTemplate, int alarmThreshold, int alarmInterval,
+                boolean fatalAlarmIfExistsConsumer, boolean isColumnar) {
+        this.desc = desc;
+        this.expirable = expirable;
+        this.msgTemplate = msgTemplate;
+        this.alarmThreshold = alarmThreshold;
+        this.alarmInterval = alarmInterval;
+        this.fatalAlarmIfExistsConsumer = fatalAlarmIfExistsConsumer;
+        this.isColumnar = isColumnar;
     }
 
     public String getDesc() {
@@ -359,5 +436,13 @@ public enum MonitorType {
 
     public void setFatalAlarmIfExistsConsumer(boolean fatalAlarmIfExistsConsumer) {
         this.fatalAlarmIfExistsConsumer = fatalAlarmIfExistsConsumer;
+    }
+
+    public boolean isColumnar() {
+        return isColumnar;
+    }
+
+    public void setIsColumnar(boolean isColumnar) {
+        this.isColumnar = isColumnar;
     }
 }

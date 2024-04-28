@@ -235,7 +235,10 @@ public class ProcessorContext {
                 return true;
             }
         } else {
-            if (commandTran == null || commandTran.getTso() < lastTSO) {
+            if (commandTran == null ||  //当前没有读到commandTran
+                commandTran.getTso() == null ||   // 当前 command 没有commit, 可能和lastTSO 有空洞关系，所以也需要记录
+                (lastTSO != null
+                    && commandTran.getTso() < lastTSO)) { // 当前 command tso 小于 刚刚收到的tso, 说明 lastTSO是处于command 之后提交
                 return true;
             }
         }

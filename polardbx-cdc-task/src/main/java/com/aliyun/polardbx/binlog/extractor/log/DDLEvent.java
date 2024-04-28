@@ -16,8 +16,14 @@ package com.aliyun.polardbx.binlog.extractor.log;
 
 import com.aliyun.polardbx.binlog.canal.HandlerEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DDL_ALTER_IMPLICIT_TABLE_GROUP_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DDL_ALTER_MANUALLY_TABLE_GROUP_ENABLED;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 
 public class DDLEvent implements HandlerEvent {
 
@@ -31,16 +37,40 @@ public class DDLEvent implements HandlerEvent {
     private String commitKey;
     private byte[] data;
 
-    public void initVisible(int value) {
+    public void initVisible(int value, DDLExtInfo ddlExtInfo) {
         if (value == 1) {
+            // Public
             visibleToPolardbX = true;
             visibleToMysql = true;
-        } else {
-            visibleToPolardbX = !"ALTER_TABLEGROUP".equals(ddlRecord.getSqlKind())
-                && !"MOVE_DATABASE".equals(ddlRecord.getSqlKind());
+        } else if (value == 2) {
+            // Protected
+            visibleToPolardbX = true;
             visibleToMysql = false;
+
+            if ("ALTER_TABLEGROUP".equals(ddlRecord.getSqlKind())) {
+                visibleToPolardbX = supportAlterTg(ddlExtInfo);
+            }
+        } else if (value == 0) {
+            // Private
+            visibleToPolardbX = false;
+            visibleToMysql = false;
+        } else {
+            throw new PolardbxException("invalid visibility : " + value);
         }
         visible = visibleToMysql || visibleToPolardbX;
+    }
+
+    private boolean supportAlterTg(DDLExtInfo ddlExtInfo) {
+        boolean supportAlterManuallyTg = getBoolean(BINLOG_DDL_ALTER_MANUALLY_TABLE_GROUP_ENABLED);
+        boolean supportAlterImplicitTg = getBoolean(BINLOG_DDL_ALTER_IMPLICIT_TABLE_GROUP_ENABLED);
+        if (ddlExtInfo != null && ddlExtInfo.getManuallyCreatedTableGroup() != null) {
+            // 能进入if，说明是支持GDN的CN(支持GDN的CN版本新增了manuallyCreatedTableGroup属性)，否则直接返回false
+            boolean isManuallyCreateTg = ddlExtInfo.getManuallyCreatedTableGroup();
+            boolean enableImplicitTgOfCN = ddlExtInfo.isEnableImplicitTableGroup();
+            return (supportAlterManuallyTg && isManuallyCreateTg) ||
+                (supportAlterImplicitTg && enableImplicitTgOfCN && !isManuallyCreateTg);
+        }
+        return false;
     }
 
     public DDLRecord getDdlRecord() {

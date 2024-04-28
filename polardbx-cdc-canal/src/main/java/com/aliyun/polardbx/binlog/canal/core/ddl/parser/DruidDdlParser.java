@@ -30,23 +30,19 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLDeleteStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLInsertStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableSource;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTruncateStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLUnique;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLUpdateStatement;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateRoleStatement;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateUserStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement.Item;
-import com.alibaba.polardbx.druid.sql.parser.ParserException;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
-import com.google.common.collect.Lists;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatementList;
@@ -57,176 +53,149 @@ import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatementList;
  */
 public class DruidDdlParser {
 
-    public static List<DdlResult> parse(String queryString, String schemaName) {
-        List<SQLStatement> stmtList;
-        try {
-            stmtList = parseSQLStatementList(queryString);
-        } catch (ParserException e) {
-            // 可能存在一些SQL是不支持的，比如存储过程
-            DdlResult ddlResult = new DdlResult();
-            ddlResult.setType(DBMSAction.QUERY);
-            return Lists.newArrayList();
-        }
+    public static DdlResult parse(String queryString, String schemaName) {
+        DdlResult ddlResult = null;
+        List<SQLStatement> stmtList = parseSQLStatementList(queryString);
 
-        List<DdlResult> ddlResults = new ArrayList<>();
         for (SQLStatement statement : stmtList) {
             if (statement instanceof SQLCreateTableStatement) {
-                DdlResult ddlResult = new DdlResult();
+                ddlResult = new DdlResult();
                 SQLCreateTableStatement createTable = (SQLCreateTableStatement) statement;
-                processName(ddlResult, schemaName, createTable.getName(), false);
+                processName(ddlResult, schemaName, createTable.getName());
                 ddlResult.setType(DBMSAction.CREATE);
                 ddlResult.setHasIfExistsOrNotExists(createTable.isIfNotExists());
-                ddlResults.add(ddlResult);
             } else if (statement instanceof SQLAlterTableStatement) {
                 SQLAlterTableStatement alterTable = (SQLAlterTableStatement) statement;
-                if (alterTable.getTableOptions().size() > 0) {
-                    DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schemaName, alterTable.getName(), false);
+                if (!alterTable.getTableOptions().isEmpty()) {
+                    ddlResult = new DdlResult();
+                    processName(ddlResult, schemaName, alterTable.getName());
                     ddlResult.setType(DBMSAction.ALTER);
-                    ddlResults.add(ddlResult);
                 }
 
                 for (SQLAlterTableItem item : alterTable.getItems()) {
                     if (item instanceof SQLAlterTableRename) {
-                        DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schemaName, alterTable.getName(), true);
-                        processName(ddlResult, schemaName, ((SQLAlterTableRename) item).getToName(), false);
+                        ddlResult = new DdlResult();
+                        processName(ddlResult, schemaName, alterTable.getName());
+                        processName(ddlResult, schemaName, ((SQLAlterTableRename) item).getToName());
                         // alter table `seller_table2` rename `seller_table3` , add key
                         // `idx_create`(`gmt_create`)
                         ddlResult.setType(DBMSAction.RENAME);
-                        ddlResults.add(ddlResult);
                     } else if (item instanceof SQLAlterTableAddIndex) {
-                        DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schemaName, alterTable.getName(), false);
+                        ddlResult = new DdlResult();
+                        processName(ddlResult, schemaName, alterTable.getName());
                         ddlResult.setType(DBMSAction.CINDEX);
-                        ddlResults.add(ddlResult);
                     } else if (item instanceof SQLAlterTableDropIndex || item instanceof SQLAlterTableDropKey) {
-                        DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schemaName, alterTable.getName(), false);
+                        ddlResult = new DdlResult();
+                        processName(ddlResult, schemaName, alterTable.getName());
                         ddlResult.setType(DBMSAction.DINDEX);
-                        ddlResults.add(ddlResult);
                     } else if (item instanceof SQLAlterTableAddConstraint) {
-                        DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schemaName, alterTable.getName(), false);
+                        ddlResult = new DdlResult();
+                        processName(ddlResult, schemaName, alterTable.getName());
                         SQLConstraint constraint = ((SQLAlterTableAddConstraint) item).getConstraint();
                         if (constraint instanceof SQLUnique) {
                             ddlResult.setType(DBMSAction.CINDEX);
-                            ddlResults.add(ddlResult);
                         }
                     } else if (item instanceof SQLAlterTableDropConstraint) {
-                        DdlResult ddlResult = new DdlResult();
-                        processName(ddlResult, schemaName, alterTable.getName(), false);
+                        ddlResult = new DdlResult();
+                        processName(ddlResult, schemaName, alterTable.getName());
                         ddlResult.setType(DBMSAction.DINDEX);
-                        ddlResults.add(ddlResult);
                     }
                 }
 
-                if (ddlResults.isEmpty()) {
-                    DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schemaName, alterTable.getName(), false);
+                if (ddlResult == null) {
+                    ddlResult = new DdlResult();
+                    processName(ddlResult, schemaName, alterTable.getName());
+                }
+                if (ddlResult.getType() == null) {
                     ddlResult.setType(DBMSAction.ALTER);
-                    ddlResults.add(ddlResult);
                 }
             } else if (statement instanceof SQLDropTableStatement) {
                 SQLDropTableStatement dropTable = (SQLDropTableStatement) statement;
                 for (SQLExprTableSource tableSource : dropTable.getTableSources()) {
-                    DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schemaName, tableSource.getExpr(), false);
+                    ddlResult = new DdlResult();
+                    processName(ddlResult, schemaName, tableSource.getExpr());
                     ddlResult.setType(DBMSAction.ERASE);
                     ddlResult.setHasIfExistsOrNotExists(dropTable.isIfExists());
-                    ddlResults.add(ddlResult);
                 }
             } else if (statement instanceof SQLCreateIndexStatement) {
                 SQLCreateIndexStatement createIndex = (SQLCreateIndexStatement) statement;
                 SQLTableSource tableSource = createIndex.getTable();
-                DdlResult ddlResult = new DdlResult();
-                processName(ddlResult, schemaName, ((SQLExprTableSource) tableSource).getExpr(), false);
+                ddlResult = new DdlResult();
+                processName(ddlResult, schemaName, ((SQLExprTableSource) tableSource).getExpr());
                 ddlResult.setType(DBMSAction.CINDEX);
-                ddlResults.add(ddlResult);
             } else if (statement instanceof SQLDropIndexStatement) {
                 SQLDropIndexStatement dropIndex = (SQLDropIndexStatement) statement;
                 SQLExprTableSource tableSource = dropIndex.getTableName();
-                DdlResult ddlResult = new DdlResult();
-                processName(ddlResult, schemaName, tableSource.getExpr(), false);
+                ddlResult = new DdlResult();
+                processName(ddlResult, schemaName, tableSource.getExpr());
                 ddlResult.setType(DBMSAction.DINDEX);
-                ddlResults.add(ddlResult);
             } else if (statement instanceof SQLTruncateStatement) {
                 SQLTruncateStatement truncate = (SQLTruncateStatement) statement;
                 for (SQLExprTableSource tableSource : truncate.getTableSources()) {
-                    DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schemaName, tableSource.getExpr(), false);
+                    ddlResult = new DdlResult();
+                    processName(ddlResult, schemaName, tableSource.getExpr());
                     ddlResult.setType(DBMSAction.TRUNCATE);
-                    ddlResults.add(ddlResult);
                 }
             } else if (statement instanceof MySqlRenameTableStatement) {
                 MySqlRenameTableStatement rename = (MySqlRenameTableStatement) statement;
                 for (Item item : rename.getItems()) {
-                    DdlResult ddlResult = new DdlResult();
-                    processName(ddlResult, schemaName, item.getName(), true);
-                    processName(ddlResult, schemaName, item.getTo(), false);
+                    ddlResult = new DdlResult();
+                    processName(ddlResult, schemaName, item.getName());
+                    processName(ddlResult, schemaName, item.getTo());
                     ddlResult.setType(DBMSAction.RENAME);
-                    ddlResults.add(ddlResult);
                 }
-            } else if (statement instanceof SQLInsertStatement) {
-                DdlResult ddlResult = new DdlResult();
-                SQLInsertStatement insert = (SQLInsertStatement) statement;
-                processName(ddlResult, schemaName, insert.getTableName(), false);
-                ddlResult.setType(DBMSAction.INSERT);
-                ddlResults.add(ddlResult);
-            } else if (statement instanceof SQLUpdateStatement) {
-                DdlResult ddlResult = new DdlResult();
-                SQLUpdateStatement update = (SQLUpdateStatement) statement;
-                // 拿到的表名可能为null,比如update a,b set a.id=x
-                processName(ddlResult, schemaName, update.getTableName(), false);
-                ddlResult.setType(DBMSAction.UPDATE);
-                ddlResults.add(ddlResult);
-            } else if (statement instanceof SQLDeleteStatement) {
-                DdlResult ddlResult = new DdlResult();
-                SQLDeleteStatement delete = (SQLDeleteStatement) statement;
-                // 拿到的表名可能为null,比如delete a,b from a where a.id = b.id
-                processName(ddlResult, schemaName, delete.getTableName(), false);
-                ddlResult.setType(DBMSAction.DELETE);
-                ddlResults.add(ddlResult);
             } else if (statement instanceof SQLDropDatabaseStatement) {
-                DdlResult ddlResult = new DdlResult();
+                ddlResult = new DdlResult();
                 SQLDropDatabaseStatement dropDataBase = (SQLDropDatabaseStatement) statement;
-                processName(ddlResult, schemaName, dropDataBase.getDatabase(), false);
+                processName(ddlResult, schemaName, dropDataBase.getDatabase());
                 ddlResult.setType(DBMSAction.DROPDB);
                 ddlResult.setHasIfExistsOrNotExists(dropDataBase.isIfExists());
-                ddlResults.add(ddlResult);
             } else if (statement instanceof SQLCreateDatabaseStatement) {
-                DdlResult ddlResult = new DdlResult();
+                ddlResult = new DdlResult();
                 SQLCreateDatabaseStatement createDataBase = (SQLCreateDatabaseStatement) statement;
-                processName(ddlResult, schemaName, createDataBase.getName(), false);
+                processName(ddlResult, schemaName, createDataBase.getName());
                 ddlResult.setType(DBMSAction.CREATEDB);
                 ddlResult.setHasIfExistsOrNotExists(createDataBase.isIfNotExists());
-                ddlResults.add(ddlResult);
+            } else if (statement instanceof MySqlCreateUserStatement) {
+                ddlResult = new DdlResult();
+                MySqlCreateUserStatement createUser = (MySqlCreateUserStatement) statement;
+                ddlResult.setType(DBMSAction.OTHER);
+                ddlResult.setHasIfExistsOrNotExists(createUser.isIfNotExists());
+            } else if (statement instanceof MySqlCreateRoleStatement) {
+                ddlResult = new DdlResult();
+                MySqlCreateRoleStatement createRole = (MySqlCreateRoleStatement) statement;
+                ddlResult.setType(DBMSAction.OTHER);
+                ddlResult.setHasIfExistsOrNotExists(createRole.isIfNotExists());
+            }
+
+            if (ddlResult != null) {
+                ddlResult.setSqlStatement(statement);
             }
         }
 
-        return ddlResults;
+        return ddlResult;
     }
 
-    private static void processName(DdlResult ddlResult, String schema, SQLExpr sqlName, boolean isOri) {
+    private static void processName(DdlResult ddlResult, String schema, SQLExpr sqlName) {
         if (sqlName == null) {
             return;
         }
 
         String table = null;
         if (sqlName instanceof SQLPropertyExpr) {
-            SQLIdentifierExpr owner = (SQLIdentifierExpr) ((SQLPropertyExpr) sqlName).getOwner();
-            schema = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(owner.getName());
+            SQLExpr owner = ((SQLPropertyExpr) sqlName).getOwner();
+            if (owner instanceof SQLPropertyExpr) {
+                // see https://aone.alibaba-inc.com/v2/project/860366/bug/55137024
+                owner = ((SQLPropertyExpr) owner).getOwner();
+            }
+
+            schema = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLIdentifierExpr) owner).getName());
             table = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLPropertyExpr) sqlName).getName());
         } else if (sqlName instanceof SQLIdentifierExpr) {
             table = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLIdentifierExpr) sqlName).getName());
         }
 
-        if (isOri) {
-            ddlResult.setOriSchemaName(schema);
-            ddlResult.setOriTableName(table);
-        } else {
-            ddlResult.setSchemaName(schema);
-            ddlResult.setTableName(table);
-        }
+        ddlResult.setSchemaName(schema);
+        ddlResult.setTableName(table);
     }
 }

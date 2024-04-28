@@ -29,6 +29,7 @@ import com.aliyun.polardbx.binlog.proc.ProcUtils;
 import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
 import com.aliyun.polardbx.binlog.util.MetricsReporter;
 import com.google.common.collect.Lists;
+import lombok.Data;
 import lombok.SneakyThrows;
 import org.apache.commons.lang3.time.DateFormatUtils;
 import org.hyperic.sigar.CpuPerc;
@@ -742,7 +743,8 @@ public class MetricsManager {
         ProcSnapshot procSnapshot;
     }
 
-    static class StreamMetricsAverage {
+    @Data
+    public static class StreamMetricsAverage {
         String streamId;
         /**
          * 从Task接收到的事件写入binlog文件的平均tps(按个数)
@@ -867,5 +869,13 @@ public class MetricsManager {
 
     public void removeClientMetric(DumpClientMetric metric) {
         this.dumpClientMetricsMap.remove(metric.getDestination());
+    }
+
+    public StreamMetricsAverage getStreamMetricsAvg(String streamId) {
+        return lastSnapshot.periodAverage.get(streamId);
+    }
+
+    public StreamMetrics getStreamMetrics(String streamId) {
+        return lastSnapshot.streamMetrics.get(streamId);
     }
 }

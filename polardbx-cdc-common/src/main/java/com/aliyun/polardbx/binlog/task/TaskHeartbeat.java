@@ -30,6 +30,7 @@ import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.DumperType;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
+import com.aliyun.polardbx.binlog.domain.po.ColumnarTaskConfig;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;

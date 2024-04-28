@@ -14,11 +14,14 @@
  */
 package com.aliyun.polardbx.binlog.format.field.datatype;
 
-import com.alibaba.druid.util.StringUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
 import lombok.Data;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
 import java.nio.charset.Charset;
@@ -26,6 +29,7 @@ import java.nio.charset.Charset;
 @Data
 public class CreateField {
 
+    private static final Logger logger = LoggerFactory.getLogger(CreateField.class);
     private String dataType;
     private boolean explicitWidth;
     private int codepoint;
@@ -45,8 +49,9 @@ public class CreateField {
 
     private String realType;
 
-    public static CreateField parse(String dataType, Serializable defaultValue, String charset, boolean nullable,
+    public static CreateField parse(String dataType, Serializable defaultValue, String mysqlCharset, boolean nullable,
                                     boolean unsigned) {
+        checkValueBefore(dataType, defaultValue, mysqlCharset, nullable, unsigned);
         CreateField type = new CreateField();
         dataType = dataType.trim();
         int k = dataType.indexOf("(");
@@ -81,18 +86,25 @@ public class CreateField {
             type.convertType = needConvert;
         }
         type.dataType = "MYSQL_TYPE_" + convertType;
-        if (defaultValue == null || StringUtils.equalsIgnoreCase(defaultValue.toString(), "null")) {
-            type.defaultValue = null;
-        } else {
-            type.defaultValue = defaultValue;
+        type.defaultValue = defaultValue;
+        String javaCharset = CharsetConversion.getJavaCharset(mysqlCharset);
+        if (StringUtils.isBlank(javaCharset)) {
+            throw new PolardbxException("can not find java charset for charset : " + mysqlCharset);
         }
-        String javaCharset = CharsetConversion.getJavaCharset(charset);
-        type.mysqlCharset = charset;
+        type.mysqlCharset = mysqlCharset;
         type.charset = Charset.forName(javaCharset);
         type.nullable = nullable;
         type.unsigned = unsigned;
 
         return type;
+    }
+
+    private static void checkValueBefore(String dataType, Serializable defaultValue, String mysqlCharset,
+                                         boolean nullable,
+                                         boolean unsigned) {
+        if (defaultValue == null && !nullable) {
+            logger.error("check nullable flag false , but receive null value , dataType is " + dataType);
+        }
     }
 
     public static enum SqlTypeConvert {

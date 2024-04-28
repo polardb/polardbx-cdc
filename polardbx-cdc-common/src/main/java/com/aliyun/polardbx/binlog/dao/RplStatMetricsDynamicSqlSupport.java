@@ -14,92 +14,124 @@
  */
 package com.aliyun.polardbx.binlog.dao;
 
-import java.sql.JDBCType;
-import java.util.Date;
-import javax.annotation.Generated;
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
+import javax.annotation.Generated;
+import java.sql.JDBCType;
+import java.util.Date;
+
 public final class RplStatMetricsDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.479+08:00", comments="Source Table: rpl_stat_metrics")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.023+08:00",
+        comments = "Source Table: rpl_stat_metrics")
     public static final RplStatMetrics rplStatMetrics = new RplStatMetrics();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.479+08:00", comments="Source field: rpl_stat_metrics.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.024+08:00",
+        comments = "Source field: rpl_stat_metrics.id")
     public static final SqlColumn<Long> id = rplStatMetrics.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.479+08:00", comments="Source field: rpl_stat_metrics.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.024+08:00",
+        comments = "Source field: rpl_stat_metrics.gmt_created")
     public static final SqlColumn<Date> gmtCreated = rplStatMetrics.gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.024+08:00",
+        comments = "Source field: rpl_stat_metrics.gmt_modified")
     public static final SqlColumn<Date> gmtModified = rplStatMetrics.gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.task_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.024+08:00",
+        comments = "Source field: rpl_stat_metrics.task_id")
     public static final SqlColumn<Long> taskId = rplStatMetrics.taskId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.out_rps")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.024+08:00",
+        comments = "Source field: rpl_stat_metrics.out_rps")
     public static final SqlColumn<Long> outRps = rplStatMetrics.outRps;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.apply_count")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.024+08:00",
+        comments = "Source field: rpl_stat_metrics.apply_count")
     public static final SqlColumn<Long> applyCount = rplStatMetrics.applyCount;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.in_eps")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.024+08:00",
+        comments = "Source field: rpl_stat_metrics.in_eps")
     public static final SqlColumn<Long> inEps = rplStatMetrics.inEps;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.out_bps")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.out_bps")
     public static final SqlColumn<Long> outBps = rplStatMetrics.outBps;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.in_bps")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.in_bps")
     public static final SqlColumn<Long> inBps = rplStatMetrics.inBps;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.out_insert_rps")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.out_insert_rps")
     public static final SqlColumn<Long> outInsertRps = rplStatMetrics.outInsertRps;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.out_update_rps")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.out_update_rps")
     public static final SqlColumn<Long> outUpdateRps = rplStatMetrics.outUpdateRps;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.out_delete_rps")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.out_delete_rps")
     public static final SqlColumn<Long> outDeleteRps = rplStatMetrics.outDeleteRps;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.48+08:00", comments="Source field: rpl_stat_metrics.receive_delay")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.receive_delay")
     public static final SqlColumn<Long> receiveDelay = rplStatMetrics.receiveDelay;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.process_delay")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.process_delay")
     public static final SqlColumn<Long> processDelay = rplStatMetrics.processDelay;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.merge_batch_size")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.merge_batch_size")
     public static final SqlColumn<Long> mergeBatchSize = rplStatMetrics.mergeBatchSize;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.rt")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.rt")
     public static final SqlColumn<Long> rt = rplStatMetrics.rt;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.skip_counter")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.skip_counter")
     public static final SqlColumn<Long> skipCounter = rplStatMetrics.skipCounter;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.skip_exception_counter")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.skip_exception_counter")
     public static final SqlColumn<Long> skipExceptionCounter = rplStatMetrics.skipExceptionCounter;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.persist_msg_counter")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.persist_msg_counter")
     public static final SqlColumn<Long> persistMsgCounter = rplStatMetrics.persistMsgCounter;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.msg_cache_size")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.msg_cache_size")
     public static final SqlColumn<Long> msgCacheSize = rplStatMetrics.msgCacheSize;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.cpu_use_ratio")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.025+08:00",
+        comments = "Source field: rpl_stat_metrics.cpu_use_ratio")
     public static final SqlColumn<Integer> cpuUseRatio = rplStatMetrics.cpuUseRatio;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.mem_use_ratio")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.026+08:00",
+        comments = "Source field: rpl_stat_metrics.mem_use_ratio")
     public static final SqlColumn<Integer> memUseRatio = rplStatMetrics.memUseRatio;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.full_gc_count")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.026+08:00",
+        comments = "Source field: rpl_stat_metrics.full_gc_count")
     public static final SqlColumn<Long> fullGcCount = rplStatMetrics.fullGcCount;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.worker_ip")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.026+08:00",
+        comments = "Source field: rpl_stat_metrics.worker_ip")
     public static final SqlColumn<String> workerIp = rplStatMetrics.workerIp;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.481+08:00", comments="Source field: rpl_stat_metrics.fsm_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.026+08:00",
+        comments = "Source field: rpl_stat_metrics.fsm_id")
     public static final SqlColumn<Long> fsmId = rplStatMetrics.fsmId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-08-11T17:36:25.479+08:00", comments="Source Table: rpl_stat_metrics")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.026+08:00",
+        comments = "Source field: rpl_stat_metrics.total_commit_count")
+    public static final SqlColumn<Long> totalCommitCount = rplStatMetrics.totalCommitCount;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-28T10:33:17.024+08:00",
+        comments = "Source Table: rpl_stat_metrics")
     public static final class RplStatMetrics extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 
@@ -150,6 +182,8 @@ public final class RplStatMetricsDynamicSqlSupport {
         public final SqlColumn<String> workerIp = column("worker_ip", JDBCType.VARCHAR);
 
         public final SqlColumn<Long> fsmId = column("fsm_id", JDBCType.BIGINT);
+
+        public final SqlColumn<Long> totalCommitCount = column("total_commit_count", JDBCType.BIGINT);
 
         public RplStatMetrics() {
             super("rpl_stat_metrics");

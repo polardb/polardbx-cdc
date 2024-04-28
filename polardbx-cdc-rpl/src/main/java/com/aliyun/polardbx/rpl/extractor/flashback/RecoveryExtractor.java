@@ -20,13 +20,11 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.BinlogEventParser;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionBegin;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultOption;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowsQueryLog;
 import com.aliyun.polardbx.binlog.canal.core.BinlogEventSink;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
@@ -51,7 +49,6 @@ import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
 
 import java.net.InetSocketAddress;
-import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -173,11 +170,10 @@ public class RecoveryExtractor extends BaseExtractor {
         @Override
         public boolean sink(List<MySQLDBMSEvent> events) {
             long now = System.currentTimeMillis();
-            Timestamp extractTimestamp = new Timestamp(now);
             List<MessageEvent> data = new ArrayList<>(events.size());
 
             for (MySQLDBMSEvent event : events) {
-                DBMSEvent dbmsEvent = event.getDbMessageWithEffect();
+                DBMSEvent dbmsEvent = event.getDbmsEventPayload();
                 if (dbmsEvent instanceof DBMSTransactionBegin) {
                     // 只处理正常的数据,事务头和尾就忽略了,避免占用ringBuffer空间
                     DBMSTransactionBegin begin = (DBMSTransactionBegin) dbmsEvent;
@@ -201,19 +197,10 @@ public class RecoveryExtractor extends BaseExtractor {
                     if (rowChange.getRowSize() == 1) {
                         MessageEvent e = new MessageEvent(RplStorage.getRepoUnit());
                         e.setDbmsEvent(dbmsEvent);
-                        e.setPosition(event.getPosition().toString());
-                        e.setSourceTimestamp(new Timestamp(event.getPosition().getTimestamp() * 1000));
-                        e.setExtractTimestamp(extractTimestamp);
-                        rowChange.putOption(
-                            new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
-                        rowChange.putOption(
-                            new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION, e.getPosition()));
                         rowChange.putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_T_ID, tid));
                         tryPersist(e, event);
                         data.add(e);
                     } else {
-                        BinlogPosition position = event.getPosition();
-                        long innerOffset = 0;
                         for (int rownum = 1; rownum <= rowChange.getRowSize(); rownum++) {
                             // 多行记录,拆分为单行进行处理
                             DefaultRowChange split = new DefaultRowChange(rowChange.getAction(),
@@ -229,17 +216,13 @@ public class RecoveryExtractor extends BaseExtractor {
                             // 每一行一个事件
                             MessageEvent e = new MessageEvent(RplStorage.getRepoUnit());
                             e.setDbmsEvent(split);
-                            // position.setInnerOffset(innerOffset++);
-                            e.setPosition(position.toString());
-                            e.setSourceTimestamp(new Timestamp(event.getPosition().getTimestamp() * 1000));
-                            e.setExtractTimestamp(extractTimestamp);
-                            split.putOption(
-                                new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
-                            split.putOption(
-                                new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION, e.getPosition()));
+                            split.setSourceTimeStamp(rowChange.getSourceTimeStamp());
+                            split.setExtractTimeStamp(rowChange.getExtractTimeStamp());
+                            split.setEventSize(rowChange.getEventSize());
+                            split.setPosition(rowChange.getPosition());
+                            split.setRtso(rowChange.getRtso());
                             split.putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_T_ID, tid));
                             tryPersist(e, event);
-
                             data.add(e);
                         }
                     }
@@ -247,18 +230,9 @@ public class RecoveryExtractor extends BaseExtractor {
                     // query log event
                     MessageEvent e = new MessageEvent(RplStorage.getRepoUnit());
                     e.setDbmsEvent(dbmsEvent);
-                    e.setPosition(event.getPosition().toString());
-                    e.setSourceTimestamp(new Timestamp(event.getPosition().getTimestamp() * 1000));
-                    if (dbmsEvent instanceof DefaultQueryLog || dbmsEvent instanceof DefaultRowsQueryLog) {
-                        dbmsEvent.putOption(
-                            new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
-                        dbmsEvent
-                            .putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION, e.getPosition()));
-                    }
-                    if (dbmsEvent instanceof DBMSQueryLog) {
+                    if (dbmsEvent instanceof DefaultQueryLog) {
                         dbmsEvent.putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_T_ID, tid));
                     }
-                    e.setExtractTimestamp(extractTimestamp);
                     tryPersist(e, event);
                     data.add(e);
                 }

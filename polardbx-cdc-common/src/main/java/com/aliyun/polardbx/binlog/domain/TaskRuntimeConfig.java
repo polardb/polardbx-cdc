@@ -14,7 +14,9 @@
  */
 package com.aliyun.polardbx.binlog.domain;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
+import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 
 import java.util.List;
 
@@ -93,6 +95,10 @@ public class TaskRuntimeConfig {
 
     public void setBinlogTaskConfig(BinlogTaskConfig binlogTaskConfig) {
         this.binlogTaskConfig = binlogTaskConfig;
+    }
+
+    public ExecutionConfig getExecutionConfig() {
+        return JSONObject.parseObject(binlogTaskConfig.getConfig(), ExecutionConfig.class);
     }
 
     @Override

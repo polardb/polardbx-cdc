@@ -17,6 +17,7 @@ package com.aliyun.polardbx.binlog.cdc.meta;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
+import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
@@ -26,14 +27,15 @@ import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 public class CreateDropTableWithExistFilter {
 
     //@see Aone，ID:39665786
-    public static boolean shouldIgnore(String sql, Long ddlRecordId, Long ddlJobId) {
-        if (ddlRecordId != null && ddlJobId == null && isCreateTableWithIfNotExist(sql)) {
+    public static boolean shouldIgnore(String sql, Long ddlRecordId, Long ddlJobId, DDLExtInfo ddlExtInfo) {
+        // task_id不为空，代表CN版本已经支持打标操作的线性一致（针对 create table if not exits 和 drop table if exists）
+        // 对于已经支持线性一致性打标的版本，则不需要再进行忽略
+        if (ddlRecordId != null && ddlJobId == null && (ddlExtInfo == null || ddlExtInfo.getTaskId() == null)
+            && isCreateTableWithIfNotExist(sql)) {
             return true;
         }
-        if (ddlRecordId != null && ddlJobId == null && isDropTableWithIfExist(sql)) {
-            return true;
-        }
-        return false;
+        return ddlRecordId != null && ddlJobId == null && (ddlExtInfo == null || ddlExtInfo.getTaskId() == null)
+            && isDropTableWithIfExist(sql);
     }
 
     private static boolean isCreateTableWithIfNotExist(String sql) {

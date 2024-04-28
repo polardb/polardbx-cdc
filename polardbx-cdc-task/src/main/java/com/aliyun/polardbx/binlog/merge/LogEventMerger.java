@@ -14,8 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.merge;
 
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.unit.SearchRecorderMetrics;
 import com.aliyun.polardbx.binlog.collect.Collector;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -25,6 +25,7 @@ import com.aliyun.polardbx.binlog.monitor.MonitorValue;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.storage.Storage;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
@@ -40,12 +41,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static com.aliyun.polardbx.binlog.util.CommonUtils.getTsoPhysicalTime;
 import static com.aliyun.polardbx.binlog.ConfigKeys.ALARM_NODATA_THRESHOLD_SECOND;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_CHECK_HEARTBEAT_WINDOW_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_FORCE_COMPLETE_HEARTBEAT_WINDOW_TIME_LIMIT;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_EMPTY_LOOP_EXCEED_THRESHOLD;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_LOOP_ERROR;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.getTsoPhysicalTime;
 import static com.aliyun.polardbx.binlog.util.TxnTokenUtil.cleanTxnBuffer4Token;
 
 /**
@@ -121,6 +122,7 @@ public class LogEventMerger implements Merger {
         running = true;
 
         rootMergeGroup = MergeGroupFactory.build(mergeSources);
+        SearchRecorderMetrics.reset();
         rootMergeGroup.start();
         executorService.execute(() -> {
             logger.info("LogEventMerger start {} ...", mergeSources);

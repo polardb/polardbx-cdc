@@ -19,30 +19,11 @@ package com.aliyun.polardbx.rpl.taskmeta;
  * @since 5.0.0.0
  */
 public enum HostType {
-    RDS(10),
+    RDS,
 
-    MYSQL(15),
+    MYSQL,
 
-    POLARX1(20),
+    POLARX1,
 
-    POLARX2(30);
-
-    private int value;
-
-    public int getValue() {
-        return value;
-    }
-
-    HostType(int value) {
-        this.value = value;
-    }
-
-    public static HostType from(int state) {
-        for (HostType i : HostType.values()) {
-            if (i.value == state) {
-                return i;
-            }
-        }
-        return null;
-    }
+    POLARX2
 }

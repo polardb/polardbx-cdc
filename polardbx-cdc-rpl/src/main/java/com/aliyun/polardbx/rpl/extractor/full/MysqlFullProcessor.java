@@ -35,7 +35,6 @@ import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import org.apache.commons.lang3.StringUtils;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.StringUtils2;
 import com.aliyun.polardbx.rpl.common.TaskContext;
@@ -98,10 +97,9 @@ public class MysqlFullProcessor {
                 }
             }
             if (orderKey == null) {
-                // 暂不支持不含主键或非空uk的表，会直接忽略并标识成功
+                // 不含主键或非空uk的表，采用第一列作为order key
                 log.error("can't find orderKey for schema:{}, tbName:{}", schema, tbName);
-                updateDbFullPosition(fullTableName, 0, null, RplConstants.FINISH);
-                return;
+                orderKey = tableInfo.getColumns().get(0).getName();
             }
             orderKeyStart = null;
             if (StringUtils.isBlank(fullPosition.getPosition())) {
@@ -195,7 +193,7 @@ public class MysqlFullProcessor {
             while (rs.next()) {
                 ExtractorUtil.addRowData(builder, tableInfo, rs);
                 if (extractorConfig.getFetchBatchSize() == builder.getRowDatas().size()) {
-                    DBMSRowChange rowChange = builder.build();
+                    DefaultRowChange rowChange = builder.build();
                     transfer(Collections.singletonList(rowChange));
                     orderKeyStart = rowChange.getRowValue(extractorConfig.getFetchBatchSize(), orderKey);
                     String position = StringUtils2.safeToString(orderKeyStart);

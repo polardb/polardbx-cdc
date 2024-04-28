@@ -16,11 +16,14 @@ package com.aliyun.polardbx.binlog.filesys;
 
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
+import com.aliyun.polardbx.binlog.enums.BinlogUploadStatus;
 import lombok.Getter;
 import lombok.Setter;
 
 import java.io.File;
 import java.io.IOException;
+import java.text.Format;
+import java.text.SimpleDateFormat;
 
 /**
  * @author yudong
@@ -34,7 +37,13 @@ public class CdcFile implements Comparable<CdcFile> {
     private final String name;
     private final IFileSystem fileSystem;
     @Setter
+    @Getter
     private BinlogOssRecord record;
+    @Setter
+    @Getter
+    private String location;
+
+    private final Format dataFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
     public CdcFile(String name, IFileSystem fileSystem) {
         this.name = name;
@@ -54,6 +63,57 @@ public class CdcFile implements Comparable<CdcFile> {
             return record.getLogSize();
         }
         return fileSystem.size(name);
+    }
+
+    public String getCreatedTime() {
+        if (record != null) {
+            return dataFormat.format(record.getGmtCreated());
+        }
+
+        return "";
+    }
+
+    public String getLastModifyTime() {
+        if (record != null) {
+            return dataFormat.format(record.getGmtModified());
+        }
+
+        return "";
+    }
+
+    // TODO: add binlogReader to get first event
+    public String getFirstEventTime() {
+        if (record != null) {
+            return dataFormat.format(record.getLogBegin());
+        }
+
+        return "";
+    }
+
+    // TODO: add binlogReader to get last event
+    public String getLastEventTime() {
+        if (record != null) {
+            return dataFormat.format(record.getLogEnd());
+        }
+
+        return "";
+    }
+
+    // TODO: add binlogReader to get last tso
+    public String getLastTso() {
+        if (record != null) {
+            return record.getLastTso();
+        }
+
+        return "";
+    }
+
+    public String getUploadStatus() {
+        if (record != null) {
+            return BinlogUploadStatus.fromValue(record.getUploadStatus()).name();
+        }
+
+        return "";
     }
 
     public File newFile() {

@@ -19,48 +19,33 @@ package com.aliyun.polardbx.rpl.taskmeta;
  * @since 5.0.0.0
  */
 public enum ServiceType {
-    REPLICA_FULL(2),
 
-    REPLICA_INC(3),
+    REPLICA_FULL,
 
-    INC_COPY(101),
+    REPLICA_INC,
+    REPLICA_FULL_VALIDATION,
 
-    FULL_COPY(100),
+    INC_COPY,
 
-    FULL_VALIDATION(200),
+    FULL_COPY,
 
-    RECONCILIATION(201),
+    FULL_VALIDATION,
 
-    FULL_VALIDATION_CROSSCHECK(202),
+    RECONCILIATION,
 
-    RECONCILIATION_CROSSCHECK(203),
+    FULL_VALIDATION_CROSSCHECK,
 
-    CDC_INC(300),
+    RECONCILIATION_CROSSCHECK,
 
-    REC_SEARCH(301),
+    CDC_INC,
 
-    REC_COMBINE(302);
+    REC_SEARCH,
 
-    private int value;
+    REC_COMBINE;
 
-    ServiceType(int value) {
-        this.value = value;
-    }
-
-    public static ServiceType from(int value) {
-        for (ServiceType i : ServiceType.values()) {
-            if (i.getValue() == value) {
-                return i;
-            }
-        }
-        return null;
-    }
-
-    public int getValue() {
-        return value;
-    }
-
-    public static boolean supportRunningCheck(int typeValue) {
-        return typeValue != REPLICA_FULL.value && typeValue != REPLICA_INC.getValue();
+    // 关闭full_copy的check，防止超大表count超时
+    public static boolean supportRunningCheck(ServiceType type) {
+        return type != REPLICA_FULL && type != REPLICA_INC &&
+            type != FULL_COPY;
     }
 }

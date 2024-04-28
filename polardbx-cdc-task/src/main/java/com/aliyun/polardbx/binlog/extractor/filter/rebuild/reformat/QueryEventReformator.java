@@ -76,7 +76,11 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
         }
 
         // 配置黑名单方式过滤解析失败、或不需要处理的queryEvent,比如:grant、savepoint等
-        return !ignoreQueryEvent(query);
+        if (ignoreQueryEvent(query)) {
+            logger.warn("ignore phy ddl : " + query);
+            return false;
+        }
+        return true;
     }
 
     @Override

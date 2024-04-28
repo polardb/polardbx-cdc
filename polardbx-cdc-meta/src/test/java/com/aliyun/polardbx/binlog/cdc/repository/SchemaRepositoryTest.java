@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.cdc.repository;
 
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.repository.Schema;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObject;
@@ -22,6 +23,9 @@ import com.alibaba.polardbx.druid.util.JdbcConstants;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Test;
+
+import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.buildCreateLikeSql;
 
 @Slf4j
 public class SchemaRepositoryTest {
@@ -357,5 +361,45 @@ public class SchemaRepositoryTest {
             + "\td int,\n"
             + "\te int\n"
             + ") DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci", buffer.toString());
+    }
+
+    //see: https://aone.alibaba-inc.com/v2/project/860366/bug/52881689
+    @Test
+    public void testCreateTableLike() {
+        String schema = "d`b1";
+        SchemaRepository repository = new SchemaRepository(JdbcConstants.MYSQL);
+        repository.setDefaultSchema(schema);
+
+        String t1 = "`gsi-`test_table`";
+        String t2 = "`gsi-`test_table`_0h4o_009";
+        String t3 = "`gsi-`test_table`_0h4o_110";
+        String createSql = String.format("create table %s (id bigint primary key)", "`" + escape(t1) + "`");
+        String createLikeSql = buildCreateLikeSql(t2, schema, t1);
+
+        repository.console(createSql);
+        SchemaObject schemaObject = findTable(repository, t1);
+        Assert.assertNotNull(schemaObject);
+        SQLCreateTableStatement createTableStatement = (SQLCreateTableStatement) schemaObject.getStatement();
+        Assert.assertFalse(createTableStatement.getTableElementList().isEmpty());
+
+        // with schema
+        repository.console(createLikeSql);
+        schemaObject = findTable(repository, t2);
+        Assert.assertNotNull(schemaObject);
+        createTableStatement = (SQLCreateTableStatement) schemaObject.getStatement();
+        Assert.assertFalse(createTableStatement.getTableElementList().isEmpty());
+
+        // without schema
+        createLikeSql = "create table ```gsi-``test_table``_0h4o_110` like ```gsi-``test_table```";
+        repository.console(createLikeSql);
+        schemaObject = findTable(repository, t3);
+        Assert.assertNotNull(schemaObject);
+        createTableStatement = (SQLCreateTableStatement) schemaObject.getStatement();
+        Assert.assertFalse(createTableStatement.getTableElementList().isEmpty());
+    }
+
+    private SchemaObject findTable(SchemaRepository repository, String tableName) {
+        Schema schema = repository.findSchema("d`b1");
+        return schema.findTable(tableName);
     }
 }

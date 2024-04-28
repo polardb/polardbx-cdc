@@ -22,47 +22,15 @@ public enum ServiceStatus {
     /*
     not used
     * */
-    NULL(0),
+    NULL,
 
-    READY(10),
+    READY,
 
-    RUNNING(20),
+    RUNNING,
 
-    STOPPED(30),
+    STOPPED,
 
-    FINISHED(40),
+    FINISHED,
 
-    DEPRECATED(50);
-
-    private int value;
-
-    public int getValue() {
-        return value;
-    }
-
-    public String getName() {
-        return this.name();
-    }
-
-    ServiceStatus(int value) {
-        this.value = value;
-    }
-
-    public static ServiceStatus from(int value) {
-        for (ServiceStatus i : ServiceStatus.values()) {
-            if (i.value == value) {
-                return i;
-            }
-        }
-        return NULL;
-    }
-
-    public static String nameFrom(int value) {
-        for (ServiceStatus i : ServiceStatus.values()) {
-            if (i.value == value) {
-                return i.name();
-            }
-        }
-        return "";
-    }
+    DEPRECATED
 }

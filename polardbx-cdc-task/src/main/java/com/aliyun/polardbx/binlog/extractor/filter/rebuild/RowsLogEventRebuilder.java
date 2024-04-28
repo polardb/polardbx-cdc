@@ -115,7 +115,7 @@ public class RowsLogEventRebuilder {
                 continue;
             }
             TableMapLogEvent.ColumnInfo columnInfo = columnInfos[i];
-            byte[] data = logBuffer.fetchBinaryValue(columnInfo.type, columnInfo.meta);
+            byte[] data = logBuffer.fetchBinaryValue(columnInfo.type, columnInfo.meta, false);
             Field field = new SimpleField(data, columnInfo.type, columnInfo.meta);
             fieldList.add(field);
         }

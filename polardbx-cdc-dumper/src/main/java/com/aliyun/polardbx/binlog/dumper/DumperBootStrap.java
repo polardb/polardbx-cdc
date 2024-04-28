@@ -45,7 +45,7 @@ public class DumperBootStrap {
         bootStrap.boot(args);
     }
 
-    private static Map<String, String> handleArgs(String arg) {
+    public static Map<String, String> handleArgs(String arg) {
         Map<String, String> propMap = new HashMap<>();
         String[] argpiece = arg.split(" ");
         for (String argstr : argpiece) {

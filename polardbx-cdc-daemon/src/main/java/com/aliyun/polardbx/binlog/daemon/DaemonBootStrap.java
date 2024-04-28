@@ -14,15 +14,19 @@
  */
 package com.aliyun.polardbx.binlog.daemon;
 
-import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.RuntimeMode;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.aliyun.polardbx.binlog.TaskBootStrap;
+import com.aliyun.polardbx.binlog.TaskConfigProvider;
 import com.aliyun.polardbx.binlog.cdc.meta.CdcMetaManager;
 import com.aliyun.polardbx.binlog.daemon.cluster.bootstrap.ClusterBootStrapFactory;
 import com.aliyun.polardbx.binlog.daemon.cluster.bootstrap.ClusterBootstrapService;
 import com.aliyun.polardbx.binlog.daemon.rest.RestServer;
+import com.aliyun.polardbx.binlog.daemon.schedule.ColumnarNodeReporter;
 import com.aliyun.polardbx.binlog.daemon.schedule.NodeReporter;
+import com.aliyun.polardbx.binlog.dumper.DumperBootStrap;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import lombok.extern.slf4j.Slf4j;
@@ -60,9 +64,16 @@ public class DaemonBootStrap {
             cdcMetaManager.init();
 
             // Node Reporter
-            NodeReporter nodeReporter = new NodeReporter(clusterId, clusterType, "NodeReport",
-                DynamicApplicationConfig.getInt(DAEMON_HEARTBEAT_INTERVAL_MS));
-            nodeReporter.start();
+            if (!clusterType.equals(ClusterType.COLUMNAR.name())) {
+                NodeReporter nodeReporter = new NodeReporter(clusterId, clusterType, "NodeReport",
+                    DynamicApplicationConfig.getInt(DAEMON_HEARTBEAT_INTERVAL_MS));
+                nodeReporter.start();
+            } else {
+                ColumnarNodeReporter columnarNodeReporter =
+                    new ColumnarNodeReporter(clusterId, clusterType, "ColumnarNodeReport",
+                        DynamicApplicationConfig.getInt(DAEMON_HEARTBEAT_INTERVAL_MS));
+                columnarNodeReporter.start();
+            }
 
             // Cluster bootstrap
             ClusterBootstrapService bootstrapService =
@@ -88,6 +99,17 @@ public class DaemonBootStrap {
                     log.info("## daemon server is down.");
                 }
             }));
+
+            RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
+            if (runtimeMode == RuntimeMode.LOCAL_SINGLE) {
+                TaskBootStrap taskBootStrap = new TaskBootStrap();
+                taskBootStrap.setTaskConfigProvider(new TaskConfigProvider("Final"));
+                taskBootStrap.boot(new String[] {TASK_NAME + "=Final"});
+
+                DumperBootStrap dumperBootStrap = new DumperBootStrap();
+                dumperBootStrap.setTaskConfigProvider(new TaskConfigProvider("Dumper-1"));
+                dumperBootStrap.boot(new String[] {TASK_NAME + "=Dumper-1"});
+            }
         } catch (Throwable t) {
             log.error("## Something goes wrong when starting up the daemon process:", t);
             Runtime.getRuntime().halt(1);

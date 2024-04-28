@@ -15,13 +15,14 @@
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.BinlogXTopologyService;
+import com.aliyun.polardbx.binlog.daemon.cluster.topology.ColumnarTopologyService;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.GlobalBinlogTopologyService;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyService;
 import com.aliyun.polardbx.binlog.dao.SystemConfigInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.SystemConfigInfo;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
@@ -73,7 +74,7 @@ public class TopologyWatcher extends AbstractBinlogTimerTask {
         if (!initFlag) {
             try {
                 ClusterSnapshot clusterSnapshot = new ClusterSnapshot(1, null, null,
-                    null, null, null, null, clusterType);
+                    null, null, null, null, clusterType, null);
                 SystemConfigInfo info = new SystemConfigInfo();
                 info.setConfigKey(CLUSTER_SNAPSHOT_VERSION_KEY);
                 info.setConfigValue(JSONObject.toJSONString(clusterSnapshot));
@@ -90,6 +91,8 @@ public class TopologyWatcher extends AbstractBinlogTimerTask {
             return new GlobalBinlogTopologyService(clusterId, clusterType);
         } else if (StringUtils.equals(clusterType, ClusterType.BINLOG_X.name())) {
             return new BinlogXTopologyService(clusterId, clusterType);
+        } else if (StringUtils.equals(clusterType, ClusterType.COLUMNAR.name())) {
+            return new ColumnarTopologyService(clusterId, clusterType);
         } else {
             throw new PolardbxException("invalid cluster type " + clusterType);
         }

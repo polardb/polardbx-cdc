@@ -34,16 +34,15 @@ import java.util.UUID;
 @Slf4j
 public class MySQLDBMSEvent {
 
-    private DBMSEvent dbMessage;
+    private DBMSEvent dbmsEventPayload;
     private BinlogPosition position;
     private DBMSXATransaction xaTransaction;
-
     private EventRepository repository;
     private long eventSize;
     private String persistKey;
 
-    public MySQLDBMSEvent(DBMSEvent dbMessage, BinlogPosition position, long eventSize) {
-        this.dbMessage = dbMessage;
+    public MySQLDBMSEvent(DBMSEvent dbmsEventPayload, BinlogPosition position, long eventSize) {
+        this.dbmsEventPayload = dbmsEventPayload;
         this.position = position;
         this.eventSize = eventSize;
     }
@@ -56,8 +55,8 @@ public class MySQLDBMSEvent {
         if (repository == null) {
             return;
         }
-        if (dbMessage == null) {
-            throw new PolardbxException("can`t persist because dbMessage is null");
+        if (dbmsEventPayload == null) {
+            throw new PolardbxException("can`t persist because dbms event payload is null");
         }
         if (StringUtils.isNotBlank(persistKey)) {
             throw new PolardbxException("can`t persist again, current persist key is " + persistKey);
@@ -66,9 +65,11 @@ public class MySQLDBMSEvent {
             eventSize >= repository.persistThreshold())) {
             persistKey = UUID.randomUUID().toString();
             try {
-                repository.put(persistKey, SerializationUtils.serialize(dbMessage));
-                dbMessage = null;
-                log.info("mysql dbms event is persisted, with key " + persistKey);
+                repository.put(persistKey, SerializationUtils.serialize(dbmsEventPayload));
+                dbmsEventPayload = null;
+                if (log.isDebugEnabled()) {
+                    log.debug("mysql dbms event is persisted, with key " + persistKey);
+                }
                 StatMetrics.getInstance().addPersistEventCount(1);
             } catch (Throwable e) {
                 throw new PolardbxException("persist failed !", e);
@@ -85,7 +86,9 @@ public class MySQLDBMSEvent {
         }
         try {
             repository.delete(persistKey);
-            log.info("persisted mysql dbms event is released, with key " + persistKey);
+            if (log.isDebugEnabled()) {
+                log.debug("persisted mysql dbms event is released, with key " + persistKey);
+            }
             persistKey = null;
             StatMetrics.getInstance().deletePersistEventCount(1);
         } catch (Throwable e) {
@@ -93,7 +96,7 @@ public class MySQLDBMSEvent {
         }
     }
 
-    public DBMSEvent getDbMessageWithEffect() {
+    public DBMSEvent getDbmsEventPayload() {
         if (StringUtils.isNotBlank(persistKey)) {
             try {
                 byte[] bytes = repository.get(persistKey);
@@ -102,12 +105,12 @@ public class MySQLDBMSEvent {
                 throw new PolardbxException("restore from rocksdb failed!!", e);
             }
         } else {
-            return dbMessage;
+            return dbmsEventPayload;
         }
     }
 
-    public void setDbMessage(DBMSEvent dbMessage) {
-        this.dbMessage = dbMessage;
+    public void setDbmsEventPayload(DBMSEvent dbmsEventPayload) {
+        this.dbmsEventPayload = dbmsEventPayload;
     }
 
     public BinlogPosition getPosition() {
@@ -120,7 +123,7 @@ public class MySQLDBMSEvent {
 
     @Override
     public String toString() {
-        return "MySQLDBMSEvent [position=" + position + ", dbMessage=" + dbMessage + "]";
+        return "MySQLDBMSEvent [position=" + position + ", dbmsEventPayload=" + dbmsEventPayload + "]";
     }
 
     public DBMSXATransaction getXaTransaction() {

@@ -38,7 +38,7 @@ public class SpecialDDLTest extends RplBaseTestCase {
             + "  `aiMzgbaKVCIQtle` INT(1) UNSIGNED NULL COMMENT 'treSay',\n"
             + "  `V8R9mZFvUHxQ` MEDIUMINT UNSIGNED ZEROFILL COMMENT 'WenHosxfI3i',\n"
             + "  `RFKRrCAF` TIMESTAMP UNIQUE,\n"
-            + "  `ctv` BIGINT(5) ZEROFILL NULL,\n"
+            + "  `ctv` BIGINT(5) NULL,\n"
             + "  `Vd` TINYINT UNSIGNED ZEROFILL UNIQUE COMMENT 'lysAE',\n"
             + "  `8` MEDIUMINT(4) ZEROFILL COMMENT 'Y',\n"
             + "  `H4rJ5c8d0N1C8Q` BIGINT UNSIGNED ZEROFILL NOT NULL,\n"

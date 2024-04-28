@@ -27,9 +27,10 @@ import java.util.LinkedList;
 public class Container implements Comparable<Container> {
     private String containerId; //全局唯一的container标示
     private Resource capability;  //该container的资源信息
-    private String nodeHttpAddress; //该container可以启动的NodeManager的hostname
+    private String ip; //该container可以启动的NodeManager的hostname
     private int daemonPort; //该container的daemon分配的port
     private LinkedList<Integer> availablePorts; //该container可用端口列表
+    private String hostString;
 
     /**
      * 扣减内存
@@ -50,13 +51,13 @@ public class Container implements Comparable<Container> {
     @Override
     public int compareTo(Container o) {
         int mem = o.getCapability().getFreeMemMb() - this.getCapability().getFreeMemMb();
-        return mem == 0 ? this.nodeHttpAddress.compareTo(o.nodeHttpAddress) : mem;
+        return mem == 0 ? this.ip.compareTo(o.ip) : mem;
     }
 
     @Override
     public String toString() {
         return "Container{" +
-            "ip='" + nodeHttpAddress + '\'' +
+            "ip='" + ip + '\'' +
             '}';
     }
 }

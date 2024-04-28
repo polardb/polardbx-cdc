@@ -20,27 +20,6 @@ package com.aliyun.polardbx.rpl.validation.common;
  * @author siyu.yusi
  */
 public enum ValidationTypeEnum {
-    FORWARD(1),
-    BACKWARD(2);
-
-    private final int value;
-
-    ValidationTypeEnum(int value) {
-        this.value = value;
-    }
-
-    public static ValidationTypeEnum from(int value) {
-        switch (value) {
-        case 1:
-            return FORWARD;
-        case 2:
-            return BACKWARD;
-        default:
-            return null;
-        }
-    }
-
-    public int getValue() {
-        return value;
-    }
+    FORWARD,
+    BACKWARD
 }

@@ -28,6 +28,7 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Base64;
 import java.util.Date;
 import java.util.Enumeration;
 import java.util.Objects;
@@ -35,6 +36,7 @@ import java.util.Random;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
@@ -48,7 +50,10 @@ import static com.aliyun.polardbx.binlog.util.StorageSequence.getFixedLengthStor
 public class CommonUtils {
     public static final String RDS_HIDDEN_PK_NAME = "__#alibaba_rds_row_id#__";
     public static final String PRIVATE_DDL_TSO_PREFIX = "# POLARX_TSO=";
+    public static final String PRIVATE_DDL_ENCODE_BASE64 = "# POLARX_ORIGIN_SQL_ENCODE=BASE64";
     public static final String PRIVATE_DDL_DDL_PREFIX = "# POLARX_ORIGIN_SQL=";
+    public static final Pattern PRIVATE_DDL_SQL_PATTERN = Pattern.compile(PRIVATE_DDL_DDL_PREFIX + "([\\W\\w]+)");
+    public static final String PRIVATE_DDL_ID_PREFIX = "# POLARX_DDL_ID=";
     public static final String PRIVATE_DDL_DDL_ROUTE_PREFIX = "# POLARX_DDL_ROUTE_MODE=";
     private static final Logger logger = LoggerFactory.getLogger(CommonUtils.class);
     private static final long TWEPOCH = 1303895660503L;
@@ -359,10 +364,29 @@ public class CommonUtils {
         return buf.toString();
     }
 
-    /**
-     * mem的格式化
-     */
-    public static Long memFormat(long value) {
-        return new Long(value / 1024 / 1024);
+    public static String extractPolarxOriginSql(String sqlInput) {
+        return extractPolarxOriginSql(sqlInput, true);
+    }
+
+    public static String extractPolarxOriginSql(String sqlInput, boolean decode) {
+        Scanner scanner = new Scanner(sqlInput);
+        while (scanner.hasNextLine()) {
+            String str = scanner.nextLine();
+            Matcher matcher = PRIVATE_DDL_SQL_PATTERN.matcher(str);
+            if (matcher.find()) {
+                String originSql = matcher.group(1);
+                if (decode && StringUtils.contains(sqlInput, PRIVATE_DDL_ENCODE_BASE64)) {
+                    return new String(Base64.getDecoder().decode(originSql));
+                } else {
+                    return originSql;
+                }
+            }
+        }
+
+        return "";
+    }
+
+    public static String tableName(String schemaName, String tableName) {
+        return String.format("`%s`.`%s`", escape(schemaName), escape(tableName));
     }
 }

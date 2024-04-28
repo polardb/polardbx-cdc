@@ -30,12 +30,17 @@ public class ColumnInfo {
     private String javaCharset;
     private boolean nullable;
     private boolean generated;
+    private String typeName;
+    private int size;
 
-    public ColumnInfo(String name, int type, String javaCharset, boolean nullable, boolean generated) {
+    public ColumnInfo(String name, int type, String javaCharset, boolean nullable, boolean generated, String typeName,
+                      int size) {
         this.name = name;
         this.type = type;
         this.javaCharset = javaCharset;
         this.nullable = nullable;
         this.generated = generated;
+        this.typeName = typeName;
+        this.size = size;
     }
 }

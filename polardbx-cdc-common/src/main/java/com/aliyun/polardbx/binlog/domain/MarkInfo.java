@@ -14,8 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.domain;
 
+import com.aliyun.polardbx.binlog.MarkCommandEnum;
 import com.aliyun.polardbx.binlog.MarkType;
-import com.aliyun.polardbx.binlog.MetaCoopCommandEnum;
 import lombok.Data;
 
 @Data
@@ -23,7 +23,7 @@ public class MarkInfo {
     private static final String SEP = "::";
     private MarkType markType;
     private String tso;
-    private MetaCoopCommandEnum command;
+    private MarkCommandEnum command;
     private boolean valid = false;
 
     public MarkInfo(String queryLogInfo) {
@@ -38,7 +38,7 @@ public class MarkInfo {
         int s = queryLogInfo.indexOf(SEP, f + 2);
         if (s > 0) {
             tso = queryLogInfo.substring(f + 2, s);
-            command = MetaCoopCommandEnum.valueOf(queryLogInfo.substring(s + 2));
+            command = MarkCommandEnum.valueOf(queryLogInfo.substring(s + 2));
         } else {
             tso = queryLogInfo.substring(f + 2);
         }
@@ -50,7 +50,7 @@ public class MarkInfo {
         this.tso = tso;
     }
 
-    public MarkInfo(MarkType markType, String tso, MetaCoopCommandEnum command) {
+    public MarkInfo(MarkType markType, String tso, MarkCommandEnum command) {
         this.markType = markType;
         this.tso = tso;
         this.command = command;

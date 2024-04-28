@@ -57,7 +57,7 @@ public class MemoryTableMetaTest_CaseSensitive extends MemoryTableMetaBase {
         Assert.assertNotNull(tm.getFieldMetaByName("GKHOUQO"));
         Assert.assertNotNull(tm.getFieldMetaByName("gkhouqo"));
 
-        Set<String> sets = memoryTableMeta.findIndexes("DbDB", "abc");
+        Set<String> sets = memoryTableMeta.find("DbDB", "abc").getIndexes().keySet();
         Assert.assertEquals(Sets.newHashSet("uqn3j"), sets);
     }
 

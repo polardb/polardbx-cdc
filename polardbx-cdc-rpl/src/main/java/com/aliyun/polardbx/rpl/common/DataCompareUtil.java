@@ -14,20 +14,24 @@
  */
 package com.aliyun.polardbx.rpl.common;
 
-import java.lang.reflect.Array;
-import java.math.BigDecimal;
-import java.sql.Types;
-import java.util.Date;
-
 import com.aliyun.polardbx.binlog.CommonConstants;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.math.util.MathUtils;
 
+import java.lang.reflect.Array;
+import java.math.BigDecimal;
+import java.sql.Types;
+import java.util.Date;
+
 /**
  * @author 燧木
  */
 public class DataCompareUtil {
+
+    private static final char[] HEX_DIGITS = new char[] {
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+
     /**
      * 比较源值与目标值是否相同
      *
@@ -76,8 +80,8 @@ public class DataCompareUtil {
 
                     return false;
                 }
-            } else if (Number.class.isAssignableFrom(sourceValue.getClass())
-                && Number.class.isAssignableFrom(targetValue.getClass())) {
+            } else if (Number.class.isAssignableFrom(sourceValue.getClass()) && Number.class.isAssignableFrom(
+                targetValue.getClass())) {
                 String v1 = getNumberString(sourceValue);
                 String v2 = getNumberString(targetValue);
                 boolean result = v1.equals(v2);
@@ -234,7 +238,7 @@ public class DataCompareUtil {
         }
     }
 
-    private static boolean isRealType(int type) {
+    public static boolean isRealType(int type) {
         switch (type) {
         case Types.DOUBLE:
         case Types.FLOAT:
@@ -245,6 +249,16 @@ public class DataCompareUtil {
         default:
             return false;
         }
+    }
+
+    public static String bytesToHexString(byte[] bytes) {
+        char[] hexChars = new char[bytes.length * 2];
+        for (int j = 0; j < bytes.length; j++) {
+            int v = bytes[j] & 0xFF;
+            hexChars[j * 2] = HEX_DIGITS[v >>> 4];
+            hexChars[j * 2 + 1] = HEX_DIGITS[v & 0x0F];
+        }
+        return new String(hexChars);
     }
 
     private static boolean compareBigDecimalStr(String source, String target) {

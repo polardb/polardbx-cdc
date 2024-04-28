@@ -26,7 +26,6 @@ import com.aliyun.polardbx.binlog.domain.MergeSourceInfo;
 import com.aliyun.polardbx.binlog.domain.MergeSourceType;
 import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
 import com.aliyun.polardbx.binlog.domain.TaskType;
-import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.BinlogExtractor;
@@ -70,6 +69,9 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_SOURCE_QUEUE_MAX_
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_MERGE_SOURCE_QUEUE_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_QUEUE_SIZE;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 
 /**
@@ -199,9 +201,7 @@ public class TaskEngine implements TxnMessageProvider {
 
         AtomicInteger extractorNum = new AtomicInteger();
         final String finalStartTso = startTso;
-        String rdsBinlogPath =
-            DynamicApplicationConfig.getString(TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR) + File.separator +
-                DynamicApplicationConfig.getString(TASK_NAME);
+        String rdsBinlogPath = getString(TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR) + File.separator + getString(TASK_NAME);
 
         List<String> sourcesList = new ArrayList<>();
         this.taskRuntimeConfig.getMergeSourceInfos().forEach(i -> {
@@ -210,8 +210,9 @@ public class TaskEngine implements TxnMessageProvider {
             mergeSource.setStartTSO(finalStartTso);
 
             if (i.getType() == MergeSourceType.BINLOG) {
-                BinlogExtractor extractor =
-                    ExtractorBuilder.buildExtractor(i.getBinlogParameter(), storage, mergeSource, rdsBinlogPath);
+                BinlogExtractor extractor = ExtractorBuilder.buildExtractor(
+                    i.getBinlogParameter(), storage, mergeSource, rdsBinlogPath,
+                    taskRuntimeConfig.getExecutionConfig().getServerIdWithCompatibility());
                 mergeSource.setExtractor(extractor);
                 extractorNum.incrementAndGet();
                 sourcesList.add(extractor.getDnHost().getStorageInstId());
@@ -238,8 +239,8 @@ public class TaskEngine implements TxnMessageProvider {
     }
 
     private int calcMergeSourceQueueSize() {
-        int defaultSize = DynamicApplicationConfig.getInt(TASK_MERGE_SOURCE_QUEUE_SIZE);
-        int maxTotalSize = DynamicApplicationConfig.getInt(TASK_MERGE_SOURCE_QUEUE_MAX_TOTAL_SIZE);
+        int defaultSize = getInt(TASK_MERGE_SOURCE_QUEUE_SIZE);
+        int maxTotalSize = getInt(TASK_MERGE_SOURCE_QUEUE_MAX_TOTAL_SIZE);
         int mergeSourceSize = taskRuntimeConfig.getMergeSourceInfos().size();
         double calcSize = maxTotalSize / ((double) mergeSourceSize);
         return Math.min(defaultSize, new Double(calcSize).intValue());
@@ -247,17 +248,14 @@ public class TaskEngine implements TxnMessageProvider {
 
     private void checkValid(String startTso) {
         String expectedStorageTso = StorageUtil.buildExpectedStorageTso(startTso);
-        //TODO for dispatcher
         if (taskRuntimeConfig.getType() != TaskType.Dispatcher && taskRuntimeConfig.getBinlogTaskConfig() != null) {
             long start = System.currentTimeMillis();
             while (true) {
-                BinlogTaskConfig binlogTaskConfig = taskRuntimeConfig.getBinlogTaskConfig();
-                ExecutionConfig taskConfig =
-                    JSONObject.parseObject(binlogTaskConfig.getConfig(), ExecutionConfig.class);
+                ExecutionConfig executionConfig = taskRuntimeConfig.getExecutionConfig();
 
-                if (!StringUtils.equals(expectedStorageTso, taskConfig.getTso())) {
+                if (!StringUtils.equals(expectedStorageTso, executionConfig.getTso())) {
                     logger.error("The input tso {} is inconsistent with the expected tso {}, will retry.",
-                        taskConfig.getTso(), expectedStorageTso);
+                        executionConfig.getTso(), expectedStorageTso);
                     try {
                         Thread.sleep(1000);
                     } catch (InterruptedException e) {
@@ -265,7 +263,7 @@ public class TaskEngine implements TxnMessageProvider {
 
                     if (System.currentTimeMillis() - start > 5 * 1000) {
                         throw new PolardbxException(
-                            "The input tso " + taskConfig.getTso() + " is inconsistent with the expected tso "
+                            "The input tso " + executionConfig.getTso() + " is inconsistent with the expected tso "
                                 + expectedStorageTso);
                     }
 
@@ -283,38 +281,37 @@ public class TaskEngine implements TxnMessageProvider {
                 extractRecoverTsoMapFromTaskConfig());
         } else {
             return new LogEventTransmitter(taskRuntimeConfig.getType(),
-                DynamicApplicationConfig.getInt(TASK_TRANSMIT_QUEUE_SIZE),
+                getInt(TASK_TRANSMIT_QUEUE_SIZE),
                 storage,
-                ChunkMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.TASK_TRANSMIT_CHUNK_MODE)),
-                DynamicApplicationConfig.getInt(ConfigKeys.TASK_TRANSMIT_CHUNK_ITEM_SIZE),
-                DynamicApplicationConfig.getInt(ConfigKeys.TASK_TRANSMIT_MAX_MESSAGE_SIZE),
-                DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_TRANSMIT_DRY_RUN),
+                ChunkMode.valueOf(getString(ConfigKeys.TASK_TRANSMIT_CHUNK_MODE)),
+                getInt(ConfigKeys.TASK_TRANSMIT_CHUNK_ITEM_SIZE),
+                getInt(ConfigKeys.TASK_TRANSMIT_MAX_MESSAGE_SIZE),
+                getBoolean(ConfigKeys.TASK_TRANSMIT_DRY_RUN),
                 startTso);
         }
     }
 
     private Map<String, String> extractRecoverTsoMapFromTaskConfig() {
-        BinlogTaskConfig binlogTaskConfig = taskRuntimeConfig.getBinlogTaskConfig();
-        ExecutionConfig taskConfig = JSONObject.parseObject(binlogTaskConfig.getConfig(), ExecutionConfig.class);
+        ExecutionConfig taskConfig = taskRuntimeConfig.getExecutionConfig();
         return taskConfig.getRecoverTsoMap();
     }
 
     private Collector buildCollector() {
         return new LogEventCollector(storage,
             transmitter,
-            DynamicApplicationConfig.getInt(TASK_COLLECT_QUEUE_SIZE),
+            getInt(TASK_COLLECT_QUEUE_SIZE),
             taskRuntimeConfig.getType(),
-            DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_MERGE_XA_WITHOUT_TSO));
+            getBoolean(ConfigKeys.TASK_MERGE_XA_WITHOUT_TSO));
     }
 
     private LogEventMerger buildMerger(String startTSO) {
         String expectedStorageTso = StorageUtil.buildExpectedStorageTso(startTSO);
         LogEventMerger result = new LogEventMerger(taskRuntimeConfig.getType(),
             collector,
-            DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_MERGE_XA_WITHOUT_TSO),
+            getBoolean(ConfigKeys.TASK_MERGE_XA_WITHOUT_TSO),
             startTSO,
-            DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_MERGE_DRY_RUN),
-            DynamicApplicationConfig.getInt(ConfigKeys.TASK_MERGE_DRY_RUN_MODE),
+            getBoolean(ConfigKeys.TASK_MERGE_DRY_RUN),
+            getInt(ConfigKeys.TASK_MERGE_DRY_RUN_MODE),
             storage,
             StringUtils.equals(expectedStorageTso, ORIGIN_TSO) ? null : expectedStorageTso);
         result.addHeartBeatWindowAware(collector);
@@ -327,7 +324,7 @@ public class TaskEngine implements TxnMessageProvider {
             BinlogTaskInfoMapper.class);
         Optional<BinlogTaskInfo> optionalTaskInfo = taskInfoMapper.selectOne(
             s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId,
-                    SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(CLUSTER_ID)))
+                    SqlBuilder.isEqualTo(getString(CLUSTER_ID)))
                 .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(taskRuntimeConfig.getName())));
         if (optionalTaskInfo.isPresent()) {
             BinlogTaskInfo taskInfo = optionalTaskInfo.get();

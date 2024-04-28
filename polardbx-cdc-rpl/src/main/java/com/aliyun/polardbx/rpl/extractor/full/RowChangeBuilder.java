@@ -33,11 +33,10 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumnSet;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSOption;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultColumnSet;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultOption;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
@@ -86,7 +85,7 @@ public class RowChangeBuilder {
     }
 
     // for inc copy
-    public static RowChangeBuilder createFromEvent(DBMSRowChange event) {
+    public static RowChangeBuilder createFromEvent(DefaultRowChange event) {
         // 转换成MAP结构数据
         RowChangeHelper.MapData mapData = RowChangeHelper.convertEvent2Map(event);
         RowChangeBuilder builder = new RowChangeBuilder(mapData.getDbName(),
@@ -94,7 +93,7 @@ public class RowChangeBuilder {
             mapData.getAction());
         // 获得表头
         List<? extends DBMSColumn> oMetaDatas = event.getColumns();
-        List<DBMSColumn> nMetaDatas = new ArrayList<DBMSColumn>(oMetaDatas.size());
+        List<DBMSColumn> nMetaDatas = new ArrayList<>(oMetaDatas.size());
         // copy old metaData
         nMetaDatas.addAll(oMetaDatas);
         builder.addMetaColumns(nMetaDatas);
@@ -153,7 +152,7 @@ public class RowChangeBuilder {
         return false;
     }
 
-    public synchronized DBMSRowChange build() throws Exception {
+    public synchronized DefaultRowChange build() throws Exception {
         // 必要参数检查
         if (StringUtils.isBlank(this.schema)) {
             throw new Exception("schema is empty!");
@@ -177,7 +176,7 @@ public class RowChangeBuilder {
         }
         // 构建columnSet
         DBMSColumnSet dbmsColumnSet = new DefaultColumnSet(metaColumns);
-        DBMSRowChange rowChange = new DefaultRowChange(action, schema, table, dbmsColumnSet);
+        DefaultRowChange rowChange = new DefaultRowChange(action, schema, table, dbmsColumnSet);
         // 获取总记录数
         int rowCount = this.rowDatas.size();
         // 填充Row数据

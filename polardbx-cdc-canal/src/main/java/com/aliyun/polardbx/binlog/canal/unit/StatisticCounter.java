@@ -74,7 +74,7 @@ public class StatisticCounter {
     private boolean isOutdate(Counter counter) {
         return DateTime.now()
             .minusSeconds(DynamicApplicationConfig.getInt(ConfigKeys.RPL_STATE_METRICS_FLUSH_INTERVAL_SECOND)).
-                isAfter(counter.timestamp);
+            isAfter(counter.timestamp);
     }
 
     private static class Counter {

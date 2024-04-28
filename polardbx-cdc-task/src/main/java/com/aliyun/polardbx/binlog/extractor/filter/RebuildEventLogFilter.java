@@ -17,11 +17,6 @@ package com.aliyun.polardbx.binlog.extractor.filter;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
-import com.alibaba.polardbx.druid.sql.ast.expr.SQLIdentifierExpr;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropIndex;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTruncateStatement;
@@ -83,10 +78,9 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST;
-import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.AUTO_LOCAL_INDEX_PREFIX;
 import static com.aliyun.polardbx.binlog.cdc.meta.CreateDropTableWithExistFilter.shouldIgnore;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.processDdlSqlCharacters;
-import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.tryRemoveAutoShardKey;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.reWriteWrongDdl;
 
@@ -101,18 +95,16 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
     private final PolarDbXTableMetaManager tableMetaManager;
     private final LogContext logContext;
     private final EventAcceptFilter acceptFilter;
-    private String defaultCharset;
-    private long serverId;
+    private final long instanceServerId;
     private FormatDescriptionLogEvent fde;
     private VirtualTSO baseVTSO;
     private final Map<Integer, EventReformater> reformaterMap = new HashMap<>();
     private final DdlEngineArchiveMapper ddlEngineArchiveMapper;
     private long injectErrorTimestamp = -1;
 
-    public RebuildEventLogFilter(long serverId, EventAcceptFilter acceptFilter,
-                                 boolean binlogx,
+    public RebuildEventLogFilter(long instanceServerId, EventAcceptFilter acceptFilter, boolean binlogx,
                                  PolarDbXTableMetaManager tableMetaManager) {
-        this.serverId = serverId;
+        this.instanceServerId = instanceServerId;
         this.acceptFilter = acceptFilter;
         this.tableMetaManager = tableMetaManager;
         logDecoder.handle(LogEvent.QUERY_EVENT);
@@ -128,7 +120,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         logContext.setLogPosition(new LogPosition(""));
         ddlEngineArchiveMapper = SpringContextHolder.getObject(DdlEngineArchiveMapper.class);
         new QueryEventReformator(tableMetaManager).register(reformaterMap);
-        new RowEventReformator(binlogx, defaultCharset, tableMetaManager).register(reformaterMap);
+        new RowEventReformator(binlogx, tableMetaManager).register(reformaterMap);
         new TableMapEventReformator(tableMetaManager).register(reformaterMap);
 
     }
@@ -155,7 +147,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         Iterator<Transaction> tranIt = event.getTransactionList().iterator();
         logContext.setServerCharactorSet(rc.getServerCharactorSet());
         ReformatContext reformatContext =
-            new ReformatContext(defaultCharset, rc.getServerCharactorSet().getCharacterSetServer(),
+            new ReformatContext(rc.getDefaultDatabaseCharset(), rc.getServerCharactorSet().getCharacterSetServer(),
                 rc.getLowerCaseTableNames(), rc.getStorageInstId());
         reformatContext.setBinlogFile(rc.getBinlogFile());
 
@@ -219,16 +211,14 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
     }
 
     private void logicDDLProcess(Transaction transaction, HandlerContext context) {
-        final long oldServerId = serverId;
         try {
+            long serverId = instanceServerId;
             if (transaction.getServerId() != null) {
                 serverId = transaction.getServerId();
             }
-            rebuildDDL(transaction, context);
+            rebuildDDL(transaction, context, serverId);
         } catch (Exception e) {
             throw new PolardbxException(e);
-        } finally {
-            serverId = oldServerId;
         }
     }
 
@@ -267,18 +257,15 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                     removeOneItem(tir, it);
                     continue;
                 }
-                final long oldServerId = serverId;
+
+                Long serverId = instanceServerId;
                 if (transaction.getServerId() != null) {
                     serverId = transaction.getServerId();
                 }
-                try {
-                    reformatContext.setServerId(serverId);
-                    if (!reformat(tir, e, reformatContext, eventData)) {
-                        it.remove();
-                        continue;
-                    }
-                } finally {
-                    serverId = oldServerId;
+                reformatContext.setServerId(serverId);
+                if (!reformat(tir, e, reformatContext, eventData)) {
+                    it.remove();
+                    continue;
                 }
 
                 allRemove = false;
@@ -298,7 +285,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         }
     }
 
-    private void rebuildDDL(Transaction transaction, HandlerContext context) throws Exception {
+    private void rebuildDDL(Transaction transaction, HandlerContext context, Long serverId) throws Exception {
         logger.info("begin to build ddl event, ddl record is  " + transaction.getDdlEvent().getDdlRecord()
             + " , tso is " + transaction.getVirtualTsoStr());
 
@@ -348,16 +335,8 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         // try rewrite for truncate table sql
         ddlRecord.setDdlSql(tryRewriteTruncateSql(ddlRecord.getTableName(), ddlRecord.getDdlSql()));
 
-        // try rewrite for drop index sql
-        String dropIndexRewriteSql = tryRewriteForDropIndex(ddlEvent.getPosition().getRtso(), ddlRecord.getSchemaName(),
-            ddlRecord.getTableName(), ddlRecord.getDdlSql(), ddlEvent);
-        boolean hasRewrittenDropIndexSql = !StringUtils.equalsIgnoreCase(dropIndexRewriteSql, ddlRecord.getDdlSql());
-        if (StringUtils.isBlank(dropIndexRewriteSql)) {
-            ddlEvent.setVisibleToMysql(false);
-        }
-
         // try ignore create table or drop table sql with exists
-        if (shouldIgnore(ddlRecord.getDdlSql(), ddlRecord.getId(), ddlRecord.getJobId())) {
+        if (shouldIgnore(ddlRecord.getDdlSql(), ddlRecord.getId(), ddlRecord.getJobId(), ddlRecord.getExtInfo())) {
             ddlEvent.setVisible(false);
         }
 
@@ -365,12 +344,14 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         DDLExtInfo ddlExtInfo = ddlRecord.getExtInfo();
         String outputBinlogSql4PolarX = ddlExtInfo != null && StringUtils.isNotBlank(ddlExtInfo.getActualOriginalSql())
             ? ddlExtInfo.getActualOriginalSql() : ddlRecord.getDdlSql();
-        String outputBinlogSql4Mysql = hasRewrittenDropIndexSql ? dropIndexRewriteSql : ddlRecord.getDdlSql();
+        String outputBinlogSql4Mysql = ddlRecord.getDdlSql();
 
-        if (ddlRecord.getExtInfo() != null && BooleanUtils.isTrue(ddlRecord.getExtInfo().getForeignKeysDdl())) {
-            // 外键使用用户侧输入的DDL， 不能用物理执行计划中的sql
+        // 建表SQL使用用户侧输入的DDL，作为单机MySQL形态的DDL sql，不能用物理执行计划中的sql
+        // 对于以/* //1/ */开头的建表SQL，属于创建影子表的范畴，内核会自动将源表名带上__test前缀，但MySQL并没有这个行为，所以不能用原始sql
+        if (ddlRecord.getExtInfo() != null && ("CREATE_TABLE".equals(ddlRecord.getSqlKind()) ||
+            BooleanUtils.isTrue(ddlRecord.getExtInfo().getForeignKeysDdl()))) {
             String actualSql = ddlRecord.getExtInfo().getActualOriginalSql();
-            if (StringUtils.isNotBlank(actualSql)) {
+            if (StringUtils.isNotBlank(actualSql) && !StringUtils.contains(actualSql, "/* //1/ */")) {
                 outputBinlogSql4Mysql = actualSql;
             }
         }
@@ -412,13 +393,19 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             }
             long sqlModeCode = SqlModeUtil.modesValue(sqlMode);
 
+            outputBinlogSql4Mysql = tryRemoveAutoShardKey(
+                ddlRecord.getSchemaName(), ddlRecord.getTableName(), outputBinlogSql4Mysql,
+                triple -> tableMetaManager.findIndexes(triple.getLeft(), triple.getMiddle()).stream().anyMatch(
+                    i -> StringUtils.equalsIgnoreCase(triple.getRight(), i)));
+
             String outputDdlSql = DDLConverter.buildDdlEventSql(
                 ddlRecord.getTableName(),
                 ddlEvent.isVisibleToPolardbX() ? outputBinlogSql4PolarX : null,
                 dbCharset,
                 tbCollation,
                 transaction.getVirtualTsoStr(),
-                ddlEvent.isVisibleToMysql() ? outputBinlogSql4Mysql : null);
+                ddlEvent.isVisibleToMysql() ? outputBinlogSql4Mysql : null,
+                ddlRecord.getDdlSql());
             int ddlCostTime = ddlCostTime(ddlRecord);
 
             long flags2Value = 0;
@@ -553,89 +540,11 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         return ddl;
     }
 
-    private String tryRewriteForDropIndex(String tso, String schema, String tableName, String sql, DDLEvent ddlEvent) {
-        if (!ddlEvent.isVisible()) {
-            return sql;
-        }
-
-        try {
-            SQLStatement sqlStatement = parseSQLStatement(sql);
-
-            // 因为全局索引的存在，CN对于索引的维护比较复杂，CDC为了保证和MySQL的兼容性，对带有global关键字的索引会直接忽略掉
-            // CN创建global index时会指定global关键字，但是删除时是可以不指定，所以我们需要判断一下drop index sql中的索引名在meta中是否存在，如果不存在则不能传递给下游
-            // 另外CN对于新分区表，在创建全局索引的时候，会自动创建local索引，判断索引是否存在的逻辑会同时判断indexName以及对应的localIndexName是否存在
-            if (sqlStatement instanceof SQLDropIndexStatement) {
-                SQLDropIndexStatement dropIndexStatement = (SQLDropIndexStatement) sqlStatement;
-                String indexName = SQLUtils.normalize(dropIndexStatement.getIndexName().getSimpleName());
-                String localIndexName = AUTO_LOCAL_INDEX_PREFIX + indexName;
-                if (!containsIndex(schema, tableName, indexName)) {
-                    if (containsIndex(schema, tableName, localIndexName)) {
-                        dropIndexStatement.setIndexName(new SQLIdentifierExpr("`" + escape(localIndexName) + "`"));
-                        String newSql = dropIndexStatement.toUnformattedString();
-                        logger.info("rewrite drop index sql, tso is ," + tso + " sql before is " + sql +
-                            ", sql after is " + newSql);
-                        return newSql;
-                    } else {
-                        logger.info("skip drop index sql, tso is " + tso + ", sql is " + sql);
-                        return null;
-                    }
-                }
-            } else if (sqlStatement instanceof SQLAlterTableStatement) {
-                SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
-                int itemSize = sqlAlterTableStatement.getItems().size();
-                if (itemSize != 0) {
-                    boolean changeFlag = false;
-                    Iterator<SQLAlterTableItem> iterator = sqlAlterTableStatement.getItems().iterator();
-                    while (iterator.hasNext()) {
-                        SQLAlterTableItem alterTableItem = iterator.next();
-                        if (alterTableItem instanceof SQLAlterTableDropIndex) {
-                            SQLAlterTableDropIndex dropIndex = (SQLAlterTableDropIndex) alterTableItem;
-                            String indexName = SQLUtils.normalize(dropIndex.getIndexName().getSimpleName());
-                            String localIndexName = AUTO_LOCAL_INDEX_PREFIX + indexName;
-                            if (!containsIndex(schema, tableName, indexName)) {
-                                if (containsIndex(schema, tableName, localIndexName)) {
-                                    dropIndex.setIndexName(new SQLIdentifierExpr("`" + escape(localIndexName) + "`"));
-                                } else {
-                                    iterator.remove();
-                                }
-                                changeFlag = true;
-                            }
-                        }
-                    }
-
-                    if (changeFlag) {
-                        String newSql = sqlAlterTableStatement.toUnformattedString();
-                        try {
-                            //只要还能正常解析，就对外输出
-                            parseSQLStatement(newSql);
-                        } catch (Throwable t) {
-                            logger.info("skip drop index sql, tso is " + tso + ", sql is " + sql);
-                            return null;
-                        }
-                        logger.info("rewrite drop index sql, tso is " + tso + ", sql before is " + sql +
-                            ", sql after is " + newSql);
-                        return newSql;
-                    }
-                }
-            }
-
-            return sql;
-        } catch (Throwable t) {
-            logger.error("try rewrite drop index sql error !", t);
-            throw t;
-        }
-    }
-
-    private boolean containsIndex(String schema, String tableName, String indexName) {
-        return tableMetaManager.findIndexes(schema, tableName).stream().anyMatch(
-            i -> StringUtils.equalsIgnoreCase(indexName, i)
-        );
-    }
-
     @Override
     public void onStart(HandlerContext context) {
-        context.getRuntimeContext().setServerId(serverId);
-        defaultCharset = context.getRuntimeContext().getDefaultDatabaseCharset();
+        context.getRuntimeContext().setServerId(instanceServerId);
+        final String defaultCharset = context.getRuntimeContext().getDefaultDatabaseCharset();
+        tableMetaManager.onStart(defaultCharset);
         this.acceptFilter.onStart(context);
         BinlogPosition startPos = context.getRuntimeContext().getStartPosition();
         logger.info("start with tso : " + startPos.getRtso());
@@ -650,7 +559,8 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
 
     @Override
     public void onStartConsume(HandlerContext context) {
-        this.defaultCharset = context.getRuntimeContext().getDefaultDatabaseCharset();
+        final String defaultCharset = context.getRuntimeContext().getDefaultDatabaseCharset();
+        tableMetaManager.onStart(defaultCharset);
         this.acceptFilter.onStartConsume(context);
     }
 }

@@ -21,6 +21,7 @@ public abstract class Constants {
     public static final String MDC_THREAD_LOGGER_VALUE_BINLOG_CLEAN = "binlog_clean";
     public static final String MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP = "binlog_dump";
     public static final String MDC_THREAD_LOGGER_VALUE_BINLOG_SYNC = "binlog_sync";
+    public static final String MDC_RPL_FULL_VALID_TASK_ID_KEY = "fullValidTaskId";
 
     public static final String RELAY_DATA_FORCE_CLEAN_FLAG = "force_clean_flag";
 }

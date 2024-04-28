@@ -44,6 +44,7 @@ public class CommonMetricsHelper {
     private static final Map<String, CommonMetrics> DUMPER = Maps.newHashMap();
     private static final Map<String, CommonMetrics> TASK = Maps.newHashMap();
     private static final Map<String, CommonMetrics> DAEMON = Maps.newHashMap();
+    private static final Map<String, CommonMetrics> COLUMNAR = Maps.newHashMap();
     private static final Map<String, CommonMetrics> ALL = Maps.newHashMap();
 
     private static final AtomicBoolean INITED = new AtomicBoolean(false);
@@ -89,6 +90,10 @@ public class CommonMetricsHelper {
                     DAEMON.put(ss[3], CommonMetrics.builder().key(ss[0]).desc(ss[4])
                         .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
                 }
+                if (ss[0].contains("_columnar_")) {
+                    COLUMNAR.put(ss[3], CommonMetrics.builder().key(ss[0]).desc(ss[4])
+                        .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
+                }
                 ALL.put(ss[0], CommonMetrics.builder().key(ss[0]).desc(ss[4])
                     .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
             }
@@ -98,6 +103,7 @@ public class CommonMetricsHelper {
                 log.debug("init metrics done DUMPER_S {}", DUMPER_S);
                 log.debug("init metrics done DUMPER {}", DUMPER);
                 log.debug("init metrics done TASK {}", TASK);
+                log.debug("init metrics done COLUMNAR {}", COLUMNAR);
             }
         } catch (IOException e) {
             log.error("prepare metrics fail", e);
@@ -130,6 +136,11 @@ public class CommonMetricsHelper {
         return TASK;
     }
 
+    public static Map<String, CommonMetrics> getColumnar() {
+        init();
+        return COLUMNAR;
+    }
+
     public static Map<String, CommonMetrics> getALL() {
         init();
         return ALL;
@@ -159,13 +170,7 @@ public class CommonMetricsHelper {
         commonMetrics.add(CommonMetrics.builder()
             .key(prefix + "heapUsage")
             .type(1)
-            .value(
-                BigDecimal.valueOf(
-                        100 * (jvmSnapshot.getYoungUsed() + jvmSnapshot.getOldUsed() + jvmSnapshot.getMetaUsed()))
-                    .divide(BigDecimal.valueOf(
-                            (jvmSnapshot.getYoungMax() + jvmSnapshot.getOldMax() + jvmSnapshot.getMetaMax())),
-                        2,
-                        RoundingMode.HALF_UP).doubleValue())
+            .value(calcHeapUseRatio(jvmSnapshot))
             .build());
         commonMetrics.add(CommonMetrics.builder()
             .key(prefix + "youngCollectionCount")
@@ -192,6 +197,14 @@ public class CommonMetricsHelper {
             .type(1)
             .value(jvmSnapshot.getCurrentThreadCount())
             .build());
+    }
+
+    private static double calcHeapUseRatio(JvmSnapshot jvmSnapshot) {
+        BigDecimal decimal1 = BigDecimal.valueOf(
+            100 * (jvmSnapshot.getYoungUsed() + jvmSnapshot.getOldUsed() + jvmSnapshot.getMetaUsed()));
+        BigDecimal decimal2 = BigDecimal.valueOf(
+            (jvmSnapshot.getYoungMax() + jvmSnapshot.getOldMax() + jvmSnapshot.getMetaMax()));
+        return decimal2.intValue() == 0 ? 0d : decimal1.divide(decimal2, 2, RoundingMode.HALF_UP).doubleValue();
     }
 
     public static void addProcMetrics(List<CommonMetrics> commonMetrics, ProcSnapshot procSnapshot, String prefix) {

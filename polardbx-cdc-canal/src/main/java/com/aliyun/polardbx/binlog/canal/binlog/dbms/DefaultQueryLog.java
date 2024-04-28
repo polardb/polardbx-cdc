@@ -14,15 +14,19 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog.dbms;
 
+import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
+
 import java.io.Serializable;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Defines a SQL statement from query-log that must be replicated. Default implementation of {@link DBMSQueryLog
- * DBMSQueryLog}
+ * Defines a SQL statement from query-log that must be replicated. Default implementation of {@link DefaultQueryLog
+ * DefaultQueryLog}
  *
  * @author Changyuan.lh
  * @version 1.0
@@ -30,7 +34,7 @@ import java.util.List;
 public class DefaultQueryLog extends DBMSQueryLog {
 
     private static final long serialVersionUID = -3393475008857141186L;
-    public static final String ddlInfo = "ddlInfo";
+
     protected String schema;
     protected String query;
     protected Timestamp timestamp;
@@ -38,29 +42,38 @@ public class DefaultQueryLog extends DBMSQueryLog {
     // binlog保证每一个ddl均带有sql mode
     // 因此不需要区分没有sql mode和sql mode = ''
     protected long sqlMode;
+    protected long execTime;
     protected List<DBMSOption> options;
+    protected AtomicBoolean firstDdl;
+    protected int parallelSeq;
+    protected TableMeta tableMeta;
+
+    public DefaultQueryLog() {
+    }
 
     /**
      * Create new <code>DefaultQueryLog</code> object.
      */
-    public DefaultQueryLog(String schema, String query, Timestamp timestamp, int errorCode) {
+    public DefaultQueryLog(String schema, String query, Timestamp timestamp, int errorCode, long execTime) {
         this.schema = schema;
         this.query = query;
         this.timestamp = timestamp;
         this.errorCode = errorCode;
+        this.execTime = execTime;
     }
 
     /**
      * Create new <code>DefaultQueryLog</code> object.
      */
     public DefaultQueryLog(String schema, String query, Timestamp timestamp, int errorCode, long sqlMode,
-                           DBMSAction action) {
+                           DBMSAction action, long execTime) {
         this.schema = schema;
         this.query = query;
         this.timestamp = timestamp;
         this.errorCode = errorCode;
         this.sqlMode = sqlMode;
         this.action = action;
+        this.execTime = execTime;
     }
 
     /**
@@ -144,6 +157,38 @@ public class DefaultQueryLog extends DBMSQueryLog {
         this.errorCode = errorCode;
     }
 
+    public long getExecTime() {
+        return execTime;
+    }
+
+    public void setExecTime(long execTime) {
+        this.execTime = execTime;
+    }
+
+    public AtomicBoolean getFirstDdl() {
+        return firstDdl;
+    }
+
+    public void setFirstDdl(AtomicBoolean firstDdl) {
+        this.firstDdl = firstDdl;
+    }
+
+    public int getParallelSeq() {
+        return parallelSeq;
+    }
+
+    public void setParallelSeq(int parallelSeq) {
+        this.parallelSeq = parallelSeq;
+    }
+
+    public TableMeta getTableMeta() {
+        return tableMeta;
+    }
+
+    public void setTableMeta(TableMeta tableMeta) {
+        this.tableMeta = tableMeta;
+    }
+
     /**
      * Returns the session options.
      */
@@ -184,5 +229,25 @@ public class DefaultQueryLog extends DBMSQueryLog {
         }
         options.add(option);
         return exist;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        DefaultQueryLog that = (DefaultQueryLog) o;
+        return errorCode == that.errorCode && sqlMode == that.sqlMode && execTime == that.execTime
+            && parallelSeq == that.parallelSeq && Objects.equals(schema, that.schema) && Objects.equals(
+            query, that.query) && Objects.equals(timestamp, that.timestamp) && Objects.equals(options,
+            that.options) && Objects.equals(tableMeta, that.tableMeta);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(schema, query, timestamp, errorCode, sqlMode, execTime, options, parallelSeq, tableMeta);
     }
 }

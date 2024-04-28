@@ -14,8 +14,8 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile.parallel;
 
-import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import com.lmax.disruptor.LifecycleAware;
 import com.lmax.disruptor.WorkHandler;
 import lombok.extern.slf4j.Slf4j;
@@ -102,6 +102,7 @@ public class EventDataBuildHandler implements WorkHandler<EventData>, LifecycleA
 
     private void buildDml(EventData eventData, SingleEventToken eventToken) {
         byte[] data = eventToken.getData();
+        EventGenerator.updateServerId(data, eventToken.getServerId());
         EventGenerator.updatePos(data, eventToken.getNextPosition());
         EventGenerator.updateChecksum(data, 0, data.length);
         eventToken.setUseTokenData(true);

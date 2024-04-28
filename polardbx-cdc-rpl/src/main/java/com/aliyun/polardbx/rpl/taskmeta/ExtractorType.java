@@ -20,51 +20,32 @@ package com.aliyun.polardbx.rpl.taskmeta;
  */
 public enum ExtractorType {
     // MYSQL数据库全量
-    DATA_IMPORT_FULL(10),
+    DATA_IMPORT_FULL,
 
     // MYSQL数据库增量
-    DATA_IMPORT_INC(20),
+    DATA_IMPORT_INC,
 
     // 用于replica全量
-    RPL_FULL(31),
+    RPL_FULL,
 
     // 用于replica增量
-    RPL_INC(30),
+    RPL_INC,
 
     // 用于CDC的增量
-    CDC_INC(40),
+    CDC_INC,
 
     // Full validation
-    FULL_VALIDATION(50),
+    FULL_VALIDATION,
 
     // Full validation from polardbx to drds
-    FULL_VALIDATION_CROSSCHECK(51),
+    FULL_VALIDATION_CROSSCHECK,
 
     // Reconciliation
-    RECONCILIATION(60),
+    RECONCILIATION,
 
     // Reconciliation from polardbx to drds
-    RECONCILIATION_CROSSCHECK(61),
+    RECONCILIATION_CROSSCHECK,
 
     // SQL闪回
-    RECOVERY(70);
-
-    private int value;
-
-    ExtractorType(int value) {
-        this.value = value;
-    }
-
-    public static ExtractorType from(int state) {
-        for (ExtractorType i : ExtractorType.values()) {
-            if (i.value == state) {
-                return i;
-            }
-        }
-        return null;
-    }
-
-    public int getValue() {
-        return value;
-    }
+    RECOVERY
 }

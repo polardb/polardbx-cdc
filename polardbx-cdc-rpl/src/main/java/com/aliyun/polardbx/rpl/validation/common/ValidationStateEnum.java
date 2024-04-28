@@ -20,34 +20,9 @@ package com.aliyun.polardbx.rpl.validation.common;
  * @author siyu.yusi
  */
 public enum ValidationStateEnum {
-    INIT(101),
-    PREPARED(102),
-    COMPARING(103),
-    DONE(104),
-    ERROR(500);
-
-    private final int value;
-
-    ValidationStateEnum(int value) {
-        this.value = value;
-    }
-
-    public static ValidationStateEnum from(int value) {
-        switch (value) {
-        case 101:
-            return INIT;
-        case 102:
-            return PREPARED;
-        case 103:
-            return COMPARING;
-        case 104:
-            return DONE;
-        default:
-            return null;
-        }
-    }
-
-    public int getValue() {
-        return value;
-    }
+    INIT,
+    PREPARED,
+    COMPARING,
+    DONE,
+    ERROR
 }

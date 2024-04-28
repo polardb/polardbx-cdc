@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.binlog.canal;
 
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.BinlogDumpContext;
@@ -29,6 +28,8 @@ import com.aliyun.polardbx.binlog.canal.core.handle.SearchTsoEventHandleV2;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.exception.ConsumeOSSBinlogEndException;
+import com.aliyun.polardbx.binlog.canal.unit.SearchRecorder;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -229,6 +230,7 @@ public class CanalBootstrap {
 
         handle.setEventHandler(handler);
 
+        processor.setSearchRecorder(null);
         processor.setHandle(handle);
         processor.init(connection, startPosition.getFileName(), startPosition.getPosition(), false,
             mySqlInfo.getServerCharactorSet(), mySqlInfo.getServerId(), mySqlInfo.getBinlogChecksum());
@@ -279,11 +281,21 @@ public class CanalBootstrap {
         } else {
             searchFile = connection.preFileName(lastSearchFile);
         }
+        SearchRecorder searchRecorder = new SearchRecorder(authenticationInfo.getStorageMasterInstId());
+        if (!(connection instanceof MysqlConnection)) {
+            searchRecorder.setLocal(false);
+        }
+        if (searchTso > 0) {
+            searchRecorder.setSearchTime(searchTso);
+        }
+        processor.setSearchRecorder(searchRecorder);
         while (true) {
             processor.init(connection.fork(), searchFile, 0, true, mySqlInfo.getServerCharactorSet(),
                 null, mySqlInfo.getBinlogChecksum());
             searchFile = processor.currentFileName();
             long binlogFileSize = connection.binlogFileSize(searchFile);
+            searchRecorder.setFileName(searchFile);
+            searchRecorder.setSize(binlogFileSize);
             if (binlogFileSize == -1) {
                 //找不到这个文件，直接break
                 break;
@@ -302,6 +314,7 @@ public class CanalBootstrap {
                 RuntimeContext.setInstructionId(searchTsoEventHandle.getCommandId());
             }
             if (startPosition != null) {
+                searchRecorder.setFinish(true);
                 return startPosition;
             }
             searchFile = connection.preFileName(searchFile);
@@ -312,6 +325,7 @@ public class CanalBootstrap {
         BinlogPosition startPosition = searchTsoEventHandle.getCommandPosition();
         if (startPosition != null) {
             RuntimeContext.setInitTopology(searchTsoEventHandle.getTopologyContext());
+            searchRecorder.setFinish(true);
             return startPosition;
         }
         return null;

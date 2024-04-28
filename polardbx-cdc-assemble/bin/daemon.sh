@@ -30,7 +30,7 @@ export LANG=zh_CN.GB18030
 
 JAVA_OPTS="-Djava.net.preferIPv4Stack=true"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs -Dfile.encoding=UTF-8"
-JAVA_OPTS="${JAVA_OPTS} -server -Xms256m -Xmx256m -XX:PermSize=32m -XX:MaxPermSize=32m -Xss1m -Djute.maxbuffer=10240000"
+JAVA_OPTS="${JAVA_OPTS} -server -Xms256m -Xmx512m -Xss1m -Djute.maxbuffer=10240000"
 JAVA_OPTS="${JAVA_OPTS} -XX:+UseParallelGC"
 JAVA_OPTS="${JAVA_OPTS} -XX:ParallelGCThreads=2"
 JAVA_OPTS="${JAVA_OPTS} -XX:+HeapDumpOnOutOfMemoryError"

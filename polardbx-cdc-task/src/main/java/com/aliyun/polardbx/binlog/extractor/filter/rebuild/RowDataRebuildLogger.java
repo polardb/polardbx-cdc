@@ -67,10 +67,8 @@ public class RowDataRebuildLogger {
     private final RowsLogBuffer logBuffer = new RowsLogBuffer(null, 0, "utf8");
     private RebuildFieldRowLog rebuildFieldRowLog;
 
-    private final ThreadLocal<String> defaultCharsetThreadLocal = new ThreadLocal<>();
-
     public RowDataRebuildLogger() {
-        isLogRecord = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACTOR_REBUILD_DATA_LOG);
+        isLogRecord = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_REBUILD_DATA_LOG);
     }
 
     private static int unSign(byte[] data, int offset) {
@@ -119,13 +117,11 @@ public class RowDataRebuildLogger {
         }
     }
 
-    public void logRowBegin(LogicTableMeta tableMeta, TableMapLogEvent tableMap, RowData rowData, int eventType,
-                            String defaultCharset) {
+    public void logRowBegin(LogicTableMeta tableMeta, TableMapLogEvent tableMap, RowData rowData, int eventType) {
         if (!isLogRecord) {
             return;
         }
 
-        defaultCharsetThreadLocal.set(defaultCharset);
         List<LogicTableMeta.FieldMetaExt> pkList = tableMeta.getPkList();
         TableMapLogEvent.ColumnInfo[] columnInfos = tableMap.getColumnInfo();
         rebuildFieldRowLog = new RebuildFieldRowLog(tableMap.getDbName(), tableMap.getTableName(), eventType
@@ -135,9 +131,6 @@ public class RowDataRebuildLogger {
             for (LogicTableMeta.FieldMetaExt fieldMeta : pkList) {
                 Field field = rowData.getBiFieldList().get(fieldMeta.getPhyIndex());
                 String charset = fieldMeta.getCharset();
-                if (StringUtils.isBlank(charset)) {
-                    charset = defaultCharset;
-                }
                 String javaCharset = CharsetConversion.getJavaCharset(charset);
                 TableMapLogEvent.ColumnInfo columnInfo = columnInfos[fieldMeta.getPhyIndex()];
                 byte[] data = field.encode();
@@ -188,9 +181,6 @@ public class RowDataRebuildLogger {
     public Serializable decodeValue(LogicTableMeta.FieldMetaExt afterFieldMeta,
                                     int type, byte[] meta, byte[] data) {
         String charset = afterFieldMeta.getCharset();
-        if (StringUtils.isBlank(charset)) {
-            charset = defaultCharsetThreadLocal.get();
-        }
         return doDecode(type, meta, data, charset, afterFieldMeta.isUnsigned());
     }
 

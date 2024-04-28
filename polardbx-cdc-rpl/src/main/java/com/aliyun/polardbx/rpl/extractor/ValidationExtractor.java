@@ -14,23 +14,16 @@
  */
 package com.aliyun.polardbx.rpl.extractor;
 
+import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-
-import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.*;
-import static org.mybatis.dynamic.sql.SqlBuilder.count;
-import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
-import static org.mybatis.dynamic.sql.SqlBuilder.select;
-
 import com.aliyun.polardbx.binlog.dao.ValidationTaskMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
-import com.aliyun.polardbx.rpl.filter.DataImportFilter;
-import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
+import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
 import com.aliyun.polardbx.rpl.taskmeta.ValidationExtractorConfig;
-import com.aliyun.polardbx.rpl.validation.ValidationContext;
 import com.aliyun.polardbx.rpl.validation.ValidationCoordinator;
 import com.aliyun.polardbx.rpl.validation.common.ValidationStateEnum;
 import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
@@ -38,12 +31,21 @@ import lombok.extern.slf4j.Slf4j;
 import org.mybatis.dynamic.sql.render.RenderingStrategy;
 import org.mybatis.dynamic.sql.select.render.SelectStatementProvider;
 
-import javax.sql.DataSource;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+
+import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.deleted;
+import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.serviceId;
+import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.state;
+import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.stateMachineId;
+import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.taskId;
+import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.type;
+import static com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport.validationTask;
+import static org.mybatis.dynamic.sql.SqlBuilder.count;
+import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
+import static org.mybatis.dynamic.sql.SqlBuilder.select;
 
 /**
  * Validation main class
@@ -52,56 +54,41 @@ import java.util.concurrent.Future;
  */
 @Slf4j
 public class ValidationExtractor extends BaseExtractor {
-    private Map<String, DataSource> dataSourceMap;
-    private ValidationExtractorConfig extractorConfig;
-    private ExecutorService executorService;
-    private List<Future> runningProcessors;
-    private HostInfo srcHost;
-    private HostInfo dstHost;
-    private String extractorName;
-    private DataImportFilter filter;
-    private List<ValidationContext> contextList;
+    private final ExecutorService executorService;
+    private final List<Future<?>> runningProcessors;
 
-    public ValidationExtractor(ValidationExtractorConfig extractorConfig, HostInfo srcHost, HostInfo dstHost,
-                               DataImportFilter filter) {
+    public ValidationExtractor(ValidationExtractorConfig extractorConfig) {
         super(extractorConfig);
-        this.extractorName = "ValidationExtractor";
         this.extractorConfig = extractorConfig;
-        this.srcHost = srcHost;
-        this.dstHost = dstHost;
-        this.filter = filter;
-        executorService = ThreadPoolUtil.createExecutorWithFixedNum(extractorConfig.getParallelCount(),
-            extractorName);
+        executorService = ThreadPoolUtil.createExecutorWithFixedNum(extractorConfig.getParallelCount(), "validation");
         runningProcessors = new ArrayList<>();
     }
 
     @Override
     public void init() throws Exception {
         super.init();
-        contextList = ValidationContext.getFactory().createCtxList(srcHost, dstHost, filter);
-        log.info("Validation context list constructed. size: {}", contextList.size());
     }
 
     @Override
     public void start() throws Exception {
-        log.info("Starting extractor {}, src physical db number: {}", extractorName, contextList.size());
-        for (ValidationContext context : contextList) {
-            ValidationCoordinator coordinator = new ValidationCoordinator(context);
-            Future<?> future = executorService.submit(coordinator::validateTable);
-            runningProcessors.add(future);
-            log.info("Running validation for src DB {} and dst DB {}", context.getSrcPhyDB(),
-                context.getDstLogicalDB());
-        }
+        log.info("Starting validation extractor");
+        DataImportMeta.ValidationMeta validationMeta =
+            JSON.parseObject(extractorConfig.getPrivateMeta(), DataImportMeta.ValidationMeta.class);
+        validationMeta.setType(ValidationTypeEnum.FORWARD);
+
+        ValidationCoordinator coordinator = new ValidationCoordinator(validationMeta);
+        Future<?> future = executorService.submit(coordinator::validateTable);
+        runningProcessors.add(future);
     }
 
     @Override
     public boolean isDone() {
         boolean allDone = true;
-        for (Future future : runningProcessors) {
+        for (Future<?> future : runningProcessors) {
             allDone &= future.isDone();
         }
         if (allDone) {
-            if (isVTaskFinished()) {
+            if (isTaskFinished()) {
                 return true;
             } else {
                 log.error("All futures have been done but some tasks are not finished");
@@ -111,7 +98,7 @@ public class ValidationExtractor extends BaseExtractor {
         return false;
     }
 
-    private boolean isVTaskFinished() {
+    private boolean isTaskFinished() {
         String smid = Long.toString(TaskContext.getInstance().getStateMachineId());
         String sid = Long.toString(TaskContext.getInstance().getServiceId());
         String tid = Long.toString(TaskContext.getInstance().getTaskId());
@@ -120,15 +107,15 @@ public class ValidationExtractor extends BaseExtractor {
             .where(stateMachineId, isEqualTo(smid))
             .and(serviceId, isEqualTo(sid))
             .and(taskId, isEqualTo(tid))
-            .and(type, isEqualTo(getType().getValue()))
+            .and(type, isEqualTo(getType().name()))
             .and(deleted, isEqualTo(false)));
 
         SelectStatementProvider selectStmt = select(count()).from(validationTask).where(stateMachineId, isEqualTo(smid))
             .and(serviceId, isEqualTo(sid))
             .and(taskId, isEqualTo(tid))
-            .and(type, isEqualTo(getType().getValue()))
+            .and(type, isEqualTo(getType().name()))
             .and(deleted, isEqualTo(false))
-            .and(state, isEqualTo(ValidationStateEnum.DONE.getValue())).build()
+            .and(state, isEqualTo(ValidationStateEnum.DONE.name())).build()
             .render(RenderingStrategy.MYBATIS3);
 
         long doneCount = mapper.count(selectStmt);
@@ -142,7 +129,7 @@ public class ValidationExtractor extends BaseExtractor {
 
     private ValidationTypeEnum getType() {
         RplService rplService = TaskContext.getInstance().getService();
-        switch (ServiceType.from(rplService.getServiceType())) {
+        switch (ServiceType.valueOf(rplService.getServiceType())) {
         case FULL_VALIDATION:
         case RECONCILIATION:
             return ValidationTypeEnum.FORWARD;

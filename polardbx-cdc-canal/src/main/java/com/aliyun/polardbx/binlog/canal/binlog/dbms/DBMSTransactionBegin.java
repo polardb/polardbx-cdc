@@ -28,6 +28,8 @@ public class DBMSTransactionBegin extends DBMSEvent {
     private static final long serialVersionUID = 1731391052965645136L;
     private Long threadId;
 
+    private String tso;
+
     @Override
     public DBMSAction getAction() {
         return DBMSAction.OTHER;
@@ -59,6 +61,14 @@ public class DBMSTransactionBegin extends DBMSEvent {
 
     public void setThreadId(Long threadId) {
         this.threadId = threadId;
+    }
+
+    public String getTso() {
+        return tso;
+    }
+
+    public void setTso(String tso) {
+        this.tso = tso;
     }
 
     public String toString() {

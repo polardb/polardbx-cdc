@@ -57,6 +57,7 @@ import com.google.common.base.Stopwatch;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.commons.lang3.tuple.Triple;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -72,6 +73,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SEMI_SNAPSHOT_CHECK_DELTA_INTERVAL_SEC;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SEMI_SNAPSHOT_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_COMPARE_RESULT_ENABLED;
@@ -83,6 +85,7 @@ import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_SEMI;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_UNSAFE;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.META_DATA_INCONSISTENT_WARNNIN;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.buildCreateLikeSql;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isGreaterThanOrEqualTo;
@@ -109,6 +112,8 @@ public class PolarDbXTableMetaManager {
     private long rollbackCostTime = -1L;
     private String lastApplyLogicTSO;
     private final String dnVersion;
+
+    private String defaultDatabaseCharset;
 
     public PolarDbXTableMetaManager(String storageInstId) {
         this(storageInstId, () -> {
@@ -161,7 +166,7 @@ public class PolarDbXTableMetaManager {
             this.polarDbXStorageTableMeta.init(null);
 
             this.consistencyChecker = new ConsistencyChecker(topologyManager, polarDbXLogicTableMeta,
-                polarDbXStorageTableMeta, this, storageInstId);
+                this, storageInstId);
             this.registerToMetaMonitor();
         }
     }
@@ -172,26 +177,48 @@ public class PolarDbXTableMetaManager {
         this.unregisterToCleaner();
     }
 
-    public TableMeta findPhyTable(String schema, String table) {
+    public void onStart(String defaultDatabaseCharset) {
+        this.defaultDatabaseCharset = defaultDatabaseCharset;
+        this.polarDbXStorageTableMeta.getRepository().setDefaultCharset(defaultDatabaseCharset);
+    }
+
+    public TableMeta findPhyTable(String schema, String table, boolean createIfNotExist) {
+        TableMeta phy = findPhyTableInternal(schema, table);
+        if (phy == null && supportInstantCreatTableWhenNotfound() && createIfNotExist) {
+            instantCreatePhyTable(schema, table);
+            phy = findPhyTableInternal(schema, table);
+        }
+        return phy;
+    }
+
+    private void instantCreatePhyTable(String schema, String table) {
+        LogicBasicInfo logicBasicInfo = getLogicBasicInfo(schema, table);
+        if (logicBasicInfo != null && StringUtils.isNotBlank(logicBasicInfo.getTableName())) {
+            log.info("phy table meta is not found for {}:{}, will instantly try to create for compensation.",
+                schema, table);
+            String logicSchema = logicBasicInfo.getSchemaName();
+            String logicTable = logicBasicInfo.getTableName();
+            TableMeta distinctPhyTableMeta = polarDbXLogicTableMeta.findDistinctPhy(logicSchema, logicTable);
+            if (distinctPhyTableMeta == null) {
+                String ddl = polarDbXLogicTableMeta.snapshot(logicSchema, logicTable);
+                createNotExistPhyTable(logicSchema, schema, logicTable, table, ddl);
+            } else {
+                String ddl = polarDbXLogicTableMeta.distinctPhySnapshot(logicSchema, logicTable);
+                createNotExistPhyTable(logicSchema, schema, logicTable, table, ddl);
+            }
+        }
+    }
+
+    private TableMeta findPhyTableInternal(String schema, String table) {
         TableMeta phy = polarDbXStorageTableMeta.find(schema, table);
-        //进行一下补偿，如果表不存在，实时创建一下
-        if (phy == null && supportInstantCreatTableWhenNotfound()) {
+        if (phy != null && StringUtils.isBlank(phy.getCharset())) {
+            // 如果没有charset，则从逻辑表中获取一下
             LogicBasicInfo logicBasicInfo = getLogicBasicInfo(schema, table);
-            if (logicBasicInfo != null && StringUtils.isNotBlank(logicBasicInfo.getTableName())) {
-                log.info("phy table meta is not found for {}:{}, will instantly try to create for compensation.",
-                    schema, table);
-                String logicSchema = logicBasicInfo.getSchemaName();
-                String logicTable = logicBasicInfo.getTableName();
-                TableMeta distinctPhyTableMeta = polarDbXLogicTableMeta.findDistinctPhy(logicSchema, logicTable);
-                if (distinctPhyTableMeta == null) {
-                    TableMeta logicTableMeta = polarDbXLogicTableMeta.find(logicSchema, logicTable);
-                    String ddl = polarDbXLogicTableMeta.snapshot(logicSchema, logicTable);
-                    createNotExistPhyTable(logicSchema, schema, logicTable, table, ddl);
-                    return logicTableMeta;
-                } else {
-                    String ddl = polarDbXLogicTableMeta.distinctPhySnapshot(logicSchema, logicTable);
-                    createNotExistPhyTable(logicSchema, schema, logicTable, table, ddl);
-                    return distinctPhyTableMeta;
+            if (logicBasicInfo != null) {
+                TableMeta logicTableMeta =
+                    findLogicTable(logicBasicInfo.getSchemaName(), logicBasicInfo.getTableName());
+                if (logicTableMeta != null) {
+                    phy.setCharset(logicTableMeta.getCharset());
                 }
             }
         }
@@ -208,15 +235,18 @@ public class PolarDbXTableMetaManager {
 
     private void createNotExistPhyTable(String logicSchema, String phySchema, String logicTable, String phyTable,
                                         String ddl) {
-        String createSql = "create table `" + escape(phyTable) + "` like `" +
-            escape(logicSchema) + "`.`" + escape(logicTable) + "`";
+        String createSql = buildCreateLikeSql(phyTable, logicSchema, logicTable);
         polarDbXStorageTableMeta.apply(logicSchema, ddl);
         polarDbXStorageTableMeta.apply(phySchema, createSql);
         polarDbXStorageTableMeta.apply(logicSchema, "drop database `" + logicSchema + "`");
     }
 
     public TableMeta findLogicTable(String schema, String table) {
-        return polarDbXLogicTableMeta.find(schema, table);
+        TableMeta logicTableMeta = polarDbXLogicTableMeta.find(schema, table);
+        if (logicTableMeta != null && StringUtils.isBlank(logicTableMeta.getCharset())) {
+            logicTableMeta.setCharset(defaultDatabaseCharset);
+        }
+        return logicTableMeta;
     }
 
     public LogicTableMeta compare(String schema, String table, int columnCount) {
@@ -228,7 +258,7 @@ public class PolarDbXTableMetaManager {
             }
         }
 
-        TableMeta phy = findPhyTable(schema, table);
+        TableMeta phy = findPhyTable(schema, table, true);
         Preconditions.checkNotNull(phy, "TableMeta is not found for physical table " + schema + "." + table);
 
         LogicBasicInfo logicTopology = getLogicBasicInfo(schema, table);
@@ -355,6 +385,9 @@ public class PolarDbXTableMetaManager {
     public void applyLogic(BinlogPosition position, DDLRecord record, String cmdId) {
         this.compareCache.clear();
         if (isIgnoreApply(position, record)) {
+            if (getBoolean(META_BUILD_RECORD_IGNORED_DDL_ENABLED)) {
+                polarDbXLogicTableMeta.applyToDb(position, record, MetaType.DDL.getValue(), cmdId, false);
+            }
             return;
         }
 
@@ -403,7 +436,7 @@ public class PolarDbXTableMetaManager {
     }
 
     public Set<String> findIndexes(String schema, String table) {
-        return polarDbXLogicTableMeta.findIndexes(schema, table);
+        return polarDbXLogicTableMeta.find(schema, table).getIndexes().keySet();
     }
 
     /**
@@ -502,7 +535,7 @@ public class PolarDbXTableMetaManager {
         }
         DDLRecord ddlRecord = DDLRecord.builder().schemaName("*").ddlSql("").metaInfo(topology).build();
         log.warn("build snapshot for : " + JSON.toJSONString(ddlRecord));
-        return polarDbXLogicTableMeta.applyToDb(position, ddlRecord, MetaType.SNAPSHOT.getValue(), cmdId);
+        return polarDbXLogicTableMeta.applyToDb(position, ddlRecord, MetaType.SNAPSHOT.getValue(), cmdId, true);
     }
 
     private void rollbackInSnapshotSemiMode(BinlogPosition position) {
@@ -773,8 +806,7 @@ public class PolarDbXTableMetaManager {
         if (logicDimTableMeta == null) {
             logicDimTableMeta = polarDbXLogicTableMeta.find(logicSchemaName, logicTableName);
         }
-        TableMeta phyDimTableMeta = createPhyIfNotExist ? findPhyTable(phySchemaName, phyTableName) :
-            polarDbXStorageTableMeta.find(phySchemaName, phyTableName);
+        TableMeta phyDimTableMeta = findPhyTable(phySchemaName, phyTableName, createPhyIfNotExist);
 
         // check meta if null
         if (logicDimTableMeta == null) {
@@ -790,11 +822,13 @@ public class PolarDbXTableMetaManager {
         }
 
         //compare table meta
-        List<Pair<String, String>> logicDimColumns = logicDimTableMeta.getFields().stream()
-            .map(f -> Pair.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase()))
+        List<Triple<String, String, String>> logicDimColumns = logicDimTableMeta.getFields().stream()
+            .map(f -> Triple.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase(),
+                StringUtils.lowerCase(f.getCharset())))
             .collect(Collectors.toList());
-        List<Pair<String, String>> phyDimColumns = phyDimTableMeta.getFields().stream()
-            .map(f -> Pair.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase()))
+        List<Triple<String, String, String>> phyDimColumns = phyDimTableMeta.getFields().stream()
+            .map(f -> Triple.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase(),
+                StringUtils.lowerCase(f.getCharset())))
             .collect(Collectors.toList());
         boolean result = logicDimColumns.equals(phyDimColumns);
         if (!result) {
@@ -897,6 +931,12 @@ public class PolarDbXTableMetaManager {
 
         if (MetaFilter.isTsoInApplyBlackList(position.getRtso())) {
             log.warn("logic ddl apply is ignored by tso blacklist, with tso {}, record detail is {}.",
+                position.getRtso(), record);
+            return true;
+        }
+
+        if (!MetaFilter.isSupportApply(record)) {
+            log.warn("logic ddl apply is ignored by sql-kind blacklist, with tso {}, record detail is {}.",
                 position.getRtso(), record);
             return true;
         }

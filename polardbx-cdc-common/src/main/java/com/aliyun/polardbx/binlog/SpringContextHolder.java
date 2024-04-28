@@ -69,4 +69,8 @@ public class SpringContextHolder implements ApplicationContextAware, EmbeddedVal
             throw new ConfigKeyNotExistException("Get property error for " + name, e);
         }
     }
+
+    public static boolean isInitialize() {
+        return applicationContext != null;
+    }
 }

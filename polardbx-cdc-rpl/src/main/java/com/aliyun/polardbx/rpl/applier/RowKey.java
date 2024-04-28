@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.rpl.applier;
 
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -27,11 +27,11 @@ import java.util.Map;
  */
 public class RowKey {
 
-    private String schema;
-    private String table;
-    private Map<Integer, Serializable> keys;
+    private final String schema;
+    private final String table;
+    private final Map<Integer, Serializable> keys;
 
-    public RowKey(DBMSRowChange rowChange, List<Integer> identifyColumns) {
+    public RowKey(DefaultRowChange rowChange, List<Integer> identifyColumns) {
         Map<Integer, Serializable> keys = new HashMap<>(identifyColumns.size());
         for (Integer columnIndex : identifyColumns) {
             keys.put(columnIndex, rowChange.getRowValue(1, columnIndex));

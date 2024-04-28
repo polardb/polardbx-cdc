@@ -17,7 +17,7 @@ package com.aliyun.polardbx.binlog.remote;
 import java.util.List;
 
 public interface IRemoteManager {
-    void download(String fileName, String localPath);
+    void download(String fileName, String localPath) throws Throwable;
 
     String getMd5(String fileName);
 

@@ -24,12 +24,16 @@ import lombok.Data;
 @Data
 public class ApplierConfig {
     protected int mergeBatchSize = 200;
-    // 不再支持多语句！sendBatchSize未来将用于transaction写入时的事务合并的size上限
-    protected int sendBatchSize = 1;
+    // 不再支持多语句！transactionEventBatchSize用于transaction写入时的事务合并的size上限
+    protected int transactionEventBatchSize = 100;
     protected int logCommitLevel = RplConstants.LOG_NO_COMMIT;
     protected boolean enableDdl = true;
-    protected int maxPoolSize = 30;
+    protected int maxPoolSize = 60;
     protected int statisticIntervalSec = 5;
-    protected int applierType = ApplierType.MERGE.getValue();
+    protected ApplierType applierType;
     protected HostInfo hostInfo;
+    protected boolean compareAll;
+    protected boolean insertOnUpdateMiss;
+    protected ConflictStrategy conflictStrategy;
+    protected long fullCopyFinishTimeStamp = -1;
 }

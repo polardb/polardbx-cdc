@@ -21,6 +21,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.config.PropertyPlaceholderConfigurer;
 import org.springframework.context.ApplicationEvent;
@@ -42,15 +43,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlaceholderConfigurer
-    implements Runnable, ApplicationListener {
+    implements Runnable, ApplicationListener, DisposableBean {
 
     private static final Logger logger = LoggerFactory.getLogger(CustomPropertySourcesPlaceholderConfigurer.class);
     private static final String CONFIG_SCAN_PERIOD_SECOND = "config_scan_period_second";
     private static final String CHECKSUM = "Checksum";
-    private static final AtomicBoolean start = new AtomicBoolean(false);
-    private static ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(
+    private final AtomicBoolean start = new AtomicBoolean(false);
+    private final ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor(
         r -> {
-            Thread t = new Thread(r, "scan-period");
+            Thread t = new Thread(r, "dynamic-config-scanner");
             t.setDaemon(true);
             return t;
         });
@@ -86,7 +87,6 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
         while (enumeration.hasMoreElements()) {
             String placeholderName = enumeration.nextElement();
             String value = props.getProperty(placeholderName);
-//            logger.warn("props : [ " + placeholderName + " : " + value + " ] ");
         }
     }
 
@@ -170,9 +170,16 @@ public class CustomPropertySourcesPlaceholderConfigurer extends PropertyPlacehol
             DynamicApplicationConfig.afterPropSet();
             String scanPeriod = props.getProperty(CONFIG_SCAN_PERIOD_SECOND);
             if (StringUtils.isNotBlank(scanPeriod)) {
-                long period = Long.valueOf(scanPeriod);
+                long period = Long.parseLong(scanPeriod);
                 scheduledExecutorService.scheduleAtFixedRate(this, period, period, TimeUnit.SECONDS);
             }
+            logger.info("dynamic config scanner started!");
         }
+    }
+
+    @Override
+    public void destroy() throws Exception {
+        scheduledExecutorService.shutdownNow();
+        logger.info("dynamic config scanner stopped!");
     }
 }

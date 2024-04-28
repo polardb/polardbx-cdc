@@ -17,41 +17,77 @@ package com.aliyun.polardbx.binlog.dao;
 import java.sql.JDBCType;
 import java.util.Date;
 import javax.annotation.Generated;
+
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class RplDdlDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.841+08:00", comments="Source Table: rpl_ddl_main")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.564+08:00",
+        comments = "Source Table: rpl_ddl_main")
     public static final RplDdl rplDdl = new RplDdl();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.567+08:00",
+        comments = "Source field: rpl_ddl_main.id")
     public static final SqlColumn<Long> id = rplDdl.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.567+08:00",
+        comments = "Source field: rpl_ddl_main.gmt_created")
     public static final SqlColumn<Date> gmtCreated = rplDdl.gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.567+08:00",
+        comments = "Source field: rpl_ddl_main.gmt_modified")
     public static final SqlColumn<Date> gmtModified = rplDdl.gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.fsm_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.567+08:00",
+        comments = "Source field: rpl_ddl_main.fsm_id")
     public static final SqlColumn<Long> fsmId = rplDdl.fsmId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.ddl_tso")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.567+08:00",
+        comments = "Source field: rpl_ddl_main.ddl_tso")
     public static final SqlColumn<String> ddlTso = rplDdl.ddlTso;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.service_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.567+08:00",
+        comments = "Source field: rpl_ddl_main.service_id")
     public static final SqlColumn<Long> serviceId = rplDdl.serviceId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.token")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.567+08:00",
+        comments = "Source field: rpl_ddl_main.token")
     public static final SqlColumn<String> token = rplDdl.token;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.state")
-    public static final SqlColumn<Integer> state = rplDdl.state;
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.568+08:00",
+        comments = "Source field: rpl_ddl_main.state")
+    public static final SqlColumn<String> state = rplDdl.state;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.842+08:00", comments="Source field: rpl_ddl_main.ddl_stmt")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.568+08:00",
+        comments = "Source field: rpl_ddl_main.async_flag")
+    public static final SqlColumn<Boolean> asyncFlag = rplDdl.asyncFlag;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.568+08:00",
+        comments = "Source field: rpl_ddl_main.async_state")
+    public static final SqlColumn<String> asyncState = rplDdl.asyncState;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.568+08:00",
+        comments = "Source field: rpl_ddl_main.schema_name")
+    public static final SqlColumn<String> schemaName = rplDdl.schemaName;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.569+08:00",
+        comments = "Source field: rpl_ddl_main.table_name")
+    public static final SqlColumn<String> tableName = rplDdl.tableName;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.569+08:00",
+        comments = "Source field: rpl_ddl_main.task_id")
+    public static final SqlColumn<Long> taskId = rplDdl.taskId;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.569+08:00",
+        comments = "Source field: rpl_ddl_main.parallel_seq")
+    public static final SqlColumn<Integer> parallelSeq = rplDdl.parallelSeq;
+
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.569+08:00",
+        comments = "Source field: rpl_ddl_main.ddl_stmt")
     public static final SqlColumn<String> ddlStmt = rplDdl.ddlStmt;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-28T11:52:55.841+08:00", comments="Source Table: rpl_ddl_main")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2024-03-20T17:19:45.566+08:00",
+        comments = "Source Table: rpl_ddl_main")
     public static final class RplDdl extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 
@@ -67,7 +103,19 @@ public final class RplDdlDynamicSqlSupport {
 
         public final SqlColumn<String> token = column("token", JDBCType.VARCHAR);
 
-        public final SqlColumn<Integer> state = column("state", JDBCType.INTEGER);
+        public final SqlColumn<String> state = column("`state`", JDBCType.VARCHAR);
+
+        public final SqlColumn<Boolean> asyncFlag = column("async_flag", JDBCType.BIT);
+
+        public final SqlColumn<String> asyncState = column("async_state", JDBCType.VARCHAR);
+
+        public final SqlColumn<String> schemaName = column("`schema_name`", JDBCType.VARCHAR);
+
+        public final SqlColumn<String> tableName = column("`table_name`", JDBCType.VARCHAR);
+
+        public final SqlColumn<Long> taskId = column("task_id", JDBCType.BIGINT);
+
+        public final SqlColumn<Integer> parallelSeq = column("parallel_seq", JDBCType.INTEGER);
 
         public final SqlColumn<String> ddlStmt = column("ddl_stmt", JDBCType.LONGVARCHAR);
 

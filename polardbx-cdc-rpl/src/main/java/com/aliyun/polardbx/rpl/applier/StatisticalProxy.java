@@ -67,28 +67,26 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public class StatisticalProxy implements FlowLimiter {
 
-    private final static int MAX_RETRY = 4;
-    private static final StatisticalProxy instance = new StatisticalProxy();
-
+    private static final int MAX_RETRY = 4;
+    private static final StatisticalProxy INSTANCE = new StatisticalProxy();
     private ScheduledExecutorService executorService;
     private ApplierConfig applierConfig;
     private final Logger positionLogger = LogUtil.getPositionLogger();
     private final Logger statisticLogger = LogUtil.getStatisticLogger();
     private String position;
     private long lastEventTimestamp;
-
     private BaseApplier applier;
-    private boolean skipAllException = false;
     private int tpsLimit;
     private volatile FlowLimiter limiter;
     private Retryer<Void> retryer;
+    private final AtomicBoolean lastErrorRemoved = new AtomicBoolean(false);
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private StatisticalProxy() {
     }
 
     public static StatisticalProxy getInstance() {
-        return instance;
+        return INSTANCE;
     }
 
     public void init() {
@@ -98,9 +96,6 @@ public class StatisticalProxy implements FlowLimiter {
         lastEventTimestamp = System.currentTimeMillis();
 
         applier = pipeline.getApplier();
-        skipAllException = pipeline.getPipeLineConfig().isSkipException();
-        applier.setSkipAllException(skipAllException);
-        applier.setSafeMode(pipeline.getPipeLineConfig().isSafeMode());
         tpsLimit = pipeline.getPipeLineConfig().getFixedTpsLimit();
         initFlowLimiter();
         retryer = RetryerBuilder.<Void>newBuilder()
@@ -113,24 +108,26 @@ public class StatisticalProxy implements FlowLimiter {
     }
 
     public void start() {
-        running.compareAndSet(false, true);
-        executorService.scheduleAtFixedRate(
-            this::flushStatistic, 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
-        executorService.scheduleAtFixedRate(
-            this::flushPosition, 0, 1, TimeUnit.SECONDS);
-        executorService.scheduleAtFixedRate(
-            this::checkRunningLock, 0, 1, TimeUnit.SECONDS);
-        executorService.scheduleAtFixedRate(
-            this::checkPipelineConfig, 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            try {
-                flushPosition();
-            } catch (Throwable e) {
-                log.warn("Something goes wrong when logging checkpoint.", e);
-            } finally {
-                log.info("Flushed position: {}", position);
-            }
-        }));
+        if (running.compareAndSet(false, true)) {
+            executorService.scheduleAtFixedRate(
+                this::flushStatistic, 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
+            executorService.scheduleAtFixedRate(
+                this::flushPosition, 0, 1, TimeUnit.SECONDS);
+            executorService.scheduleAtFixedRate(
+                this::checkRunningLock, 0, 1, TimeUnit.SECONDS);
+            executorService.scheduleAtFixedRate(
+                this::checkPipelineConfig, 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
+
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    flushPosition();
+                } catch (Throwable e) {
+                    log.error("Something goes wrong when logging checkpoint.", e);
+                } finally {
+                    log.info("Flushed position: {}", position);
+                }
+            }));
+        }
     }
 
     public void stop() {
@@ -178,9 +175,6 @@ public class StatisticalProxy implements FlowLimiter {
         try {
             RplTaskConfig taskConfig = DbTaskMetaManager.getTaskConfig(TaskContext.getInstance().getTaskId());
             PipelineConfig config = JSON.parseObject(taskConfig.getPipelineConfig(), PipelineConfig.class);
-            skipAllException = config.isSkipException();
-            applier.setSkipAllException(skipAllException);
-            applier.setSafeMode(config.isSafeMode());
             if (this.tpsLimit != config.getFixedTpsLimit()) {
                 this.tpsLimit = config.getFixedTpsLimit();
                 initFlowLimiter();
@@ -194,7 +188,7 @@ public class StatisticalProxy implements FlowLimiter {
         try {
             applier.apply(events);
         } catch (Exception e1) {
-            log.warn("batch apply events failure, exception: ", e1);
+            log.warn("batch apply events failure, will change to single apply mode ,exception: ", e1);
             for (DBMSEvent event : events) {
                 try {
                     applier.apply(Collections.singletonList(event));
@@ -205,6 +199,7 @@ public class StatisticalProxy implements FlowLimiter {
             }
         }
         StatMetrics.getInstance().doStatOut(events);
+        StatMetrics.getInstance().addCommitCount(events.size());
     }
 
     public void innerTranApply(List<Transaction> transactions) throws Exception {
@@ -230,13 +225,11 @@ public class StatisticalProxy implements FlowLimiter {
             }
         }
 
-        for (Transaction transaction : transactions) {
-            Transaction.RangeIterator it = transaction.rangeIterator();
-            while (it.hasNext()) {
-                Transaction.Range range = it.next();
-                List<DBMSEvent> events = range.getEvents();
-                StatMetrics.getInstance().doStatOut(events);
-            }
+        for (Transaction trans : transactions) {
+            StatMetrics.getInstance().doStatOut(
+                trans.getInsertCount(), trans.getUpdateCount(), trans.getDeleteCount(),
+                trans.getByteSize(), trans.peekLast());
+            StatMetrics.getInstance().addCommitCount(trans.getEventCount());
         }
     }
 
@@ -251,8 +244,17 @@ public class StatisticalProxy implements FlowLimiter {
         if (StringUtils.isBlank(position)) {
             return;
         }
+        if (lastErrorRemoved.compareAndSet(false, true) && !StringUtils.equalsIgnoreCase(this.position, position)) {
+            StatisticalProxy.getInstance().removeLastError();
+        }
+        if (positionLogger.isDebugEnabled()) {
+            positionLogger.debug(LogUtil.generatePositionLog(position));
+        }
+
         this.position = position;
-        positionLogger.debug(LogUtil.generatePositionLog(position));
+        if (positionLogger.isDebugEnabled()) {
+            positionLogger.debug(LogUtil.generatePositionLog(position));
+        }
     }
 
     public void recordLastError(String error) {
@@ -262,18 +264,25 @@ public class StatisticalProxy implements FlowLimiter {
         // 只记录关闭状态前的error
         // 开始关闭后由于连接池关闭等会导致新增报错，会干扰错误判断
         RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
-        if (task.getStatus() != TaskStatus.RUNNING.getValue()) {
+        if (TaskStatus.valueOf(task.getStatus()) != TaskStatus.RUNNING) {
             return;
         }
         if (!running.get()) {
             return;
         }
-        DbTaskMetaManager.updateTaskLastError(TaskContext.getInstance().getTaskId(), error);
+
+        lastErrorRemoved.compareAndSet(true, false);
+        DbTaskMetaManager.updateTaskLastError(TaskContext.getInstance().getTaskId(), "Time:" +
+            new Date(System.currentTimeMillis()) + ", error: " + error);
+    }
+
+    private void removeLastError() {
+        DbTaskMetaManager.updateTaskLastError(TaskContext.getInstance().getTaskId(), "");
     }
 
     public void triggerAlarmSync(MonitorType monitorType, Object... args) {
         RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
-        if (task.getStatus() == TaskStatus.RUNNING.getValue()) {
+        if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.RUNNING) {
             MonitorManager.getInstance().triggerAlarmSync(monitorType, args);
         } else {
             log.info("receive an invalid alarm trigger sync, monitorType is {}, args is \r\n {}", monitorType, args);
@@ -299,7 +308,7 @@ public class StatisticalProxy implements FlowLimiter {
     public void checkRunningLock() {
         if (!RuntimeLeaderElector.isLeader(RplConstants.RPL_TASK_LEADER_LOCK_PREFIX +
             TaskContext.getInstance().getTaskId())) {
-            log.error("another process is already running, exit");
+            log.error("another process is already running, will exit");
             TaskContext.getInstance().getPipeline().stop();
         }
     }
@@ -310,10 +319,12 @@ public class StatisticalProxy implements FlowLimiter {
             if (task == null) {
                 log.error("task has been deleted from db");
                 TaskContext.getInstance().getPipeline().stop();
+                return;
             }
-            if (task.getStatus() != TaskStatus.RUNNING.getValue()) {
-                log.info("task id: {}, task status: {}, exit", task.getId(), TaskStatus.from(task.getStatus()).name());
+            if (TaskStatus.valueOf(task.getStatus()) != TaskStatus.RUNNING) {
+                log.info("task id: {}, task status: {}, exit", task.getId(), task.getStatus());
                 TaskContext.getInstance().getPipeline().stop();
+                return;
             }
 
             int retry = 0;
@@ -336,23 +347,24 @@ public class StatisticalProxy implements FlowLimiter {
         }
     }
 
-    public void flushPosition() {
+    public synchronized void flushPosition() {
         try {
             // get the latest status before update
             RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
             if (task == null) {
-                log.error("task has been deleted from db");
+                log.error("task has been deleted from db, current runtime will exit!");
                 TaskContext.getInstance().getPipeline().stop();
+                return;
             }
+
             // task may be set to STOPPED but the still running
             Date gmtHeartBeat = null;
             if (lastEventTimestamp > 0) {
                 gmtHeartBeat = new Date(lastEventTimestamp);
             }
-            if (task.getStatus() == TaskStatus.RUNNING.getValue()) {
+            if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.RUNNING) {
                 DbTaskMetaManager.updateTask(TaskContext.getInstance().getTaskId(),
-                    null, null, position, null,
-                    gmtHeartBeat);
+                    null, null, position, null, gmtHeartBeat);
             } else {
                 log.error("task is not in running status");
                 TaskContext.getInstance().getPipeline().stop();
@@ -394,6 +406,9 @@ public class StatisticalProxy implements FlowLimiter {
         rplStatMetrics.setCpuUseRatio((int) (statMetrics.getCpuRatio() * 100));
         rplStatMetrics.setMemUseRatio(userRatio);
         rplStatMetrics.setFullGcCount(jvmSnapshot.getOldCollectionCount());
+        rplStatMetrics.setTotalCommitCount(
+            statMetrics.getPeriodCommitCount() + (rplStatMetrics.getTotalCommitCount() == null ? 0 :
+                rplStatMetrics.getTotalCommitCount()));
         statisticLogger.info(LogUtil.generateStatisticLogV2(rplStatMetrics));
     }
 
@@ -430,7 +445,7 @@ public class StatisticalProxy implements FlowLimiter {
             log.error("task has been deleted from db");
             TaskContext.getInstance().getPipeline().stop();
         }
-        if (task.getStatus() == TaskStatus.RUNNING.getValue()) {
+        if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.RUNNING) {
             DbTaskMetaManager.updateTask(TaskContext.getInstance().getTaskId(),
                 null, null, null, JSON.toJSONString(rplStatMetrics),
                 gmtHeartBeat);

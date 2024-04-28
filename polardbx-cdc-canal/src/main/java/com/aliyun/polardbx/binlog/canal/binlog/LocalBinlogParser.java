@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.binlog.canal.binlog;
 
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.FileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.AbstractEventParser;
 import com.aliyun.polardbx.binlog.canal.core.ddl.ThreadRecorder;
 import com.aliyun.polardbx.binlog.canal.core.dump.ErosaConnection;

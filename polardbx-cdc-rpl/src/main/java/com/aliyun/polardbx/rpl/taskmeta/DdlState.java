@@ -19,32 +19,15 @@ package com.aliyun.polardbx.rpl.taskmeta;
  * @since 5.0.0.0
  */
 public enum DdlState {
-    NOT_START(0),
+    NOT_START,
 
-    RUNNING(10),
+    RUNNING,
 
-    SUCCEED(20);
+    SUCCEED,
 
-    private int value;
-
-    public int getValue() {
-        return value;
-    }
+    FAILED;
 
     public boolean isFinished() {
         return this == SUCCEED;
-    }
-
-    DdlState(int value) {
-        this.value = value;
-    }
-
-    public static DdlState from(int state) {
-        for (DdlState i : DdlState.values()) {
-            if (i.value == state) {
-                return i;
-            }
-        }
-        return null;
     }
 }

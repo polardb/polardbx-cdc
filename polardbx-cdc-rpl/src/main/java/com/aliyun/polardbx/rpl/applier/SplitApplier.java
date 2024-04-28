@@ -35,8 +35,8 @@ import java.util.Set;
 @Slf4j
 public class SplitApplier extends SplitTransactionApplier {
 
-    public SplitApplier(ApplierConfig applierConfig, HostInfo hostInfo) {
-        super(applierConfig, hostInfo);
+    public SplitApplier(ApplierConfig applierConfig, HostInfo hostInfo, HostInfo srcHostInfo) {
+        super(applierConfig, hostInfo, srcHostInfo);
     }
 
     @Override
@@ -47,9 +47,8 @@ public class SplitApplier extends SplitTransactionApplier {
 
         Map<String, Map<RowKey, List<DefaultRowChange>>> allSplitRowChanges = new HashMap<>();
         Map<String, List<DefaultRowChange>> allSerialRowChanges = new HashMap<>();
-        Set<String> changedIdentifyColumnTables = new HashSet<>();
 
-        split(dbmsEvents, allSplitRowChanges, allSerialRowChanges, changedIdentifyColumnTables);
+        split(dbmsEvents, allSplitRowChanges, allSerialRowChanges);
 
         int allSerialRowChangeCount = 0;
         for (String fullTbName : allSerialRowChanges.keySet()) {
@@ -73,7 +72,6 @@ public class SplitApplier extends SplitTransactionApplier {
                     allQueues.put(fakeTbName, curQueue);
                     queueIndex++;
                 }
-
                 curQueue.addAll(rowChanges);
             }
         }
@@ -83,7 +81,7 @@ public class SplitApplier extends SplitTransactionApplier {
 
         // allSerialRowChanges 并行执行，每个队列内需要事务
         for (String fullTbName : allSerialRowChanges.keySet()) {
-            log.info("{} changes will be executed by SplitTransactionApplier, rowChanges: {}", fullTbName,
+            log.info("{} serial row changes will be executed by SplitTransactionApplier, rowChanges: {}", fullTbName,
                 allSerialRowChanges.get(fullTbName).size());
         }
         parallelExecSqlContexts(allSerialRowChanges, true);
@@ -91,25 +89,30 @@ public class SplitApplier extends SplitTransactionApplier {
 
     protected void split(List<DBMSEvent> dbmsEvents,
                          Map<String, Map<RowKey, List<DefaultRowChange>>> allSplitRowChanges,
-                         Map<String, List<DefaultRowChange>> allSerialRowChanges,
-                         Set<String> changedIdentifyColumnTables) throws Exception {
+                         Map<String, List<DefaultRowChange>> allSerialRowChanges) throws Exception {
         Map<String, List<Integer>> allTbIdentifyColumns = new HashMap<>();
 
+        Set<String> changedIdentifyColumnTables = new HashSet<>();
         for (DBMSEvent event : dbmsEvents) {
             DefaultRowChange rowChange = (DefaultRowChange) event;
             String fullTbName = rowChange.getSchema() + "." + rowChange.getTable();
 
             // get identify columns
-            List<Integer> identifyColumns = getIdentifyColumnsIndex(allTbIdentifyColumns, fullTbName, rowChange);
+            List<Integer> identifyColumns =
+                DmlApplyHelper.getIdentifyColumnsIndex(allTbIdentifyColumns, fullTbName, rowChange);
 
             // find out events which changed identify columns of a table
-            if (changedIdentifyColumnTables != null
-                && !changedIdentifyColumnTables.contains(fullTbName)
-                && rowChange.getAction() == DBMSAction.UPDATE) {
-                for (Integer column : identifyColumns) {
-                    if (rowChange.hasChangeColumn(column)) {
-                        changedIdentifyColumnTables.add(fullTbName);
-                        break;
+            if (!changedIdentifyColumnTables.contains(fullTbName)) {
+                // no pk table view as changedIdentifyColumnTables to make its dml serial execute
+                // has uk table view as changedIdentifyColumnTables when delete event
+                if (DmlApplyHelper.shouldSerialExecute(rowChange)) {
+                    changedIdentifyColumnTables.add(fullTbName);
+                } else if (rowChange.getAction() == DBMSAction.UPDATE) {
+                    for (Integer column : identifyColumns) {
+                        if (rowChange.hasChangeColumn(column)) {
+                            changedIdentifyColumnTables.add(fullTbName);
+                            break;
+                        }
                     }
                 }
             }

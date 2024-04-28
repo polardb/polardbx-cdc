@@ -22,9 +22,9 @@ import lombok.Data;
  */
 @Data
 public class ExtractorConfig {
-    protected int extractorType;
-    protected int filterType;
+    protected ExtractorType extractorType;
+    protected FilterType filterType;
     protected HostInfo hostInfo;
-    protected String sourceToTargetConfig;
+    protected String privateMeta;
     protected int eventBufferSize = 2048;
 }

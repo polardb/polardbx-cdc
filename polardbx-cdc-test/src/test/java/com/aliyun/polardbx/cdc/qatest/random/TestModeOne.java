@@ -36,12 +36,16 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
 import static com.aliyun.polardbx.cdc.qatest.random.DdlType.AddColumn;
+import static com.aliyun.polardbx.cdc.qatest.random.DdlType.AlterTableCharset;
 import static com.aliyun.polardbx.cdc.qatest.random.DdlType.DropColumn;
 import static com.aliyun.polardbx.cdc.qatest.random.DdlType.ModifyColumn;
 import static com.aliyun.polardbx.cdc.qatest.random.SqlConstants.T_RANDOM_CREATE_SQL;
@@ -75,6 +79,9 @@ public class TestModeOne extends RplBaseTestCase {
         ModifyColumn,
         ModifyColumn,
         ModifyColumn,
+        AlterTableCharset,
+        AlterTableCharset,
+        AlterTableCharset,
         DropColumn,
         DropColumn);
 
@@ -95,8 +102,20 @@ public class TestModeOne extends RplBaseTestCase {
     private int updateBatchMode;
     private long loopWaitTimeoutMs;
 
+    private AtomicLong fowardCommitCount = new AtomicLong(0);
+
+    private TEST_MODE testMode;
+
+    private volatile int streamCount = 1;
+
+    public enum TEST_MODE {
+        FORWARD_MODE,
+        BACKFLOW_MODE,
+        BIDIRECTIONAL_MODE
+    }
+
     public TestModeOne() {
-        this.dbName = "cdc_reformat_test_mode_one";
+        this.dbName = System.getProperty("dbName", "cdc_reformat_test_mode_one");
         this.tableName = System.getProperty("tableName", "t_random_instant_check");
         this.columnSeeds = new ColumnSeeds(dbName, tableName);
         this.dmlSqlBuilder = new DmlSqlBuilder(dbName, tableName, columnSeeds, true);
@@ -104,11 +123,110 @@ public class TestModeOne extends RplBaseTestCase {
     }
 
     @Before
-    public void bootStrap() throws SQLException {
+    public void bootStrap() throws Exception {
+        buildDdlType();
         tryCreateDb();
         setSystemParameters();
         prepareTables();
         buildParameters();
+    }
+
+    private void buildDdlType() {
+        addDdlType(AddColumn, 4);
+        if (testMode == TEST_MODE.FORWARD_MODE) {
+            addDdlType(ModifyColumn, 6);
+            addDdlType(DropColumn, 2);
+        }
+
+    }
+
+    private void addDdlType(DdlType ddlType, int count) {
+        for (int i = 0; i < count; i++) {
+            ddlTypes.add(ddlType);
+        }
+    }
+
+    private void waitForSeconds(int seconds) {
+        try {
+            Thread.sleep(TimeUnit.SECONDS.toMillis(seconds));
+        } catch (InterruptedException e) {
+            throw new PolardbxException(e);
+        }
+    }
+
+    private void waitForRplFlushMetrics() {
+        //默认的flushInterval是5s, see {ApplierConfig}
+        log.warn("wait for rpl task flush metrics");
+        waitForSeconds(10);
+    }
+
+    private void checkBefore() throws Exception {
+        if (isBackflowMode()) {
+            // 双向表都创建好
+            bidirectionalSendTokenAndWait();
+            // 回流模式，之前都不能有数据写入
+            waitForRplFlushMetrics();
+            String position;
+
+            try (Connection conn = getPolardbxConnection()) {
+                if (getCommitCount(conn) > streamCount) {
+                    throw new PolardbxException(
+                        "backflow mode is enabled, detect backflow  metadb.rpl_stat_metrics is not empty");
+                }
+                position = getBinlogPosition(conn);
+            }
+
+            try (Connection conn = getCdcSyncDbConnection()) {
+                final long commitCount = getCommitCount(conn);
+                final long oldFowardCommitCount = fowardCommitCount.get();
+                this.fowardCommitCount.set(commitCount);
+                log.warn("forward commit count is : " + oldFowardCommitCount + ", commitCount is " + commitCount
+                    + ", binlog position : " + position);
+            }
+        }
+    }
+
+    private void checkAfter() throws Exception {
+        if (isBackflowMode()) {
+            // 回流模式，该阶段逆向有数据写入
+            String position;
+            try (Connection conn = getPolardbxConnection()) {
+                position = getBinlogPosition(conn);
+            }
+            waitForRplFlushMetrics();
+            try (Connection conn = getCdcSyncDbConnection()) {
+                final long commitCount = getCommitCount(conn);
+                final long diffCount = commitCount - fowardCommitCount.get();
+                if (diffCount > 2) {
+                    throw new PolardbxException(
+                        "forward commit count is not equal to 0 , diff count : " + diffCount + ", binlog position : "
+                            + position + " forward : " + fowardCommitCount.get() + " , commit count : " + commitCount);
+                }
+            }
+        }
+    }
+
+    private String getBinlogPosition(Connection conn) throws SQLException {
+        final String showMasterSql = "show master status";
+        ResultSet rs = JdbcUtil.executeQuery(showMasterSql, conn);
+        StringBuilder sb = new StringBuilder();
+        if (rs.next()) {
+            sb.append(rs.getString(1)).append(":");
+            sb.append(rs.getString(2));
+        }
+        return sb.toString();
+    }
+
+    private long getCommitCount(Connection conn) throws Exception {
+        final String queryMetricsSql = "select total_commit_count from metadb.rpl_stat_metrics";
+        ResultSet rs = JdbcUtil.executeQuery(queryMetricsSql, conn);
+        long totalCommit = 0;
+        streamCount = 0;
+        while (rs.next()) {
+            streamCount++;
+            totalCommit += rs.getLong(1);
+        }
+        return totalCommit;
     }
 
     public void testDdlWithCommitDelay() {
@@ -134,6 +252,9 @@ public class TestModeOne extends RplBaseTestCase {
                 case ModifyColumn:
                     modifyColumn();
                     break;
+                case AlterTableCharset:
+                    alterTableCharset();
+                    break;
                 default:
                     throw new PolardbxException("invalid ddl type " + ddlType);
                 }
@@ -147,7 +268,6 @@ public class TestModeOne extends RplBaseTestCase {
 
                 int index = new Random().nextInt(dmlTypes.size());
                 DmlType dmlType = dmlTypes.get(index);
-                long start = System.currentTimeMillis();
 
                 System.out.println("start start start start");
                 switch (dmlType) {
@@ -170,7 +290,7 @@ public class TestModeOne extends RplBaseTestCase {
         });
 
         try {
-            sleep(testTimeMinutes * 60 * 1000);
+            sleep((long) testTimeMinutes * 60 * 1000);
         } catch (Throwable t) {
             log.error("background thread meet an error!", t);
         } finally {
@@ -181,16 +301,35 @@ public class TestModeOne extends RplBaseTestCase {
     }
 
     @Test
-    public void testRandomDmlWithDdl() throws InterruptedException {
-        execute();
-        checkData();
+    public void testRandomDmlWithDdl() throws Exception {
+        try {
+            checkBefore();
+            execute();
+            checkData();
+            checkAfter();
+        } finally {
+            resetCommitCount();
+        }
+    }
+
+    private void resetCommitCount() throws Exception {
+        try (Connection polardbxConnection = getPolardbxConnection()) {
+            // 清空回流产生的commit count
+            doResetCommit(polardbxConnection);
+        }
+    }
+
+    private void doResetCommit(Connection conn) {
+        JdbcUtil.executeSuccess(conn, "update metadb.rpl_stat_metrics set total_commit_count=0");
     }
 
     @SneakyThrows
     private void tryCreateDb() {
         try (Connection polardbxConnection = ConnectionManager.getInstance().getDruidPolardbxConnection()) {
+            JdbcUtil.executeSuccess(polardbxConnection, "DROP DATABASE IF EXISTS `" + dbName + "`");
             JdbcUtil.executeSuccess(polardbxConnection, "CREATE DATABASE IF NOT EXISTS `" + dbName + "`");
             log.info("/*MASTER*/CREATE DATABASE IF NOT EXISTS `" + dbName + "`");
+            fowardCommitCount.addAndGet(2L * streamCount);
         }
     }
 
@@ -202,7 +341,7 @@ public class TestModeOne extends RplBaseTestCase {
 
         new Thread(() -> {
             try {
-                sleep(testTimeMinutes * 60 * 1000);
+                sleep((long) testTimeMinutes * 60 * 1000);
             } catch (Throwable t) {
                 log.error("background thread meet an error!", t);
             } finally {
@@ -234,8 +373,8 @@ public class TestModeOne extends RplBaseTestCase {
     }
 
     private void prepareTables() throws SQLException {
-        JdbcUtil.executeUpdate(getPolardbxConnection(dbName), String.format(T_RANDOM_CREATE_SQL, tableName));
-        JdbcUtil.executeUpdate(getPolardbxConnection(dbName), String.format(T_RANDOM_INSERT_SQL, tableName));
+        JdbcUtil.executeUpdate(getDataConnection(dbName), String.format(T_RANDOM_CREATE_SQL, tableName));
+        JdbcUtil.executeUpdate(getDataConnection(dbName), String.format(T_RANDOM_INSERT_SQL, tableName));
         columnSeeds.buildColumnSeeds();
     }
 
@@ -246,6 +385,8 @@ public class TestModeOne extends RplBaseTestCase {
         truncateThreshold = Integer.parseInt(System.getProperty("truncateThreshold", "3000"));
         insertBatchMode = Integer.parseInt(System.getProperty("insertBatchMode", "2"));
         updateBatchMode = Integer.parseInt(System.getProperty("updateBatchMode", "2"));
+        testMode = TEST_MODE.valueOf(System.getProperty("testMode", TEST_MODE.FORWARD_MODE.name()));
+        log.warn("backflow mode : " + testMode);
     }
 
     private Thread buildDdlThread(AtomicBoolean running) {
@@ -274,6 +415,9 @@ public class TestModeOne extends RplBaseTestCase {
                     case ModifyColumn:
                         modifyColumn();
                         break;
+                    case AlterTableCharset:
+                        alterTableCharset();
+                        break;
                     default:
                         throw new PolardbxException("invalid ddl type " + ddlType);
                     }
@@ -292,21 +436,52 @@ public class TestModeOne extends RplBaseTestCase {
         });
     }
 
-    private void checkData() {
-        waitAndCheck(CheckParameter.builder()
+    private void checkData() throws Exception {
+        CheckParameter parameter = CheckParameter.builder()
             .dbName(dbName)
             .tbName(tableName)
             .directCompareDetail(true)
             .compareDetailOneByOne(true)
             .loopWaitTimeoutMs(loopWaitTimeoutMs)
-            .build());
+            .build();
+
+        if (isBackflowMode() || isBidirectionalMode()) {
+            sendTokenAndWaitBackflow(parameter);
+        }
+        fowardCommitCount.addAndGet(streamCount);
+        waitAndCheck(parameter);
+    }
+
+    private void bidirectionalSendTokenAndWait() {
+        CheckParameter parameter = CheckParameter.builder()
+            .dbName(dbName)
+            .tbName(tableName)
+            .directCompareDetail(true)
+            .compareDetailOneByOne(true)
+            .loopWaitTimeoutMs(loopWaitTimeoutMs)
+            .build();
+
+        if (isBackflowMode() || isBidirectionalMode()) {
+            sendTokenAndWaitBackflow(parameter);
+        }
+        sendTokenAndWait(parameter);
+    }
+
+    public void sendTokenAndWaitBackflow(CheckParameter checkParameter) {
+        //send token
+        String uuid = UUID.randomUUID().toString();
+        String tableName = TOKEN_TABLE_PREFIX + uuid;
+        JdbcUtil.executeSuccess(cdcSyncDbConnection, String.format(TOKEN_TABLE_CREATE_SQL, tableName));
+
+        //wait token
+        loopWait(tableName, polardbxConnection, checkParameter.getLoopWaitTimeoutMs());
     }
 
     private void addColumn() {
         String columnName = RandomUtil.randomIdentifier();
         Pair<String, String> pair = ddlSqlBuilder.buildAddColumnSql(columnName);
 
-        try (Connection connection = getPolardbxConnection(dbName)) {
+        try (Connection connection = getDdlConnection(dbName)) {
             setSqlMode("", connection);
             Statement stmt = connection.createStatement();
             stmt.execute(pair.getValue());
@@ -323,7 +498,7 @@ public class TestModeOne extends RplBaseTestCase {
         String sql = ddlSqlBuilder.buildDropColumnSql(columnName);
         columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.remove(columnName);
 
-        try (Connection connection = getPolardbxConnection(dbName)) {
+        try (Connection connection = getDdlConnection(dbName)) {
             setSqlMode("", connection);
             Statement stmt = connection.createStatement();
             stmt.execute(sql);
@@ -340,7 +515,7 @@ public class TestModeOne extends RplBaseTestCase {
         String columnType = pair.getKey().getValue();
         String sql = pair.getValue();
 
-        try (Connection connection = getPolardbxConnection(dbName)) {
+        try (Connection connection = getDdlConnection(dbName)) {
             setSqlMode("", connection);
             Statement stmt = connection.createStatement();
             stmt.execute(sql);
@@ -352,10 +527,24 @@ public class TestModeOne extends RplBaseTestCase {
         }
     }
 
+    private void alterTableCharset() {
+        String alterTableCharsetSql = ddlSqlBuilder.buildAlterTableCharsetSql();
+
+        try (Connection connection = getPolardbxConnection(dbName)) {
+            setSqlMode("", connection);
+            Statement stmt = connection.createStatement();
+            stmt.execute(alterTableCharsetSql);
+            Metrics.getInstance().getModifyColumnSuccess().incrementAndGet();
+        } catch (Throwable t) {
+            Metrics.getInstance().getModifyColumnFail().incrementAndGet();
+            log.error("modify column error!! \r\nsql : " + alterTableCharsetSql, t);
+        }
+    }
+
     private void insertSingle(boolean withDelay) {
         Pair<String, List<Pair<String, Object>>> insertSqlPair = dmlSqlBuilder.buildInsertSql(false);
 
-        try (Connection connection = getPolardbxConnection(dbName)) {
+        try (Connection connection = getDataConnection(dbName)) {
             setSqlMode("", connection);
             trySetCommitDelay(withDelay, connection);
             PreparedStatement statement = connection.prepareStatement(insertSqlPair.getKey());
@@ -382,7 +571,7 @@ public class TestModeOne extends RplBaseTestCase {
     }
 
     private void insertBatch1(boolean withDelay) {
-        try (Connection connection = getPolardbxConnection(dbName)) {
+        try (Connection connection = getDataConnection(dbName)) {
             setSqlMode("", connection);
             trySetCommitDelay(withDelay, connection);
             String sql = dmlSqlBuilder.buildInsertBatchSql(false, dmlBatchLimitNum);
@@ -399,7 +588,7 @@ public class TestModeOne extends RplBaseTestCase {
         Pair<String, List<Pair<String, Object>>> insertSqlPair =
             dmlSqlBuilder.buildInsertBatchSql2(false, dmlBatchLimitNum);
 
-        try (Connection connection = getPolardbxConnection(dbName)) {
+        try (Connection connection = getDataConnection(dbName)) {
             setSqlMode("", connection);
             trySetCommitDelay(withDelay, connection);
             PreparedStatement statement = connection.prepareStatement(insertSqlPair.getKey());
@@ -449,6 +638,30 @@ public class TestModeOne extends RplBaseTestCase {
         }
     }
 
+    public boolean isBackflowMode() {
+        return testMode == TEST_MODE.BACKFLOW_MODE;
+    }
+
+    public boolean isBidirectionalMode() {
+        return testMode == TEST_MODE.BIDIRECTIONAL_MODE;
+    }
+
+    public Connection getDataConnection(String dbName) {
+        if (isBackflowMode() || isBidirectionalMode()) {
+            return getCdcSyncDbConnection(dbName);
+        } else {
+            return getPolardbxConnection(dbName);
+        }
+    }
+
+    public Connection getDdlConnection(String dbName) {
+        if (isBackflowMode()) {
+            return getCdcSyncDbConnection(dbName);
+        } else {
+            return getPolardbxConnection(dbName);
+        }
+    }
+
     private void updateBatch2(boolean withDelay) {
         try {
             Pair<String, List<Pair<String, Object>>> updateSqlPair =
@@ -462,7 +675,7 @@ public class TestModeOne extends RplBaseTestCase {
     }
 
     private void update(Pair<String, List<Pair<String, Object>>> updateSqlPair, boolean withDelay) throws SQLException {
-        try (Connection connection = getPolardbxConnection(dbName)) {
+        try (Connection connection = getDataConnection(dbName)) {
             setSqlMode("", connection);
             trySetCommitDelay(withDelay, connection);
             PreparedStatement statement = connection.prepareStatement(updateSqlPair.getKey());
@@ -497,7 +710,7 @@ public class TestModeOne extends RplBaseTestCase {
     @SneakyThrows
     private void tryTruncate() {
         // 数据太多的话，数据校验耗时比较久，下游mysql执行ddl也会耗很多时间，触达阈值之后，进行truncate处理
-        try (Connection connection = getPolardbxConnection(dbName)) {
+        try (Connection connection = getDataConnection(dbName)) {
             String querySql = "select count(id) from " + tableName;
             String truncateSql = "truncate " + tableName;
 

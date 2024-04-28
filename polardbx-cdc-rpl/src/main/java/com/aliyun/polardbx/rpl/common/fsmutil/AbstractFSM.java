@@ -14,9 +14,11 @@
  */
 package com.aliyun.polardbx.rpl.common.fsmutil;
 
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
+import com.aliyun.polardbx.rpl.taskmeta.MetaManagerTranProxy;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -29,6 +31,8 @@ public abstract class AbstractFSM<T> {
 
     private List<FSMTransition> transitionList;
     private FSMState initialState;
+    private static final MetaManagerTranProxy TRANSACTION_MANAGER =
+        SpringContextHolder.getObject(MetaManagerTranProxy.class);
 
     public AbstractFSM(List<FSMTransition> transitionList, FSMState initialState) {
         this.transitionList = transitionList;
@@ -43,10 +47,10 @@ public abstract class AbstractFSM<T> {
 
     public void update(RplStateMachine stateMachine, FSMAction action) {
         long FSMId = stateMachine.getId();
-        int nowState = stateMachine.getState();
+        FSMState nowState = FSMState.valueOf(stateMachine.getState());
         List<FSMTransition> transitions = transitionList
             .stream()
-            .filter(tran -> tran.getCurrentState().getValue() == nowState)
+            .filter(tran -> tran.getCurrentState() == nowState)
             .collect(Collectors.toList());
 
         if (transitions.isEmpty()) {
@@ -70,7 +74,7 @@ public abstract class AbstractFSM<T> {
             DbTaskMetaManager.updateStateMachineState(FSMId, state);
             FSMMetaManager.startServiceByState(FSMId);
             // 立即distribute一次，防止running进入ready导致重启
-            FSMMetaManager.distributeTasks();
+            TRANSACTION_MANAGER.distributeTasks();
         }
     }
 

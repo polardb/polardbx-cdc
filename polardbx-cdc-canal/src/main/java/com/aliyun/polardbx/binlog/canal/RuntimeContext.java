@@ -29,11 +29,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * @since 1.0.25
  */
 public class RuntimeContext {
-
-    public static final int DEBUG_MODE = 0;
-    public static final int ATTRIBUTE_TABLE_META_MANAGER = 1;
     public static final AtomicReference<String> initTopology = new AtomicReference<>("");
-    private static ThreadLocal<String> instructionIdLocal = new ThreadLocal<>();
+    private static final ThreadLocal<String> instructionIdLocal = new ThreadLocal<>();
     private final ThreadRecorder threadRecorder;
 
     /**

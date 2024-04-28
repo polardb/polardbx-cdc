@@ -18,6 +18,9 @@ import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import org.junit.Assert;
 import org.junit.Test;
 
+import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.buildCreateLikeSql;
+
 /**
  * description:
  * author: ziyang.lb
@@ -128,4 +131,27 @@ public class MemoryTableMetaTest_Backtick extends MemoryTableMetaBase {
         Assert.assertNotNull(tableMeta);
     }
 
+    @Test
+    public void testCreateTableLike() {
+        String t0 = "test_table";
+        String t1 = "`gsi-`test_table`";
+        String t2 = "`gsi-`test_table`_0h4o_009";
+
+        createTableLike(t0, t2);
+        createTableLike(t1, t2);
+    }
+
+    private void createTableLike(String baseTable, String targetTable) {
+        String createSql = "create table %s (id bigint primary key)";
+        String createLikeSql = buildCreateLikeSql(targetTable, "d1", baseTable);
+
+        MemoryTableMeta memoryTableMeta = newMemoryTableMeta();
+        applySql(memoryTableMeta, "d1", String.format(createSql, "`" + escape(baseTable) + "`"));
+        TableMeta tableMeta = memoryTableMeta.find("d1", baseTable);
+        Assert.assertNotNull(tableMeta);
+
+        applySql(memoryTableMeta, "d1", createLikeSql);
+        tableMeta = memoryTableMeta.find("d1", targetTable);
+        Assert.assertNotNull(tableMeta);
+    }
 }

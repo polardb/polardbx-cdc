@@ -42,11 +42,14 @@ import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.sql.DataSource;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
+
+import static com.aliyun.polardbx.rpl.applier.SqlContextExecutor.execSqlContextsV2;
 
 /**
  * @author jiyue 2021/10/14 11:32
@@ -55,8 +58,17 @@ import java.util.concurrent.Future;
 
 @Slf4j
 public class FullCopyApplier extends MysqlApplier {
-    public FullCopyApplier(ApplierConfig applierConfig, HostInfo hostInfo) {
-        super(applierConfig, hostInfo);
+
+    DataSource dataSource;
+
+    @Override
+    public void init() throws Exception {
+        super.init();
+        dataSource = dbMetaCache.getBuiltInDefaultDataSource();
+    }
+
+    public FullCopyApplier(ApplierConfig applierConfig, HostInfo hostInfo, HostInfo srcHostInfo) {
+        super(applierConfig, hostInfo, srcHostInfo);
     }
 
     @Override
@@ -74,18 +86,18 @@ public class FullCopyApplier extends MysqlApplier {
             return;
         }
         try {
-            parallelExecSqlContexts((List<DefaultRowChange>) (List<?>) dbmsEvents, false);
+            parallelExecuteDML((List<DefaultRowChange>) (List<?>) dbmsEvents, false);
         } catch (Exception e) {
-            parallelExecSqlContexts((List<DefaultRowChange>) (List<?>) dbmsEvents, true);
+            parallelExecuteDML((List<DefaultRowChange>) (List<?>) dbmsEvents, true);
         }
     }
 
-    private void parallelExecSqlContexts(List<DefaultRowChange> allRowChanges, boolean isIgnore) throws Exception {
+    private void parallelExecuteDML(List<DefaultRowChange> allRowChanges, boolean isIgnore) throws Exception {
         List<SqlContextV2> sqlContexts = getMergeInsertSqlContexts(allRowChanges, isIgnore);
         List<Future<Void>> futures = new ArrayList<>();
         for (SqlContextV2 sqlContext : sqlContexts) {
             Callable<Void> task = () -> {
-                execSqlContextsV2(Collections.singletonList(sqlContext));
+                execSqlContextsV2(dataSource, Collections.singletonList(sqlContext));
                 sqlContext.setSucceed(true);
                 return null;
             };
@@ -125,7 +137,7 @@ public class FullCopyApplier extends MysqlApplier {
                     (i == rowChanges.size() - 1 && j == nowRowChange.getRowSize())) {
                     TableInfo dstTbInfo =
                         dbMetaCache.getTableInfo(mergedRowChange.getSchema(), mergedRowChange.getTable());
-                    SqlContextV2 sqlContext = ApplyHelper.getMergeInsertSqlExecContextV2(mergedRowChange, dstTbInfo,
+                    SqlContextV2 sqlContext = DmlApplyHelper.getMergeInsertSqlExecContextV2(mergedRowChange, dstTbInfo,
                         insertMode);
                     sqlContexts.add(sqlContext);
                     nowMergeCount = 0;

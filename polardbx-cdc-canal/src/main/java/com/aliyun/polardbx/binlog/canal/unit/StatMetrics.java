@@ -25,7 +25,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Data
@@ -49,12 +48,7 @@ public class StatMetrics {
     private AtomicLong skipExceptionCounter = new AtomicLong();
     private AtomicLong persistentMessageCounter = new AtomicLong();
     private AtomicLong totalInCache = new AtomicLong();
-    private ScheduledThreadPoolExecutor executorService = new ScheduledThreadPoolExecutor(1,
-        r -> {
-            Thread t = new Thread(r, "stat-metrics");
-            t.setDaemon(true);
-            return t;
-        });
+    private AtomicLong periodCommitCount = new AtomicLong();
 
     public static StatMetrics getInstance() {
         return INSTANCE;
@@ -84,7 +78,12 @@ public class StatMetrics {
             lastEvent = event;
         }
 
-        addOutBytes(outBytes);
+        doStatOut(insertCount, updateCount, deleteCount, outBytes, lastEvent);
+
+    }
+
+    public void doStatOut(long insertCount, long updateCount, long deleteCount, long byteSize, DBMSEvent lastEvent) {
+        addOutBytes(byteSize);
         deleteMessageCount.add(deleteCount);
         updateMessageCount.add(updateCount);
         insertMessageCount.add(insertCount);
@@ -96,10 +95,8 @@ public class StatMetrics {
 
     private void doStatOutDelay(DBMSEvent event) {
         long now = System.currentTimeMillis();
-        Long sourceTimestamp = event.getSourceTimeStamp();
-        if (sourceTimestamp != null) {
-            setProcessDelay(now - sourceTimestamp);
-        }
+        long extractTimestamp = event.getExtractTimeStamp();
+        setProcessDelay(now - extractTimestamp);
     }
 
     public void setTotalInCache(long totalInCache) {
@@ -156,6 +153,14 @@ public class StatMetrics {
 
     public void deletePersistEventCount(long delNum) {
         persistentMessageCounter.addAndGet(-delNum);
+    }
+
+    public long getPeriodCommitCount() {
+        return periodCommitCount.getAndSet(0);
+    }
+
+    public void addCommitCount(long addCount) {
+        periodCommitCount.addAndGet(addCount);
     }
 
     public double getCpuRatio() {

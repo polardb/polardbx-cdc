@@ -57,7 +57,7 @@ public class MySqlInfo {
             @Override
             public Long process(ResultSet rs) throws SQLException {
                 if (rs.next()) {
-                    return rs.getLong(2);
+                    return Long.parseLong(rs.getObject(2).toString());
                 } else {
                     throw new CanalParseException(
                         "command : show variables like 'server_id' has an error! pls check. you need (at least one "

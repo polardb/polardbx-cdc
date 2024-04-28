@@ -14,14 +14,14 @@
  */
 package com.aliyun.polardbx.rpl.extractor.flashback;
 
-import com.aliyun.polardbx.binlog.canal.binlog.FileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.PreviousGtidsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RotateLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.FileLogFetcher;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.dump.ErosaConnection;
 import com.aliyun.polardbx.binlog.canal.core.dump.SinkFunction;
 import com.aliyun.polardbx.binlog.canal.core.gtid.GTIDSet;

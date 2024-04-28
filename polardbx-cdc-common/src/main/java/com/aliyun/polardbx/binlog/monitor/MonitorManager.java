@@ -202,13 +202,24 @@ public class MonitorManager {
                 alarmEvent.setEventValue(monitorContent.errorMessage);
                 alarmEvent.setTriggerValue(monitorValue != null ? monitorValue.triggerValue : null);
                 AlarmEventReporter.report(alarmEvent);
+                // binlog fatal error
                 if (monitorType.isFatalAlarmIfExistsConsumer() &&
                     System.currentTimeMillis() - DynamicApplicationConfig.getLong(ALARM_LATEST_CONSUME_TIME_MS) <
-                        DynamicApplicationConfig.getLong(ALARM_FATAL_THRESHOLD_MS)) {
+                        DynamicApplicationConfig.getLong(ALARM_FATAL_THRESHOLD_MS) && !monitorType.isColumnar()) {
                     AlarmEvent fatalAlarmEvent = new AlarmEvent();
                     fatalAlarmEvent.setEventKey(MonitorType.BINLOG_FATAL_ERROR.getDesc());
                     fatalAlarmEvent.setEventValue(MonitorMsgBuilder
                         .buildMessage(MonitorType.BINLOG_FATAL_ERROR, monitorContent.errorMessage));
+                    fatalAlarmEvent.setTriggerValue(null);
+                    AlarmEventReporter.report(fatalAlarmEvent);
+                }
+                // columnar fatal error
+                if (monitorType.isFatalAlarmIfExistsConsumer() && monitorType.isColumnar() && isAlarmPhone(monitorType,
+                    monitorContent)) {
+                    AlarmEvent fatalAlarmEvent = new AlarmEvent();
+                    fatalAlarmEvent.setEventKey(MonitorType.COLUMNAR_FATAL_ERROR.getDesc());
+                    fatalAlarmEvent.setEventValue(MonitorMsgBuilder
+                        .buildMessage(MonitorType.COLUMNAR_FATAL_ERROR, monitorContent.errorMessage));
                     fatalAlarmEvent.setTriggerValue(null);
                     AlarmEventReporter.report(fatalAlarmEvent);
                 }

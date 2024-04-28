@@ -7,10 +7,14 @@ option optimize_for = SPEED;
 package dumper;
 
 service CdcService {
-  // ShowBinaryLogs + ShowMasterLogs
+
   rpc ShowBinaryLogs (Request) returns (stream BinaryLog) {}
 
+  rpc ShowFullBinaryLogs (Request) returns (stream FullBinaryLog) {}
+
   rpc ShowMasterStatus (Request) returns (MasterStatus) {}
+
+  rpc ShowFullMasterStatus (Request) returns (FullMasterStatus) {}
 
   rpc ShowBinlogEvents (ShowBinlogEventsRequest) returns (stream BinlogEvent) {}
 
@@ -60,12 +64,40 @@ message BinaryLog {
   int64  fileSize = 2;
 }
 
+message FullBinaryLog {
+  string logName = 1;
+  int64 fileSize = 2;
+  string createdTime = 3;
+  string lastModifyTime = 4;
+  string firstEventTime = 5;
+  string lastEventTime = 6;
+  string lastTso = 7;
+  string uploadStatus = 8;
+  string fileLocation = 9;
+  string ext = 10;
+}
+
 message MasterStatus {
   string file = 1;
   int64  position = 2;
   string  binlogDoDB = 3;
   string  binlogIgnoreDB = 4;
   string  executedGtidSet = 5;
+}
+
+message FullMasterStatus {
+  string file = 1;
+  int64  position = 2;
+  string lastTso = 3;
+  int64 delayTime = 4;
+  int64 avgRevEps = 5;
+  int64 avgRevBps = 6;
+  int64 avgWriteEps = 7;
+  int64 avgWriteBps = 8;
+  int64 avgWriteTps = 9;
+  int64 avgUploadBps = 10;
+  int64 avgDumpBps = 11;
+  string extInfo = 12;
 }
 
 message BinlogEvent {

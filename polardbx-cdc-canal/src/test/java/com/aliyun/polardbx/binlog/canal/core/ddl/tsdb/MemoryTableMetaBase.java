@@ -14,8 +14,11 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 
+import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.Assert;
+import org.junit.Test;
 
 /**
  * created by ziyang.lb
@@ -29,5 +32,47 @@ public class MemoryTableMetaBase extends BaseTest {
 
     protected void applySql(MemoryTableMeta m, String db, String sql) {
         m.apply(null, db, sql, null);
+    }
+
+    @Test
+    public void testGenerateColumnIndex() {
+        String sql1 = "CREATE TABLE expr_multi_column_tbl (\n"
+            + "  a int PRIMARY KEY,\n"
+            + "  b int,\n"
+            + "  c int,\n"
+            + "  d varchar(64),\n"
+            + "  e varchar(64)\n"
+            + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci\n"
+            + "DBPARTITION BY hash(a)";
+        String sql2 = "alter table expr_multi_column_tbl "
+            + "add local unique index expr_multi_column_tbl_idx((a+1) desc,b,c-1,substr(d,-2) asc,a+b+c*2)";
+
+        MemoryTableMeta memoryTableMeta = newMemoryTableMeta();
+        applySql(memoryTableMeta, "d1", sql1);
+        applySql(memoryTableMeta, "d1", sql2);
+        memoryTableMeta.find("d1", "expr_multi_column_tbl");
+    }
+
+    @Test
+    public void testCreateTableIfNotExist() {
+        MemoryTableMeta memoryTableMeta = newMemoryTableMeta();
+
+        String sql1 = "create table if not exists `tT``g`(id bigint)";
+        applySql(memoryTableMeta, "d1", sql1);
+        TableMeta tableMeta = memoryTableMeta.find("d1", "tt`g");
+        Assert.assertNotNull(tableMeta);
+        Assert.assertEquals(tableMeta.getFieldMetaByName("id").getColumnType(), "bigint");
+
+        String sql2 = "create table if not exists `Tt``G`(id varchar)";
+        applySql(memoryTableMeta, "d1", sql2);
+        tableMeta = memoryTableMeta.find("d1", "tt`g");
+        Assert.assertNotNull(tableMeta);
+        Assert.assertEquals(tableMeta.getFieldMetaByName("id").getColumnType(), "bigint");
+
+        memoryTableMeta.setForceReplace(true);
+        applySql(memoryTableMeta, "d1", sql2);
+        tableMeta = memoryTableMeta.find("d1", "tt`g");
+        Assert.assertNotNull(tableMeta);
+        Assert.assertEquals(tableMeta.getFieldMetaByName("id").getColumnType(), "varchar");
     }
 }

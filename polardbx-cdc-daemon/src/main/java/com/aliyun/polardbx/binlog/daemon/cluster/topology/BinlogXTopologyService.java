@@ -40,9 +40,11 @@ import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
 import com.aliyun.polardbx.binlog.scheduler.ScheduleHistoryContent;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -62,6 +64,7 @@ import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyService
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.getStreamConfig;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.lockAndCheck;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.shouldRefreshTopology;
+import static com.aliyun.polardbx.binlog.util.ServerConfigUtil.SERVER_ID;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 /**
@@ -100,7 +103,8 @@ public class BinlogXTopologyService implements TopologyService {
     @Override
     public void tryBuild() {
         String suspendTopologyRebuilding = SystemDbConfig.getSystemDbConfig(CLUSTER_SUSPEND_TOPOLOGY_REBUILDING);
-        if (StringUtils.isNotBlank(suspendTopologyRebuilding) && CommonConstants.TRUE.equals(suspendTopologyRebuilding)) {
+        if (StringUtils.isNotBlank(suspendTopologyRebuilding) && CommonConstants.TRUE.equals(
+            suspendTopologyRebuilding)) {
             log.info("current cluster is in suspend state , skip rebuilding cluster topology");
             return;
         }
@@ -123,8 +127,9 @@ public class BinlogXTopologyService implements TopologyService {
             storageHistoryInfo)) {
             long newVersion = preClusterSnapshot.getVersion() + 1;
             List<Container> containers = resourceManager.availableContainers();
-            List<BinlogTaskConfig> taskConfigs = topologyBuilder.buildTopology(containers, storageInfos,
-                buildExpectedStorageTso4BinlogX(), newVersion, preClusterSnapshot);
+            long serverId = ServerConfigUtil.getGlobalNumberVarDirect(SERVER_ID);
+            Pair<Long, List<BinlogTaskConfig>> taskConfigs = topologyBuilder.buildTopology(containers, storageInfos,
+                buildExpectedStorageTso4BinlogX(), newVersion, preClusterSnapshot, serverId);
             ClusterSnapshot postClusterSnapshot = new ClusterSnapshot(newVersion,
                 System.currentTimeMillis(),
                 containers.stream().map(Container::getContainerId).collect(Collectors.toSet()),
@@ -132,8 +137,10 @@ public class BinlogXTopologyService implements TopologyService {
                 "",
                 "",
                 storageHistoryInfo == null ? ExecutionConfig.ORIGIN_TSO : storageHistoryInfo.getTso(),
-                clusterType);
-            persist(taskConfigs, storageInfos, preClusterSnapshot, postClusterSnapshot,
+                clusterType,
+                taskConfigs.getKey()
+            );
+            persist(taskConfigs.getValue(), storageInfos, preClusterSnapshot, postClusterSnapshot,
                 storageHistoryInfo, executionSnapshot);
         }
     }

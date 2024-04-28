@@ -29,6 +29,7 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.commons.lang3.tuple.Triple;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -37,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_CHECK_CONSISTENCY_ENABLED;
+import static com.aliyun.polardbx.binlog.cdc.meta.MetaFilter.isSupportApply;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
@@ -50,18 +52,15 @@ public class ConsistencyChecker {
 
     private final TopologyManager topologyManager;
     private final PolarDbXLogicTableMeta polarDbXLogicTableMeta;
-    private final PolarDbXStorageTableMeta polarDbXStorageTableMeta;
     private final PolarDbXTableMetaManager polarDbXTableMetaManager;
     private final String storageInstId;
     private final AtomicLong checkCount;
     private OriginMetaSupplier originMetaSupplier;
 
     public ConsistencyChecker(TopologyManager topologyManager, PolarDbXLogicTableMeta polarDbXLogicTableMeta,
-                              PolarDbXStorageTableMeta polarDbXStorageTableMeta,
                               PolarDbXTableMetaManager polarDbXTableMetaManager, String storageInstId) {
         this.topologyManager = topologyManager;
         this.polarDbXLogicTableMeta = polarDbXLogicTableMeta;
-        this.polarDbXStorageTableMeta = polarDbXStorageTableMeta;
         this.polarDbXTableMetaManager = polarDbXTableMetaManager;
         this.storageInstId = storageInstId;
         this.checkCount = new AtomicLong();
@@ -92,7 +91,7 @@ public class ConsistencyChecker {
 
     public void checkLogicAndPhysicalConsistency(String tso, DDLRecord record) {
         boolean needCheckConsistency = DynamicApplicationConfig.getBoolean(META_BUILD_CHECK_CONSISTENCY_ENABLED);
-        if (needCheckConsistency) {
+        if (needCheckConsistency && isSupportApply(record)) {
             TopologyRecord r = JSONObject.parseObject(record.getMetaInfo(), TopologyRecord.class);
             if ("DROP_DATABASE".equals(record.getSqlKind())) {
                 checkForDropDatabase(tso, record);
@@ -133,8 +132,12 @@ public class ConsistencyChecker {
             return;
         }
 
+        if (!isSupportApply(ddlRecord)) {
+            return;
+        }
+
         if (CreateDropTableWithExistFilter.shouldIgnore(ddlRecord.getDdlSql(), ddlRecord.getId(),
-            ddlRecord.getJobId())) {
+            ddlRecord.getJobId(), ddlRecord.getExtInfo())) {
             return;
         }
 
@@ -239,9 +242,8 @@ public class ConsistencyChecker {
                                                String phySchemaName, String phyTableName, boolean createPhyIfNotExist) {
         //get table meta
         TableMeta logicDimTableMeta = polarDbXLogicTableMeta.find(logicSchemaName, logicTableName);
-        TableMeta phyDimTableMeta =
-            createPhyIfNotExist ? polarDbXTableMetaManager.findPhyTable(phySchemaName, phyTableName) :
-                polarDbXStorageTableMeta.find(phySchemaName, phyTableName);
+        TableMeta phyDimTableMeta = polarDbXTableMetaManager.findPhyTable(
+            phySchemaName, phyTableName, createPhyIfNotExist);
         TableMeta distinctPhyDimTableMeta = polarDbXLogicTableMeta.findDistinctPhy(logicSchemaName, logicTableName);
 
         // compare table meta
@@ -284,17 +286,30 @@ public class ConsistencyChecker {
                 phySchemaName, phyTableName, tso);
             throw new PolardbxException(message);
         }
-        List<Pair<String, String>> logicDimColumns = parseColumns(logicDimTableMeta);
-        List<Pair<String, String>> phyDimColumns = parseColumns(phyDimTableMeta);
+        if (!StringUtils.equalsAnyIgnoreCase(logicDimTableMeta.getCharset(), phyDimTableMeta.getCharset())) {
+            String message =
+                String.format(
+                    "check consistency failed, logic charset %s[%s] not equals physical charset %s[%s], with tso %s.",
+                    logicDimTableMeta.getTable(), logicDimTableMeta.getCharset(), phyDimTableMeta.getTable(),
+                    phyDimTableMeta.getCharset(), tso);
+            throw new PolardbxException(message);
+        }
+        List<Triple<String, String, String>> logicDimColumns = parseColumns(logicDimTableMeta);
+        List<Triple<String, String, String>> phyDimColumns = parseColumns(phyDimTableMeta);
         boolean result = logicDimColumns.equals(phyDimColumns);
         if (!result & mode == 0) {
             // 允许出现逻辑表和物理表列序不一致，如逻辑sql为: alter table add column xxx after yyy.
             // 也允许出现物理表比逻辑表多列，如OMC、生成列等场景，会先进行DDL打标，再清理物理表的相关列
             // 但不允许物理表比逻辑表少列，也不允许逻辑表和物理表列类型不一致
+
             Map<String, String> phyColumnMap =
-                phyDimColumns.stream().collect(Collectors.toMap(Pair::getKey, Pair::getValue));
+                phyDimColumns.stream()
+                    .collect(Collectors.toMap(Triple::getLeft,
+                        triple -> triple.getMiddle()
+                            + triple.getRight()));
             logicDimColumns.forEach(p -> {
-                if (!(phyColumnMap.containsKey(p.getKey()) && p.getValue().equals(phyColumnMap.get(p.getKey())))) {
+                if (!(phyColumnMap.containsKey(p.getLeft()) && (p.getMiddle() + p.getRight()).equals(
+                    phyColumnMap.get(p.getLeft())))) {
                     String message = String.format(
                         "check consistency failed, logic table meta and phy table meta is not consistent, logicSchema %s, "
                             + "logicTable %s , phySchema %s, phyTable %s, logicColumns %s, phy Columns %s, tso %s.",
@@ -307,9 +322,10 @@ public class ConsistencyChecker {
         return result;
     }
 
-    private List<Pair<String, String>> parseColumns(TableMeta tableMeta) {
+    private List<Triple<String, String, String>> parseColumns(TableMeta tableMeta) {
         return tableMeta.getFields().stream()
-            .map(f -> Pair.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase()))
+            .map(f -> Triple.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase(),
+                StringUtils.lowerCase(f.getCharset())))
             .collect(Collectors.toList());
     }
 

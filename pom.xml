@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.aliyun.polardbx</groupId>
     <artifactId>polardbx-cdc</artifactId>
-    <version>2.3.0-SNAPSHOT</version>
+    <version>5.4.19-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -16,27 +16,27 @@
         <module>polardbx-cdc-daemon</module>
         <module>polardbx-cdc-storage</module>
         <module>polardbx-cdc-assemble</module>
-        <module>polardbx-cdc-transfer</module>
         <module>polardbx-cdc-format</module>
         <module>polardbx-cdc-protocol</module>
         <module>polardbx-cdc-meta</module>
         <module>polardbx-cdc-test</module>
         <module>polardbx-cdc-backup</module>
         <module>polardbx-cdc-rpl</module>
-        <module>polardbx-cdc-monitor</module>
         <module>polardbx-cdc-external</module>
+        <module>polardbx-cdc-client</module>
+        <module>polardbx-cdc-columnar</module>
     </modules>
 
     <properties>
         <file.encoding>UTF-8</file.encoding>
-        <java.source.version>1.8</java.source.version>
-        <java.target.version>1.8</java.target.version>
+        <java.source.version>8</java.source.version>
+        <java.target.version>8</java.target.version>
         <grpc.version>1.30.0</grpc.version>
         <logback.version>1.2.8</logback.version>
         <slf4j.version>1.7.26</slf4j.version>
         <jdbc.version>5.1.49</jdbc.version>
         <druid.version>1.0.25.2018030201</druid.version>
-        <polardbx-parser.version>4.6</polardbx-parser.version>
+        <polardbx-parser.version>6.9</polardbx-parser.version>
         <fastjson.version>1.2.50_noneautotype</fastjson.version>
         <lombok.version>1.18.0</lombok.version>
         <spring.version>5.3.20</spring.version>
@@ -56,6 +56,7 @@
         <commons-io.version>2.7</commons-io.version>
         <commons-text.version>1.10.0</commons-text.version>
         <apache-thrift.version>0.14.1</apache-thrift.version>
+        <mockito.version>4.4.0</mockito.version>
         <powermock.version>2.0.9</powermock.version>
         <h2database.version>2.2.220</h2database.version>
         <license.dir>${basedir}</license.dir>
@@ -74,7 +75,7 @@
         <flyway.version>7.3.0</flyway.version>
         <okhttp.version>4.9.2</okhttp.version>
         <ini4j.version>0.5.4</ini4j.version>
-        <rocksdb.version>6.16.4</rocksdb.version>
+        <rocksdb.version>6.29.5</rocksdb.version>
         <tomcat-jdbc.version>9.0.65</tomcat-jdbc.version>
         <mybatis.version>3.5.6</mybatis.version>
         <mybatis-spring.version>2.0.5</mybatis-spring.version>
@@ -82,6 +83,7 @@
         <guava-retrying.version>2.0.0</guava-retrying.version>
         <aws-java-sdk-s3.version>1.11.655</aws-java-sdk-s3.version>
         <maven-surefire-plugin.version>3.0.0-M4</maven-surefire-plugin.version>
+        <cdc.client.version>2.0.33</cdc.client.version>
     </properties>
 
     <dependencyManagement>
@@ -246,6 +248,18 @@
                 <artifactId>lombok</artifactId>
                 <version>${lombok.version}</version>
                 <scope>provided</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>${mockito.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-inline</artifactId>
+                <version>${mockito.version}</version>
+                <scope>test</scope>
             </dependency>
             <dependency>
                 <groupId>org.powermock</groupId>
@@ -568,6 +582,11 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-inline</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <distributionManagement>
@@ -585,30 +604,12 @@
 
     <profiles>
         <profile>
-            <id>develop</id>
+            <id>release</id>
             <activation>
                 <activeByDefault>true</activeByDefault>
             </activation>
             <properties>
-                <env>develop</env>
-            </properties>
-        </profile>
-        <profile>
-            <id>dev_x</id>
-            <properties>
-                <env>dev_x</env>
-            </properties>
-        </profile>
-        <profile>
-            <id>release</id>
-            <properties>
                 <env>release</env>
-            </properties>
-        </profile>
-        <profile>
-            <id>test</id>
-            <properties>
-                <env>test</env>
             </properties>
         </profile>
     </profiles>
@@ -665,8 +666,8 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.7.0</version>
                 <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
+                    <source>${java.source.version}</source>
+                    <target>${java.target.version}</target>
                     <encoding>UTF-8</encoding>
                 </configuration>
             </plugin>
@@ -724,6 +725,19 @@
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>2.3</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-install-plugin</artifactId>
                 <version>3.0.1</version>
                 <executions>
@@ -731,11 +745,11 @@
                         <id>install-external</id>
                         <phase>clean</phase>
                         <configuration>
-                            <file>${basedir}/lib/polardbx-parser-4.6.jar</file>
+                            <file>${basedir}/lib/polardbx-parser-6.9.jar</file>
                             <repositoryLayout>default</repositoryLayout>
                             <groupId>com.alibaba.polardbx</groupId>
                             <artifactId>polardbx-parser</artifactId>
-                            <version>4.6</version>
+                            <version>6.9</version>
                             <packaging>jar</packaging>
                             <generatePom>true</generatePom>
                         </configuration>

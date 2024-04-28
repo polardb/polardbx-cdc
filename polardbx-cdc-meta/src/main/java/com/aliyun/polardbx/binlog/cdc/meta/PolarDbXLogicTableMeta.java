@@ -78,13 +78,11 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
 
     private final TopologyManager topologyManager;
     //保存逻辑表和物理表列序不一致的meta
-    private final MemoryTableMeta distinctPhyMeta = new MemoryTableMeta(logger, CdcSchemaStoreProvider.getInstance(),
-        DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_MAX_SIZE),
-        DynamicApplicationConfig.getInt(META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES),
-        DynamicApplicationConfig.getBoolean(META_BUILD_IGNORE_APPLY_ERROR));
+    private final MemoryTableMeta distinctPhyMeta;
     private final BinlogLogicMetaHistoryMapper binlogLogicMetaHistoryMapper = SpringContextHolder.getObject(
         BinlogLogicMetaHistoryMapper.class);
     private final String dnVersion;
+
     private String maxTsoWithInit;
     private String latestAppliedTopologyTso = "";
     private long applySnapshotCostTime = -1;
@@ -100,6 +98,8 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
             DynamicApplicationConfig.getBoolean(META_BUILD_IGNORE_APPLY_ERROR));
         this.topologyManager = topologyManager;
         this.dnVersion = dnVersion;
+        this.distinctPhyMeta = initDistinctPhyMeta();
+
         boolean isMySQL8 = StringUtils.startsWith(dnVersion, "8");
         setMySql8(isMySQL8);
         distinctPhyMeta.setMySql8(isMySql8);
@@ -111,13 +111,22 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         return true;
     }
 
+    private MemoryTableMeta initDistinctPhyMeta() {
+        MemoryTableMeta distinctPhyMeta = new MemoryTableMeta(logger, CdcSchemaStoreProvider.getInstance(),
+            DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_MAX_SIZE),
+            DynamicApplicationConfig.getInt(META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES),
+            DynamicApplicationConfig.getBoolean(META_BUILD_IGNORE_APPLY_ERROR));
+        distinctPhyMeta.setForceReplace(true);
+        return distinctPhyMeta;
+    }
+
     public void applyBase(BinlogPosition position, LogicMetaTopology topology, String cmdId) {
         applySnapshotInternal(topology);
         DDLRecord record = DDLRecord.builder().schemaName("*").ddlSql(JSONObject.toJSONString(snapshot()))
             .metaInfo(JSONObject.toJSONString(topology)).build();
         try {
             if (applyBaseFlag.compareAndSet(false, true)) {
-                applyToDb(position, record, MetaType.SNAPSHOT.getValue(), cmdId);
+                applyToDb(position, record, MetaType.SNAPSHOT.getValue(), cmdId, true);
             }
         } catch (Throwable t) {
             applyBaseFlag.compareAndSet(true, false);
@@ -152,11 +161,11 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
 
             // 对于create if not exists和drop if exists，如果checkResult为false，不记录到binlog_logic_meta_history，以避免数据膨胀
             // 有时候有些系统(比如DTS)会通过create if not exists的方式维持心跳，如果记录这些信息到history表，会导致数据暴增
-            applyToDb(position, record, MetaType.DDL.getValue(), cmdId);
+            applyToDb(position, record, MetaType.DDL.getValue(), cmdId, true);
             Printer.tryPrint(position, record.getSchemaName(), record.getTableName(), this);
         } else {
             if (DynamicApplicationConfig.getBoolean(META_BUILD_RECORD_SQL_WITH_EXISTS_ENABLED)) {
-                applyToDb(position, record, MetaType.DDL.getValue(), cmdId);
+                applyToDb(position, record, MetaType.DDL.getValue(), cmdId, false);
                 Printer.tryPrint(position, record.getSchemaName(), record.getTableName(), this);
             }
         }
@@ -190,6 +199,8 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         AtomicLong applyCount = new AtomicLong(0L);
         topology.getLogicDbMetas().forEach(s -> {
             String schema = s.getSchema();
+            String charset = s.getCharset();
+            repository.setDefaultSchemaWithCharset(schema, charset);
             s.getLogicTableMetas().forEach(t -> {
                 String createSql = t.getCreateSql();
                 apply(null, schema, createSql, null);
@@ -222,6 +233,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
                 .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isGreaterThan(snapshotTsoCondition))
                 .and(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isLessThanOrEqualTo(rollbackTso))
                 .and(BinlogLogicMetaHistoryDynamicSqlSupport.type, SqlBuilder.isEqualTo(MetaType.DDL.getValue()))
+                .and(BinlogLogicMetaHistoryDynamicSqlSupport.needApply, SqlBuilder.isEqualTo(true))
                 .orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso).limit(PAGE_SIZE)
             );
             queryDdlHistoryCostTime += (System.currentTimeMillis() - queryStarTime);
@@ -298,24 +310,24 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
     /**
      * 快照备份到存储, 这里只需要备份变动的table
      */
-    public int applyToDb(BinlogPosition position, DDLRecord record, byte type, String cmdId) {
+    public int applyToDb(BinlogPosition position, DDLRecord record, byte type, String cmdId, boolean needApply) {
         if (position == null || position.getRtso().compareTo(maxTsoWithInit) <= 0) {
             return 0;
         }
         try {
-            BinlogLogicMetaHistory history = BinlogLogicMetaHistory.builder()
-                .tso(position.getRtso())
-                .dbName(record.getSchemaName())
-                .tableName(record.getTableName())
-                .sqlKind(record.getSqlKind())
-                .ddl(record.getDdlSql())
-                .topology(record.getMetaInfo())
-                .type(type)
-                .instructionId(cmdId)
-                .extInfo(record.getExtInfo() != null ? JSONObject.toJSONString(record.getExtInfo()) : null)
-                .ddlRecordId(record.getId())
-                .ddlJobId(record.getJobId())
-                .build();
+            BinlogLogicMetaHistory history = new BinlogLogicMetaHistory();
+            history.setTso(position.getRtso());
+            history.setDbName(record.getSchemaName());
+            history.setTableName(record.getTableName());
+            history.setSqlKind(record.getSqlKind());
+            history.setDdl(record.getDdlSql());
+            history.setTopology(record.getMetaInfo());
+            history.setType(type);
+            history.setInstructionId(cmdId);
+            history.setExtInfo(record.getExtInfo() != null ? JSONObject.toJSONString(record.getExtInfo()) : null);
+            history.setDdlRecordId(record.getId());
+            history.setDdlJobId(record.getJobId());
+            history.setNeedApply(needApply);
             return binlogLogicMetaHistoryMapper.insertSelective(history);
         } catch (DuplicateKeyException e) {
             if (logger.isDebugEnabled()) {
@@ -424,7 +436,8 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         }
 
         if (!result) {
-            logger.warn("ignore logic ddl sql， with tso {}, schema {}, tableName {}.", tso, schema, tableName);
+            logger.warn("ignore logic ddl sql， with tso {}, schema {}, tableName {}, ddlRecordId {}.",
+                tso, schema, tableName, ddlRecordId);
         }
         return result;
     }

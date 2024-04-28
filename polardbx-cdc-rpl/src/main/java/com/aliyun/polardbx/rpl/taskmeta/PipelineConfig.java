@@ -24,7 +24,7 @@ import lombok.Data;
 public class PipelineConfig {
 
     private int consumerParallelCount = 32;
-    private int bufferSize = 2048;
+    private int bufferSize = 4096;
     private boolean supportXa = false;
     private int fixedTpsLimit = -1;
     private boolean useIncValidation = false;

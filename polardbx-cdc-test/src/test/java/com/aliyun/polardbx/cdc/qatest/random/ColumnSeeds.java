@@ -48,6 +48,10 @@ public class ColumnSeeds {
     // <column name, query value>
     final Map<String, Object> COLUMN_NAME_QUERY_VALUE_MAPPING = new ConcurrentHashMap<>();
 
+    final List<String> CHARSET_LIST = Arrays.asList("utf8mb4", "utf8", "gbk");
+
+    private long tableCharsetIndex = 0;
+
     public ColumnSeeds(String dbName, String tableName) {
         this.dbName = dbName;
         this.tableName = tableName;
@@ -97,6 +101,14 @@ public class ColumnSeeds {
                 }
             }
         }
+    }
+
+    public String randomCharset() {
+        return CHARSET_LIST.get((int) (Math.random() * CHARSET_LIST.size()));
+    }
+
+    public String nextCharset() {
+        return CHARSET_LIST.get(Math.abs((int) (tableCharsetIndex++ % CHARSET_LIST.size())));
     }
 
     private void print() {

@@ -15,7 +15,6 @@
 package com.aliyun.polardbx.binlog.format.utils;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -32,9 +31,29 @@ public class EventGenerator {
     public static final int COMMIT_EVENT_LENGTH = 31;
     public static final int ROWS_QUERY_FIXED_LENGTH = 24;
 
-    private static final int EVENT_LEN_OFFSET = 9;
+    /*
+     * Event header offsets;
+     * these point to places inside the fixed header.
+     */
+    public static final int TIMESTAMP_OFFSET = 0;
+    public static final int EVENT_TYPE_OFFSET = 4;
+    public static final int SERVER_ID_OFFSET = 5;
+    public static final int EVENT_LEN_OFFSET = 9;
+    public static final int LOG_POS_OFFSET = 13;
+    public static final int FLAGS_OFFSET = 17;
+
+    public static final int TIMESTAMP_LEN = 4;
+    public static final int EVENT_TYPE_LEN = 1;
+    public static final int SERVER_ID_LEN = 4;
+    public static final int EVENT_LEN_LEN = 4;
+    public static final int LOG_POS_LEN = 4;
+    public static final int FLAG_LEN = 2;
+
+    public static final int LOG_EVENT_HEADER_LEN = 19;
+    public static final int BINLOG_CHECKSUM_LEN = 4;
+    public static final int ROTATE_HEADER_LEN = 8;
+
     private static final ThreadLocal<byte[]> BYTES = ThreadLocal.withInitial(() -> new byte[1024]);
-    private static final long SERVER_ID = ServerConfigUtil.getGlobalNumberVar("SERVER_ID");
     private static final byte[] BEGIN_BYTES = "BEGIN".getBytes();
 
     public static Pair<byte[], Integer> makeMarkEvent(long timestamp, long serverId, String markContent, long nextPos) {
@@ -136,14 +155,14 @@ public class EventGenerator {
         return Pair.of(data, length);
     }
 
-    public static Pair<byte[], Integer> makeRotate(long timestamp, String fileName, long nextPos) {
+    public static Pair<byte[], Integer> makeRotate(long timestamp, String fileName, long nextPos, long serverId) {
         byte[] data = new byte[128];
         ByteArray rotateEvent = new ByteArray(data);
 
         // write rotate event header
         rotateEvent.writeLong(timestamp, 4);
         rotateEvent.write((byte) LogEvent.ROTATE_EVENT);
-        rotateEvent.writeLong(SERVER_ID, 4);// write serverId
+        rotateEvent.writeLong(serverId, 4);// write serverId
         rotateEvent.skip(4);// we don't know the size now
         rotateEvent.writeLong(nextPos, 4);// we don't know the log pos now
         rotateEvent.writeLong(0, 2);//
@@ -162,33 +181,93 @@ public class EventGenerator {
         return Pair.of(data, length);
     }
 
-    public static Pair<byte[], Integer> makeHeartBeat(String fileName, long pos, boolean updateCheckSum) {
-        byte[] data = new byte[128];
-        ByteArray heartbeatEvent = new ByteArray(data);
-        // write heartbeat event header
-        heartbeatEvent.writeLong(0, 4);
-        heartbeatEvent.write((byte) LogEvent.HEARTBEAT_LOG_EVENT);
-        heartbeatEvent.writeLong(SERVER_ID, 4);// write serverId
-        heartbeatEvent.skip(4);// we don't know the size now
-        heartbeatEvent.writeLong(pos, 4);
-        heartbeatEvent.writeLong(0, 2);//
-        // write rotate event body
-        byte[] bytes = fileName.getBytes();
-        heartbeatEvent.write(bytes);
-        heartbeatEvent.skip(4);// crc32 checksum holder
-        // rewrite size, log pos
-        int length = heartbeatEvent.getPos();
-        heartbeatEvent.reset();
-        heartbeatEvent.skip(EVENT_LEN_OFFSET);
-        heartbeatEvent.writeLong(length, 4);
-        if (updateCheckSum) {
-            EventGenerator.updateChecksum(data, 0, length);
+    /**
+     * This event does not appear in the binary log.
+     * It's only sent over the network by a master to a slave server to let it know that the master is still alive,
+     * and is only sent when the master has no binlog events to send to slave servers.
+     * <p>
+     * Header:
+     * - Timestamp [4]
+     * - Event Type [1]
+     * - Server_id [4]
+     * - Event Size [4]
+     * - Next_pos [4]
+     * - Flags [2]
+     * Content, string<EOF>
+     */
+    public static byte[] makeHeartBeat(String logFileName, long logPos, boolean eventChecksumOn, long serverId) {
+        // TODO: dir name length 处理
+        // const char* filename= m_linfo.log_file_name;
+        // const char* p= filename + dirname_length(filename);
+        // size_t ident_len= strlen(p);
+
+        int eventLen = logFileName.length() + LOG_EVENT_HEADER_LEN + (eventChecksumOn ? BINLOG_CHECKSUM_LEN : 0);
+        ByteArray heartbeatEvent = new ByteArray(new byte[eventLen]);
+        /* Timestamp field */
+        heartbeatEvent.writeLong(TIMESTAMP_OFFSET, 0, TIMESTAMP_LEN);
+        heartbeatEvent.writeByte(EVENT_TYPE_OFFSET, (byte) LogEvent.HEARTBEAT_LOG_EVENT);
+        heartbeatEvent.writeLong(SERVER_ID_OFFSET, serverId, SERVER_ID_LEN);
+        heartbeatEvent.writeLong(EVENT_LEN_OFFSET, eventLen, EVENT_LEN_LEN);
+        heartbeatEvent.writeLong(LOG_POS_OFFSET, logPos, LOG_POS_LEN);
+        heartbeatEvent.writeLong(FLAGS_OFFSET, 0, FLAG_LEN);
+        heartbeatEvent.writeString(LOG_EVENT_HEADER_LEN, logFileName);
+
+        if (eventChecksumOn) {
+            CRC32 crc32 = new CRC32();
+            crc32.update(heartbeatEvent.getData(), 0, eventLen - LogEvent.BINLOG_CHECKSUM_LEN);
+            heartbeatEvent.writeLong(eventLen - LogEvent.BINLOG_CHECKSUM_LEN, crc32.getValue(), BINLOG_CHECKSUM_LEN);
         }
-        return Pair.of(data, length);
+
+        return heartbeatEvent.getData();
+    }
+
+    /**
+     * Faked rotate event is only required in a few cases.
+     * But even so, a faked rotate event is always sent before sending event log file,
+     * even if a rotate log event exists in last binlog and was already sent.
+     * The slave then gets an extra rotation and records two Rotate_log_events.
+     * The main issue here are some dependencies on mysqlbinlog, that should be solved in the future.
+     * <p>
+     * Header:
+     * - Timestamp[4] set to 0
+     * - Event Type[1] set to ROTATE_EVENT
+     * - Next_Pos[4] set to 0
+     * - Flags[2] set to LOG_ARTIFICIAL_F (0x20)
+     * Content:
+     * - pos[8]: the requested pos from slave, usually 4
+     * - filename: the master binlog filename
+     * If it is the first fake rotate event and global server variable @@binlog_checksum was set to CRC32:
+     * - crc32_checksum (4 Bytes)
+     */
+    public static byte[] makeFakeRotate(String nextLogFile, long logPos, boolean eventChecksumOn, long serverId) {
+        // TODO: dir name length 处理
+        // const char* filename= m_linfo.log_file_name;
+        // const char* p= filename + dirname_length(filename);
+        // size_t ident_len= strlen(p);
+
+        int eventLen = nextLogFile.length() + LOG_EVENT_HEADER_LEN + ROTATE_HEADER_LEN +
+            (eventChecksumOn ? BINLOG_CHECKSUM_LEN : 0);
+        ByteArray fakeRotateEvent = new ByteArray(new byte[eventLen]);
+        // 'when' (the timestamp) is set to 0 so that slave could distinguish between
+        // real and fake Rotate events (if necessary)
+        fakeRotateEvent.writeLong(TIMESTAMP_OFFSET, 0, TIMESTAMP_LEN);
+        fakeRotateEvent.writeByte(EVENT_TYPE_OFFSET, (byte) LogEvent.ROTATE_EVENT);
+        fakeRotateEvent.writeLong(SERVER_ID_OFFSET, serverId, SERVER_ID_LEN);
+        fakeRotateEvent.writeLong(EVENT_LEN_OFFSET, eventLen, EVENT_LEN_LEN);
+        fakeRotateEvent.writeLong(LOG_POS_OFFSET, 0, LOG_POS_LEN);
+        fakeRotateEvent.writeLong(FLAGS_OFFSET, 0x0020, FLAG_LEN); // LOG_EVENT_ARTIFICIAL_F
+        fakeRotateEvent.writeLong(LOG_EVENT_HEADER_LEN, logPos, ROTATE_HEADER_LEN);
+        fakeRotateEvent.writeString(LOG_EVENT_HEADER_LEN + ROTATE_HEADER_LEN, nextLogFile);
+
+        if (eventChecksumOn) {
+            EventGenerator.updateChecksum(fakeRotateEvent.getData(), 0, eventLen);
+        }
+
+        return fakeRotateEvent.getData();
     }
 
     public static Pair<byte[], Integer> makeFakeRotate(long timestamp, String fileName, long position,
-                                                       boolean updateCheckSum) {
+                                                       boolean withCheckSum, long serverId) {
         if (log.isDebugEnabled()) {
             log.debug("makeRotate {} {}", fileName, position);
         }
@@ -198,7 +277,7 @@ public class EventGenerator {
         // write rotate event header
         rotateEvent.writeLong(timestamp, 4);
         rotateEvent.write((byte) LogEvent.ROTATE_EVENT);
-        rotateEvent.writeLong(SERVER_ID, 4);// write serverId
+        rotateEvent.writeLong(serverId, 4);// write serverId
         rotateEvent.skip(4);// we don't know the size now
         rotateEvent.skip(4);// we don't know the log pos now
         rotateEvent.writeLong(0x0020, 2);// 0x0020 LOG_EVENT_ARTIFICIAL_F
@@ -206,14 +285,15 @@ public class EventGenerator {
         // write rotate event body
         rotateEvent.writeLong(position, 8);// The position of the first event in the next log file
         rotateEvent.writeString(fileName);
-        rotateEvent.writeLong(0, 4);// crc32 checksum holder
-
+        if (withCheckSum) {
+            rotateEvent.writeLong(0, 4);// crc32 checksum holder
+        }
         // rewrite size, log pos
         int length = rotateEvent.getPos();
         rotateEvent.reset();
         rotateEvent.skip(EVENT_LEN_OFFSET);
         rotateEvent.writeLong(length, 4);
-        if (updateCheckSum) {
+        if (withCheckSum) {
             EventGenerator.updateChecksum(data, 0, length);
         }
         return Pair.of(data, length);
@@ -259,21 +339,13 @@ public class EventGenerator {
         byteArray.writeLong(tableId, length);
     }
 
-    public static void updateServerId(byte[] data) {
-        if (log.isDebugEnabled()) {
-            log.debug("updateServerId {}", SERVER_ID);
-        }
-
+    public static void updateServerId(byte[] data, long serverId) {
         ByteArray byteArray = new ByteArray(data);
         byteArray.skip(5);
-        byteArray.writeLong(SERVER_ID, 4);
+        byteArray.writeLong(serverId, 4);
     }
 
     public static void updateChecksum(byte[] data, int offset, int length) {
-        if (log.isDebugEnabled()) {
-            log.debug("updateChecksum {}", SERVER_ID);
-        }
-
         CRC32 crc32 = new CRC32();
         crc32.update(data, offset, length - LogEvent.BINLOG_CHECKSUM_LEN);
         ByteArray byteArray = new ByteArray(data);

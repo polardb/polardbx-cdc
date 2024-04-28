@@ -14,7 +14,6 @@
  */
 package com.aliyun.polardbx.cdc.qatest.random;
 
-import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.cdc.qatest.base.CheckParameter;
 import com.aliyun.polardbx.cdc.qatest.base.ConnectionManager;
@@ -86,6 +85,9 @@ public class TestModeTwo extends RplBaseTestCase {
         DdlType.ModifyColumn, DdlType.ModifyColumn, DdlType.ModifyColumn,
         DdlType.ModifyColumn, DdlType.ModifyColumn, DdlType.ModifyColumn);
 
+    private final ArrayList<DdlType> alterTableCharsetTypes =
+        Lists.newArrayList(DdlType.AlterTableCharset, DdlType.AlterTableCharset, DdlType.AlterTableCharset,
+            DdlType.AlterTableCharset);
     private final ArrayList<DdlType> ddlTypes = Lists.newArrayList();
 
     // ----------------------------------------- parameters -----------------------------------------
@@ -248,7 +250,7 @@ public class TestModeTwo extends RplBaseTestCase {
     }
 
     private void buildDdlTypes() {
-        String ddlTypeConfig = System.getProperty("ddlTypes", "AddColumn,DropColumn,ModifyColumn");
+        String ddlTypeConfig = System.getProperty("ddlTypes", "AddColumn,DropColumn,ModifyColumn,AlterTableCharset");
         String[] tokens = StringUtils.split(ddlTypeConfig, ",");
         for (String token : tokens) {
             if (DdlType.AddColumn.name().equals(token)) {
@@ -257,6 +259,8 @@ public class TestModeTwo extends RplBaseTestCase {
                 ddlTypes.addAll(dropColumnTypes);
             } else if (DdlType.ModifyColumn.name().equals(token)) {
                 ddlTypes.addAll(modifyColumnTypes);
+            } else if (DdlType.AlterTableCharset.name().equals(token)) {
+                ddlTypes.addAll(alterTableCharsetTypes);
             }
         }
     }
@@ -323,6 +327,9 @@ public class TestModeTwo extends RplBaseTestCase {
                 case ModifyColumn:
                     modifyColumn();
                     break;
+                case AlterTableCharset:
+                    alterTableCharset();
+                    break;
                 default:
                     throw new PolardbxException("invalid ddl type " + ddlType);
                 }
@@ -384,6 +391,20 @@ public class TestModeTwo extends RplBaseTestCase {
         }
     }
 
+    private void alterTableCharset() {
+        String alterTableCharsetSql = ddlSqlBuilder.buildAlterTableCharsetSql();
+
+        try (Connection connection = getPolardbxConnection(DB_NAME)) {
+            setSqlMode("", connection);
+            Statement stmt = connection.createStatement();
+            stmt.execute(alterTableCharsetSql);
+            Metrics.getInstance().getModifyColumnSuccess().incrementAndGet();
+        } catch (Throwable t) {
+            Metrics.getInstance().getModifyColumnFail().incrementAndGet();
+            log.error("alter table charset error!! \r\nsql : " + alterTableCharsetSql, t);
+        }
+    }
+
     private void insertSingle() {
         Pair<String, List<Pair<String, Object>>> insertSqlPair = dmlSqlBuilder.buildInsertSql(useRandomColumn4Dml);
 
@@ -399,8 +420,8 @@ public class TestModeTwo extends RplBaseTestCase {
             Metrics.getInstance().getInsertSingleSuccess().incrementAndGet();
         } catch (Throwable t) {
             Metrics.getInstance().getInsertSingleFail().incrementAndGet();
-            log.error("insert single error!! \r\n sql : " + insertSqlPair.getKey() + " \r\nparameter : "
-                + JSONObject.toJSONString(insertSqlPair.getValue(), true), t);
+            log.error("insert single error!! \r\n sql : " + insertSqlPair.getKey() + " \r\nparameter : ignore"
+                /*+ JSONObject.toJSONString(insertSqlPair.getValue(), true)*/, t);
         }
     }
 
@@ -441,8 +462,8 @@ public class TestModeTwo extends RplBaseTestCase {
             Metrics.getInstance().getInsertBatchSuccess().incrementAndGet();
         } catch (Throwable t) {
             Metrics.getInstance().getInsertBatchFail().incrementAndGet();
-            log.error("insert batch error!! \r\n sql : " + insertSqlPair.getKey() + " \r\nparameter : "
-                + JSONObject.toJSONString(insertSqlPair.getValue(), true), t);
+            log.error("insert batch error!! \r\n sql : " + insertSqlPair.getKey() + " \r\nparameter : ignore"
+                /*+ JSONObject.toJSONString(insertSqlPair.getValue(), true)*/, t);
         }
     }
 
@@ -453,8 +474,8 @@ public class TestModeTwo extends RplBaseTestCase {
             Metrics.getInstance().getUpdateSingleSuccess().incrementAndGet();
         } catch (Throwable t) {
             Metrics.getInstance().getUpdateSingleFail().incrementAndGet();
-            log.error("update single error!! \r\n sql : " + updateSqlPair.getKey() + "  \r\n parameter : "
-                + JSONObject.toJSONString(updateSqlPair.getValue(), true), t);
+            log.error("update single error!! \r\n sql : " + updateSqlPair.getKey() + "  \r\n parameter : ignore"
+                /*+ JSONObject.toJSONString(updateSqlPair.getValue(), true)*/, t);
         }
     }
 

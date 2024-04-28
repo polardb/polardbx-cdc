@@ -50,4 +50,19 @@ public class StringFieldTest {
             field.encode());
     }
 
+    @Test
+    public void testCharNullValue() {
+        Field field = MakeFieldFactory.makField4TypeMisMatch("char(32)", "null", utf8, false, "null", false);
+        Assert.assertArrayEquals(new byte[] {-2, -128}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {4, 110, 117, 108, 108},
+            field.encode());
+    }
+
+    @Test
+    public void testCharNull() {
+        Field field = MakeFieldFactory.makField4TypeMisMatch("char(32)", null, utf8, false, "null", false);
+        Assert.assertArrayEquals(new byte[] {-2, -128}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {},
+            field.encode());
+    }
 }

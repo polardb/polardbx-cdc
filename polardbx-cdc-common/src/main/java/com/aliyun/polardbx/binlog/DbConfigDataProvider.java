@@ -14,11 +14,16 @@
  */
 package com.aliyun.polardbx.binlog;
 
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 
 public class DbConfigDataProvider implements IConfigDataProvider {
     @Override
     public String getValue(String key) {
+        if (!SpringContextHolder.isInitialize()) {
+            throw new PolardbxException(
+                "spring context not initialize , can not use system db config get config by key : " + key);
+        }
         return SystemDbConfig.getCachedSystemDbConfig(key);
     }
 }

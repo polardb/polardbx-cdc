@@ -14,17 +14,17 @@
  */
 package com.aliyun.polardbx.binlog.filesys;
 
-import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * @author yudong
@@ -71,9 +71,17 @@ public class LocalFileSystem implements IFileSystem {
 
     @Override
     public List<CdcFile> listFiles() {
+        List<CdcFile> res = new ArrayList<>();
+
         List<File> fileList = BinlogFileUtil.listLocalBinlogFiles(fullPath, group, stream);
-        return fileList.stream().map(f -> new CdcFile(f.getName(), this)).sorted(CdcFile::compareTo)
-            .collect(Collectors.toList());
+        for (File f : fileList) {
+            CdcFile cdcFile = new CdcFile(f.getName(), this);
+            cdcFile.setLocation("LOCAL");
+            res.add(cdcFile);
+        }
+
+        res.sort(CdcFile::compareTo);
+        return res;
     }
 
     @Override

@@ -50,4 +50,35 @@ public class VarCharFieldTest {
             field.encode());
     }
 
+    @Test
+    public void testVarCharNullValue() {
+        Field field = MakeFieldFactory.makField4TypeMisMatch("varchar(32)", "null", utf8, false, "null", false);
+        Assert.assertArrayEquals(new byte[] {-128, 0}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {4, 110, 117, 108, 108},
+            field.encode());
+    }
+
+    @Test
+    public void testVarCharNull() {
+        Field field = MakeFieldFactory.makField4TypeMisMatch("varchar(32)", null, utf8, false, "null", false);
+        Assert.assertArrayEquals(new byte[] {-128, 0}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {},
+            field.encode());
+    }
+
+    @Test
+    public void testVarCharNullValue2() {
+        Field field = MakeFieldFactory.makeField("varchar(32)", "null", utf8, false, false);
+        Assert.assertArrayEquals(new byte[] {-128, 0}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {4, 110, 117, 108, 108},
+            field.encode());
+    }
+
+    @Test
+    public void testVarCharNull2() {
+        Field field = MakeFieldFactory.makeField("varchar(32)", null, utf8, false, false);
+        Assert.assertArrayEquals(new byte[] {-128, 0}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {},
+            field.encode());
+    }
 }

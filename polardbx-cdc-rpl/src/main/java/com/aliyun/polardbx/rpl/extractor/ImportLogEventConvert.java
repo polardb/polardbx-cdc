@@ -168,7 +168,7 @@ public class ImportLogEventConvert extends LogEventConvert {
                 DefaultQueryLog queryEvent = new DefaultQueryLog(rewriteDbName,
                     queryString,
                     new java.sql.Timestamp(event.getHeader().getWhen() * 1000),
-                    event.getErrorCode(), 0, DBMSAction.QUERY);
+                    event.getErrorCode(), 0, DBMSAction.QUERY, event.getExecTime());
                 MySQLDBMSEvent mySQLDBMSEvent =
                     new MySQLDBMSEvent(queryEvent, createPosition(event.getHeader()), event.getHeader().getEventLen());
                 mySQLDBMSEvent.setXaTransaction(xaTransaction);

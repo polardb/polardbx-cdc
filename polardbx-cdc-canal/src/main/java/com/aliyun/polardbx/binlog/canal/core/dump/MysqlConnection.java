@@ -15,13 +15,13 @@
 package com.aliyun.polardbx.binlog.canal.core.dump;
 
 import com.aliyun.polardbx.binlog.canal.DefaultBinlogFileInfoFetcher;
-import com.aliyun.polardbx.binlog.canal.binlog.DirectLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.DirectLogFetcher;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.gtid.GTIDSet;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
@@ -389,7 +389,7 @@ public class MysqlConnection implements ErosaConnection {
             public Integer process(ResultSet rs) throws SQLException {
                 Integer lowerCaseValue = 0;
                 if (rs.next()) {
-                    lowerCaseValue = rs.getInt(2);
+                    lowerCaseValue = Integer.parseInt(rs.getObject(2).toString());
                 }
                 return lowerCaseValue;
             }

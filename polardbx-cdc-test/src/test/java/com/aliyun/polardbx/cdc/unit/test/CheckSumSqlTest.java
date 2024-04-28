@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.cdc.unit.test;
 
-import com.aliyun.polardbx.cdc.qatest.check.DataConsistencyTest;
+import com.aliyun.polardbx.cdc.qatest.check.bothcheck.common.DataConsistencyTest;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;

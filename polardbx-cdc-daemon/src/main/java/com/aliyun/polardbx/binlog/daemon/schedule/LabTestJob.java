@@ -130,6 +130,13 @@ public class LabTestJob extends AbstractBinlogTimerTask {
             if (!DynamicApplicationConfig.getBoolean(ConfigKeys.DAEMON_AUTO_FLUSH_LOG_TEST)) {
                 return;
             }
+
+            String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+
+            if (clusterId.contains("-re-")) {
+                log.warn("ignore replica flush job command");
+                return;
+            }
             String clusterType = DynamicApplicationConfig.getClusterType();
 
             if (StringUtils.equals(clusterType, ClusterType.BINLOG.name())) {

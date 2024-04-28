@@ -19,7 +19,6 @@ import com.aliyun.polardbx.binlog.canal.binlog.JsonConversion;
 import com.aliyun.polardbx.binlog.canal.binlog.JsonConversion.Json_Value;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,6 +52,8 @@ public final class RowsLogBuffer {
     private int javaType;
     private int length;
     private Serializable value;
+
+    private static char[] digits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
 
     public RowsLogBuffer(LogBuffer buffer, final int columnLen, String charsetName) {
         this.buffer = buffer;
@@ -252,6 +253,25 @@ public final class RowsLogBuffer {
         } else {
             // Extracting field value from packed buffer.
             return fetchValue(type, meta, isBinary);
+        }
+    }
+
+    /**
+     * 只提供给columnar使用
+     */
+    public final Serializable nextBinaryValueForColumnar(final int type, final int meta) {
+        fNull = nullBits.get(nullBitIndex++);
+
+        if (fNull) {
+            value = null;
+            javaType = mysqlToJavaType(type, meta, true);
+            length = 0;
+            return null;
+        } else {
+            // Extracting field value from packed buffer.
+            value = fetchBinaryValue(type, meta, true);
+            javaType = mysqlToJavaType(type, meta, true);
+            return value;
         }
     }
 
@@ -531,17 +551,17 @@ public final class RowsLogBuffer {
                 // t % 100);
 
                 StringBuilder builder = new StringBuilder();
-                builder.append(formatNumber(d / 10000, 4))
-                    .append('-')
-                    .append(formatNumber((d % 10000) / 100, 2))
-                    .append('-')
-                    .append(formatNumber(d % 100, 2))
-                    .append(' ')
-                    .append(formatNumber(t / 10000, 2))
-                    .append(':')
-                    .append(formatNumber((t % 10000) / 100, 2))
-                    .append(':')
-                    .append(formatNumber(t % 100, 2));
+                appendNumber4(builder, d / 10000);
+                builder.append('-');
+                appendNumber2(builder, (d % 10000) / 100);
+                builder.append('-');
+                appendNumber2(builder, d % 100);
+                builder.append(' ');
+                appendNumber2(builder, t / 10000);
+                builder.append(':');
+                appendNumber2(builder, (t % 10000) / 100);
+                builder.append(':');
+                appendNumber2(builder, t % 100);
                 value = builder.toString();
             }
             javaType = Types.TIMESTAMP;
@@ -601,18 +621,18 @@ public final class RowsLogBuffer {
                 // (int) ((hms >> 6) % (1 << 6)),
                 // (int) (hms % (1 << 6)));
 
-                StringBuilder builder = new StringBuilder();
-                builder.append(formatNumber((int) (ym / 13), 4))
-                    .append('-')
-                    .append(formatNumber((int) (ym % 13), 2))
-                    .append('-')
-                    .append(formatNumber((int) (ymd % (1 << 5)), 2))
-                    .append(' ')
-                    .append(formatNumber((int) (hms >> 12), 2))
-                    .append(':')
-                    .append(formatNumber((int) ((hms >> 6) % (1 << 6)), 2))
-                    .append(':')
-                    .append(formatNumber((int) (hms % (1 << 6)), 2));
+                StringBuilder builder = new StringBuilder(26);
+                appendNumber4(builder, (int) (ym / 13));
+                builder.append('-');
+                appendNumber2(builder, (int) (ym % 13));
+                builder.append('-');
+                appendNumber2(builder, (int) (ymd % (1 << 5)));
+                builder.append(' ');
+                appendNumber2(builder, (int) (hms >> 12));
+                builder.append(':');
+                appendNumber2(builder, (int) ((hms >> 6) % (1 << 6)));
+                builder.append(':');
+                appendNumber2(builder, (int) (hms % (1 << 6)));
                 second = builder.toString();
             }
 
@@ -648,15 +668,21 @@ public final class RowsLogBuffer {
                 // (u32 % 10000) / 100,
                 // u32 % 100);
 
-                StringBuilder builder = new StringBuilder();
+                StringBuilder builder = new StringBuilder(17);
                 if (i32 < 0) {
                     builder.append('-');
                 }
-                builder.append(formatNumber(u32 / 10000, 2))
-                    .append(':')
-                    .append(formatNumber((u32 % 10000) / 100, 2))
-                    .append(':')
-                    .append(formatNumber(u32 % 100, 2));
+
+                int d = u32 / 10000;
+                if (d > 100) {
+                    builder.append(d);
+                } else {
+                    appendNumber2(builder, d);
+                }
+                builder.append(':');
+                appendNumber2(builder, (u32 % 10000) / 100);
+                builder.append(':');
+                appendNumber2(builder, u32 % 100);
                 value = builder.toString();
             }
             javaType = Types.TIME;
@@ -738,15 +764,21 @@ public final class RowsLogBuffer {
                 // (int) ((intpart >> 6) % (1 << 6)),
                 // (int) (intpart % (1 << 6)));
 
-                StringBuilder builder = new StringBuilder();
+                StringBuilder builder = new StringBuilder(12);
                 if (ltime < 0) {
                     builder.append('-');
                 }
-                builder.append(formatNumber((int) ((intpart >> 12) % (1 << 10)), 2))
-                    .append(':')
-                    .append(formatNumber((int) ((intpart >> 6) % (1 << 6)), 2))
-                    .append(':')
-                    .append(formatNumber((int) (intpart % (1 << 6)), 2));
+
+                int d = (int) ((intpart >> 12) % (1 << 10));
+                if (d >= 100) {
+                    builder.append(d);
+                } else {
+                    appendNumber2(builder, d);
+                }
+                builder.append(':');
+                appendNumber2(builder, (int) ((intpart >> 6) % (1 << 6)));
+                builder.append(':');
+                appendNumber2(builder, (int) (intpart % (1 << 6)));
                 second = builder.toString();
             }
 
@@ -788,12 +820,12 @@ public final class RowsLogBuffer {
                 // value = new java.sql.Date(cal.getTimeInMillis());
                 // value = String.format("%04d-%02d-%02d", i32 / (16 * 32), i32 / 32 % 16, i32 % 32);
 
-                StringBuilder builder = new StringBuilder();
-                builder.append(formatNumber(i32 / (16 * 32), 4))
-                    .append('-')
-                    .append(formatNumber(i32 / 32 % 16, 2))
-                    .append('-')
-                    .append(formatNumber(i32 % 32, 2));
+                StringBuilder builder = new StringBuilder(12);
+                appendNumber4(builder, i32 / (16 * 32));
+                builder.append('-');
+                appendNumber2(builder, i32 / 32 % 16);
+                builder.append('-');
+                appendNumber2(builder, i32 % 32);
                 value = builder.toString();
             }
             javaType = Types.DATE;
@@ -1104,7 +1136,7 @@ public final class RowsLogBuffer {
         return value;
     }
 
-    public final byte[] fetchBinaryValue(int type, final int meta) {
+    public final byte[] fetchBinaryValue(int type, final int meta, boolean forColumnar) {
         int len = 0;
 
         if (type == LogEvent.MYSQL_TYPE_STRING) {
@@ -1314,40 +1346,67 @@ public final class RowsLogBuffer {
             case 1: {
                 /* TINYBLOB/TINYTEXT */
                 final int len8 = buffer.getUint8();
-                byte[] binary = new byte[len8 + 1];
-                binary[0] = (byte) len8;
-                buffer.fillBytes(binary, 1, len8);
-                return binary;
+                if (forColumnar) {
+                    byte[] binary = new byte[len8];
+                    buffer.fillBytes(binary, 0, len8);
+                    return binary;
+                } else {
+                    byte[] binary = new byte[len8 + 1];
+                    binary[0] = (byte) len8;
+                    buffer.fillBytes(binary, 1, len8);
+                    return binary;
+                }
             }
             case 2: {
                 /* BLOB/TEXT */
                 final int len16 = buffer.getUint16();
-                byte[] binary = new byte[len16 + 2];
-                binary[0] = (byte) (len16 & 0xFF);
-                binary[1] = (byte) ((len16 >> 8) & 0xFF);
-                buffer.fillBytes(binary, 2, len16);
-                return binary;
+                if (forColumnar) {
+                    byte[] binary = new byte[len16];
+                    buffer.fillBytes(binary, 0, len16);
+                    return binary;
+                } else {
+                    byte[] binary = new byte[len16 + 2];
+                    binary[0] = (byte) (len16 & 0xFF);
+                    binary[1] = (byte) ((len16 >> 8) & 0xFF);
+                    buffer.fillBytes(binary, 2, len16);
+                    return binary;
+                }
+
             }
             case 3: {
                 /* MEDIUMBLOB/MEDIUMTEXT */
                 final int len24 = buffer.getUint24();
-                byte[] binary = new byte[len24 + 3];
-                binary[0] = (byte) (len24 & 0xFF);
-                binary[1] = (byte) ((len24 >> 8) & 0xFF);
-                binary[2] = (byte) ((len24 >> 16) & 0xFF);
-                buffer.fillBytes(binary, 3, len24);
-                return binary;
+                if (forColumnar) {
+                    byte[] binary = new byte[len24];
+                    buffer.fillBytes(binary, 0, len24);
+                    return binary;
+                } else {
+                    byte[] binary = new byte[len24 + 3];
+                    binary[0] = (byte) (len24 & 0xFF);
+                    binary[1] = (byte) ((len24 >> 8) & 0xFF);
+                    binary[2] = (byte) ((len24 >> 16) & 0xFF);
+                    buffer.fillBytes(binary, 3, len24);
+                    return binary;
+                }
+
             }
             case 4: {
                 /* LONGBLOB/LONGTEXT */
                 final int len32 = (int) buffer.getUint32();
-                byte[] binary = new byte[len32 + 4];
-                binary[0] = (byte) (len32 & 0xFF);
-                binary[1] = (byte) ((len32 >> 8) & 0xFF);
-                binary[2] = (byte) ((len32 >> 16) & 0xFF);
-                binary[3] = (byte) ((len32 >> 24) & 0xFF);
-                buffer.fillBytes(binary, 4, len32);
-                return binary;
+                if (forColumnar) {
+                    byte[] binary = new byte[len32];
+                    buffer.fillBytes(binary, 0, len32);
+                    return binary;
+                } else {
+                    byte[] binary = new byte[len32 + 4];
+                    binary[0] = (byte) (len32 & 0xFF);
+                    binary[1] = (byte) ((len32 >> 8) & 0xFF);
+                    binary[2] = (byte) ((len32 >> 16) & 0xFF);
+                    binary[3] = (byte) ((len32 >> 24) & 0xFF);
+                    buffer.fillBytes(binary, 4, len32);
+                    return binary;
+                }
+
             }
             default:
                 throw new IllegalArgumentException("!! Unknown BLOB packlen = " + meta);
@@ -1363,15 +1422,25 @@ public final class RowsLogBuffer {
             int start = 0;
             if (len < 256) {
                 len = buffer.getUint8();
-                binary = new byte[len + 1];
-                binary[0] = (byte) len;
-                start = 1;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 1];
+                    binary[0] = (byte) len;
+                    start = 1;
+                }
+
             } else {
                 len = buffer.getUint16();
-                binary = new byte[len + 2];
-                binary[0] = (byte) (len & 0xFF);
-                binary[1] = (byte) (len >> 8 & 0xFF);
-                start = 2;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 2];
+                    binary[0] = (byte) (len & 0xFF);
+                    binary[1] = (byte) (len >> 8 & 0xFF);
+                    start = 2;
+                }
+
             }
 
             // fixed issue #66 ,binary类型在binlog中为var_string
@@ -1385,15 +1454,25 @@ public final class RowsLogBuffer {
             int start = 0;
             if (len < 256) {
                 len = buffer.getUint8();
-                binary = new byte[len + 1];
-                binary[0] = (byte) (len & 0xFF);
-                start = 1;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 1];
+                    binary[0] = (byte) (len & 0xFF);
+                    start = 1;
+                }
+
             } else {
                 len = buffer.getUint16();
-                binary = new byte[len + 2];
-                binary[0] = (byte) (len & 0xFF);
-                binary[1] = (byte) (len >> 8 & 0xFF);
-                start = 2;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 2];
+                    binary[0] = (byte) (len & 0xFF);
+                    binary[1] = (byte) (len >> 8 & 0xFF);
+                    start = 2;
+                }
+
             }
 
             /* fill binary */
@@ -1403,40 +1482,56 @@ public final class RowsLogBuffer {
         }
         case LogEvent.MYSQL_TYPE_JSON: {
             byte[] binary;
-            int start;
+            int start = 0;
             switch (meta) {
             case 1: {
                 len = buffer.getUint8();
-                binary = new byte[len + 1];
-                binary[0] = (byte) (len & 0xFF);
-                start = 1;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 1];
+                    binary[0] = (byte) (len & 0xFF);
+                    start = 1;
+                }
                 break;
             }
             case 2: {
                 len = buffer.getUint16();
-                binary = new byte[len + 2];
-                binary[0] = (byte) (len & 0xFF);
-                binary[1] = (byte) (len >> 8 & 0xFF);
-                start = 2;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 2];
+                    binary[0] = (byte) (len & 0xFF);
+                    binary[1] = (byte) (len >> 8 & 0xFF);
+                    start = 2;
+                }
                 break;
             }
             case 3: {
                 len = buffer.getUint24();
-                binary = new byte[len + 3];
-                binary[0] = (byte) (len & 0xFF);
-                binary[1] = (byte) (len >> 8 & 0xFF);
-                binary[2] = (byte) (len >> 16 & 0xFF);
-                start = 3;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 3];
+                    binary[0] = (byte) (len & 0xFF);
+                    binary[1] = (byte) (len >> 8 & 0xFF);
+                    binary[2] = (byte) (len >> 16 & 0xFF);
+                    start = 3;
+                }
                 break;
             }
             case 4: {
                 len = (int) buffer.getUint32();
-                binary = new byte[len + 4];
-                binary[0] = (byte) (len & 0xFF);
-                binary[1] = (byte) (len >> 8 & 0xFF);
-                binary[2] = (byte) (len >> 16 & 0xFF);
-                binary[3] = (byte) (len >> 24 & 0xFF);
-                start = 4;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 4];
+                    binary[0] = (byte) (len & 0xFF);
+                    binary[1] = (byte) (len >> 8 & 0xFF);
+                    binary[2] = (byte) (len >> 16 & 0xFF);
+                    binary[3] = (byte) (len >> 24 & 0xFF);
+                    start = 4;
+                }
                 break;
             }
             default:
@@ -1462,33 +1557,49 @@ public final class RowsLogBuffer {
             switch (meta) {
             case 1:
                 len = buffer.getUint8();
-                binary = new byte[len + 1];
-                binary[0] = (byte) (len & 0xFF);
-                start = 1;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 1];
+                    binary[0] = (byte) (len & 0xFF);
+                    start = 1;
+                }
                 break;
             case 2:
                 len = buffer.getUint16();
-                binary = new byte[len + 2];
-                binary[0] = (byte) (len & 0xFF);
-                binary[1] = (byte) (len >> 8 & 0xFF);
-                start = 2;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 2];
+                    binary[0] = (byte) (len & 0xFF);
+                    binary[1] = (byte) (len >> 8 & 0xFF);
+                    start = 2;
+                }
                 break;
             case 3:
                 len = buffer.getUint24();
-                binary = new byte[len + 3];
-                binary[0] = (byte) (len & 0xFF);
-                binary[1] = (byte) (len >> 8 & 0xFF);
-                binary[2] = (byte) (len >> 16 & 0xFF);
-                start = 3;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 3];
+                    binary[0] = (byte) (len & 0xFF);
+                    binary[1] = (byte) (len >> 8 & 0xFF);
+                    binary[2] = (byte) (len >> 16 & 0xFF);
+                    start = 3;
+                }
                 break;
             case 4:
                 len = (int) buffer.getUint32();
-                binary = new byte[len + 4];
-                binary[0] = (byte) (len & 0xFF);
-                binary[1] = (byte) (len >> 8 & 0xFF);
-                binary[2] = (byte) (len >> 16 & 0xFF);
-                binary[3] = (byte) (len >> 24 & 0xFF);
-                start = 4;
+                if (forColumnar) {
+                    binary = new byte[len];
+                } else {
+                    binary = new byte[len + 4];
+                    binary[0] = (byte) (len & 0xFF);
+                    binary[1] = (byte) (len >> 8 & 0xFF);
+                    binary[2] = (byte) (len >> 16 & 0xFF);
+                    binary[3] = (byte) (len >> 24 & 0xFF);
+                    start = 4;
+                }
                 break;
             default:
                 throw new IllegalArgumentException("!! Unknown MYSQL_TYPE_GEOMETRY packlen = " + meta);
@@ -1545,11 +1656,37 @@ public final class RowsLogBuffer {
         return sec.substring(0, meta);
     }
 
-    private String formatNumber(int d, int size) {
-        return StringUtils.leftPad(String.valueOf(d), size, '0');
-    }
-
     public BitSet getNullBits() {
         return nullBits;
     }
+
+    public static void appendNumber4(StringBuilder builder, int d) {
+        if (d >= 1000) {
+            builder.append(digits[d / 1000])
+                .append(digits[(d / 100) % 10])
+                .append(digits[(d / 10) % 10])
+                .append(digits[d % 10]);
+        } else {
+            builder.append('0');
+            appendNumber3(builder, d);
+        }
+    }
+
+    public static void appendNumber3(StringBuilder builder, int d) {
+        if (d >= 100) {
+            builder.append(digits[d / 100]).append(digits[(d / 10) % 10]).append(digits[d % 10]);
+        } else {
+            builder.append('0');
+            appendNumber2(builder, d);
+        }
+    }
+
+    public static void appendNumber2(StringBuilder builder, int d) {
+        if (d >= 10) {
+            builder.append(digits[(d / 10) % 10]).append(digits[d % 10]);
+        } else {
+            builder.append('0').append(digits[d]);
+        }
+    }
+
 }

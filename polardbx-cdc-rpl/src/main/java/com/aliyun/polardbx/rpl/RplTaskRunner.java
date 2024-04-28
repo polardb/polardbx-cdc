@@ -15,18 +15,17 @@
 package com.aliyun.polardbx.rpl;
 
 import com.alibaba.fastjson.JSON;
-import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.monitor.MonitorType;
-import com.aliyun.polardbx.binlog.util.AddressUtil;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.util.AddressUtil;
 import com.aliyun.polardbx.rpl.applier.BaseApplier;
 import com.aliyun.polardbx.rpl.applier.FullCopyApplier;
 import com.aliyun.polardbx.rpl.applier.MergeApplier;
-import com.aliyun.polardbx.rpl.applier.MergeTransactionApplier;
 import com.aliyun.polardbx.rpl.applier.MysqlApplier;
 import com.aliyun.polardbx.rpl.applier.RecoveryApplier;
 import com.aliyun.polardbx.rpl.applier.SplitApplier;
@@ -36,8 +35,8 @@ import com.aliyun.polardbx.rpl.applier.TableParallelApplier;
 import com.aliyun.polardbx.rpl.applier.TransactionApplier;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
-import com.aliyun.polardbx.rpl.extractor.MysqlBinlogExtractor;
 import com.aliyun.polardbx.rpl.extractor.CdcExtractor;
+import com.aliyun.polardbx.rpl.extractor.MysqlBinlogExtractor;
 import com.aliyun.polardbx.rpl.extractor.RdsBinlogExtractor;
 import com.aliyun.polardbx.rpl.extractor.ReconExtractor;
 import com.aliyun.polardbx.rpl.extractor.ValidationExtractor;
@@ -63,11 +62,11 @@ import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
 import com.aliyun.polardbx.rpl.taskmeta.RdsExtractorConfig;
+import com.aliyun.polardbx.rpl.taskmeta.ReconExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryMeta;
 import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
-import com.aliyun.polardbx.rpl.taskmeta.ReconExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.ValidationExtractorConfig;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -104,6 +103,7 @@ public class RplTaskRunner {
     public void start() {
         try {
             log.info("RplTaskEngine initializing");
+            StatisticalProxy.getInstance().heartbeat();
             init();
             log.info("RplTaskEngine initialized");
 
@@ -158,9 +158,9 @@ public class RplTaskRunner {
         context.setConfig(config);
         context.setPhysicalNum(0);
         ExtractorConfig extractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(), ExtractorConfig.class);
-        if (extractorConfig.getFilterType() == FilterType.IMPORT_FILTER.getValue()) {
+        if (extractorConfig.getFilterType() == FilterType.IMPORT_FILTER) {
             DataImportMeta.PhysicalMeta importMeta = JSON.parseObject(
-                extractorConfig.getSourceToTargetConfig(), DataImportMeta.PhysicalMeta.class);
+                extractorConfig.getPrivateMeta(), DataImportMeta.PhysicalMeta.class);
             context.setPhysicalMeta(importMeta);
             DataImportMeta meta = JSON.parseObject(config, DataImportMeta.class);
             context.setPhysicalNum(meta.getMetaList().size());
@@ -186,10 +186,10 @@ public class RplTaskRunner {
         log.info("RplTaskRunner init all");
     }
 
-    private void createFullExtractor(int extractorType) throws Exception {
+    private void createFullExtractor(ExtractorType extractorType) {
         FullExtractorConfig taskExtractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(),
             FullExtractorConfig.class);
-        switch (ExtractorType.from(extractorType)) {
+        switch (extractorType) {
         case DATA_IMPORT_FULL:
             extractor =
                 new MysqlFullExtractor(taskExtractorConfig, taskExtractorConfig.getHostInfo(),
@@ -207,46 +207,34 @@ public class RplTaskRunner {
     private void createFullValidationExtractor() {
         ValidationExtractorConfig extractorConfig =
             JSON.parseObject(taskConfig.getExtractorConfig(), ValidationExtractorConfig.class);
-        ApplierConfig applierConfig = JSON.parseObject(taskConfig.getApplierConfig(), ApplierConfig.class);
-        HostInfo applierHost = applierConfig.getHostInfo();
-        extractor = new ValidationExtractor(extractorConfig, extractorConfig.getHostInfo(), applierHost,
-            (DataImportFilter) filter);
+        extractor = new ValidationExtractor(extractorConfig);
     }
 
     private void createReconExtractor() {
         ReconExtractorConfig extractorConfig =
             JSON.parseObject(taskConfig.getExtractorConfig(), ReconExtractorConfig.class);
-        ApplierConfig applierConfig = JSON.parseObject(taskConfig.getApplierConfig(), ApplierConfig.class);
-        HostInfo applierHost = applierConfig.getHostInfo();
-        extractor =
-            new ReconExtractor(extractorConfig, extractorConfig.getHostInfo(), applierHost, (DataImportFilter) filter);
+        extractor = new ReconExtractor(extractorConfig);
     }
 
     private void createCrossCheckFullValExtractor() {
         ValidationExtractorConfig extractorConfig =
             JSON.parseObject(taskConfig.getExtractorConfig(), ValidationExtractorConfig.class);
-        ApplierConfig applierConfig = JSON.parseObject(taskConfig.getApplierConfig(), ApplierConfig.class);
-        HostInfo applierHost = applierConfig.getHostInfo();
-        extractor = new ValidationExtractor(extractorConfig, extractorConfig.getHostInfo(), applierHost,
-            (DataImportFilter) filter);
+        extractor = new ValidationExtractor(extractorConfig);
     }
 
     private void createCrossCheckReconExtractor() {
         ReconExtractorConfig extractorConfig =
             JSON.parseObject(taskConfig.getExtractorConfig(), ReconExtractorConfig.class);
-        ApplierConfig applierConfig = JSON.parseObject(taskConfig.getApplierConfig(), ApplierConfig.class);
-        HostInfo applierHost = applierConfig.getHostInfo();
-        extractor =
-            new ReconExtractor(extractorConfig, extractorConfig.getHostInfo(), applierHost, (DataImportFilter) filter);
+        extractor = new ReconExtractor(extractorConfig);
     }
 
-    private void createIncExtractor(int extractorType) {
+    private void createIncExtractor(ExtractorType extractorType) {
         BinlogPosition binlogPosition = null;
         if (StringUtils.isNotBlank(task.getPosition())) {
             binlogPosition = BinlogPosition.parseFromString(task.getPosition());
         }
         ApplierConfig applierConfig = JSON.parseObject(taskConfig.getApplierConfig(), ApplierConfig.class);
-        switch (ExtractorType.from(extractorType)) {
+        switch (extractorType) {
         case RPL_INC:
             ExtractorConfig extractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(),
                 ExtractorConfig.class);
@@ -267,10 +255,10 @@ public class RplTaskRunner {
         // if applier enabled transaction, the extractor should NOT filter
         // TransactionEnd
         ((MysqlBinlogExtractor) extractor)
-            .setFilterTransactionEnd(applierConfig.getApplierType() != ApplierType.TRANSACTION.getValue());
+            .setFilterTransactionEnd(applierConfig.getApplierType() != ApplierType.TRANSACTION);
     }
 
-    private void createCdcIncExtractor(int extractorType) {
+    private void createCdcIncExtractor() {
         BinlogPosition binlogPosition = null;
         if (StringUtils.isNotBlank(task.getPosition())) {
             binlogPosition = BinlogPosition.parseFromString(task.getPosition());
@@ -294,7 +282,7 @@ public class RplTaskRunner {
 
     private void createExtractor() throws Exception {
         ExtractorConfig config = JSON.parseObject(taskConfig.getExtractorConfig(), ExtractorConfig.class);
-        switch (ExtractorType.from(config.getExtractorType())) {
+        switch (config.getExtractorType()) {
         case DATA_IMPORT_FULL:
         case RPL_FULL:
             createFullExtractor(config.getExtractorType());
@@ -304,7 +292,7 @@ public class RplTaskRunner {
             createIncExtractor(config.getExtractorType());
             break;
         case CDC_INC:
-            createCdcIncExtractor(config.getExtractorType());
+            createCdcIncExtractor();
             break;
         case FULL_VALIDATION:
             createFullValidationExtractor();
@@ -329,44 +317,39 @@ public class RplTaskRunner {
     private void createApplier() {
         ApplierConfig config = JSON.parseObject(taskConfig.getApplierConfig(), ApplierConfig.class);
         ExtractorConfig extractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(), ExtractorConfig.class);
-        HostInfo hostInfo = config.getHostInfo();
+        HostInfo targetHostInfo = config.getHostInfo();
+        HostInfo srcHostInfo = extractorConfig.getHostInfo();
 
-        switch (ApplierType.from(config.getApplierType())) {
+        switch (config.getApplierType()) {
         case TRANSACTION:
-            applier = new TransactionApplier(config, hostInfo);
+            applier = new TransactionApplier(config, targetHostInfo, srcHostInfo);
             break;
         case SERIAL:
-            applier = new MysqlApplier(config, hostInfo);
+            applier = new MysqlApplier(config, targetHostInfo, srcHostInfo);
             break;
         case TABLE_PARALLEL:
-            applier = new TableParallelApplier(config, hostInfo);
+            applier = new TableParallelApplier(config, targetHostInfo, srcHostInfo);
             break;
         case SPLIT:
-            applier = new SplitApplier(config, hostInfo);
+            applier = new SplitApplier(config, targetHostInfo, srcHostInfo);
             break;
         case SPLIT_TRANSACTION:
-            applier = new SplitTransactionApplier(config, hostInfo);
+            applier = new SplitTransactionApplier(config, targetHostInfo, srcHostInfo);
             break;
         case MERGE:
-            applier = new MergeApplier(config, hostInfo);
-            break;
-        case MERGE_TRANSACTION:
-            applier = new MergeTransactionApplier(config, hostInfo);
+            applier = new MergeApplier(config, targetHostInfo, srcHostInfo);
             break;
         case JUST_EXTRACT:
             applier = new BaseApplier(config);
             break;
         case FULL_COPY:
-            applier = new FullCopyApplier(config, hostInfo);
+            applier = new FullCopyApplier(config, targetHostInfo, srcHostInfo);
             break;
         case RECOVERY:
             createRecoveryApplier();
             break;
         default:
             break;
-        }
-        if (applier instanceof MysqlApplier) {
-            ((MysqlApplier) applier).setSrcHostInfo(extractorConfig.getHostInfo());
         }
     }
 
@@ -384,15 +367,15 @@ public class RplTaskRunner {
 
     private void createFilter() {
         ExtractorConfig extractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(), ExtractorConfig.class);
-        switch (FilterType.from(extractorConfig.getFilterType())) {
+        switch (extractorConfig.getFilterType()) {
         case RPL_FILTER:
             ReplicaMeta replicaMeta = JSON.parseObject(
-                extractorConfig.getSourceToTargetConfig(), ReplicaMeta.class);
+                extractorConfig.getPrivateMeta(), ReplicaMeta.class);
             filter = new ReplicaFilter(replicaMeta);
             break;
         case IMPORT_FILTER:
             DataImportMeta.PhysicalMeta importMeta = JSON.parseObject(
-                extractorConfig.getSourceToTargetConfig(), DataImportMeta.PhysicalMeta.class);
+                extractorConfig.getPrivateMeta(), DataImportMeta.PhysicalMeta.class);
             filter = new DataImportFilter(importMeta);
             break;
         case NO_FILTER:

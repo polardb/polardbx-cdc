@@ -17,6 +17,7 @@ package com.aliyun.polardbx.rpl.validation;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.TaskContext;
+import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -26,28 +27,19 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class ValidationCoordinator {
-    private ValidationContext ctx;
+    private final DataImportMeta.ValidationMeta meta;
 
-    public ValidationCoordinator(ValidationContext context) {
-        this.ctx = context;
+    public ValidationCoordinator(DataImportMeta.ValidationMeta meta) {
+        this.meta = meta;
     }
 
     public void validateTable() {
         try {
-            // 0x00 Split table into chunks
-            log.info("Start validating tables. Src phy db: {}, Src table list size: {}", ctx.getSrcPhyDB(),
-                ctx.getSrcPhyTableList().size());
-            // 0x01 validating table
-            Validator validator = new TableValidator(ctx);
-            validator.findDiffRows();
-
-            // 0x03 update task status
-            log.info("Finished table validation for src db: {}, smid: {}, sid: {}, tid: {}",
-                ctx.getSrcPhyDB(), ctx.getStateMachineId(), ctx.getServiceId(), ctx.getTaskId());
+            Validator validator = new Validator(meta);
+            validator.start();
         } catch (Exception e) {
             log.error("Table validation exception", e);
-            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR, ctx.getTaskId(),
-                e.getMessage());
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR, e.getMessage());
             StatisticalProxy.getInstance().recordLastError(e.toString());
             TaskContext.getInstance().getPipeline().stop();
         }

@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.format.utils;
 
-import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.dump.ErosaConnection;
 import com.aliyun.polardbx.binlog.canal.core.dump.SinkFunction;
 import com.aliyun.polardbx.binlog.canal.core.gtid.GTIDSet;

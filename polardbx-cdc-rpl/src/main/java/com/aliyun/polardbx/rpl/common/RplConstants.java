@@ -23,15 +23,6 @@ import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 public class RplConstants {
 
     /**
-     * canal 中，将binlog产生的时间写入option中
-     */
-    public static final String BINLOG_EVENT_OPTION_TIMESTAMP = "message_event_option_timestamp";
-
-    /**
-     * canal 中，将当前binlog position 写入option
-     */
-    public static final String BINLOG_EVENT_OPTION_POSITION = "message_event_option_offset";
-    /**
      * 将source schema name 写入option
      */
     public static final String BINLOG_EVENT_OPTION_SOURCE_SCHEMA = "source_schema";
@@ -91,7 +82,7 @@ public class RplConstants {
      */
     public static final String POLARX_IMPLICIT_ID = "_drds_implicit_id_";
 
-    public static final String ASYNC_DDL = "PURE_ASYNC_DDL_MODE=TRUE";
+    public static final String ASYNC_DDL_HINTS = "/!TDDL:cmd_extra(PURE_ASYNC_DDL_MODE=TRUE)*/";
 
     public static final String RDS_IMPLICIT_ID = "__#alibaba_rds_row_id#__";
 
@@ -120,6 +111,8 @@ public class RplConstants {
 
     public static final String MASTER_PORT = "MASTER_PORT";
 
+    public static final String MASTER_INST_ID = "MASTER_INST_ID";
+
     public static final String MASTER_LOG_FILE = "MASTER_LOG_FILE";
 
     public static final String MASTER_LOG_POS = "MASTER_LOG_POS";
@@ -128,9 +121,16 @@ public class RplConstants {
 
     public static final String SOURCE_HOST_TYPE = "SOURCE_HOST_TYPE";
 
-    public static final String RDS = "RDS";
+    public static final String WRITE_TYPE = "WRITE_TYPE";
 
-    public static final String MYSQL = "MYSQL";
+    public static final String COMPARE_ALL = "COMPARE_ALL";
+
+    public static final String INSERT_ON_UPDATE_MISS = "INSERT_ON_UPDATE_MISS";
+
+    public static final String CONFLICT_STRATEGY = "CONFLICT_STRATEGY";
+
+    public static final String RDS = "RDS";
+    public static final String POLARDBX = "POLARDBX";
 
     public static final String CHANNEL = "CHANNEL";
 
@@ -152,7 +152,7 @@ public class RplConstants {
 
     public static final String ENABLE_AUTO_POSITION = "ENABLE_AUTO_POSITION";
 
-    public static final String TRIGGER_DYNAMIC_MASTER_HOST = "TRIGGER_AUTO_MASTER_HOST";
+    public static final String TRIGGER_DYNAMIC_MASTER_HOST = "TRIGGER_DYNAMIC_MASTER_HOST";
 
     public static final String TRIGGER_AUTO_POSITION = "TRIGGER_AUTO_POSITION";
 
@@ -235,4 +235,8 @@ public class RplConstants {
     public static final int INSERT_MODE_REPLACE = 3;
 
     public static final String RPL_TASK_LEADER_LOCK_PREFIX = "RplTaskEngine_";
+
+    public static final String RPL_FULL_VALID_DB = "dbName";
+
+    public static final String RPL_FULL_VALID_TB = "tbName";
 }

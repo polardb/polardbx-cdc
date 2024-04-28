@@ -19,22 +19,20 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSOption;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultOption;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowsQueryLog;
 import com.aliyun.polardbx.binlog.canal.core.handle.EventHandle;
-import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.rpl.common.RplConstants;
+import com.aliyun.polardbx.rpl.extractor.CdcExtractor;
 import com.aliyun.polardbx.rpl.extractor.LogEventConvert;
 import com.aliyun.polardbx.rpl.pipeline.BasePipeline;
 import com.aliyun.polardbx.rpl.pipeline.MessageEvent;
 
-import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -44,11 +42,13 @@ public class DefaultCdcExtractHandler implements EventHandle {
 
     protected final LogEventConvert binlogParser;
     protected BasePipeline pipeline;
+    protected CdcExtractor cdcExtractor;
     protected List<MessageEvent> datas = new ArrayList<>();
 
-    public DefaultCdcExtractHandler(LogEventConvert binlogParser, BasePipeline pipeline) {
+    public DefaultCdcExtractHandler(LogEventConvert binlogParser, BasePipeline pipeline, CdcExtractor cdcExtractor) {
         this.binlogParser = binlogParser;
         this.pipeline = pipeline;
+        this.cdcExtractor = cdcExtractor;
     }
 
     @Override
@@ -73,48 +73,43 @@ public class DefaultCdcExtractHandler implements EventHandle {
         if (dbmsEvent instanceof DefaultRowChange) {
             return true;
         }
-        if (dbmsEvent instanceof DBMSQueryLog) {
+        if (dbmsEvent instanceof DefaultQueryLog) {
+            return true;
+        }
+        if (dbmsEvent instanceof DefaultRowsQueryLog) {
             return true;
         }
         return false;
     }
 
     @Override
-    public void handle(LogEvent event, LogPosition position) {
+    public void handle(LogEvent logEvent, LogPosition position) {
         try {
-            MySQLDBMSEvent sqldbmsEvent = binlogParser.parse(event, false);
+            MySQLDBMSEvent sqldbmsEvent = binlogParser.parse(logEvent, false);
+            long now = System.currentTimeMillis();
+            StatMetrics.getInstance().setReceiveDelay(now - logEvent.getWhen() * 1000);
+            StatMetrics.getInstance().addInMessageCount(1);
+            StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
             if (sqldbmsEvent == null) {
                 return;
             }
-            long now = System.currentTimeMillis();
-            Timestamp extractTimestamp = new Timestamp(System.currentTimeMillis());
-            DBMSEvent dbmsEvent = sqldbmsEvent.getDbMessageWithEffect();
-            StatMetrics.getInstance().setReceiveDelay(now - event.getWhen() * 1000);
-            StatMetrics.getInstance().addInMessageCount(1);
-            StatMetrics.getInstance().addInBytes(dbmsEvent.getEventSize());
+            DBMSEvent dbmsEvent = sqldbmsEvent.getDbmsEventPayload();
+            dbmsEvent.setEventSize(logEvent.getEventLen());
+            dbmsEvent.setSourceTimeStamp(logEvent.getWhen() * 1000);
+            dbmsEvent.setExtractTimeStamp(now);
+            dbmsEvent.setPosition(sqldbmsEvent.getPosition().toString());
+            dbmsEvent.setRtso(sqldbmsEvent.getPosition().getRtso());
             if (!acceptEvent(dbmsEvent)) {
                 return;
             }
             datas.clear();
-            dbmsEvent.setEventSize(event.getEventLen());
-            dbmsEvent.setSourceTimeStamp(now);
-
             if (dbmsEvent instanceof DefaultRowChange) {
                 DefaultRowChange rowChange = (DefaultRowChange) dbmsEvent;
                 if (rowChange.getRowSize() == 1) {
                     MessageEvent e = new MessageEvent();
                     e.setDbmsEvent(dbmsEvent);
-                    e.setPosition(sqldbmsEvent.getPosition().toString());
-                    e.setSourceTimestamp(new Timestamp(sqldbmsEvent.getPosition().getTimestamp() * 1000));
-                    e.setExtractTimestamp(extractTimestamp);
-                    rowChange.putOption(
-                        new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
-                    rowChange.putOption(
-                        new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION, e.getPosition()));
                     datas.add(e);
                 } else {
-                    BinlogPosition nowPosition = sqldbmsEvent.getPosition();
-                    long innerOffset = 0;
                     for (int rownum = 1; rownum <= rowChange.getRowSize(); rownum++) {
                         // 多行记录,拆分为单行进行处理
                         DefaultRowChange split = new DefaultRowChange(rowChange.getAction(),
@@ -133,22 +128,16 @@ public class DefaultCdcExtractHandler implements EventHandle {
                         MessageEvent e = new MessageEvent();
                         e.setDbmsEvent(split);
                         // nowPosition.setInnerOffset(innerOffset++);
-                        e.setPosition(nowPosition.toString());
-                        e.setSourceTimestamp(new Timestamp(sqldbmsEvent.getPosition().getTimestamp() * 1000));
-                        e.setExtractTimestamp(extractTimestamp);
-                        split.putOption(
-                            new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
-                        split.putOption(
-                            new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION, e.getPosition()));
+                        split.setSourceTimeStamp(rowChange.getSourceTimeStamp());
+                        split.setExtractTimeStamp(rowChange.getExtractTimeStamp());
+                        split.setPosition(dbmsEvent.getPosition());
+                        split.setRtso(dbmsEvent.getRtso());
                         datas.add(e);
                     }
                 }
             } else {
                 MessageEvent e = new MessageEvent();
                 e.setDbmsEvent(dbmsEvent);
-                e.setPosition(sqldbmsEvent.getPosition().toString());
-                e.setSourceTimestamp(new Timestamp(sqldbmsEvent.getPosition().getTimestamp() * 1000));
-                e.setExtractTimestamp(extractTimestamp);
                 datas.add(e);
             }
             sqldbmsEvent.tryRelease();

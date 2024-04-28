@@ -43,4 +43,11 @@ public class NewDateFieldTest {
         Assert.assertArrayEquals(new byte[] {}, field.doGetTableMeta());
         Assert.assertArrayEquals(new byte[] {24, -49, 15}, field.encode());
     }
+
+    @Test
+    public void testZero() {
+        Field field = MakeFieldFactory.makeField("date", "0000-00-00", defaultCharset, false, false);
+        Assert.assertArrayEquals(new byte[] {}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {0, 0, 0}, field.encode());
+    }
 }

@@ -16,13 +16,14 @@ package com.aliyun.polardbx.rpl.common;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.domain.po.RplStatMetrics;
-import com.aliyun.polardbx.rpl.applier.ApplyHelper;
+import com.aliyun.polardbx.rpl.applier.DdlApplyHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -41,12 +42,13 @@ public class LogUtil {
      */
 
     private static String COMMIT_LOGGER = "commitLogger";
-    private static String CHECK_RESULT_LOGGER = "checkResultLogger";
     private static String POSITION_LOGGER = "positionLogger";
     private static String META_LOGGER = "metaLogger";
     private static String STATISTIC_LOGGER = "statisticLogger";
     private static String CONSOLE_LOGGER = "consoleLogger";
     private static String RPL_LOGGER = "rplLogger";
+    private static String ASYNC_DDL_LOGGER = "asyncDdlLogger";
+    private static String SKIP_DDL_LOGGER = "skipDdlLogger";
 
     static {
         loggers.set(new HashMap<>());
@@ -62,6 +64,14 @@ public class LogUtil {
 
     public static Logger getMetaLogger() {
         return LoggerFactory.getLogger(META_LOGGER);
+    }
+
+    public static Logger getAsyncDdlLogger() {
+        return LoggerFactory.getLogger(ASYNC_DDL_LOGGER);
+    }
+
+    public static Logger getSkipDdlLogger() {
+        return LoggerFactory.getLogger(SKIP_DDL_LOGGER);
     }
 
     public static Logger getPositionLogger() {
@@ -81,29 +91,28 @@ public class LogUtil {
     }
 
     public static String generateStatisticLogV2(RplStatMetrics rplStatMetrics) {
-        return
-            new StringBuilder(512).append(CommonUtil.getCurrentTime())
-                .append(" outRps:").append(rplStatMetrics.getOutRps())
-                .append(" applyCount:").append(rplStatMetrics.getApplyCount())
-                .append(" inEps:").append(rplStatMetrics.getInEps())
-                .append(" outBps:").append(rplStatMetrics.getOutBps())
-                .append(" inBps:").append(rplStatMetrics.getInBps())
-                .append(" outInsertRps:").append(rplStatMetrics.getOutInsertRps())
-                .append(" outUpdateRps:").append(rplStatMetrics.getOutUpdateRps())
-                .append(" outDeleteRps:").append(rplStatMetrics.getOutDeleteRps())
-                .append(" receiveDelay:").append(rplStatMetrics.getReceiveDelay())
-                .append(" processDelay:").append(rplStatMetrics.getProcessDelay())
-                .append(" mergeBatchSize:").append(rplStatMetrics.getMergeBatchSize())
-                .append(" rt:").append(rplStatMetrics.getRt())
-                .append(" skipCounter:").append(rplStatMetrics.getSkipCounter())
-                .append(" skipExceptionCounter:").append(rplStatMetrics.getSkipExceptionCounter())
-                .append(" persistMsgCounter:").append(rplStatMetrics.getPersistMsgCounter())
-                .append(" msgCacheSize:").append(rplStatMetrics.getMsgCacheSize())
-                .append(" cpuUseRatio:").append(rplStatMetrics.getCpuUseRatio())
-                .append(" memUseRatio:").append(rplStatMetrics.getMemUseRatio())
-                .append(" fullGcCount:").append(rplStatMetrics.getFullGcCount())
-                .append(" workerIp:").append(rplStatMetrics.getWorkerIp())
-                .toString();
+        return CommonUtil.getCurrentTime()
+            + " outRps:" + rplStatMetrics.getOutRps()
+            + " applyCount:" + rplStatMetrics.getApplyCount()
+            + " inEps:" + rplStatMetrics.getInEps()
+            + " outBps:" + rplStatMetrics.getOutBps()
+            + " inBps:" + rplStatMetrics.getInBps()
+            + " outInsertRps:" + rplStatMetrics.getOutInsertRps()
+            + " outUpdateRps:" + rplStatMetrics.getOutUpdateRps()
+            + " outDeleteRps:" + rplStatMetrics.getOutDeleteRps()
+            + " receiveDelay:" + rplStatMetrics.getReceiveDelay()
+            + " processDelay:" + rplStatMetrics.getProcessDelay()
+            + " mergeBatchSize:" + rplStatMetrics.getMergeBatchSize()
+            + " rt:" + rplStatMetrics.getRt()
+            + " skipCounter:" + rplStatMetrics.getSkipCounter()
+            + " skipExceptionCounter:" + rplStatMetrics.getSkipExceptionCounter()
+            + " persistMsgCounter:" + rplStatMetrics.getPersistMsgCounter()
+            + " msgCacheSize:" + rplStatMetrics.getMsgCacheSize()
+            + " cpuUseRatio:" + rplStatMetrics.getCpuUseRatio()
+            + " memUseRatio:" + rplStatMetrics.getMemUseRatio()
+            + " fullGcCount:" + rplStatMetrics.getFullGcCount()
+            + " workerIp:" + rplStatMetrics.getWorkerIp()
+            + " totalCommitCount" + rplStatMetrics.getTotalCommitCount();
     }
 
     public static void logFullCommitInfo(List<DBMSEvent> dbmsEvents, String physicalInfo) {
@@ -117,9 +126,9 @@ public class LogUtil {
     public static List<String> generateCommitLog(DBMSEvent event, String physicalInfo) {
         List<String> logs = new ArrayList<>();
         String timestamp = CommonUtil.getCurrentTime();
+        String position = event.getPosition();
 
-        if (ApplyHelper.isDdl(event)) {
-            String position = (String) (event.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue());
+        if (DdlApplyHelper.isDdl(event)) {
             String log = String.format("%s, DDL: schema: %s, action: %s, sql: %s, position: %s",
                 timestamp,
                 event.getSchema(),
@@ -128,19 +137,10 @@ public class LogUtil {
                 position);
             logs.add(log);
         } else {
-            DBMSRowChange rowChange = (DBMSRowChange) event;
-            String position = null;
-            String binlogTimestamp = null;
+            DefaultRowChange rowChange = (DefaultRowChange) event;
             String sourceSchema = null;
             String sourceTable = null;
-            if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION) != null &&
-                rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue() != null) {
-                position = (String) (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION).getValue());
-            }
-            if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP) != null &&
-                rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP).getValue() != null) {
-                binlogTimestamp = rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP).getValue().toString();
-            }
+            String binlogTimestamp = new Timestamp(rowChange.getSourceTimeStamp()).toString();
             if (rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA) != null &&
                 rowChange.getOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA).getValue() != null) {
                 sourceSchema =
@@ -172,14 +172,17 @@ public class LogUtil {
     }
 
     public static String[] getPks(DBMSEvent dbMessage) {
-        DBMSRowChange rowChange = (DBMSRowChange) dbMessage;
+        DefaultRowChange rowChange = (DefaultRowChange) dbMessage;
         int rowSize = rowChange.getRowSize();
         String[] pks = new String[rowSize];
         for (int i = 0; i < rowSize; i++) {
-            List<DBMSColumn> primaryKeys = rowChange.getPrimaryKey();
+            List<? extends DBMSColumn> primaryKeys = rowChange.getPrimaryKey();
+//            if (primaryKeys.isEmpty()) {
+//                primaryKeys = rowChange.getColumns();
+//            }
             StringBuilder pkSb = new StringBuilder("[");
             if (primaryKeys != null) {
-                Iterator<DBMSColumn> iterator = primaryKeys.iterator();
+                Iterator<? extends DBMSColumn> iterator = primaryKeys.iterator();
                 while (iterator.hasNext()) {
                     DBMSColumn column = iterator.next();
                     pkSb.append(rowChange.getRowValue(i + 1, column));

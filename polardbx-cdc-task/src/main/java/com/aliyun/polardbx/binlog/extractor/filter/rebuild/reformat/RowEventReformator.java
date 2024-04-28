@@ -48,7 +48,6 @@ import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.util.DirectByteOutput;
 import com.google.common.collect.Lists;
 import com.google.protobuf.UnsafeByteOperations;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,13 +66,11 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
     private static final Logger log = LoggerFactory.getLogger("rebuildEventLogger");
     private final RowDataRebuildLogger rebuildLogger = new RowDataRebuildLogger();
     private final boolean binlogx;
-    private final String defaultCharset;
     private final PolarDbXTableMetaManager tableMetaManager;
 
-    public RowEventReformator(boolean binlogx, String defaultCharset,
+    public RowEventReformator(boolean binlogx,
                               PolarDbXTableMetaManager tableMetaManager) {
         this.binlogx = binlogx;
-        this.defaultCharset = defaultCharset;
         this.tableMetaManager = tableMetaManager;
     }
 
@@ -239,8 +236,7 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
         List<RowData> newRowDataList = new ArrayList<>();
         for (RowData rowData : rowDataList) {
             RowData newRowData = new RowData();
-            rebuildLogger.logRowBegin(tableMeta, table, rowData, reb.getEventType(),
-                getTableCharset(tableMeta.getLogicSchema(), tableMeta.getLogicTable()));
+            rebuildLogger.logRowBegin(tableMeta, table, rowData, reb.getEventType());
             // 先处理before image
             processBIImage(tableMeta, fieldMetas, table, rowData, newRowData, reb);
             if (reb.isUpdate()) {
@@ -293,7 +289,7 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
             newColumnBitMap.set(logicIdx, true);
             Field biField;
             if (phyIndex < 0) {
-                String charset = getJavaCharset(fieldMetaExt, tableMeta.getLogicSchema(), tableMeta.getLogicTable());
+                String charset = fieldMetaExt.getCharset();
                 biField = MakeFieldFactory.makeField(fieldMetaExt.getColumnType(),
                     fieldMetaExt.getDefaultValue(),
                     charset,
@@ -310,7 +306,7 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
                 boolean isNull = biNullBitMap.get(phyIndex);
                 if (!isNull) {
                     if (!fieldMetaExt.isTypeMatch()) {
-                        biField = resolveDataTypeNotMatch(tableMeta, biField, table, fieldMetaExt);
+                        biField = resolveDataTypeNotMatch(biField, table, fieldMetaExt);
                     }
                     newBiNullBitMap.set(logicIdx, biField.isNull());
                     if (!biField.isNull()) {
@@ -339,7 +335,7 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
             int logicIndex = fieldMetaExt.getLogicIndex();
             int phyIndex = fieldMetaExt.getPhyIndex();
             if (phyIndex < 0) {
-                String charset = getCharset(fieldMetaExt, tableMeta.getLogicSchema(), tableMeta.getLogicTable());
+                String charset = fieldMetaExt.getCharset();
                 Field aiField = MakeFieldFactory.makeField(fieldMetaExt.getColumnType(),
                     fieldMetaExt.getDefaultValue(),
                     charset,
@@ -357,7 +353,7 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
                     if (!isNull) {
                         Field aiField = orgFieldList.get(phyIndex);
                         if (!fieldMetaExt.isTypeMatch()) {
-                            aiField = resolveDataTypeNotMatch(tableMeta, aiField, table, fieldMetaExt);
+                            aiField = resolveDataTypeNotMatch(aiField, table, fieldMetaExt);
                         }
                         newAINullBitMap.set(logicIndex, aiField.isNull());
                         if (!aiField.isNull()) {
@@ -373,48 +369,24 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
         newRowData.setAiFieldList(newAIFiledList);
     }
 
-    private String getJavaCharset(LogicTableMeta.FieldMetaExt fieldMetaExt, String db, String table) {
-        String charset = getCharset(fieldMetaExt, db, table);
-        if (StringUtils.isNotBlank(charset)) {
-            if (StringUtils.startsWith(charset, "utf8")) {
-                return "utf8";
-            }
-        }
-        return charset;
-    }
-
-    private String getCharset(LogicTableMeta.FieldMetaExt fieldMetaExt, String db, String table) {
-        String charset = fieldMetaExt.getCharset();
-        if (StringUtils.isBlank(charset)) {
-            charset = getTableCharset(db, table);
-        }
-        return charset;
-    }
-
-    private String getTableCharset(String db, String table) {
-        String charset = tableMetaManager.findLogicTable(db, table).getCharset();
-        if (StringUtils.isBlank(charset)) {
-            charset = defaultCharset;
-        }
-        return charset;
-    }
-
-    private Field resolveDataTypeNotMatch(LogicTableMeta tableMeta, Field field, TableMapLogEvent tableMapLogEvent,
+    private Field resolveDataTypeNotMatch(Field field, TableMapLogEvent tableMapLogEvent,
                                           LogicTableMeta.FieldMetaExt fieldMetaExt) {
         int phyIndex = fieldMetaExt.getPhyIndex();
         SimpleField simpleField = (SimpleField) field;
         TableMapLogEvent.ColumnInfo columnInfo = tableMapLogEvent.getColumnInfo()[phyIndex];
         byte[] value = simpleField.getData();
         LogBuffer logBuffer = new LogBuffer(value, 0, value.length);
-        String charset = getCharset(fieldMetaExt, tableMeta.getLogicSchema(), tableMeta.getLogicTable());
-        String javaCharset = CharsetConversion.getJavaCharset(charset);
-        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(logBuffer, 0, javaCharset);
         TableMeta.FieldMeta phyFieldMeta = fieldMetaExt.getPhyFieldMeta();
+        String phyJavaCharset =
+            CharsetConversion.getJavaCharset(phyFieldMeta.getCharset());
+        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(logBuffer, 0, phyJavaCharset);
         Serializable serializable =
             rowsLogBuffer.fetchValue(columnInfo.type, columnInfo.meta, false, phyFieldMeta.isUnsigned());
+
+        String logicMySqlCharset = fieldMetaExt.getCharset();
         Field dest = MakeFieldFactory.makField4TypeMisMatch(fieldMetaExt.getColumnType(),
             serializable,
-            charset,
+            logicMySqlCharset,
             fieldMetaExt.isNullable(),
             fieldMetaExt.getDefaultValue(),
             fieldMetaExt.isUnsigned());
@@ -423,4 +395,6 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
                 dest.encode());
         return dest;
     }
+
 }
+

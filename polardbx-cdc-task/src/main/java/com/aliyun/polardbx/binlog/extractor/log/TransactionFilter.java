@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Set;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACT_FILTER_TRANS_BLACKLIST;
-import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getString;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
 /**
  * created by ziyang.lb

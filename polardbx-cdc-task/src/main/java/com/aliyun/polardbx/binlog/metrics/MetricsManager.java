@@ -18,6 +18,8 @@ import com.aliyun.polardbx.binlog.CommonMetrics;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.core.ddl.ThreadRecorder;
+import com.aliyun.polardbx.binlog.canal.unit.SearchRecorder;
+import com.aliyun.polardbx.binlog.canal.unit.SearchRecorderMetrics;
 import com.aliyun.polardbx.binlog.cdc.meta.MetaMetrics;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
@@ -32,9 +34,11 @@ import com.aliyun.polardbx.binlog.storage.StorageMetrics;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.MetricsReporter;
 import com.google.common.collect.Lists;
 import lombok.SneakyThrows;
+import org.apache.commons.lang3.time.DateFormatUtils;
 import org.hyperic.sigar.CpuPerc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -192,42 +196,70 @@ public class MetricsManager {
             MultiStreamStartTsoWindow.getInstance().isAllReady());
         stringBuilder.append(tableFormat);
 
-        //Extractor Thread Metrics
-        if (ThreadRecorder.getRecorderMap().isEmpty()) {
-            stringBuilder.append("binlog parser not ready!").append("\n");
-        } else {
-            TableFormat threadInfoFormat = new TableFormat("Extractor threadInfo");
-            TableFormat threadExtInfoFormat = new TableFormat("Extractor threadExtInfo");
-            threadInfoFormat.addColumn("tid",
-                "storage",
-                "stat",
-                "rt(ms)",
-                "status",
-                "pos",
-                "delay(ms)",
-                "sorter_queue",
-                "sorter_first_trans",
-                "ms_queue_size",
-                "ms_pass_cnt");
-            threadExtInfoFormat.addColumn("tid", "storage", "firstTransKeyInSorter");
-            for (ThreadRecorder record : ThreadRecorder.getRecorderMap().values()) {
-                threadInfoFormat.addRow(record.getTid(),
-                    record.getStorageInstanceId(),
-                    record.getState(),
-                    record.getRt(),
-                    record.isComplete() ? "RUNNING" : "BLOCK",
-                    record.getPosition(),
-                    Math.max(System.currentTimeMillis() - record.getWhen() * 1000, 0),
-                    record.getQueuedTransSizeInSorter(),
-                    record.getFirstTransPosInSorter(),
-                    record.getMergeSourceQueueSize(),
-                    record.getMergeSourcePassCount());
-
-                String firstTransKey = record.getFirstTransKeyInSorter();
-                threadExtInfoFormat.addRow(record.getTid(), record.getStorageInstanceId(), firstTransKey);
+        //Extractor search metrics
+        if (!SearchRecorderMetrics.isEmpty() && !SearchRecorderMetrics.allFinish()) {
+            TableFormat threadInfoFormat = new TableFormat("Extractor search threadInfo");
+            threadInfoFormat.addColumn("tid", "storage", "stat", "binlog-pos", "timestamp", "file-size", "unCommitXA",
+                "needXAStart", "dst-tso-time", "source");
+            for (SearchRecorder searchRecorder : SearchRecorderMetrics.getSearchRecorderMap().values()) {
+                threadInfoFormat.addRow(searchRecorder.getTid(),
+                    searchRecorder.getStorageName(),
+                    searchRecorder.isFinish() ? "finish" : "running",
+                    searchRecorder.getFileName() + ":" + searchRecorder.getPosition(),
+                    DateFormatUtils.format(searchRecorder.getTimestamp() * 1000, "yyyy-MM-dd HH:mm:ss"),
+                    searchRecorder.getSize(),
+                    searchRecorder.getUnCommitXidSet().size(),
+                    searchRecorder.getNeedStartXidSet().size(),
+                    searchRecorder.getSearchTime() > 0 ?
+                        DateFormatUtils.format(
+                            CommonUtils.tso2physicalTime(searchRecorder.getSearchTime(), TimeUnit.MILLISECONDS),
+                            "yyyy-MM-dd HH:mm:ss") :
+                        "CdcStart",
+                    searchRecorder.isLocal() ? "rds-local" : "backup-remote");
             }
             stringBuilder.append(threadInfoFormat);
-            stringBuilder.append(threadExtInfoFormat);
+            // 搜索位点，就不需要输出下面的log了
+            return;
+        }
+
+        //Extractor Thread Metrics
+        {
+            if (ThreadRecorder.getRecorderMap().isEmpty()) {
+                stringBuilder.append("binlog parser not ready!").append("\n");
+            } else {
+                TableFormat threadInfoFormat = new TableFormat("Extractor threadInfo");
+                TableFormat threadExtInfoFormat = new TableFormat("Extractor threadExtInfo");
+                threadInfoFormat.addColumn("tid",
+                    "storage",
+                    "stat",
+                    "rt(ms)",
+                    "status",
+                    "pos",
+                    "delay(ms)",
+                    "sorter_queue",
+                    "sorter_first_trans",
+                    "ms_queue_size",
+                    "ms_pass_cnt");
+                threadExtInfoFormat.addColumn("tid", "storage", "firstTransKeyInSorter");
+                for (ThreadRecorder record : ThreadRecorder.getRecorderMap().values()) {
+                    threadInfoFormat.addRow(record.getTid(),
+                        record.getStorageInstanceId(),
+                        record.getState(),
+                        record.getRt(),
+                        record.isComplete() ? "RUNNING" : "BLOCK",
+                        record.getPosition(),
+                        Math.max(System.currentTimeMillis() - record.getWhen() * 1000, 0),
+                        record.getQueuedTransSizeInSorter(),
+                        record.getFirstTransPosInSorter(),
+                        record.getMergeSourceQueueSize(),
+                        record.getMergeSourcePassCount());
+
+                    String firstTransKey = record.getFirstTransKeyInSorter();
+                    threadExtInfoFormat.addRow(record.getTid(), record.getStorageInstanceId(), firstTransKey);
+                }
+                stringBuilder.append(threadInfoFormat);
+                stringBuilder.append(threadExtInfoFormat);
+            }
         }
     }
 
@@ -585,6 +617,7 @@ public class MetricsManager {
         ProcSnapshot procSnapshot;
         MetaMetrics metaMetrics;
         AggregateCoreMetrics aggregateCoreMetrics;
+
     }
 
     private static class AggregateCoreMetrics {

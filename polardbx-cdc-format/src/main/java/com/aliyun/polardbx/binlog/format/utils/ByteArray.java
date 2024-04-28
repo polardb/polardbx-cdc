@@ -64,6 +64,11 @@ public class ByteArray {
         return result;
     }
 
+    public int readInteger(int pos, int length) {
+        this.pos = pos;
+        return readInteger(length);
+    }
+
     /**
      * Read int<lenenc> written in little-endian format.
      * Format (first-byte-based):<br/>
@@ -126,6 +131,11 @@ public class ByteArray {
         }
     }
 
+    public void writeLong(int pos, long value, int length) {
+        this.pos = pos;
+        writeLong(value, length);
+    }
+
     /**
      * Write fixed length string, only for ascii code.
      */
@@ -138,6 +148,11 @@ public class ByteArray {
         for (byte aByte : bytes) {
             write((byte) (aByte & 0xff));
         }
+    }
+
+    public void writeString(int pos, String value) {
+        this.pos = pos;
+        writeString(value);
     }
 
     public int read() {
@@ -154,6 +169,11 @@ public class ByteArray {
     public void write(byte b) {
         Assert.isTrue(pos < limit);
         data[pos++] = b;
+    }
+
+    public void writeByte(int pos, byte b) {
+        this.pos = pos;
+        write(b);
     }
 
     public void skip(int n) {

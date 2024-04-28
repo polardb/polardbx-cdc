@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
+import com.aliyun.polardbx.binlog.CnInstConfigUtil;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
@@ -24,6 +25,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 
 import java.util.concurrent.TimeUnit;
+
+import static com.aliyun.polardbx.binlog.CnInstConfigKeys.ENABLE_CDC_META_BUILD_SNAPSHOT;
 
 @Slf4j
 public class TableMetaHistoryWatcher extends AbstractBinlogTimerTask {
@@ -40,7 +43,10 @@ public class TableMetaHistoryWatcher extends AbstractBinlogTimerTask {
     @Override
     public void exec() {
         try {
-            if (RuntimeLeaderElector.isLeader(TABLE_META_REBUILD_LOCK)) {
+
+            if (CnInstConfigUtil.getBoolean(ENABLE_CDC_META_BUILD_SNAPSHOT) &&
+                RuntimeLeaderElector.isLeader(
+                    TABLE_META_REBUILD_LOCK)) {
                 tableMetaHistoryDbHelper.tryClean();
             }
         } catch (Throwable th) {

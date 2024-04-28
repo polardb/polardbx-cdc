@@ -71,7 +71,8 @@ public class CommandPipeline {
 
     public void startRplTask(long taskId, String taskName, int memory) throws Exception {
         log.info("Starting rpl task. Task id: {}, name: {}", taskId, taskName);
-        execCommand(new String[] {"bash", "-c", "sh bin/start_rpl.sh " + taskId + " " + taskName + " "
+        execCommand(new String[] {
+            "bash", "-c", "sh bin/start_rpl.sh " + taskId + " " + taskName + " "
             + memory}, 1000);
     }
 

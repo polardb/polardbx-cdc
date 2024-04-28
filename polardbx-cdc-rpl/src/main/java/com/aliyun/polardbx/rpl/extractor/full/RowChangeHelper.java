@@ -24,7 +24,7 @@ import java.util.Map;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSOption;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowData;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.builder.ToStringBuilder;
@@ -32,18 +32,18 @@ import org.apache.commons.lang.builder.ToStringStyle;
 
 public class RowChangeHelper {
 
-    public static MapData convertEvent2Map(DBMSRowChange event) {
+    public static MapData convertEvent2Map(DefaultRowChange event) {
         return convertEvent2Map(event, Boolean.FALSE);
     }
 
     /**
-     * 将DBMSRowChange 转换成K-V 的MAP形式
+     * 将DefaultRowChange 转换成K-V 的MAP形式
      *
-     * @param event DBMSRowChange
+     * @param event DefaultRowChange
      * @param upperCase 是否将dbname,table,column的名称转换成大写
      * @return MapData 对象
      */
-    public static MapData convertEvent2Map(DBMSRowChange event, boolean upperCase) {
+    public static MapData convertEvent2Map(DefaultRowChange event, boolean upperCase) {
         // 获取数据的描述信息
         String dbName = upperCase ? StringUtils.upperCase(event.getSchema()) : StringUtils.lowerCase(event.getSchema());
         String tableName =
@@ -133,7 +133,7 @@ public class RowChangeHelper {
         return mapData;
     }
 
-    public static DBMSRowChange removeRowData(DBMSRowChange event, RemoveCondition condition) {
+    public static DefaultRowChange removeRowData(DefaultRowChange event, RemoveCondition condition) {
         if (null == event) {
             return null;
         }
@@ -153,7 +153,7 @@ public class RowChangeHelper {
 
     public static interface RemoveCondition {
 
-        public boolean isRemove(DBMSRowChange event, DBMSRowData rowData);
+        public boolean isRemove(DefaultRowChange event, DBMSRowData rowData);
     }
 
     public static class MapData implements Serializable {

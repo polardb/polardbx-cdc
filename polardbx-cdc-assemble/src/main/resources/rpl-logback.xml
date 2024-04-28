@@ -60,6 +60,68 @@
         </encoder>
     </appender>
 
+    <appender name="extractorDdlAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator class="com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator">
+            <Key>taskName</Key>
+            <DefaultValue>default</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="extractorDdlAppender-${taskName}"
+                      class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${HOME}/logs/polardbx-rpl/${taskName}/extractor_ddl.log</file>
+                <append>true</append>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <!-- rollover daily -->
+                    <fileNamePattern>${HOME}/logs/polardbx-rpl/${taskName}/%d{yyyy-MM-dd}/extractor_ddl.%i.log.gz
+                    </fileNamePattern>
+                    <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                        <maxFileSize>200MB</maxFileSize>
+                    </timeBasedFileNamingAndTriggeringPolicy>
+                    <maxHistory>14</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>
+                        <![CDATA[
+                        %d{yyyy-MM-dd HH:mm:ss.SSS} - %m%n
+                        ]]>
+                    </pattern>
+                    <charset class="java.nio.charset.Charset">UTF-8</charset>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+
+    <appender name="skipDdlAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator class="com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator">
+            <Key>taskName</Key>
+            <DefaultValue>default</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="skipDdlAppender-${taskName}"
+                      class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${HOME}/logs/polardbx-rpl/${taskName}/skip_ddl.log</file>
+                <append>true</append>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <!-- rollover daily -->
+                    <fileNamePattern>${HOME}/logs/polardbx-rpl/${taskName}/%d{yyyy-MM-dd}/skip_ddl.%i.log.gz
+                    </fileNamePattern>
+                    <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                        <maxFileSize>200MB</maxFileSize>
+                    </timeBasedFileNamingAndTriggeringPolicy>
+                    <maxHistory>14</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>
+                        <![CDATA[
+                        %d{yyyy-MM-dd HH:mm:ss.SSS} - %m%n
+                        ]]>
+                    </pattern>
+                    <charset class="java.nio.charset.Charset">UTF-8</charset>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+
     <appender name="commitAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
         <discriminator class="com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator">
             <Key>taskName</Key>
@@ -195,6 +257,59 @@
         </sift>
     </appender>
 
+    <appender name="asyncDdlAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator class="com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator">
+            <Key>taskName</Key>
+            <DefaultValue>default</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="asyncDdlAppender-${taskName}"
+                      class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <file>${HOME}/logs/polardbx-rpl/${taskName}/async_ddl.log</file>
+                <append>true</append>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <!-- rollover daily -->
+                    <fileNamePattern>${HOME}/logs/polardbx-rpl/${taskName}/%d{yyyy-MM-dd}/async_ddl.%i.log.gz
+                    </fileNamePattern>
+                    <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                        <maxFileSize>200MB</maxFileSize>
+                    </timeBasedFileNamingAndTriggeringPolicy>
+                    <maxHistory>14</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>
+                        <![CDATA[
+                        %m%n
+                        ]]>
+                    </pattern>
+                    <charset class="java.nio.charset.Charset">UTF-8</charset>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+
+    <appender name="fullValidAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator class="com.aliyun.polardbx.rpl.common.TaskBasedDiscriminator">
+            <Key>taskName</Key>
+            <DefaultValue>default</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="fullValidAppender"
+                      class="ch.qos.logback.core.FileAppender">
+                <file>${HOME}/logs/polardbx-rpl/${taskName}/fullvalid.log</file>
+                <append>true</append>
+                <encoder>
+                    <pattern>
+                        <![CDATA[
+                    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %class{0} - [task_id %X{fullValidTaskId}] %msg%n
+                ]]>
+                    </pattern>
+                    <charset class="java.nio.charset.Charset">UTF-8</charset>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+
     <logger name="defaultLogger" level="INFO">
         <appender-ref ref="defaultAppender"/>
     </logger>
@@ -232,9 +347,38 @@
         <appender-ref ref="statisticAppender" additivity="false"/>
     </logger>
 
+    <logger name="asyncDdlLogger" additivity="false">
+        <level value="INFO"/>
+        <appender-ref ref="asyncDdlAppender" additivity="false"/>
+    </logger>
+
+    <logger name="fullValidLogger" additivity="false">
+        <level value="INFO"/>
+        <appender-ref ref="fullValidAppender" additivity="false"/>
+    </logger>
+
+    <logger name="asyncDdlLogger" additivity="false">
+        <level value="INFO"/>
+        <appender-ref ref="asyncDdlAppender" additivity="false"/>
+    </logger>
+
+    <logger name="fullValidLogger" additivity="false">
+        <level value="INFO"/>
+        <appender-ref ref="fullValidAppender" additivity="false"/>
+    </logger>
+
+    <logger name="rplExtractorLogger" additivity="false">
+        <level value="INFO"/>
+        <appender-ref ref="extractorDdlAppender" additivity="false"/>
+    </logger>
+
+    <logger name="skipDdlLogger" additivity="false">
+        <level value="INFO"/>
+        <appender-ref ref="skipDdlAppender" additivity="false"/>
+    </logger>
+
     <root level="INFO">
         <appender-ref ref="defaultAppender"/>
-        <!--        <appender-ref ref="consoleAppender"/>-->
     </root>
 
     <logger name="rplLogger" level="INFO">

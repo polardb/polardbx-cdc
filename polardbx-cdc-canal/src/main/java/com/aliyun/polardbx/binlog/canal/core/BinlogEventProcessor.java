@@ -19,14 +19,15 @@ import com.aliyun.polardbx.binlog.canal.IBinlogFileInfoFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.dump.ErosaConnection;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.dump.OssConnection;
 import com.aliyun.polardbx.binlog.canal.core.handle.EventHandle;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
+import com.aliyun.polardbx.binlog.canal.unit.SearchRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,6 +49,8 @@ public class BinlogEventProcessor {
 
     private boolean serverIdMatch = false;
 
+    private SearchRecorder searchRecorder;
+
     public EventHandle getHandle() {
         return handle;
     }
@@ -59,7 +62,7 @@ public class BinlogEventProcessor {
     public void init(ErosaConnection connection, String binlogFileName, long position, boolean search,
                      ServerCharactorSet serverCharactorSet, Long serverId, int binlogChecksum)
         throws IOException {
-        init(connection, binlogFileName, position, search, serverCharactorSet, serverId, binlogChecksum,false);
+        init(connection, binlogFileName, position, search, serverCharactorSet, serverId, binlogChecksum, false);
     }
 
     public void init(ErosaConnection connection, String binlogFileName, long position, boolean search,
@@ -114,6 +117,10 @@ public class BinlogEventProcessor {
         }
     }
 
+    public void setSearchRecorder(SearchRecorder searchRecorder) {
+        this.searchRecorder = searchRecorder;
+    }
+
     private void doStart() throws IOException {
         LogDecoder decoder = new LogDecoder();
         Set<Integer> ie = handle.interestEvents();
@@ -139,6 +146,10 @@ public class BinlogEventProcessor {
             }
             handle.handle(event, context.getLogPosition());
             lastLogPosition = context.getLogPosition();
+            if (searchRecorder != null) {
+                searchRecorder.setPosition(event.getLogPos());
+                searchRecorder.setTimestamp(event.getWhen());
+            }
             if (handle.interrupt()) {
                 logger.warn(" handler interrupt");
                 break;

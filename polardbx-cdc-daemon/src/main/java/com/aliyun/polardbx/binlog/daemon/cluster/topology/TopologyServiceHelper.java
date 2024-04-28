@@ -39,6 +39,7 @@ import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.ExecutionSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.util.StorageUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Lists;
@@ -63,6 +64,7 @@ import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.status;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.storageInstId;
+import static com.aliyun.polardbx.binlog.util.ServerConfigUtil.SERVER_ID;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isIn;
 import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
@@ -124,7 +126,7 @@ public class TopologyServiceHelper {
     public static StorageHistoryInfo buildStorageHistoryInfo(String expectedStorageTso) {
         StorageHistoryInfoMapper storageHistoryMapper = getObject(StorageHistoryInfoMapper.class);
         List<StorageHistoryInfo> storageHistoryInfos = storageHistoryMapper.select(s -> s.where(
-            StorageHistoryInfoDynamicSqlSupport.clusterId, isEqualTo(DynamicApplicationConfig.getString(CLUSTER_ID)))
+                StorageHistoryInfoDynamicSqlSupport.clusterId, isEqualTo(DynamicApplicationConfig.getString(CLUSTER_ID)))
             .and(StorageHistoryInfoDynamicSqlSupport.status, isEqualTo(0)));
         if (storageHistoryInfos.isEmpty()) {
             return null;
@@ -145,12 +147,17 @@ public class TopologyServiceHelper {
             ClusterRebalanceInstruction.SET_REBALANCE_INSTRUCTION)) {
             SystemDbConfig.updateSystemDbConfig(ConfigKeys.CLUSTER_REBALANCE_INSTRUCTION,
                 ClusterRebalanceInstruction.UNSET_REBALANCE_INSTRUCTION);
-            log.info("cluster rebalance instruction is set, topology will rebuild");
+            log.info("cluster re-balance instruction is set, topology will rebuild");
             return true;
         }
 
         if (preClusterSnapshot.isNew()) {
             log.info("cluster snapshot is new, topology will rebuild.");
+            return true;
+        }
+
+        if (preClusterSnapshot.getServerId() == null
+            || ServerConfigUtil.getGlobalNumberVarDirect(SERVER_ID) != preClusterSnapshot.getServerId()) {
             return true;
         }
 

@@ -19,9 +19,8 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowData;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowData;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
@@ -108,7 +107,7 @@ public class RecoveryApplier extends BaseApplier {
     @Override
     public void init() {
         RplTask task = DbTaskMetaManager.getTask(taskId);
-        if (task.getStatus() != null && task.getStatus() == TaskStatus.FINISHED.getValue()) {
+        if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.FINISHED) {
             log.info("task {} has already finished, skip execute.", taskId);
             throw new PolardbxException("task has already finished, skip execute");
         }
@@ -296,7 +295,7 @@ public class RecoveryApplier extends BaseApplier {
         return ("'" + data.toString().replaceAll("'", "\\\\'").replaceAll("\n", "\\\\n") + "'");
     }
 
-    private String whereClause(DBMSRowChange event, DBMSRowData data) {
+    private String whereClause(DefaultRowChange event, DBMSRowData data) {
         List<DBMSColumn> keys = event.getPrimaryKey();
         if (keys.isEmpty()) {
             keys = event.getUniqueKey();
@@ -318,7 +317,7 @@ public class RecoveryApplier extends BaseApplier {
         return str.toString();
     }
 
-    private String setClause(DBMSRowChange event, DBMSRowData data) {
+    private String setClause(DefaultRowChange event, DBMSRowData data) {
         StringBuilder str = new StringBuilder();
         List<? extends DBMSColumn> cols = event.getColumns();
         if (cols.isEmpty()) {
@@ -340,7 +339,7 @@ public class RecoveryApplier extends BaseApplier {
         return str.toString();
     }
 
-    private String insertClause(DBMSRowChange event, DBMSRowData data) {
+    private String insertClause(DefaultRowChange event, DBMSRowData data) {
         StringBuilder str = new StringBuilder("(");
         List<? extends DBMSColumn> cols = event.getColumns();
         if (cols.isEmpty()) {
@@ -368,7 +367,7 @@ public class RecoveryApplier extends BaseApplier {
     }
 
     private String reverseSQL(DBMSEvent event) {
-        if (event instanceof DBMSRowChange) {
+        if (event instanceof DefaultRowChange) {
             String schema = this.schema;
             DefaultRowChange defaultRowChange = (DefaultRowChange) event;
             String table = defaultRowChange.getTable();
@@ -394,7 +393,7 @@ public class RecoveryApplier extends BaseApplier {
         return null;
     }
 
-    private boolean hasPrimaryOrUniqueKey(DBMSRowChange event) {
+    private boolean hasPrimaryOrUniqueKey(DefaultRowChange event) {
         List<DBMSColumn> keys = event.getPrimaryKey();
         if (keys.isEmpty()) {
             keys = event.getUniqueKey();
@@ -406,7 +405,7 @@ public class RecoveryApplier extends BaseApplier {
     }
 
     private String mirrorSQL(DBMSEvent event) {
-        if (event instanceof DBMSRowChange) {
+        if (event instanceof DefaultRowChange) {
             String schema = this.schema;
             DefaultRowChange defaultRowChange = (DefaultRowChange) event;
             String table = defaultRowChange.getTable();

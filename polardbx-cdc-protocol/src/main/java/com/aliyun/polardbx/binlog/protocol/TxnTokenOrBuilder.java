@@ -257,4 +257,10 @@ public interface TxnTokenOrBuilder extends
    */
   com.google.protobuf.ByteString
       getDdlBytes();
+
+  /**
+   * <code>int32 ddlScope = 16;</code>
+   * @return The ddlScope.
+   */
+  int getDdlScope();
 }

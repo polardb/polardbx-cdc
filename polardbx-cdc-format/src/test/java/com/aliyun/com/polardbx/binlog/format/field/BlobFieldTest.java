@@ -295,4 +295,22 @@ public class BlobFieldTest {
         Assert.assertArrayEquals(new byte[] {3, 0, 5, 85, 85},
             field.encode());
     }
+
+    @Test
+    public void testTextNullValue() {
+        Field field =
+            MakeFieldFactory.makField4TypeMisMatch("text", "null", defaultCharset, false, "null", false);
+        Assert.assertArrayEquals(new byte[] {2}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {4, 0, 110, 117, 108, 108},
+            field.encode());
+    }
+
+    @Test
+    public void testTextNull() {
+        Field field =
+            MakeFieldFactory.makField4TypeMisMatch("text", null, defaultCharset, false, "null", false);
+        Assert.assertArrayEquals(new byte[] {2}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {},
+            field.encode());
+    }
 }

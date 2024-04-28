@@ -47,33 +47,33 @@ import org.mybatis.dynamic.sql.util.mybatis3.MyBatis3Utils;
 
 @Mapper
 public interface RplTaskMapper {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     BasicColumn[] selectList = BasicColumn.columnList(id, gmtCreated, gmtModified, gmtHeartbeat, status, serviceId, stateMachineId, type, masterHost, masterPort, position, worker, clusterId, extractorConfig, pipelineConfig, applierConfig, lastError, statistic, extra);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.972+08:00", comments="Source Table: rpl_task")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     long count(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.972+08:00", comments="Source Table: rpl_task")
     @DeleteProvider(type=SqlProviderAdapter.class, method="delete")
     int delete(DeleteStatementProvider deleteStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.972+08:00", comments="Source Table: rpl_task")
     @InsertProvider(type=SqlProviderAdapter.class, method="insert")
     @SelectKey(statement="SELECT LAST_INSERT_ID()", keyProperty="record.id", before=false, resultType=Long.class)
     int insert(InsertStatementProvider<RplTask> insertStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.973+08:00", comments="Source Table: rpl_task")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Long.class, jdbcType=JdbcType.BIGINT, id=true),
         @Arg(column="gmt_created", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
         @Arg(column="gmt_modified", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
         @Arg(column="gmt_heartbeat", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
-        @Arg(column="status", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
+        @Arg(column="status", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="service_id", javaType=Long.class, jdbcType=JdbcType.BIGINT),
         @Arg(column="state_machine_id", javaType=Long.class, jdbcType=JdbcType.BIGINT),
-        @Arg(column="type", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
+        @Arg(column="type", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="master_host", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="master_port", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
         @Arg(column="position", javaType=String.class, jdbcType=JdbcType.VARCHAR),
@@ -88,17 +88,17 @@ public interface RplTaskMapper {
     })
     Optional<RplTask> selectOne(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     @SelectProvider(type=SqlProviderAdapter.class, method="select")
     @ConstructorArgs({
         @Arg(column="id", javaType=Long.class, jdbcType=JdbcType.BIGINT, id=true),
         @Arg(column="gmt_created", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
         @Arg(column="gmt_modified", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
         @Arg(column="gmt_heartbeat", javaType=Date.class, jdbcType=JdbcType.TIMESTAMP),
-        @Arg(column="status", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
+        @Arg(column="status", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="service_id", javaType=Long.class, jdbcType=JdbcType.BIGINT),
         @Arg(column="state_machine_id", javaType=Long.class, jdbcType=JdbcType.BIGINT),
-        @Arg(column="type", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
+        @Arg(column="type", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="master_host", javaType=String.class, jdbcType=JdbcType.VARCHAR),
         @Arg(column="master_port", javaType=Integer.class, jdbcType=JdbcType.INTEGER),
         @Arg(column="position", javaType=String.class, jdbcType=JdbcType.VARCHAR),
@@ -113,28 +113,28 @@ public interface RplTaskMapper {
     })
     List<RplTask> selectMany(SelectStatementProvider selectStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     @UpdateProvider(type=SqlProviderAdapter.class, method="update")
     int update(UpdateStatementProvider updateStatement);
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     default long count(CountDSLCompleter completer) {
         return MyBatis3Utils.countFrom(this::count, rplTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     default int delete(DeleteDSLCompleter completer) {
         return MyBatis3Utils.deleteFrom(this::delete, rplTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     default int deleteByPrimaryKey(Long id_) {
         return delete(c -> 
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     default int insert(RplTask record) {
         return MyBatis3Utils.insert(this::insert, record, rplTask, c ->
             c.map(gmtCreated).toProperty("gmtCreated")
@@ -158,7 +158,7 @@ public interface RplTaskMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     default int insertSelective(RplTask record) {
         return MyBatis3Utils.insert(this::insert, record, rplTask, c ->
             c.map(gmtCreated).toPropertyWhenPresent("gmtCreated", record::getGmtCreated)
@@ -182,34 +182,34 @@ public interface RplTaskMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     default Optional<RplTask> selectOne(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectOne(this::selectOne, selectList, rplTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.932+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     default List<RplTask> select(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectList(this::selectMany, selectList, rplTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.933+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.974+08:00", comments="Source Table: rpl_task")
     default List<RplTask> selectDistinct(SelectDSLCompleter completer) {
         return MyBatis3Utils.selectDistinct(this::selectMany, selectList, rplTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.933+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.975+08:00", comments="Source Table: rpl_task")
     default Optional<RplTask> selectByPrimaryKey(Long id_) {
         return selectOne(c ->
             c.where(id, isEqualTo(id_))
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.933+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.975+08:00", comments="Source Table: rpl_task")
     default int update(UpdateDSLCompleter completer) {
         return MyBatis3Utils.update(this::update, rplTask, completer);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.933+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.975+08:00", comments="Source Table: rpl_task")
     static UpdateDSL<UpdateModel> updateAllColumns(RplTask record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(gmtCreated).equalTo(record::getGmtCreated)
                 .set(gmtModified).equalTo(record::getGmtModified)
@@ -231,7 +231,7 @@ public interface RplTaskMapper {
                 .set(extra).equalTo(record::getExtra);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.933+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.975+08:00", comments="Source Table: rpl_task")
     static UpdateDSL<UpdateModel> updateSelectiveColumns(RplTask record, UpdateDSL<UpdateModel> dsl) {
         return dsl.set(gmtCreated).equalToWhenPresent(record::getGmtCreated)
                 .set(gmtModified).equalToWhenPresent(record::getGmtModified)
@@ -253,7 +253,7 @@ public interface RplTaskMapper {
                 .set(extra).equalToWhenPresent(record::getExtra);
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.933+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.975+08:00", comments="Source Table: rpl_task")
     default int updateByPrimaryKey(RplTask record) {
         return update(c ->
             c.set(gmtCreated).equalTo(record::getGmtCreated)
@@ -278,7 +278,7 @@ public interface RplTaskMapper {
         );
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-07-13T15:39:08.933+08:00", comments="Source Table: rpl_task")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T14:24:49.975+08:00", comments="Source Table: rpl_task")
     default int updateByPrimaryKeySelective(RplTask record) {
         return update(c ->
             c.set(gmtCreated).equalToWhenPresent(record::getGmtCreated)

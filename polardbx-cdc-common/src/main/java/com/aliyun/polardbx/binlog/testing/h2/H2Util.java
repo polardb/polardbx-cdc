@@ -31,14 +31,15 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlTableInde
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlUnlockTablesStatement;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.text.StringEscapeUtils;
 import org.h2.jdbcx.JdbcConnectionPool;
 import org.junit.Assert;
 
 import javax.sql.DataSource;
+import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.sql.Connection;
@@ -49,6 +50,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Scanner;
+import java.util.zip.GZIPInputStream;
 
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
@@ -72,15 +74,24 @@ public class H2Util {
     }
 
     @SneakyThrows
-    public static void executeBatchSql(Connection connection, File file) {
-        String sql = FileUtils.readFileToString(file, "UTF-8");
-        executeBatchSql(connection, sql);
+    public static void executeBatchSqlGzip(Connection connection, File file) {
+        try (FileInputStream fileInputStream = new FileInputStream(file);
+            GZIPInputStream gzipInputStream = new GZIPInputStream(fileInputStream)) {
+            Scanner scanner = new Scanner(new BufferedInputStream(gzipInputStream));
+            executeBatchSql(connection, scanner);
+        }
     }
 
     @SneakyThrows
-    public static void executeBatchSql(Connection connection, String sql) {
-        Scanner scanner = new Scanner(sql);
+    public static void executeBatchSql(Connection connection, File file) {
+        try (FileInputStream fileInputStream = new FileInputStream(file)) {
+            Scanner scanner = new Scanner(fileInputStream.getChannel());
+            executeBatchSql(connection, scanner);
+        }
+    }
 
+    @SneakyThrows
+    public static void executeBatchSql(Connection connection, Scanner scanner) {
         StringBuilder sb = new StringBuilder();
         while (scanner.hasNextLine()) {
             String s = scanner.nextLine();
@@ -133,6 +144,9 @@ public class H2Util {
             sql = StringEscapeUtils.unescapeJava(sql);
         }
 
+        sql = sql.replaceAll("AUTO_SPLIT ''ON''", "");
+        sql = sql.replaceAll("auto_split ''on''", "");
+
         //remove hints like /*!32312 ... */ , /*! ... */
         sql = removeHints(sql);
         if (StringUtils.isBlank(sql)) {
@@ -149,7 +163,7 @@ public class H2Util {
             createTableStatement.setTablePartitions(null);
             createTableStatement.setTablePartitionBy(null);
             createTableStatement.getTableOptions().clear();
-
+            createTableStatement.setAutoSplit(null);
             Iterator<SQLTableElement> it = createTableStatement.getTableElementList().iterator();
             while (it.hasNext()) {
                 SQLTableElement el = it.next();

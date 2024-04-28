@@ -14,24 +14,17 @@
  */
 package com.aliyun.polardbx.rpl.validation;
 
-import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.rpl.applier.SqlContext;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
-import com.aliyun.polardbx.rpl.validation.common.Record;
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 
-import java.io.Serializable;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
+
+import static com.aliyun.polardbx.rpl.validation.common.ValidationUtil.escape;
 
 /**
  * Validation SQL generator per table
@@ -41,209 +34,142 @@ import java.util.stream.Collectors;
 @Builder
 @Slf4j
 public class ValSQLGenerator {
-    private ValidationContext ctx;
     private boolean convertToByte;
     private static final String CHECKSUM = "checksum";
 
-    public String getSelectAllKeysChecksumSQL(TableInfo srcTable) throws Exception {
-        // ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`)
-        List<String> srcColList = srcTable.getColumns().stream().map(ColumnInfo::getName).collect(Collectors.toList());
-        // Use dst table key list as it most likely will contain partition keys
-        List<String> keyColList = ctx.getMappingTable().get(srcTable.getName()).getKeyList();
-        StringBuilder concatSb = new StringBuilder();
-        for (int i = 0; i < srcColList.size(); i++) {
-            if (i == 0) {
-                concatSb.append(String.format("ISNULL(`%s`)", srcColList.get(i)));
-            } else {
-                concatSb.append(String.format(", ISNULL(`%s`)", srcColList.get(i)));
-            }
-        }
-        // ',', `id`, `name`, `order_od`, CONCAT(ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`)))
-        StringBuilder concatWsSb = new StringBuilder();
-        // ',' + space
-        concatWsSb.append("',', ");
-        for (String column : srcColList) {
-            concatWsSb.append(String.format("`%s`, ", column));
-        }
-        concatWsSb.append(concatSb);
-        // CONCAT_WS(',', `id`, `name`, `order_od`, CONCAT(ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`))))
-        String concatWs = String.format("CONCAT_WS(%s)", concatWsSb);
+    private static final String BATCH_CHECK_SQL_TEMPLATE =
+        "SELECT COUNT(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', %s, CONCAT(%s)))AS UNSIGNED)) AS CHECKSUM FROM %s";
 
-        // c_w_id, c_d_id, c_id
-        String keyCols = keyColList.stream().collect(Collectors.joining("`,`", "`", "`"));
+    private static final String ROW_CHECK_SQL_TEMPLATE =
+        "SELECT CAST(CRC32(CONCAT_WS(',', %s, CONCAT(%s)))AS UNSIGNED) AS CHECKSUM, %s FROM %s";
 
-        return String.format(
-            "/*+TDDL:IN_SUB_QUERY_THRESHOLD=2*/ SELECT CAST(CRC32(%s) AS UNSIGNED) AS checksum, %s FROM `%s`.`%s`",
-            concatWs, keyCols, ctx.getSrcPhyDB(), srcTable.getName());
-    }
+    private static final String SELECT_SQL_TEMPLATE =
+        "SELECT %s FROM %s";
 
-    public SqlContext formatSelectSQL(TableInfo table, List<Serializable> keyValList) {
-        List<Serializable> params = new ArrayList<>(table.getKeyList().size());
-        String where = getWhereString(keyValList, table.getKeyList(), params);
-        String columns =
-            table.getColumns().stream().map(ColumnInfo::getName).collect(Collectors.joining("`,`", "`", "`"));
-        String sql =
-            String.format("SELECT %s FROM `%s`.`%s` WHERE %s", columns, ctx.getSrcPhyDB(), table.getName(), where);
-        return new SqlContext(sql, null, null, params);
-    }
+    private static final String REPLACE_INTO_TEMPLATE =
+        "REPLACE INTO %s (%s) VALUES (%s)";
 
-    // replace into `%s`.`%s` (%s) values (?,?,?)
-    public PreparedStatement formatInsertStatement(Connection conn, TableInfo dstTable, Record... records)
-        throws SQLException {
-        if (records.length < 1) {
-            throw new SQLException(
-                String.format("Records cannot be less than one. db: %s, table: %s", ctx.getDstLogicalDB(),
-                    dstTable.getName()));
-        }
-        List<String> valueList = new ArrayList<>();
-        List<String> colList = records[0].getColumnList();
+    private static final String DELETE_FROM_TEMPLATE =
+        "DELETE FROM %s";
 
-        for (int k = 0; k < records.length; k++) {
-            StringBuilder updateSb = new StringBuilder();
-            for (int i = 0; i < colList.size(); i++) {
-                if (i == 0) {
-                    updateSb.append("?");
-                } else {
-                    updateSb.append(",?");
-                }
-            }
-            valueList.add(updateSb.toString());
+    /**
+     * calculate CRC32 checksum and count example:
+     * mysql> select count(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', id, name, age, CONCAT(ISNULL(id), ISNULL(name), ISNULL(age))) AS UNSIGNED)) AS CHECKSUM from `test_db`.`test_tb` where id > 0;
+     * +--------+------------+
+     * |  CNT   |  CHECKSUM  |
+     * +--------+------------+
+     * | 100000 | 1128664311 |
+     * +--------+------------+
+     * 1 row in set (0.46 sec)
+     */
+    public static SqlContextBuilder.SqlContext getBatchCheckSql(String dbName, String tableName, TableInfo srcTableInfo,
+                                                                List<Object> lowerBounds, List<Object> upperBounds) {
+        List<String> columnNames = new ArrayList<>();
+        for (ColumnInfo col : srcTableInfo.getColumns()) {
+            columnNames.add(col.getName());
         }
 
-        // (`a`=?,`b`=?),(`a`=?,`b`=?)
-        String values = valueList.stream().collect(Collectors.joining("),(", "(", ")"));
-        String columns = colList.stream().collect(Collectors.joining("`,`", "`", "`"));
+        String columnNamesStr =
+            columnNames.stream().map(k -> String.format("`%s`", escape(k))).collect(Collectors.joining(", "));
+        String columnIsNullStr =
+            columnNames.stream().map(k -> String.format("ISNULL(`%s`)", escape(k))).collect(Collectors.joining(", "));
+        String sqlBeforeWhere = String.format(BATCH_CHECK_SQL_TEMPLATE, columnNamesStr, columnIsNullStr,
+            CommonUtils.tableName(dbName, tableName));
 
-        String sql =
-            String.format("REPLACE INTO `%s`.`%s` (%s) VALUES %s", ctx.getDstLogicalDB(), dstTable.getName(), columns,
-                values);
-        PreparedStatement preparedStatement = conn.prepareStatement(sql);
-        int pos = 1;
-        for (Record r : records) {
-            for (Object obj : r.getValList()) {
-                preparedStatement.setObject(pos, obj);
-                pos++;
-            }
-        }
-        return preparedStatement;
+        SqlContextBuilder.SqlContext result =
+            SqlContextBuilder.buildRangeQueryContext(sqlBeforeWhere, null, srcTableInfo.getPks(), lowerBounds,
+                upperBounds);
+
+        log.info("batch check sql:{}, params:{}", result.sql, result.params);
+
+        return result;
     }
 
     /**
-     * e.g. SELECT BIT_XOR(CAST(CRC32(CONCAT_WS(',', C1, C2, C3, C4, C5, C6, C7, C8, C9, CONCAT(ISNULL(C1), ISNULL(C2), ISNULL(C3), ISNULL(C4), ISNULL(C5), ISNULL(C6), ISNULL(C7), ISNULL(C8), ISNULL(C9)))) AS UNSIGNED)) AS checksum FROM `tpch.orders`;
+     * 返回一个SQL，用于查询出给定区间内每一行的主键 & 拆分键，以及该行的checksum
      */
-    public SqlContext generateChecksumSQL(TableInfo srcTable, Map<String, List<Serializable>> keyValMap,
-                                          boolean isDst) {
-        // ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`)
-        String db = isDst ? ctx.getDstLogicalDB() : ctx.getSrcPhyDB();
-        TableInfo table = isDst ? ctx.getMappingTable().get(srcTable.getName()) : srcTable;
+    public static SqlContextBuilder.SqlContext getRowCheckSql(String dbName, String tableName, TableInfo srcTableInfo,
+                                                              List<Object> lowerBounds, List<Object> upperBounds) {
+        List<String> columnNames = new ArrayList<>();
+        for (ColumnInfo col : srcTableInfo.getColumns()) {
+            columnNames.add(col.getName());
+        }
 
-        StringBuilder concatSb = new StringBuilder();
-        List<ColumnInfo> columns = srcTable.getColumns();
-        for (int i = 0; i < columns.size(); i++) {
+        List<String> keys = srcTableInfo.getKeyList();
+        String keyCols =
+            keys.stream().map(k -> String.format("`%s`", escape(k))).collect(Collectors.joining(", "));
+        String columnNamesStr =
+            columnNames.stream().map(k -> String.format("`%s`", escape(k))).collect(Collectors.joining(", "));
+        String columnIsNullStr =
+            columnNames.stream().map(k -> String.format("ISNULL(`%s`)", escape(k))).collect(Collectors.joining(", "));
+
+        String sqlBeforeWhere = String.format(ROW_CHECK_SQL_TEMPLATE, columnNamesStr, columnIsNullStr, keyCols,
+            CommonUtils.tableName(dbName, tableName));
+        String sqlAfterWhere = " ORDER BY " + keyCols;
+
+        SqlContextBuilder.SqlContext result =
+            SqlContextBuilder.buildRangeQueryContext(sqlBeforeWhere, sqlAfterWhere, srcTableInfo.getPks(), lowerBounds,
+                upperBounds);
+
+        log.info("row check sql:{}, params:{}", result.sql, result.params);
+
+        return result;
+    }
+
+    public static SqlContextBuilder.SqlContext getPointSelectSql(TableInfo tableInfo, List<Object> keyVal) {
+        List<String> columnNames = new ArrayList<>();
+        for (ColumnInfo col : tableInfo.getColumns()) {
+            columnNames.add(col.getName());
+        }
+
+        String columnNamesStr =
+            columnNames.stream().map(k -> String.format("`%s`", escape(k))).collect(Collectors.joining(", "));
+        String sqlBeforeWhere = String.format(SELECT_SQL_TEMPLATE, columnNamesStr,
+            CommonUtils.tableName(tableInfo.getSchema(), tableInfo.getName()));
+
+        SqlContextBuilder.SqlContext result =
+            SqlContextBuilder.buildPointQueryContext(sqlBeforeWhere, tableInfo.getKeyList(), keyVal);
+
+        log.info("point select sql:{}, params:{}", result.sql, result.params);
+
+        return result;
+    }
+
+    public static SqlContextBuilder.SqlContext getReplaceIntoSql(String dbName, String tableName, TableInfo tableInfo,
+                                                                 List<Object> row) {
+        List<String> columnNames = new ArrayList<>();
+        for (ColumnInfo col : tableInfo.getColumns()) {
+            columnNames.add(col.getName());
+        }
+        String columnNamesStr =
+            columnNames.stream().map(k -> String.format("`%s`", escape(k))).collect(Collectors.joining(", "));
+        StringBuilder valuesSb = new StringBuilder();
+        for (int i = 0; i < columnNames.size(); i++) {
             if (i == 0) {
-                concatSb.append(String.format("ISNULL(`%s`)", columns.get(i).getName()));
+                valuesSb.append("?");
             } else {
-                concatSb.append(String.format(", ISNULL(`%s`)", columns.get(i).getName()));
+                valuesSb.append(", ?");
             }
         }
-        // ',', `id`, `name`, `order_od`, CONCAT(ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`)))
-        StringBuilder concatWsSb = new StringBuilder();
-        // ',' + space
-        concatWsSb.append("',', ");
-        for (ColumnInfo column : columns) {
-            if (convertToByte) {
-                // deal with Illegal mix of collations for operation 'concat_ws'
-                concatWsSb.append(String.format("convert(`%s` using byte), ", column.getName()));
-            } else {
-                concatWsSb.append(String.format("`%s`, ", column.getName()));
-            }
-        }
-        concatWsSb.append(concatSb);
-        // CONCAT_WS(',', `id`, `name`, `order_od`, CONCAT(ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`))))
-        String concatWs = String.format("CONCAT_WS(%s)", concatWsSb);
-        List<String> predicate = new ArrayList<>();
-        List<Serializable> params = new ArrayList<>();
-        for (String key : table.getKeyList()) {
-            boolean hasNull = false;
-            boolean hasNotNull = false;
-            List<Serializable> values = keyValMap.get(key);
-            for (Serializable value : values) {
-                if (value == null) {
-                    hasNull = true;
-                    break;
-                }
-            }
-            List<Serializable> thisKeyParams = values.stream().filter(Objects::nonNull)
-                .map(Object::toString).distinct().collect(Collectors.toList());
-            if (thisKeyParams.size() > 0) {
-                hasNotNull = true;
-                params.addAll(thisKeyParams);
-            }
-            if (hasNotNull && hasNull) {
-                predicate.add(String.format("(`%s` IN (%s) or `%s` IS NULL)", key,
-                    StringUtils.repeat("?", ",", thisKeyParams.size()), key));
-            } else if (hasNotNull) {
-                predicate.add(String.format("(`%s` IN (%s))", key,
-                    StringUtils.repeat("?", ",", thisKeyParams.size())));
-            } else if (hasNull) {
-                predicate.add(String.format("`%s` IS NULL", key));
-            } else {
-                throw new PolardbxException(String.format("where for `%s` must has null or has not null", key));
-            }
-            // String valList = keyValMap.get(key).stream().map(Object::toString).distinct().collect(Collectors.joining("','", "'", "'"));
-        }
-        String where = predicate.stream().collect(Collectors.joining(" AND "));
-        String sql = String.format("SELECT BIT_XOR(CAST(CRC32(%s) AS UNSIGNED)) AS checksum FROM `%s`.`%s` WHERE %s",
-            concatWs, db, table.getName(), where);
-        return new SqlContext(sql, null, null, params);
+
+        String sql =
+            String.format(REPLACE_INTO_TEMPLATE, CommonUtils.tableName(dbName, tableName), columnNamesStr, valuesSb);
+
+        log.info("replace into sql:{}", sql);
+
+        return new SqlContextBuilder.SqlContext(sql, row);
     }
 
-    public SqlContext formatSingleRowChecksumSQL(TableInfo dstTable, List<Serializable> keyValList) {
-        // ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`)
+    public static SqlContextBuilder.SqlContext getDeleteFromSql(String dbName, String tableName, TableInfo tableInfo,
+                                                                List<Object> keyVal) {
+        String sqlBeforeWhere =
+            String.format(DELETE_FROM_TEMPLATE, CommonUtils.tableName(dbName, tableName));
 
-        StringBuilder concatSb = new StringBuilder();
-        for (int i = 0; i < dstTable.getColumns().size(); i++) {
-            ColumnInfo column = dstTable.getColumns().get(i);
-            if (i == 0) {
-                concatSb.append(String.format("ISNULL(`%s`)", column.getName()));
-            } else {
-                concatSb.append(String.format(", ISNULL(`%s`)", column.getName()));
-            }
-        }
-        // ',', `id`, `name`, `order_od`, CONCAT(ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`)))
-        StringBuilder concatWsSb = new StringBuilder();
-        // ',' + space
-        concatWsSb.append("',', ");
-        for (ColumnInfo column : dstTable.getColumns()) {
-            if (convertToByte) {
-                // deal with Illegal mix of collations for operation 'concat_ws'
-                concatWsSb.append(String.format("convert(`%s` using byte), ", column.getName()));
-            } else {
-                concatWsSb.append(String.format("`%s`, ", column.getName()));
-            }
-        }
-        concatWsSb.append(concatSb);
-        // CONCAT_WS(',', `id`, `name`, `order_od`, CONCAT(ISNULL(`id`), ISNULL(`name`), ISNULL(`order_id`))))
-        String concatWs = String.format("CONCAT_WS(%s)", concatWsSb);
-        List<Serializable> params = new ArrayList<>(dstTable.getKeyList().size());
-        String where = getWhereString(keyValList, dstTable.getKeyList(), params);
-        String sql = String.format(
-            "/*+TDDL:IN_SUB_QUERY_THRESHOLD=2*/ SELECT BIT_XOR(CAST(CRC32(%s) AS UNSIGNED)) AS checksum FROM `%s`.`%s` WHERE %s",
-            concatWs, ctx.getDstLogicalDB(), dstTable.getName(), where);
-        return new SqlContext(sql, null, null, params);
+        SqlContextBuilder.SqlContext sqlContext =
+            SqlContextBuilder.buildPointQueryContext(sqlBeforeWhere, tableInfo.getKeyList(), keyVal);
+
+        log.info("point delete sql:{}", sqlContext.getSql());
+
+        return sqlContext;
     }
-
-    public String getWhereString(List<Serializable> keyValList, List<String> keyList, List<Serializable> params) {
-        List<String> whereList = new ArrayList<>();
-        for (int i = 0; i < keyList.size(); i++) {
-            if (keyValList.get(i) == null) {
-                whereList.add(String.format("`%s` IS NULL", keyList.get(i)));
-            } else {
-                whereList.add(String.format("`%s` = ?", keyList.get(i)));
-                params.add(keyValList.get(i));
-            }
-        }
-        return String.join(" AND ", whereList);
-    }
-
 }

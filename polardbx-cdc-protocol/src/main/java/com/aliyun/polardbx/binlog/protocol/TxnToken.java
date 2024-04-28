@@ -166,6 +166,11 @@ private static final long serialVersionUID = 0L;
             ddl_ = s;
             break;
           }
+          case 128: {
+
+            ddlScope_ = input.readInt32();
+            break;
+          }
           default: {
             if (!parseUnknownField(
                 input, unknownFields, extensionRegistry, tag)) {
@@ -653,6 +658,17 @@ private static final long serialVersionUID = 0L;
     }
   }
 
+  public static final int DDLSCOPE_FIELD_NUMBER = 16;
+  private int ddlScope_;
+  /**
+   * <code>int32 ddlScope = 16;</code>
+   * @return The ddlScope.
+   */
+  @java.lang.Override
+  public int getDdlScope() {
+    return ddlScope_;
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -711,6 +727,9 @@ private static final long serialVersionUID = 0L;
     }
     if (!getDdlBytes().isEmpty()) {
       com.google.protobuf.GeneratedMessageV3.writeString(output, 15, ddl_);
+    }
+    if (ddlScope_ != 0) {
+      output.writeInt32(16, ddlScope_);
     }
     unknownFields.writeTo(output);
   }
@@ -779,6 +798,10 @@ private static final long serialVersionUID = 0L;
     if (!getDdlBytes().isEmpty()) {
       size += com.google.protobuf.GeneratedMessageV3.computeStringSize(15, ddl_);
     }
+    if (ddlScope_ != 0) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeInt32Size(16, ddlScope_);
+    }
     size += unknownFields.getSerializedSize();
     memoizedSize = size;
     return size;
@@ -826,6 +849,8 @@ private static final long serialVersionUID = 0L;
     }
     if (!getDdl()
         .equals(other.getDdl())) return false;
+    if (getDdlScope()
+        != other.getDdlScope()) return false;
     if (!unknownFields.equals(other.unknownFields)) return false;
     return true;
   }
@@ -875,6 +900,8 @@ private static final long serialVersionUID = 0L;
     }
     hash = (37 * hash) + DDL_FIELD_NUMBER;
     hash = (53 * hash) + getDdl().hashCode();
+    hash = (37 * hash) + DDLSCOPE_FIELD_NUMBER;
+    hash = (53 * hash) + getDdlScope();
     hash = (29 * hash) + unknownFields.hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -1042,6 +1069,8 @@ private static final long serialVersionUID = 0L;
       }
       ddl_ = "";
 
+      ddlScope_ = 0;
+
       return this;
     }
 
@@ -1092,6 +1121,7 @@ private static final long serialVersionUID = 0L;
         result.serverId_ = serverIdBuilder_.build();
       }
       result.ddl_ = ddl_;
+      result.ddlScope_ = ddlScope_;
       onBuilt();
       return result;
     }
@@ -1197,6 +1227,9 @@ private static final long serialVersionUID = 0L;
       if (!other.getDdl().isEmpty()) {
         ddl_ = other.ddl_;
         onChanged();
+      }
+      if (other.getDdlScope() != 0) {
+        setDdlScope(other.getDdlScope());
       }
       this.mergeUnknownFields(other.unknownFields);
       onChanged();
@@ -2360,6 +2393,37 @@ private static final long serialVersionUID = 0L;
   checkByteStringIsUtf8(value);
       
       ddl_ = value;
+      onChanged();
+      return this;
+    }
+
+    private int ddlScope_ ;
+    /**
+     * <code>int32 ddlScope = 16;</code>
+     * @return The ddlScope.
+     */
+    @java.lang.Override
+    public int getDdlScope() {
+      return ddlScope_;
+    }
+    /**
+     * <code>int32 ddlScope = 16;</code>
+     * @param value The ddlScope to set.
+     * @return This builder for chaining.
+     */
+    public Builder setDdlScope(int value) {
+      
+      ddlScope_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>int32 ddlScope = 16;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearDdlScope() {
+      
+      ddlScope_ = 0;
       onChanged();
       return this;
     }

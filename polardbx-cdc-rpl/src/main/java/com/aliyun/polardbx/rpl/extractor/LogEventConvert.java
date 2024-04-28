@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.rpl.extractor;
 
-import com.alibaba.polardbx.druid.wall.spi.MySqlWallProvider;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
@@ -65,11 +65,11 @@ import com.aliyun.polardbx.rpl.filter.BaseFilter;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
-import org.springframework.util.CollectionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.io.Serializable;
@@ -79,14 +79,13 @@ import java.math.BigInteger;
 import java.sql.Types;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Scanner;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_PARSE_ERROR_PROCESS_MODE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_FILTER_TABLE_ERROR;
-import static com.aliyun.polardbx.binlog.util.CommonUtils.PRIVATE_DDL_DDL_PREFIX;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql;
 
 /**
  * 基于{@linkplain LogEvent}转化为Entry对象的处理
@@ -97,6 +96,7 @@ import static com.aliyun.polardbx.binlog.util.CommonUtils.PRIVATE_DDL_DDL_PREFIX
 @Slf4j
 public class LogEventConvert {
 
+    protected static final Logger extractorLogger = LoggerFactory.getLogger("rplExtractorLogger");
     public static final String ISO_8859_1 = "ISO-8859-1";
     public static final int TINYINT_MAX_VALUE = 256;
     public static final int SMALLINT_MAX_VALUE = 65536;
@@ -106,7 +106,6 @@ public class LogEventConvert {
     public static final int version = 1;
     public static final String BEGIN = "BEGIN";
     public static final String COMMIT = "COMMIT";
-    private static final Pattern ORIGIN_SQL_PATTERN = Pattern.compile(PRIVATE_DDL_DDL_PREFIX + "([\\W\\w]+)");
 
     protected static final String MYSQL = "mysql";
     protected static final String HA_HEALTH_CHECK = "ha_health_check";
@@ -119,7 +118,7 @@ public class LogEventConvert {
     protected boolean filterQueryDml = true;
     protected boolean filterRowsQuery = false;
     // 是否跳过table相关的解析异常,比如表不存在或者列数量不匹配,issue 92
-    protected boolean filterTableError = DynamicApplicationConfig.getBoolean(RPL_FILTER_TABLE_ERROR);
+    protected boolean filterTableError = getBoolean(RPL_FILTER_TABLE_ERROR);
     protected boolean firstBinlogFile = true;
     protected HostType srcHostType;
     protected HostInfo metaHostInfo;
@@ -234,7 +233,14 @@ public class LogEventConvert {
         case LogEvent.DELETE_ROWS_EVENT:
             return parseRowsEvent((DeleteRowsLogEvent) logEvent, isSeek);
         case LogEvent.ROWS_QUERY_LOG_EVENT:
-            nowTso = LogEventUtil.getTsoFromRowQuery(((RowsQueryLogEvent) logEvent).getRowsQuery());
+            String thisTso = LogEventUtil.getTsoFromRowQuery(((RowsQueryLogEvent) logEvent).getRowsQuery());
+            // nowTso 仅能从 DDL / 心跳 / 事务内的第一个rows query log获取
+            // 同事务内后续的 rows query log 无 tso
+            // 因此此处要判空，防止后续dml没有正确的 tso
+            // nowTso 仅在事务开头和事务结尾清除
+            if (thisTso != null) {
+                nowTso = thisTso;
+            }
             return parseRowsQueryEvent((RowsQueryLogEvent) logEvent);
         case LogEvent.ANNOTATE_ROWS_EVENT:
             return parseAnnotateRowsEvent((AnnotateRowsEvent) logEvent);
@@ -260,103 +266,102 @@ public class LogEventConvert {
     protected MySQLDBMSEvent parseQueryEvent(QueryLogEvent event, boolean isSeek) {
         String queryString = event.getQuery();
         if (StringUtils.endsWithIgnoreCase(queryString, BEGIN)) {
+            // 此处还拿不到该事务真正的tso，因此直接置空
             nowTso = null;
             DBMSTransactionBegin transactionBegin = createTransactionBegin(event.getSessionId());
             return new MySQLDBMSEvent(transactionBegin, createPosition(event.getHeader()),
                 event.getHeader().getEventLen());
         } else if (StringUtils.endsWithIgnoreCase(queryString, COMMIT)) {
-            nowTso = null;
             DBMSTransactionEnd transactionEnd = createTransactionEnd(0L);
-            return new MySQLDBMSEvent(transactionEnd, createPosition(event.getHeader()),
+            // 先获取nowTso再置空，确保下游的position中含有tso
+            MySQLDBMSEvent sqlDBMSEvent = new MySQLDBMSEvent(transactionEnd, createPosition(event.getHeader()),
                 event.getHeader().getEventLen());
+            nowTso = null;
+            return sqlDBMSEvent;
         } else {
-            // ddl
-            // 先提取# POLARX_TSO=
+            // 先提取TSO: # POLARX_TSO=，并尝试过滤
             String tso = CommonUtils.extractPrivateTSOFromDDL(queryString);
             if (StringUtils.isNotBlank(tso)) {
                 nowTso = tso;
             }
-
-            String originSql = queryString;
-            Scanner scanner = new Scanner(queryString);
-            while (scanner.hasNextLine()) {
-                String str = scanner.nextLine();
-                Matcher matcher = ORIGIN_SQL_PATTERN.matcher(str);
-                if (matcher.find()) {
-                    originSql = matcher.group(1);
-                    break;
+            if (filter.ignoreEventByTso(nowTso)) {
+                if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
+                    extractorLogger.warn("ignoreDdlByTSO: " + nowTso + ":[" + event.getDbName() + "]:["
+                        + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
                 }
+
+                return null;
             }
 
-            // DDL语句处理
-            // 只保留最后一条，queryString都是一样的
-            HashMap<String, String> ddlInfo = Maps.newHashMap();
+            // 尝试提取私有DDL，# POLARX_ORIGIN_SQL=
+            String originSql = extractPolarxOriginSql(queryString);
+            originSql = StringUtils.isNotBlank(originSql) ? originSql : queryString;
 
-            // 解析 sql 语句
-            if (StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "flush")
+            // 如果上游是polardbx，则不能过滤，正常同步
+            if (StringUtils.isBlank(tso) && (StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "flush")
                 || StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "grant")
                 || StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "create user")
-                || StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "drop user")) {
-                return null;
-            }
-            List<DdlResult> resultList = DruidDdlParser.parse(originSql, event.getDbName());
-            if (CollectionUtils.isEmpty(resultList)) {
-                if (!(originSql.startsWith("/*!") && originSql.endsWith("*/"))) {
-                    log.error("DDL result list is empty. Raw query string: {}, db: {}", queryString, event.getDbName());
+                || StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "drop user"))) {
+                if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
+                    extractorLogger.warn("ignoreDdlByEmptyTSO: " + nowTso + ":[" + event.getDbName() + "]:["
+                        + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
                 }
                 return null;
             }
-            DdlResult result = resultList.get(0);
-            DBMSAction action = result.getType();
 
-            // 根据 filter 的 rewriteDbs 重写 dbName
+            // 尝试进行解析
+            int mode = getInt(RPL_DDL_PARSE_ERROR_PROCESS_MODE);
+            DdlResult ddlResult = null;
+            try {
+                ddlResult = DruidDdlParser.parse(originSql, event.getDbName());
+            } catch (Exception e) {
+                if (mode == 1) {
+                    log.warn("skip ddl sql because of parsing error, sql {} , tso {}.", originSql, tso);
+                    if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
+                        extractorLogger.warn("ignoreDdlByParsingError: " + nowTso + ":[" + event.getDbName() + "]:["
+                            + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
+                    }
+                    return null;
+                } else if (mode == 2) {
+                    log.error("ignore ddl sql because of parsing error, sql {} , tso {}.", originSql, tso);
+                    if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
+                        extractorLogger.warn("ignoreDdlByParsingError: " + nowTso + ":[" + event.getDbName() + "]:["
+                            + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
+                    }
 
-            // 对于非跨库 DDL: use db1, create table tb1(id int)
-            // event.getDbName() == result.getSchemaName() == db1
-
-            // 对于跨库 DDL:
-            // 如在源库 use db1, create db2.tb1(id int)
-            // 则，event.getDbName() == db1，result.getSchemaName() == db2;
-
-            // 对于 create database db1, drop database db1:
-            // 则不管是否跨库，始终 event.getDbName() == result.getSchemaName() == db1
-
-            // getRewriteDb 的作用：如果一条 sql,
-            // 不管是跨库的 use db2, create table db1.tb1(id int),
-            // 还是不跨库的 use db1, create table tb1(id int)
-            // 则 result.getSchemaName() == db1,
-            // mysql 在目标上执行逻辑：use result.getSchemaName()，create table tb1(id int);
-
-            // 注意：getRewriteDb 对 create database 和 drop database 不生效，
-            // 因为对于 mysql 来说，即便是有 rewriteDbs: <db1, db2>，
-            // 一条 sql: create database db1，在目标库执行时，不会变成 create database db2，
-            // 而仍然是 create database db1。
-
-            // mysql 逻辑，不管是否是跨库 ddl，都使用 event.getDbName() 对应的 rewriteDb 来过滤，
-            // 而不是使用 result.getSchemaName()。
-            // 按照逻辑来说，应该要使用 result.getSchemaName() 的 rewriteDb 来过滤，但此处 polarx 与 mysql 逻辑对齐。
-            String rewriteDbName = filter.getRewriteDb(event.getDbName(), action);
-            if (filter.ignoreEvent(rewriteDbName, result.getTableName(), action, event.getServerId())) {
-                return null;
+                } else {
+                    log.error("parse ddl sql error, sql {}, tso {}.", originSql, tso, e);
+                    throw e;
+                }
             }
-            if (filter.ignoreEventByTso(nowTso)) {
+            DBMSAction action = ddlResult == null ? DBMSAction.OTHER : ddlResult.getType();
+            String rewriteDbName = filter.getRewriteDb(event.getDbName(), action);
+            if (filter.ignoreEvent(rewriteDbName,
+                (ddlResult == null || ddlResult.getTableName() == null) ? "" : ddlResult.getTableName(),
+                action, event.getServerId())) {
+                if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
+                    extractorLogger.warn("ignoreDdlByFilter: " + nowTso + ":[" + event.getDbName() + "]:["
+                        + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
+                }
                 return null;
             }
 
             // 跨库 ddl，构造 DDL 事件时，要使用其真正的 db，即 result.getSchemaName()
-            if (!StringUtils.equalsIgnoreCase(event.getDbName(), result.getSchemaName())) {
-                rewriteDbName = filter.getRewriteDb(result.getSchemaName(), action);
-            }
-
-            // 对于 create database, drop database，则不再需要指定当前 DDL 在哪个 db 上执行，
-            // 因为执行 sql: create databases db1 时，本就不要也不能预先执行 use db1
-            if (action == DBMSAction.CREATEDB || action == DBMSAction.DROPDB) {
-                rewriteDbName = "";
+            // 但polardbx不需要
+            if (StringUtils.isBlank(tso) && ddlResult != null && StringUtils.isNotBlank(ddlResult.getSchemaName())
+                && !StringUtils.equalsIgnoreCase(event.getDbName(), ddlResult.getSchemaName())) {
+                rewriteDbName = filter.getRewriteDb(ddlResult.getSchemaName(), action);
             }
 
             // 更新内存 tableMetaCache
-            BinlogPosition position = createPosition(event.getHeader());
-            tableMetaCache.apply(position, rewriteDbName, originSql);
+            TableMeta preVersionTableMeta = null;
+            if (ddlResult != null) {
+                if (StringUtils.isNotBlank(ddlResult.getTableName())) {
+                    preVersionTableMeta = tableMetaCache.getTableMetaIfPresent(rewriteDbName, ddlResult.getTableName());
+                }
+                BinlogPosition position = createPosition(event.getHeader());
+                tableMetaCache.apply(position, rewriteDbName, originSql);
+            }
 
             // 构造对象
             DefaultQueryLog queryEvent = new DefaultQueryLog(rewriteDbName,
@@ -364,12 +369,14 @@ public class LogEventConvert {
                 new java.sql.Timestamp(event.getHeader().getWhen() * 1000),
                 event.getErrorCode(),
                 event.getSqlMode(),
-                result.getType());
-
-            // 将 ddl 的一些信息 set 到 optionValue
-            if (!ddlInfo.isEmpty()) {
-                queryEvent.setOptionValue(DefaultQueryLog.ddlInfo, ddlInfo);
+                action,
+                event.getExecTime());
+            queryEvent.setTableMeta(preVersionTableMeta);
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
+                extractorLogger.warn("recordDdl : " + nowTso + ":[" + event.getDbName() + "]:["
+                    + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
             }
+
             return new MySQLDBMSEvent(queryEvent, createPosition(event.getHeader()), event.getHeader().getEventLen());
         }
     }
@@ -449,7 +456,7 @@ public class LogEventConvert {
             } else if (LogEvent.DELETE_ROWS_EVENT_V1 == type || LogEvent.DELETE_ROWS_EVENT == type) {
                 action = DBMSAction.DELETE;
             } else {
-                throw new CanalParseException("unsupport event type :" + event.getHeader().getType());
+                throw new CanalParseException("unsupported event type :" + event.getHeader().getType());
             }
 
             // 根据 filter 的 rewriteDbs 重写 DbName
@@ -590,28 +597,27 @@ public class LogEventConvert {
                     if (fieldMeta.isUnsigned() && number.longValue() < 0) {
                         switch (buffer.getLength()) {
                         case 1: /* MYSQL_TYPE_TINY */
-                            dataValue = String.valueOf(Integer.valueOf(TINYINT_MAX_VALUE + number.intValue()));
+                            dataValue = TINYINT_MAX_VALUE + number.intValue();
                             javaType = Types.SMALLINT; // 往上加一个量级
                             break;
 
                         case 2: /* MYSQL_TYPE_SHORT */
-                            dataValue = String.valueOf(Integer.valueOf(SMALLINT_MAX_VALUE + number.intValue()));
+                            dataValue = SMALLINT_MAX_VALUE + number.intValue();
                             javaType = Types.INTEGER; // 往上加一个量级
                             break;
 
                         case 3: /* MYSQL_TYPE_INT24 */
-                            dataValue = String
-                                .valueOf(Integer.valueOf(MEDIUMINT_MAX_VALUE + number.intValue()));
+                            dataValue = MEDIUMINT_MAX_VALUE + number.intValue();
                             javaType = Types.INTEGER; // 往上加一个量级
                             break;
 
                         case 4: /* MYSQL_TYPE_LONG */
-                            dataValue = String.valueOf(Long.valueOf(INTEGER_MAX_VALUE + number.longValue()));
+                            dataValue = INTEGER_MAX_VALUE + number.longValue();
                             javaType = Types.BIGINT; // 往上加一个量级
                             break;
 
                         case 8: /* MYSQL_TYPE_LONGLONG */
-                            dataValue = BIGINT_MAX_VALUE.add(BigInteger.valueOf(number.longValue())).toString();
+                            dataValue = BIGINT_MAX_VALUE.add(BigInteger.valueOf(number.longValue()));
                             javaType = Types.DECIMAL; // 往上加一个量级，避免执行出错
                             break;
                         default:
@@ -619,7 +625,7 @@ public class LogEventConvert {
                         }
                     } else {
                         // 对象为number类型，直接valueof即可
-                        dataValue = String.valueOf(value);
+                        dataValue = value;
                     }
                     break;
                 case Types.REAL: // float
@@ -732,7 +738,8 @@ public class LogEventConvert {
             new java.sql.Timestamp(logHeader.getWhen() * 1000),
             0,
             0,
-            action);
+            action,
+            0);
 
         return new MySQLDBMSEvent(queryLog, createPosition(logHeader), logHeader.getEventLen());
     }

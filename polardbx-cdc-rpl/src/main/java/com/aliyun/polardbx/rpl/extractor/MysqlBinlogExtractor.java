@@ -41,7 +41,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import java.net.InetSocketAddress;
-import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -136,7 +135,6 @@ public class MysqlBinlogExtractor extends BaseExtractor {
         @Override
         public boolean sink(List<MySQLDBMSEvent> events) {
             long now = System.currentTimeMillis();
-            Timestamp extractTimestamp = new Timestamp(now);
             List<MessageEvent> datas = new ArrayList<>(events.size());
 
             // 一次完整的 XA 事务，会 3 次调用本函数
@@ -145,7 +143,7 @@ public class MysqlBinlogExtractor extends BaseExtractor {
             // 3. XA_COMMIT
 
             for (MySQLDBMSEvent event : events) {
-                DBMSEvent dbmsEvent = event.getDbMessageWithEffect();
+                DBMSEvent dbmsEvent = event.getDbmsEventPayload();
                 if (dbmsEvent instanceof DBMSTransactionBegin) {
                     // 只处理正常的数据,事务头和尾就忽略了,避免占用ringbuffer空间
                     DBMSTransactionBegin begin = (DBMSTransactionBegin) dbmsEvent;
@@ -182,13 +180,6 @@ public class MysqlBinlogExtractor extends BaseExtractor {
                     if (rowChange.getRowSize() == 1) {
                         MessageEvent e = new MessageEvent(RplStorage.getRepoUnit());
                         e.setDbmsEvent(dbmsEvent);
-                        e.setPosition(event.getPosition().toString());
-                        e.setSourceTimestamp(new Timestamp(event.getPosition().getTimestamp() * 1000));
-                        e.setExtractTimestamp(extractTimestamp);
-                        rowChange.putOption(
-                            new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
-                        rowChange.putOption(
-                            new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION, e.getPosition()));
                         rowChange.putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_T_ID, tid));
                         // 如果此 DML 与某 XA 事务关联，将 XA 事务信息赋予其关联 DML
                         if (nowXa != null) {
@@ -198,7 +189,7 @@ public class MysqlBinlogExtractor extends BaseExtractor {
                         datas.add(e);
                     } else {
                         BinlogPosition position = event.getPosition();
-                        long innerOffset = 0;
+                        // long innerOffset = 0;
                         for (int rownum = 1; rownum <= rowChange.getRowSize(); rownum++) {
                             // 多行记录,拆分为单行进行处理
                             DefaultRowChange split = new DefaultRowChange(rowChange.getAction(),
@@ -216,14 +207,11 @@ public class MysqlBinlogExtractor extends BaseExtractor {
                             // 每一行一个事件
                             MessageEvent e = new MessageEvent(RplStorage.getRepoUnit());
                             e.setDbmsEvent(split);
-                            // position.setInnerOffset(innerOffset++);
-                            e.setPosition(position.toString());
-                            e.setSourceTimestamp(new Timestamp(event.getPosition().getTimestamp() * 1000));
-                            e.setExtractTimestamp(extractTimestamp);
-                            split.putOption(
-                                new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
-                            split.putOption(
-                                new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION, e.getPosition()));
+                            split.setSourceTimeStamp(rowChange.getSourceTimeStamp());
+                            split.setExtractTimeStamp(rowChange.getExtractTimeStamp());
+                            split.setEventSize(rowChange.getEventSize());
+                            split.setPosition(rowChange.getPosition());
+                            split.setRtso(rowChange.getRtso());
                             split.putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_T_ID, tid));
                             if (nowXa != null) {
                                 e.setXaTransaction(nowXa);
@@ -236,19 +224,11 @@ public class MysqlBinlogExtractor extends BaseExtractor {
                     // query log event
                     MessageEvent e = new MessageEvent(RplStorage.getRepoUnit());
                     e.setDbmsEvent(dbmsEvent);
-                    e.setPosition(event.getPosition().toString());
-                    e.setSourceTimestamp(new Timestamp(event.getPosition().getTimestamp() * 1000));
                     if (dbmsEvent instanceof DefaultQueryLog) {
-                        dbmsEvent.putOption(
-                            new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP, e.getSourceTimestamp()));
-                        dbmsEvent
-                            .putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_POSITION, e.getPosition()));
                         dbmsEvent.putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_T_ID, tid));
                     }
-                    e.setExtractTimestamp(extractTimestamp);
                     e.setXaTransaction(event.getXaTransaction());
                     tryPersist(e, event);
-
                     datas.add(e);
                 }
                 event.tryRelease();

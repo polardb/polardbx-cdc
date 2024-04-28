@@ -41,4 +41,15 @@ public class Timestamp2FieldTest {
             new byte[] {127, -1, -1, -1},
             field.encode());
     }
+
+    @Test
+    public void testZero() {
+        TimeZone.setDefault(TimeZone.getTimeZone("CTT"));
+        Field field = MakeFieldFactory.makeField("timestamp", "0000-00-00 00:00:00.000", "utf8", false, false);
+        Assert.assertArrayEquals(new byte[] {0}, field.doGetTableMeta());
+        Assert.assertArrayEquals(
+            new byte[] {0, 0, 0, 0},
+            field.encode());
+    }
+
 }

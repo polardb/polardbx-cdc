@@ -24,7 +24,15 @@ public enum RuntimeMode {
      */
     LOCAL,
     /**
+     * 本地单体模式，Daemon、Dumper、Task跑在一个进程
+     */
+    LOCAL_SINGLE,
+    /**
      * 集群模式
      */
-    CLUSTER
+    CLUSTER;
+
+    public static boolean isLocalMode(RuntimeMode mode) {
+        return mode == LOCAL || mode == LOCAL_SINGLE;
+    }
 }

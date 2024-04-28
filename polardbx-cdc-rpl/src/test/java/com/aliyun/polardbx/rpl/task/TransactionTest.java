@@ -16,7 +16,7 @@ package com.aliyun.polardbx.rpl.task;
 
 import com.aliyun.polardbx.rpl.RplTaskRunner;
 import com.aliyun.polardbx.rpl.TestBase;
-import com.aliyun.polardbx.rpl.applier.ApplyHelper;
+import com.aliyun.polardbx.rpl.applier.DmlApplyHelper;
 import com.aliyun.polardbx.rpl.applier.SqlContext;
 import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
 import org.junit.After;
@@ -24,6 +24,7 @@ import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -61,11 +62,17 @@ public class TransactionTest extends TestBase {
             final int j = i;
             executorService.submit(() -> {
                 int start = 30000 + j * 2000000;
+                Connection conn = srcDs.getConnection();
+                conn.setAutoCommit(false);
                 while (true) {
-                    ApplyHelper.tranExecUpdate(srcDs, getSqlContexts1(start));
-                    ApplyHelper.tranExecUpdate(srcDs, getSqlContexts2(start));
-                    ApplyHelper.tranExecUpdate(srcDs, getSqlContexts3(start));
-                    ApplyHelper.tranExecUpdate(srcDs, getSqlContexts4(start));
+                    List<SqlContext> contexts = getSqlContexts1(start);
+                    contexts.addAll(getSqlContexts2(start));
+                    contexts.addAll(getSqlContexts3(start));
+                    contexts.addAll(getSqlContexts4(start));
+                    for (SqlContext context : contexts) {
+                        DmlApplyHelper.execSqlContext(conn, context);
+                    }
+                    conn.commit();
                     start += 10;
                 }
             });

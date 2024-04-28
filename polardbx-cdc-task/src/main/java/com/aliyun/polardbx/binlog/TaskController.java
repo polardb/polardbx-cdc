@@ -128,7 +128,7 @@ public class TaskController {
         if (info.isPresent()) {
             // 兼容一下老版调度引擎的逻辑，如果version为0，进行更新
             RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
-            if (info.get().getVersion() == 0 || runtimeMode == RuntimeMode.LOCAL) {
+            if (info.get().getVersion() == 0 || RuntimeMode.isLocalMode(runtimeMode)) {
                 binlogTaskInfo.setId(info.get().getId());
                 taskInfoMapper.updateByPrimaryKeySelective(binlogTaskInfo);
             } else {

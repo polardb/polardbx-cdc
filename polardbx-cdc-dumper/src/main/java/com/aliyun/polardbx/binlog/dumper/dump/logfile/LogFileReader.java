@@ -20,6 +20,7 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
+import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg;
 import com.aliyun.polardbx.binlog.dumper.metrics.DumpClientMetric;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
@@ -29,6 +30,7 @@ import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import com.aliyun.polardbx.binlog.util.LabEventType;
+import com.aliyun.polardbx.binlog.util.Timer;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
@@ -49,7 +51,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_BACK_PRESSURE_SLEEP_TIME_US;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_HEARTBEAT_INTERVAL_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_MASTER_HEARTBEAT_PERIOD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_PACKET_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DUMP_READ_BUFFER_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND;
@@ -60,6 +62,9 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getLong;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.dumper.dump.constants.DumpUserVariableName.MASTER_BINLOG_CHECKSUM;
+import static com.aliyun.polardbx.binlog.dumper.dump.constants.DumpUserVariableName.MASTER_HEARTBEAT_PERIOD;
+import static com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg.BINLOG_CHECKSUM_ALG_UNDEF;
 
 /**
  * Created by ShuGuang
@@ -118,7 +123,8 @@ public class LogFileReader {
             log.error("show binlog events in {} from {} limit {}, {} fail", cdcFile.getName(), position, offset,
                 rowCount,
                 th);
-            serverCallStreamObserver.onError(Status.INVALID_ARGUMENT.withDescription(th.getMessage()).asException());
+            serverCallStreamObserver.onError(
+                Status.INVALID_ARGUMENT.withDescription("show binlog events error!").asException());
         } finally {
             if (binlogFileReader != null) {
                 binlogFileReader.close();
@@ -126,13 +132,31 @@ public class LogFileReader {
         }
     }
 
-    public void binlogDump(String fileName, long position, boolean registered, Map<String, String> ext,
+    public void binlogDump(String fileName, long startPosition, boolean registered, Map<String, String> ext,
                            ServerCallStreamObserver<DumpStream> serverCallStreamObserver) {
         BinlogDumpReader dumpReader = null;
         BinlogDumpDownloader dumpDownloader = null;
         try {
             log.info("binlogDump from {}@{}, register parameter value is {}, ext parameter value is {}",
-                fileName, position, registered, ext);
+                fileName, startPosition, registered, ext);
+
+            // ===============  handle binlog dump related user variables ===================
+            EnumBinlogChecksumAlg slaveChecksumAlg = BINLOG_CHECKSUM_ALG_UNDEF;
+            long masterHeartbeatPeriod = DynamicApplicationConfig.getLong(BINLOG_DUMP_MASTER_HEARTBEAT_PERIOD);
+            for (Map.Entry<String, String> entry : ext.entrySet()) {
+                switch (entry.getKey()) {
+                case MASTER_BINLOG_CHECKSUM:
+                    slaveChecksumAlg = EnumBinlogChecksumAlg.fromName(entry.getValue());
+                    break;
+                case MASTER_HEARTBEAT_PERIOD:
+                    masterHeartbeatPeriod = Long.parseLong(entry.getValue());
+                    break;
+                default:
+                    log.warn("unknown binlog dump parameter: {}", entry.getKey());
+                }
+            }
+            // ===============  handle binlog dump related user variables ===================
+
             long retryInterval = DynamicApplicationConfig.getLong(
                 ConfigKeys.BINLOG_DUMP_WAIT_CURSOR_READY_RETRY_INTERVAL_SECOND);
             int retryTimesLimit = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_DUMP_WAIT_CURSOR_READY_TIMES_LIMIT);
@@ -143,35 +167,44 @@ public class LogFileReader {
                 build().
                 call(logFileManager::getLatestFileCursor);
 
-            dumpReader = new BinlogDumpReader(logFileManager, fileName, position, getInt(BINLOG_DUMP_PACKET_SIZE),
-                getInt(BINLOG_DUMP_READ_BUFFER_SIZE));
+            dumpReader = new BinlogDumpReader(logFileManager, fileName, startPosition, getInt(BINLOG_DUMP_PACKET_SIZE),
+                getInt(BINLOG_DUMP_READ_BUFFER_SIZE), slaveChecksumAlg);
+
             DumpClientMetric.startDump();
             if (useDownloadFirstModeForDump(fileName)) {
                 Integer windowSize = getInt(ConfigKeys.BINLOG_DUMP_DOWNLOAD_WINDOW_SIZE);
                 // 解决多个dump请求并发的问题，防止互相干扰
                 String downloadPath = getString(ConfigKeys.BINLOG_DUMP_DOWNLOAD_PATH) + "/" + UUID.randomUUID();
-                dumpDownloader = new BinlogDumpDownloader(logFileManager, downloadPath, windowSize, fileName);
+                dumpDownloader =
+                    new BinlogDumpDownloader(logFileManager, downloadPath, windowSize, fileName, masterHeartbeatPeriod,
+                        serverCallStreamObserver, dumpReader);
                 dumpDownloader.start();
                 dumpReader.setDumpMode(BinlogDumpReader.DumpMode.QUICK);
                 dumpReader.setBinlogDumpDownloader(dumpDownloader);
                 dumpReader.registerRotateObserver(dumpDownloader);
             }
 
+            // send a fake rotate
+            ByteString fakeRotatePacket = dumpReader.fakeRotateEventPacket();
+            serverCallStreamObserver.onNext(DumpStream.newBuilder().setPayload(fakeRotatePacket).build());
+            DEBUG_INFO("FakeRotateEvent", fakeRotatePacket);
+
+            // get file from local or wait for file download from remote
             dumpReader.init();
+
             dumpReader.valid();
 
-            // 在读取binlog中的内容之前，发送一个fake rotate和一个fake format event
-            ByteString fakeRotateEvent = dumpReader.fakeRotateEvent();
-            ByteString fakeFormatEvent = dumpReader.fakeFormatEvent();
-            serverCallStreamObserver.onNext(DumpStream.newBuilder().setPayload(fakeRotateEvent).build());
-            show("FakeRotateEvent", fakeRotateEvent);
-            serverCallStreamObserver.onNext(DumpStream.newBuilder().setPayload(fakeFormatEvent).build());
-            show("FakeFormatEvent", fakeFormatEvent);
+            // send a format desc event first
+            ByteString fakeFormatEventPack = dumpReader.formatDescriptionPacket();
+            // ByteString fakeFormatEventPack = dumpReader.fakeFormatEvent();
+            serverCallStreamObserver.onNext(DumpStream.newBuilder().setPayload(fakeFormatEventPack).build());
+            DEBUG_INFO("FakeFormatEvent", fakeFormatEventPack);
 
             dumpReader.start();
             int timeout = 10, noData = 0;
             int checkFileStatusInterval = getInt(BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND);
-            long lastCheckTime = System.currentTimeMillis();
+            Timer checkFileStatusTimer = new Timer(checkFileStatusInterval * 1000L);
+            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000);
             long backPressureSleepTime = getLong(BINLOG_DUMP_BACK_PRESSURE_SLEEP_TIME_US);
             while (true) {
                 if (serverCallStreamObserver.isCancelled()) {
@@ -181,14 +214,10 @@ public class LogFileReader {
 
                 // 必须要check file是否存在，否则如果dump过程中文件被删，hasNext方法会一值返回true
                 // 但是nextPack是空的，导致线程在while循环中无法退出
-                if (System.currentTimeMillis() - lastCheckTime > checkFileStatusInterval * 1000) {
-                    if (!dumpReader.checkFileStatus()) {
-                        log.warn("binlog file {} has been deleted, dump thread will exit.", dumpReader.fileName);
-                        LabEventManager.logEvent(LabEventType.DUMPER_DUMP_LOCAL_FILE_IS_DELETED);
-                        break;
-                    } else {
-                        lastCheckTime = System.currentTimeMillis();
-                    }
+                if (checkFileStatusTimer.isTimeout() && !dumpReader.checkFileStatus()) {
+                    log.warn("binlog file {} has been deleted, dump thread will exit.", dumpReader.fileName);
+                    LabEventManager.logEvent(LabEventType.DUMPER_DUMP_LOCAL_FILE_IS_DELETED);
+                    break;
                 }
 
                 if (serverCallStreamObserver.isReady()) {
@@ -196,39 +225,35 @@ public class LogFileReader {
                         ByteString pack = dumpReader.nextDumpPacks();
                         metrics.incrementTotalDumpBytes(pack.size());
                         if (log.isDebugEnabled()) {
-                            show("BinlogDump", pack);
+                            DEBUG_INFO("BinlogDump", pack);
                         }
 
                         serverCallStreamObserver.onNext(
                             DumpStream.newBuilder().setPayload(pack).build());
                         DumpClientMetric.addDumpBytes(pack.size());
-                        DumpClientMetric.recordPosition(dumpReader.fileName, dumpReader.fp, dumpReader.timestamp);
+                        DumpClientMetric.recordPosition(dumpReader.fileName, dumpReader.lastPosition,
+                            dumpReader.timestamp);
+                        heartbeatTimer.reset();
                     } else {
                         TimeUnit.MILLISECONDS.sleep(timeout);
-                        noData += timeout;
-                        //默认30s一次心跳(mysql 默认 SELECT Heartbeat FROM MYSQL.SLAVE_MASTER_INFO)
-                        //减少到1s
-                        int interval = DynamicApplicationConfig.getInt(BINLOG_DUMP_HEARTBEAT_INTERVAL_MS);
-                        if (noData > interval) {
-                            ByteString heartbeatEvent = dumpReader.heartbeatEvent();
-                            show("HeartbeatEvent", heartbeatEvent);
-                            serverCallStreamObserver.onNext(
-                                DumpStream.newBuilder()
-                                    .setPayload(heartbeatEvent)
-                                    .build());
-                            noData = 0;
+                        if (heartbeatTimer.isTimeout()) {
+                            ByteString heartbeatEvent = dumpReader.heartbeatEventPacket();
+                            DEBUG_INFO("HeartbeatEvent", heartbeatEvent);
+                            serverCallStreamObserver.onNext(DumpStream.newBuilder().setPayload(heartbeatEvent).build());
                         }
                     }
                 } else {
                     TimeUnit.MICROSECONDS.sleep(backPressureSleepTime);
                 }
             }
+        } catch (InterruptedException e) {
+            log.info("remote closed.");
         } catch (Throwable th) {
-            log.error("BinlogDump fail {},{} {}", fileName, position, th.getMessage(), th);
+            log.error("BinlogDump fail {},{} {}", fileName, startPosition, th.getMessage(), th);
             //如果是明确error_code的异常信息，可以以json的形式onError出去，否则show slave status可能不显示
             Map map = Maps.newHashMap();
             map.put("error_code", 1236);
-            map.put("error_message", th.getMessage());
+            map.put("error_message", "binlog dump error!");
             final String s = JSON.toJSONString(map);
             serverCallStreamObserver.onError(Status.INVALID_ARGUMENT.withDescription(s).asException());
         } finally {
@@ -251,8 +276,10 @@ public class LogFileReader {
         }
         BinlogSyncReader binlogSyncReader = null;
         try {
+            EnumBinlogChecksumAlg eventChecksumAlg = EnumBinlogChecksumAlg.fromName(
+                DynamicApplicationConfig.getString(ConfigKeys.BINLOG_DUMP_M_EVENT_CHECKSUM_ALG));
             binlogSyncReader = new BinlogSyncReader(logFileManager, fileName, position, eventSplitMode,
-                getInt(BINLOG_SYNC_PACKET_SIZE), getInt(BINLOG_SYNC_READ_BUFFER_SIZE));
+                getInt(BINLOG_SYNC_PACKET_SIZE), getInt(BINLOG_SYNC_READ_BUFFER_SIZE), eventChecksumAlg);
             binlogSyncReader.start();
             int timeout = 100, noData = 0;
             int checkFileStatusInterval = getInt(BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND);
@@ -275,7 +302,7 @@ public class LogFileReader {
                     if (binlogSyncReader.hasNext()) {
                         ByteString pack = binlogSyncReader.nextSyncPacks();
                         if (log.isDebugEnabled()) {
-                            show("BinlogSync", pack);
+                            DEBUG_INFO("BinlogSync", pack);
                         }
                         outputStream.onNext(DumpStream.newBuilder().setPayload(pack).build());
                     } else {
@@ -283,7 +310,7 @@ public class LogFileReader {
                         noData += timeout;
                         if (noData > 2000) {
                             outputStream.onNext(DumpStream.newBuilder()
-                                .setPayload(binlogSyncReader.heartbeatEvent())
+                                .setPayload(binlogSyncReader.heartbeatEventPacket())
                                 .setIsHeartBeat(true)
                                 .build());
                             noData = 0;
@@ -310,18 +337,19 @@ public class LogFileReader {
         return ByteString.copyFrom(data);
     }
 
-    private void show(String type, ByteString pack) {
-        byte[] data = pack.toByteArray();
-        ByteArray ba = new ByteArray(data);
-        if (!type.equals("BinlogSync")) {
-            ba.skip(5);
-        }
-        ba.skip(4);
-        int eventType = ba.read();
-        long serverId = ba.readLong(4);
-        long eventSize = ba.readLong(4);
-        int endPos = ba.readInteger(4);
+    private void DEBUG_INFO(String type, ByteString pack) {
         if (log.isDebugEnabled()) {
+            byte[] data = pack.toByteArray();
+            ByteArray ba = new ByteArray(data);
+            if (!type.equals("BinlogSync")) {
+                ba.skip(5);
+            }
+            ba.skip(4);
+            int eventType = ba.read();
+            long serverId = ba.readLong(4);
+            long eventSize = ba.readLong(4);
+            int endPos = ba.readInteger(4);
+
             log.debug("{} serverId={} payload {}[{}->{}]", type, serverId,
                 LogEvent.getTypeName(eventType), endPos - eventSize, endPos);
         }

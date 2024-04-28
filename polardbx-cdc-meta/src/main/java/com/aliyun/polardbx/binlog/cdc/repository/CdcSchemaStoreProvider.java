@@ -37,10 +37,9 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 public class CdcSchemaStoreProvider implements SchemaObjectStoreProvider {
 
     private static final CdcSchemaStoreProvider INSTANCE = new CdcSchemaStoreProvider();
-    private final RepoUnit repoUnit;
+    private volatile RepoUnit repoUnit;
 
     private CdcSchemaStoreProvider() {
-        this.repoUnit = buildRepoUnit();
     }
 
     public static CdcSchemaStoreProvider getInstance() {
@@ -50,17 +49,25 @@ public class CdcSchemaStoreProvider implements SchemaObjectStoreProvider {
     @Override
     public SchemaObjectStore get() {
         if (getMetaPersistEnabled()) {
-            return new PersistentSchemaStore(repoUnit);
+            return new PersistentSchemaStore(getRepoUnit());
         } else {
             return new SchemaObjectStoreInMemory();
         }
     }
 
-    private RepoUnit buildRepoUnit() {
-        if (!getMetaPersistEnabled()) {
-            return null;
+    private RepoUnit getRepoUnit() {
+        if (repoUnit != null) {
+            return repoUnit;
         }
+        synchronized (this) {
+            if (repoUnit == null) {
+                repoUnit = buildRepoUnit();
+            }
+        }
+        return repoUnit;
+    }
 
+    private RepoUnit buildRepoUnit() {
         try {
             String basePath = DynamicApplicationConfig.getString(META_PERSIST_BASE_PATH);
             if (!basePath.endsWith("/")) {

@@ -14,29 +14,34 @@
  */
 package com.aliyun.polardbx.rpl.extractor;
 
-import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DdlResult;
 import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DruidDdlParser;
+import org.junit.Assert;
 import org.junit.Test;
 
-import java.util.List;
-
-import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatementList;
 import static org.junit.Assert.assertNotNull;
 
 public class DruidDdlParserTest {
-
     @Test
-    public void DruidDdlParserTest() {
+    public void testForeignKey() {
         String sql1 = "ALTER TABLE `res_catalog`\n"
             + "  COMMENT = ''";
-        String sql2 =
-            "create table if not exists `t_hash_hash_not_template_1690868091444` (a bigint unsigned not null,b bigint unsigned not null,c datetime NOT NULL,d varchar(16) NOT NULL,e varchar(16) NOT NULL)partition by hash (c,d) partitions 2 subpartition by hash (a,b)(  partition p1 subpartitions 2,  partition p2 subpartitions 4)";
-        DdlResult result1 = DruidDdlParser.parse(sql1, "abc").get(0);
-        List<DdlResult> resultList2 = DruidDdlParser.parse(sql2, "abc");
-        List<SQLStatement> stmtList = parseSQLStatementList(sql2);
-        String a = stmtList.get(0).toString();
+        String sql2 = "ALTER TABLE res_catalog";
+        String sql3 = "ALTER TABLE `device` ADD CONSTRAINT FOREIGN KEY (`b`) REFERENCES `user2` (`a`)";
+        DdlResult result1 = DruidDdlParser.parse(sql1, "abc");
+        DdlResult result2 = DruidDdlParser.parse(sql2, "abc");
+        DdlResult result3 = DruidDdlParser.parse(sql3, "abc");
         assertNotNull(result1);
-        assertNotNull(resultList2);
+        assertNotNull(result2);
+        assertNotNull(result3.getType());
+    }
+
+    @Test
+    public void testDropTableIfExists() {
+        // see https://aone.alibaba-inc.com/v2/project/860366/bug/55137024
+        String sql = "DROP TABLE IF EXISTS d1.d2.rename_target_auto";
+        DdlResult ddlResult = DruidDdlParser.parse(sql, "abc");
+        Assert.assertEquals("d1", ddlResult.getSchemaName());
+        Assert.assertEquals("rename_target_auto", ddlResult.getTableName());
     }
 }

@@ -240,7 +240,7 @@ public class TsoHeartbeatTimer implements Runnable, IScheduleJob {
 
         new AlterTableModifyColumnExecutor(template).
             tableName("__cdc_ddl_record__").
-            targetColumnType("MEDIUMTEXT").
+            targetColumnType("LONGTEXT").
             defaultNull().
             modifyColumn("META_INFO").
             execute();

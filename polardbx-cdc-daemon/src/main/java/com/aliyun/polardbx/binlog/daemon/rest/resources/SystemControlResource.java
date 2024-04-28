@@ -167,21 +167,24 @@ public class SystemControlResource {
     public String reset() {
         logger.info("try to reset master");
 
-        if (!RuntimeLeaderElector.isDaemonLeader()) {
-            logger.error("reset operation must execute in daemon leader!");
-            ResultCode<Object> res = ResultCode.builder().code(CommonConstants.FAILURE_CODE)
-                .msg("reset operation must execute in daemon leader!").data(false).build();
-            return JSON.toJSONString(res);
-        }
+        // force 开关打开，不需要等待任务调度，本地开发使用
+        if (!DynamicApplicationConfig.getBoolean(ConfigKeys.FORCE_RESET_ENABLE)) {
+            if (!RuntimeLeaderElector.isDaemonLeader()) {
+                logger.error("reset operation must execute in daemon leader!");
+                ResultCode<Object> res = ResultCode.builder().code(CommonConstants.FAILURE_CODE)
+                    .msg("reset operation must execute in daemon leader!").data(false).build();
+                return JSON.toJSONString(res);
+            }
 
-        try {
-            waitStop();
-        } catch (Exception e) {
-            logger.error("wait stop error", e);
-            ResultCode<Object> res = ResultCode.builder().code(CommonConstants.FAILURE_CODE)
-                .msg("Want to reset master? You should execute stop master first!")
-                .data(false).build();
-            return JSON.toJSONString(res);
+            try {
+                waitStop();
+            } catch (Exception e) {
+                logger.error("wait stop error", e);
+                ResultCode<Object> res = ResultCode.builder().code(CommonConstants.FAILURE_CODE)
+                    .msg("Want to reset master? You should execute stop master first!")
+                    .data(false).build();
+                return JSON.toJSONString(res);
+            }
         }
 
         ClusterBootstrapService bootstrapService = ClusterBootStrapFactory
@@ -555,16 +558,19 @@ public class SystemControlResource {
 
     @GET
     @Path("/getVersion")
-    @Leader
     public String getVersion() {
         String result = "";
-        java.nio.file.Path path = Paths.get("/home/admin/polardbx-binlog.standalone/conf/git.properties");
+        // 用例中使用变量
+        String releaseNotePath = DynamicApplicationConfig.getString(ConfigKeys.RELEASE_NOTE_PATH);
         try {
+            java.nio.file.Path path = Paths.get(releaseNotePath);
+            String prefix = "t-polardbx-cdc-";
+            String endfix = ".noarch.rpm";
             List<String> lines = Files.readAllLines(path);
-            String versionPrefix = "git.build.version=";
             for (String line : lines) {
-                if (line.startsWith(versionPrefix)) {
-                    result = line.substring(versionPrefix.length(), line.indexOf('-'));
+                if (line.startsWith(prefix)) {
+                    result = line.substring(prefix.length(), line.indexOf(endfix));
+                    break;
                 }
             }
         } catch (Exception e) {

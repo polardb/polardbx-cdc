@@ -53,6 +53,12 @@ public class ColumnTypeUtil {
             columnType.startsWith("timestamp");
     }
 
+    public static boolean isCharacterSetSensitive(String columnType) {
+        return columnType.startsWith("char") || columnType.startsWith("varchar") ||
+            columnType.startsWith("text") || columnType.startsWith("tinytext") ||
+            columnType.startsWith("mediumtext") || columnType.startsWith("longtext");
+    }
+
     public static boolean isVarCharOrBinary(String columnType) {
         return columnType.startsWith("varchar") || columnType.startsWith("char") ||
             columnType.startsWith("binary") || columnType.startsWith("varbinary") ||

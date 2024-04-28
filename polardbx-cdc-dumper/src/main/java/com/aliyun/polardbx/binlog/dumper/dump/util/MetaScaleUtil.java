@@ -58,12 +58,12 @@ import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.EXPECTED_STORAGE_TSO_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_REPAIR_STORAGE_WITH_SCALE_ENABLE;
-import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
-import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.util.StorageUtil.buildExpectedStorageTso;
@@ -231,9 +231,9 @@ public class MetaScaleUtil {
         long start = System.currentTimeMillis();
         while (true) {
             List<BinlogTaskConfig> taskConfigs = taskConfigMapper.select(
-                t -> t.where(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(getString(ConfigKeys.CLUSTER_ID)))
-                    .and(BinlogTaskConfigDynamicSqlSupport.role, isIn(
-                        TaskType.Final.name(), TaskType.Relay.name(), TaskType.Dispatcher.name())))
+                    t -> t.where(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(getString(ConfigKeys.CLUSTER_ID)))
+                        .and(BinlogTaskConfigDynamicSqlSupport.role, isIn(
+                            TaskType.Final.name(), TaskType.Relay.name(), TaskType.Dispatcher.name())))
                 .stream().filter(tc -> {
                     ExecutionConfig config = JSONObject.parseObject(tc.getConfig(), ExecutionConfig.class);
                     return !expectedStorageTso.equals(config.getTso());
@@ -269,7 +269,7 @@ public class MetaScaleUtil {
         BinlogOssRecordMapper mapper = getObject(BinlogOssRecordMapper.class);
         while (true) {
             List<BinlogOssRecord> list = mapper.select(s -> s.where(BinlogOssRecordDynamicSqlSupport.uploadStatus,
-                isIn(BinlogUploadStatus.SUCCESS.getValue(), BinlogUploadStatus.IGNORE.getValue()))
+                    isIn(BinlogUploadStatus.SUCCESS.getValue(), BinlogUploadStatus.IGNORE.getValue()))
                 .and(BinlogOssRecordDynamicSqlSupport.binlogFile, isLessThanOrEqualTo(fileName))
                 .and(BinlogOssRecordDynamicSqlSupport.streamId, isEqualTo(streamName))
                 .and(BinlogOssRecordDynamicSqlSupport.clusterId, isEqualTo(getString(CLUSTER_ID))));
@@ -318,7 +318,7 @@ public class MetaScaleUtil {
                         .and(StorageInfoDynamicSqlSupport.gmtCreated, isLessThanOrEqualTo(command.getGmtCreated()))
                         .orderBy(StorageInfoDynamicSqlSupport.id));
                 Set<String> storageIdsInDb = storageInfosInDb.stream().collect(
-                    Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1, (s1, s2) -> s1)).values().stream()
+                        Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1, (s1, s2) -> s1)).values().stream()
                     .map(StorageInfo::getStorageInstId)
                     .collect(Collectors.toSet());
 
@@ -346,11 +346,10 @@ public class MetaScaleUtil {
             JdbcTemplate polarxTemplate = getObject("polarxJdbcTemplate");
             String version = polarxTemplate.queryForObject("select version()", String.class);
             String[] versionArray = version.split("-");
-            if (!StringUtils.equals("TDDL", versionArray[1])) {
-                throw new PolardbxException("invalid polardbx version " + version);
+            if (versionArray.length > 2 && StringUtils.equals("TDDL", versionArray[1])) {
+                String kernelVersion = versionArray[2];
+                return needRepairVersions.contains(kernelVersion);
             }
-            String kernelVersion = versionArray[2];
-            return needRepairVersions.contains(kernelVersion);
         }
         return false;
     }

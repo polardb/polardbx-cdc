@@ -131,13 +131,20 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
         // 启动工作线程
         parseThread = new ParserThread();
         parseThread.setUncaughtExceptionHandler((t, e) -> {
-            boolean alreadyDeal = userDefinedHandler.handle(e);
-            if (directExitWhenStop && !alreadyDeal) {
-                log.error("encounter uncaught exception, process will exit.", e);
-                StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
-                    TaskContext.getInstance().getTaskId(), "apply error");
-                StatisticalProxy.getInstance().recordLastError(e.toString());
-                TaskContext.getInstance().getPipeline().stop();
+            try {
+                boolean alreadyDeal = false;
+                if (userDefinedHandler != null) {
+                    alreadyDeal = userDefinedHandler.handle(e);
+                }
+                if (directExitWhenStop && !alreadyDeal) {
+                    log.error("encounter uncaught exception, process will exit.", e);
+                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                        TaskContext.getInstance().getTaskId(), "apply error");
+                    StatisticalProxy.getInstance().recordLastError(e.toString());
+                    TaskContext.getInstance().getPipeline().stop();
+                }
+            } catch (Throwable th) {
+                log.error("uncaught exception handler error" + t.getName(), th);
             }
         });
         parseThread.setName(String.format("address = %s , EventParser",
@@ -410,7 +417,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
 
                         logfilename = entry.getPosition().getFileName();
 
-                        DBMSEvent dbmsEvent = entry.getDbMessageWithEffect();
+                        DBMSEvent dbmsEvent = entry.getDbmsEventPayload();
                         if (dbmsEvent instanceof DBMSTransactionBegin || dbmsEvent instanceof DBMSTransactionEnd) {
                             if (log.isDebugEnabled()) {
                                 log.debug(String.format("compare exit condition:%s,%s,%s, startTimestamp=%s...",
@@ -464,21 +471,27 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     /**
      * @param isSeek 是否回溯
      */
-    protected MySQLDBMSEvent parseAndProfilingIfNecessary(LogEvent bod, boolean isSeek) throws Exception {
+    protected MySQLDBMSEvent parseAndProfilingIfNecessary(LogEvent logEvent, boolean isSeek) throws Exception {
         long startTs = -1;
         boolean enabled = getProfilingEnabled();
         long now = System.currentTimeMillis();
         if (enabled) {
             startTs = now;
         }
-        MySQLDBMSEvent event = binlogParser.parse(bod, isSeek);
+        StatMetrics.getInstance().setReceiveDelay(now - logEvent.getWhen() * 1000);
+        StatMetrics.getInstance().addInMessageCount(1);
+        StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
+        MySQLDBMSEvent event = binlogParser.parse(logEvent, isSeek);
         if (event != null) {
+            DBMSEvent dbmsEvent = event.getDbmsEventPayload();
+            dbmsEvent.setSourceTimeStamp(logEvent.getWhen() * 1000);
+            dbmsEvent.setExtractTimeStamp(now);
+            dbmsEvent.setEventSize(logEvent.getEventLen());
+            dbmsEvent.setPosition(event.getPosition().toString());
+            dbmsEvent.setRtso(event.getPosition().getRtso());
+
             event.setRepository(eventRepository);
             event.tryPersist();
-            DBMSEvent dbmsEvent = event.getDbMessageWithEffect();
-            dbmsEvent.setSourceTimeStamp(now);
-            dbmsEvent.setEventSize(bod.getEventLen());
-            StatMetrics.getInstance().setReceiveDelay(now - bod.getWhen() * 1000);
         }
 
         if (enabled) {
@@ -602,12 +615,10 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                         public boolean sink(LogEvent event, LogPosition logPosition) throws CanalParseException,
                             TableIdNotFoundException {
                             try {
-                                StatMetrics.getInstance().addInBytes(event.getEventLen());
-                                MySQLDBMSEvent entry = parseAndProfilingIfNecessary(event, false);
-
                                 if (!running) {
                                     return false;
                                 }
+                                MySQLDBMSEvent entry = parseAndProfilingIfNecessary(event, false);
 
                                 if (entry != null) {
                                     transactionBuffer.add(entry);
@@ -615,7 +626,6 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                                     this.lastPosition = buildLastPosition(entry);
                                 }
                                 StatisticalProxy.getInstance().heartbeat();
-                                StatMetrics.getInstance().addInMessageCount(1);
                                 return running;
                             } catch (TableIdNotFoundException e) {
                                 throw e;
@@ -641,6 +651,9 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                         startPosition.getTimestamp(),
                         sinkHandler);
                 } catch (ServerIdNotMatchException e) {
+                    StatisticalProxy.getInstance().recordLastError("Server Id not match");
+                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                        TaskContext.getInstance().getTaskId(), "parse error");
                     throw e;
                 } catch (TableIdNotFoundException e) {
                     // 特殊处理TableIdNotFound异常,出现这样的异常，一种可能就是起始的position是一个事务当中，导致tablemap
@@ -648,21 +661,26 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                     needTransactionPosition.compareAndSet(false, true);
                     log.error(String.format("dump address %s has an error, retrying. caused by ",
                         runningInfo.getAddress().toString()), e);
-                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
-                        TaskContext.getInstance().getTaskId(), e.getMessage());
+                    StatisticalProxy.getInstance().recordLastError("Table Id not found");
+                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                        TaskContext.getInstance().getTaskId(), "parse error");
                 } catch (Throwable e) {
                     processDumpError(e);
                     if (!running) {
                         if (!(e instanceof java.nio.channels.ClosedByInterruptException
                             || e.getCause() instanceof java.nio.channels.ClosedByInterruptException)) {
+                            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                                TaskContext.getInstance().getTaskId(), "dump error");
+                            StatisticalProxy.getInstance().recordLastError("Dump error");
                             throw new CanalParseException(String.format("dump address %s has an error, retrying. ",
                                 runningInfo.getAddress().toString()), e);
                         }
                     } else {
                         log.error(String.format("dump address %s has an error, retrying. caused by ",
                             runningInfo.getAddress().toString()), e);
-                        StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_PROCESS_ERROR,
-                            TaskContext.getInstance().getTaskId(), e.getMessage());
+                        StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                            TaskContext.getInstance().getTaskId(), "dump error");
+                        StatisticalProxy.getInstance().recordLastError("Dump error");
                     }
                 } finally {
                     // 重新置为中断状态
@@ -699,7 +717,6 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                 log.error("ParserThread failed after retry: {}, process exit", retry);
                 StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
                     TaskContext.getInstance().getTaskId(), "parse error");
-                StatisticalProxy.getInstance().recordLastError("ParserThread failed");
                 TaskContext.getInstance().getPipeline().stop();
             }
         }

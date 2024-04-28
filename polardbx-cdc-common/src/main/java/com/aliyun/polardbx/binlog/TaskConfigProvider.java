@@ -59,7 +59,7 @@ public class TaskConfigProvider {
         BinlogTaskConfigMapper mapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
         Optional<BinlogTaskConfig> opTask = mapper
             .selectOne(s -> s.where(BinlogTaskConfigDynamicSqlSupport.clusterId,
-                IsEqualTo.of(() -> DynamicApplicationConfig.getString(CLUSTER_ID)))
+                    IsEqualTo.of(() -> DynamicApplicationConfig.getString(CLUSTER_ID)))
                 .and(BinlogTaskConfigDynamicSqlSupport.taskName, IsEqualTo.of(() -> taskName)));
         if (!opTask.isPresent()) {
             throw new PolardbxException("task config is null");

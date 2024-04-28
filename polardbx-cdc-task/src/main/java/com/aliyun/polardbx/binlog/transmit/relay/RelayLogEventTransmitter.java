@@ -39,6 +39,7 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ReformatContext;
 import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
+import com.aliyun.polardbx.binlog.metadata.DdlScope;
 import com.aliyun.polardbx.binlog.metrics.TransmitMetrics;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
 import com.aliyun.polardbx.binlog.protocol.EventData;
@@ -106,7 +107,6 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_DRY_RUN;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_DRY_RUN_MODE;
 import static com.aliyun.polardbx.binlog.Constants.MDC_STREAM_SEQ;
 import static com.aliyun.polardbx.binlog.Constants.RELAY_DATA_FORCE_CLEAN_FLAG;
-import static com.aliyun.polardbx.binlog.CommonConstants.VERSION_PATH_PREFIX;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.TABLE_MAP_EVENT;
 import static com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet.loadCharactorSetFromCN;
 import static com.aliyun.polardbx.binlog.enums.BinlogUploadStatus.IGNORE;
@@ -595,13 +595,12 @@ public class RelayLogEventTransmitter implements Transmitter {
     }
 
     private void save(TxnToken token) {
-        if (token.getType() == TxnType.META_DDL) {
+        if (token.getType() == TxnType.META_DDL && token.getDdlScope() != DdlScope.Instance.getValue()) {
             HashConfig.tryReloadTableStreamMapping(token);
             HashLevel hashLevel = HashConfig.getHashLevel(token.getSchema(), token.getTable());
 
-            // 对于库级别的ddl操作(建库和删除)，需要采用广播模式，原因如下：
-            // 某个库的HashLevel是DATABASE，但是其中某张表的HashLevel是RECORD或者TABLE，需要保证对应流上有对应的库
-            if (hashLevel != HashLevel.RECORD && StringUtils.isNotBlank(token.getTable())) {
+            // 对于库级别的拆分策略，DDL的分发采用Single模式
+            if (hashLevel == HashLevel.DATABASE) {
                 int streamSeq = HashConfig.getStreamSeq(token.getSchema(), token.getTable(), -1);
                 byte[] newPayload = rewriteDdlEvent(token, streamSeq, token.getPayload().toByteArray());
                 token = token.toBuilder().setPayload(ByteString.copyFrom(newPayload)).build();
@@ -719,14 +718,15 @@ public class RelayLogEventTransmitter implements Transmitter {
             bufferMap.computeIfAbsent(streamSeq, k -> {
                 if (currentTableMapTxnItems.size() > 1) {
                     return currentTableMapTxnItems.stream().filter(m -> {
-                        HashLevel hashLevel = HashConfig.getHashLevel(m.getSchema(), m.getTable());
-                        if (hashLevel != HashLevel.RECORD) {
-                            int streamSeqTmp = HashConfig.getStreamSeq(m.getSchema(), m.getTable(), -1);
-                            return streamSeqTmp == k;
-                        } else {
-                            return true;
-                        }
-                    }).collect(Collectors.toList());
+                            HashLevel hashLevel = HashConfig.getHashLevel(m.getSchema(), m.getTable());
+                            if (hashLevel != HashLevel.RECORD) {
+                                int streamSeqTmp = HashConfig.getStreamSeq(m.getSchema(), m.getTable(), -1);
+                                return streamSeqTmp == k;
+                            } else {
+                                return true;
+                            }
+                        }).map(m -> m.toBuilder().setRowsQuery(currentTableMapTxnItems.get(0).getRowsQuery()).build())
+                        .collect(Collectors.toList());
                 } else {
                     return new ArrayList<>(currentTableMapTxnItems);
                 }

@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.remote.channel;
 
+import com.aliyun.oss.OSSException;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -39,12 +40,18 @@ public abstract class AbstractBinlogFileReadChannel extends AbstractInterruptibl
      */
     protected abstract void getRange(long startPosition);
 
-    public final int read(ByteBuffer dst, long startPosition) throws IOException {
+    public final int read(ByteBuffer dst, long startPosition) {
         getRange(startPosition);
-        return readHelper(dst);
+
+        try {
+            return readHelper(dst);
+        } catch (IOException e) {
+            log.error("read from remote error!", e);
+            throw new OSSException("Read from oss error!");
+        }
     }
 
-    public final int read(ByteBuffer dst) throws IOException {
+    public final int read(ByteBuffer dst) {
         if (dst.remaining() == 0) {
             if (log.isDebugEnabled()) {
                 log.debug("dst has no remain space!");
@@ -56,23 +63,22 @@ public abstract class AbstractBinlogFileReadChannel extends AbstractInterruptibl
             getRange(4L);
         }
 
-        return readHelper(dst);
+        try {
+            return readHelper(dst);
+        } catch (IOException e) {
+            log.error("read from remote error!", e);
+            throw new OSSException("Read from oss error!");
+        }
     }
 
     public final long position() {
         return position;
     }
 
-    /**
-     * todo @yudong 亟待优化， 如果newPosition > position, 调用skip方法
-     */
     public final void position(long newPosition) throws IOException {
         getRange(newPosition);
     }
 
-    /**
-     * todo @yudong 优化, 避免调用getRange函数
-     */
     public final long size() throws IOException {
         if (fileSize == -1) {
             getRange(4L);

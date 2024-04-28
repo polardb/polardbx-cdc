@@ -18,7 +18,7 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RotateLogEvent;
@@ -53,7 +53,7 @@ public class BinlogSearchPositionTest extends BaseTestWithGmsTables {
     }
 
     /**
-     * 生成普通CdcStart序列
+     * tso 位点搜索
      */
     @Test
     public void testSearchTSO1() throws Exception {
@@ -98,6 +98,36 @@ public class BinlogSearchPositionTest extends BaseTestWithGmsTables {
      */
     @Test
     public void searchCmd() throws Exception {
+        CdcGenerateUtil generateUtil = new CdcGenerateUtil(false);
+        CdcGenerateUtil.Heartbeat h1 = generateUtil.newHeartbeat();
+        h1.prepare();
+
+        h1.commit();
+        CdcGenerateUtil.Heartbeat h2 = generateUtil.newHeartbeat();
+        h2.prepare();
+        CdcGenerateUtil.CdcStart cdcStart = generateUtil.newCdcStart();
+        cdcStart.prepare();
+
+        h2.commit();
+
+        CdcGenerateUtil.Heartbeat h3 = generateUtil.newHeartbeat();
+        h3.prepare();
+
+        h3.commit();
+        cdcStart.commit();
+
+        CdcGenerateUtil.Heartbeat h4 = generateUtil.newHeartbeat();
+        h4.prepare();
+        h4.commit();
+
+        generateUtil.generateRotate("mysql-bin.00002");
+        BinlogPosition targetPos = search(-1, 0, generateUtil);
+        Assert.assertNotNull(targetPos);
+        Assert.assertEquals(buildRtso(cdcStart), targetPos.getRtso());
+    }
+
+    @Test
+    public void searchCmd1() throws Exception {
         CdcGenerateUtil generateUtil = new CdcGenerateUtil(false);
         CdcGenerateUtil.Heartbeat h1 = generateUtil.newHeartbeat();
         h1.prepare();

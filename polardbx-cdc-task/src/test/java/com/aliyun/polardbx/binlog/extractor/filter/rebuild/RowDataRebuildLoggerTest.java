@@ -31,7 +31,7 @@ public class RowDataRebuildLoggerTest extends BaseTest {
 
     @Test
     public void testEnum() {
-        setConfig(ConfigKeys.TASK_EXTRACTOR_REBUILD_DATA_LOG, "true");
+        setConfig(ConfigKeys.TASK_EXTRACT_REBUILD_DATA_LOG, "true");
         Field field =
             MakeFieldFactory.makeField("enum('x-small','small','medium','large','x-large')", "x-large", "utf8", false,
                 false);
@@ -43,7 +43,7 @@ public class RowDataRebuildLoggerTest extends BaseTest {
 
     @Test
     public void testDecimal() {
-        setConfig(ConfigKeys.TASK_EXTRACTOR_REBUILD_DATA_LOG, "true");
+        setConfig(ConfigKeys.TASK_EXTRACT_REBUILD_DATA_LOG, "true");
         float b = 23.1415f;
         Field field =
             MakeFieldFactory.makeField("decimal(10,3)", b + "", "utf8", false,
@@ -56,7 +56,7 @@ public class RowDataRebuildLoggerTest extends BaseTest {
 
     @Test
     public void testVarchar() {
-        setConfig(ConfigKeys.TASK_EXTRACTOR_REBUILD_DATA_LOG, "true");
+        setConfig(ConfigKeys.TASK_EXTRACT_REBUILD_DATA_LOG, "true");
         String str = "abcdefgh";
         Field field =
             MakeFieldFactory.makeField("varchar(5)", str, "utf8", false,

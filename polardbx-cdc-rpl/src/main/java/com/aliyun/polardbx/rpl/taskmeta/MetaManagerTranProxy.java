@@ -76,4 +76,9 @@ public class MetaManagerTranProxy {
     public ResultCode<?> changeReplicationFilterWithTran(Map<String, String> params) {
         return RplServiceManager.changeReplicationFilterWithTran(params);
     }
+
+    @Transactional(rollbackFor = {Throwable.class})
+    public void distributeTasks() {
+        TaskDistributor.distributeTasks();
+    }
 }

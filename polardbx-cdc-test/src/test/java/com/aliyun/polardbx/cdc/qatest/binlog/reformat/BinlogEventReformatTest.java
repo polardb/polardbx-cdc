@@ -15,7 +15,6 @@
 package com.aliyun.polardbx.cdc.qatest.binlog.reformat;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.canal.binlog.FileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LocalBinlogParser;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
@@ -24,6 +23,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.UpdateRowsLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.FileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.dump.SinkFunction;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
@@ -55,8 +55,8 @@ import java.util.List;
 
 @Slf4j
 public class BinlogEventReformatTest {
-    private static String filePath = "/Users/yanfenglin/Documents/polardbx-binlog/dumper/binlog/binlog.000001";
     private static final AutoExpandBuffer output = new AutoExpandBuffer(1024, 1024);
+    private static String filePath = "/Users/yanfenglin/Documents/polardbx-binlog/dumper/binlog/binlog.000001";
 
     static {
         filePath = System.getProperty("user.home") + filePath;

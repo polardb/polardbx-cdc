@@ -69,8 +69,14 @@ public class BinlogParser {
 
     private DefaultRowChange rowChange;
 
-    public void parse(TableMeta tableMeta, RowsLogEvent rowsLogEvent,
-                      String charset) throws UnsupportedEncodingException {
+    private boolean binaryLog = false;
+
+    public void setBinaryLog(boolean binaryLog) {
+        this.binaryLog = binaryLog;
+    }
+
+    public DefaultRowChange parse(TableMeta tableMeta, RowsLogEvent rowsLogEvent,
+                                  String charset) throws UnsupportedEncodingException {
 
         this.tableMeta = tableMeta;
         this.rowsLogEvent = rowsLogEvent;
@@ -92,7 +98,6 @@ public class BinlogParser {
         BitSet changeColumns = rowsLogEvent.getChangeColumns(); // 非变更的列,而是指存在binlog记录的列,mysql full image模式会提供所有列
 
         int columnSize = rowsLogEvent.getTable().getColumnCnt();
-        ColumnInfo[] columnInfo = rowsLogEvent.getTable().getColumnInfo();
 
         TableMapLogEvent table = rowsLogEvent.getTable();
 
@@ -166,7 +171,7 @@ public class BinlogParser {
                     actualChangeColumns);
             }
         }
-
+        return rowChange;
     }
 
     private boolean parseOneRow(DefaultRowChange rowChange, RowsLogEvent event, RowsLogBuffer buffer, BitSet cols,
@@ -197,18 +202,23 @@ public class BinlogParser {
                 // 处理file meta
                 fieldMeta = tableMeta.getFields().get(i);
             }
-            // fixed issue
-            // https://github.com/alibaba/canal/issues/66，特殊处理binary/varbinary，不能做编码处理
-            boolean isBinary = false;
-            if (fieldMeta != null) {
-                if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "VARBINARY")) {
-                    isBinary = true;
-                } else if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "BINARY")) {
-                    isBinary = true;
-                }
-            }
+
             try {
-                buffer.nextValue(info.type, info.meta, isBinary);
+                if (binaryLog) {
+                    buffer.nextBinaryValueForColumnar(info.type, info.meta);
+                } else {
+                    // fixed issue
+                    // https://github.com/alibaba/canal/issues/66，特殊处理binary/varbinary，不能做编码处理
+                    boolean isBinary = false;
+                    if (fieldMeta != null) {
+                        if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "VARBINARY")) {
+                            isBinary = true;
+                        } else if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "BINARY")) {
+                            isBinary = true;
+                        }
+                    }
+                    buffer.nextValue(info.type, info.meta, isBinary);
+                }
             } catch (Exception e) {
                 throw new PolardbxException("fetch value occur error ! " + fieldMeta.getColumnName() + " !", e);
             }
@@ -224,92 +234,98 @@ public class BinlogParser {
                 dataValue = null;
             } else {
                 final Serializable value = buffer.getValue();
-                // 处理各种类型
-                switch (javaType) {
-                case Types.INTEGER:
-                case Types.TINYINT:
-                case Types.SMALLINT:
-                case Types.BIGINT:
-                    // 处理unsigned类型
-                    Number number = (Number) value;
-                    if (fieldMeta != null && fieldMeta.isUnsigned() && number.longValue() < 0) {
-                        switch (buffer.getLength()) {
-                        case 1: /* MYSQL_TYPE_TINY */
-                            dataValue = String.valueOf(Integer.valueOf(TINYINT_MAX_VALUE + number.intValue()));
-                            javaType = Types.SMALLINT; // 往上加一个量级
-                            break;
+                if (binaryLog) {
+                    dataValue = value;
+                } else {
+                    // 处理各种类型
 
-                        case 2: /* MYSQL_TYPE_SHORT */
-                            dataValue = String.valueOf(Integer.valueOf(SMALLINT_MAX_VALUE + number.intValue()));
-                            javaType = Types.INTEGER; // 往上加一个量级
-                            break;
+                    switch (javaType) {
+                    case Types.INTEGER:
+                    case Types.TINYINT:
+                    case Types.SMALLINT:
+                    case Types.BIGINT:
+                        // 处理unsigned类型
+                        Number number = (Number) value;
+                        if (fieldMeta != null && fieldMeta.isUnsigned() && number.longValue() < 0) {
+                            switch (buffer.getLength()) {
+                            case 1: /* MYSQL_TYPE_TINY */
+                                dataValue = String.valueOf(Integer.valueOf(TINYINT_MAX_VALUE + number.intValue()));
+                                javaType = Types.SMALLINT; // 往上加一个量级
+                                break;
 
-                        case 3: /* MYSQL_TYPE_INT24 */
-                            dataValue = String
-                                .valueOf(Integer.valueOf(MEDIUMINT_MAX_VALUE + number.intValue()));
-                            javaType = Types.INTEGER; // 往上加一个量级
-                            break;
+                            case 2: /* MYSQL_TYPE_SHORT */
+                                dataValue = String.valueOf(Integer.valueOf(SMALLINT_MAX_VALUE + number.intValue()));
+                                javaType = Types.INTEGER; // 往上加一个量级
+                                break;
 
-                        case 4: /* MYSQL_TYPE_LONG */
-                            dataValue = String.valueOf(Long.valueOf(INTEGER_MAX_VALUE + number.longValue()));
-                            javaType = Types.BIGINT; // 往上加一个量级
-                            break;
+                            case 3: /* MYSQL_TYPE_INT24 */
+                                dataValue = String
+                                    .valueOf(Integer.valueOf(MEDIUMINT_MAX_VALUE + number.intValue()));
+                                javaType = Types.INTEGER; // 往上加一个量级
+                                break;
 
-                        case 8: /* MYSQL_TYPE_LONGLONG */
-                            dataValue = BIGINT_MAX_VALUE.add(BigInteger.valueOf(number.longValue())).toString();
-                            javaType = Types.DECIMAL; // 往上加一个量级，避免执行出错
-                            break;
+                            case 4: /* MYSQL_TYPE_LONG */
+                                dataValue = String.valueOf(Long.valueOf(INTEGER_MAX_VALUE + number.longValue()));
+                                javaType = Types.BIGINT; // 往上加一个量级
+                                break;
+
+                            case 8: /* MYSQL_TYPE_LONGLONG */
+                                dataValue = BIGINT_MAX_VALUE.add(BigInteger.valueOf(number.longValue())).toString();
+                                javaType = Types.DECIMAL; // 往上加一个量级，避免执行出错
+                                break;
+                            }
+                        } else {
+                            // 对象为number类型，直接valueof即可
+                            dataValue = String.valueOf(value);
                         }
-                    } else {
+                        break;
+                    case Types.REAL: // float
+                    case Types.DOUBLE: // double
                         // 对象为number类型，直接valueof即可
                         dataValue = String.valueOf(value);
+                        break;
+                    case Types.BIT:// bit
+                        // 对象为byte[]类型,不能直接转为字符串,入库的时候会有问题
+                        dataValue = value;
+                        break;
+                    case Types.DECIMAL:
+                        dataValue = ((BigDecimal) value).toPlainString();
+                        break;
+                    case Types.TIMESTAMP:
+                        // 修复时间边界值
+                        // String v = value.toString();
+                        // v = v.substring(0, v.length() - 2);
+                        // columnBuilder.setValue(v);
+                        // break;
+                    case Types.TIME:
+                    case Types.DATE:
+                        // 需要处理year
+                        dataValue = value.toString();
+                        break;
+                    case Types.BINARY:
+                    case Types.VARBINARY:
+                    case Types.LONGVARBINARY:
+                        // fixed text encoding
+                        // https://github.com/AlibabaTech/canal/issues/18
+                        // mysql binlog中blob/text都处理为blob类型，需要反查table
+                        // meta，按编码解析text
+                        if (fieldMeta != null && isText(fieldMeta.getColumnType())) {
+                            dataValue = new String((byte[]) value, charset);
+                            javaType = Types.CLOB;
+                        } else {
+                            // byte数组，直接使用iso-8859-1保留对应编码，浪费内存
+                            dataValue = (byte[]) value;
+                            javaType = Types.BLOB;
+                        }
+                        break;
+                    case Types.CHAR:
+                    case Types.VARCHAR:
+                        dataValue = value.toString();
+                        break;
+                    default:
+                        dataValue = value.toString();
                     }
-                    break;
-                case Types.REAL: // float
-                case Types.DOUBLE: // double
-                    // 对象为number类型，直接valueof即可
-                    dataValue = String.valueOf(value);
-                    break;
-                case Types.BIT:// bit
-                    // 对象为byte[]类型,不能直接转为字符串,入库的时候会有问题
-                    dataValue = value;
-                    break;
-                case Types.DECIMAL:
-                    dataValue = ((BigDecimal) value).toPlainString();
-                    break;
-                case Types.TIMESTAMP:
-                    // 修复时间边界值
-                    // String v = value.toString();
-                    // v = v.substring(0, v.length() - 2);
-                    // columnBuilder.setValue(v);
-                    // break;
-                case Types.TIME:
-                case Types.DATE:
-                    // 需要处理year
-                    dataValue = value.toString();
-                    break;
-                case Types.BINARY:
-                case Types.VARBINARY:
-                case Types.LONGVARBINARY:
-                    // fixed text encoding
-                    // https://github.com/AlibabaTech/canal/issues/18
-                    // mysql binlog中blob/text都处理为blob类型，需要反查table
-                    // meta，按编码解析text
-                    if (fieldMeta != null && isText(fieldMeta.getColumnType())) {
-                        dataValue = new String((byte[]) value, charset);
-                        javaType = Types.CLOB;
-                    } else {
-                        // byte数组，直接使用iso-8859-1保留对应编码，浪费内存
-                        dataValue = (byte[]) value;
-                        javaType = Types.BLOB;
-                    }
-                    break;
-                case Types.CHAR:
-                case Types.VARCHAR:
-                    dataValue = value.toString();
-                    break;
-                default:
-                    dataValue = value.toString();
+
                 }
 
             }

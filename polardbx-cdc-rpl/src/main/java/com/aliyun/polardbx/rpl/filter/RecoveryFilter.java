@@ -17,11 +17,11 @@ package com.aliyun.polardbx.rpl.filter;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultColumnSet;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultOption;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowsQueryLog;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryApplierConfig;
@@ -39,6 +39,12 @@ import java.util.Set;
  */
 @Slf4j
 public class RecoveryFilter {
+    private static final String hintPrefix = "/*DRDS /";
+    private static final String hintEnd = "/ */";
+    private static final String hintDivision = "/";
+    private static final int hintSplitNum = 5;
+    private static final int hintTraceIdIdx = 3;
+    private static final String hintTraceIdLogicalSqlSpliter = "-";
 
     private boolean match = false;
 
@@ -84,14 +90,14 @@ public class RecoveryFilter {
 
     }
 
-    public DBMSRowChange convert(DBMSEvent event) {
+    public DefaultRowChange convert(DBMSEvent event) {
         if (event == null) {
             return null;
         }
 
         if (filterByBeginTimestamp(event)) {
             if (log.isDebugEnabled()) {
-                log.debug("skip event {}, which timestamp is less than begin time {}.", getPosition(event), beginTime);
+                log.debug("skip event {}, which timestamp is less than begin time {}.", event.getPosition(), beginTime);
             }
             return null;
         }
@@ -105,30 +111,25 @@ public class RecoveryFilter {
             return generateEndFlag();
         }
 
-        // 只处理 dbmsRowChange 和 queryLog 两种类型的event
-        if (event instanceof DBMSQueryLog) {
+        if (event instanceof DefaultRowsQueryLog) {
             if (!isFuzzySearch) {
-                String traceId = findTraceId((DBMSQueryLog) event);
-                if (traceId != null) {
-                    match = traceId.equalsIgnoreCase(this.traceId);
-                } else {
-                    match = false;
-                }
-
+                this.queryLog = ((DefaultRowsQueryLog) event).getRowsQuery();
+                String traceId = extractTraceId(queryLog);
+                match = matchTraceId(traceId, this.traceId);
                 log.info("match: " + match);
             }
-        } else if (event instanceof DBMSRowChange) {
-            if (!filterBySchemaAndTable((DBMSRowChange) event)) {
+        } else if (event instanceof DefaultRowChange) {
+            if (!filterBySchemaAndTable((DefaultRowChange) event)) {
                 return null;
             }
 
             if (isFuzzySearch) {
-                if (filterBySqlType((DBMSRowChange) event)) {
-                    return fillFuzzyOption((DBMSRowChange) event);
+                if (filterBySqlType((DefaultRowChange) event)) {
+                    return fillFuzzyOption((DefaultRowChange) event);
                 }
             } else {
                 if (match) {
-                    return fillFuzzyOption((DBMSRowChange) event);
+                    return fillFuzzyOption((DefaultRowChange) event);
                 }
             }
         }
@@ -147,54 +148,88 @@ public class RecoveryFilter {
         Timestamp timestamp = getEventTimestamp(event);
         boolean result = timestamp.compareTo(endTime) <= 0;
         if (log.isDebugEnabled()) {
-            log.debug("reach end event {}, which timestamp is larger than end time {}.", getPosition(event), endTime);
+            log.debug("reach end event {}, which timestamp is larger than end time {}.", event.getPosition(), endTime);
         }
         return result;
     }
 
     private boolean filterByFileName(DBMSEvent event) {
-        String position = getPosition(event);
+        String position = event.getPosition();
         String fileName = CommonUtil.parsePosition(position).get(0);
         boolean result = filesToConsume.contains(fileName);
         if (log.isDebugEnabled()) {
-            log.debug("reach end event {}, which fileName is not in filesToConsume {}.", getPosition(event),
+            log.debug("reach end event {}, which fileName is not in filesToConsume {}.", event.getPosition(),
                 JSONObject.toJSONString(filesToConsume));
         }
         return result;
     }
 
-    private boolean filterBySchemaAndTable(DBMSRowChange event) {
+    private boolean filterBySchemaAndTable(DefaultRowChange event) {
         String table = event.getTable().toLowerCase();
         return this.schema.equalsIgnoreCase(event.getSchema()) &&
             (tableSet == null || tableSet.contains(table));
     }
 
-    private boolean filterBySqlType(DBMSRowChange rowChange) {
+    private boolean filterBySqlType(DefaultRowChange rowChange) {
         return StringUtils.isEmpty(sqlType) || sqlType.contains(rowChange.getAction().name());
     }
 
-    /**
-     * queryLog example: /*DRDS /127.0.0.1/12fb0789b6000000/0// * /
-     */
-    private String findTraceId(DBMSQueryLog queryLog) {
-        String query = queryLog.getQuery();
-        int hintBegin = query.indexOf("/*");
-        if (hintBegin == -1) {
+    // hints format: /*DRDS /client ip/trace id/physical sql id/server id/ */
+    // example: /*DRDS /127.0.0.1/12fb0789b6000000/0// */
+    // 如果一个事务中有多条SQL，则对应trace-id中有小序号-1, -2, -3...
+    private static String extractTraceId(String query) {
+        String res;
+        if (!query.startsWith(hintPrefix)) {
+            log.info("This is not a drds hint, query: " + query);
             return null;
         }
-        int hintEnd = query.indexOf("*/");
-        String hint = query.substring(hintBegin + 2, hintEnd);
-        String[] hintKeyArray = hint.split("/");
-        if (!hintKeyArray[RplConstants.KEY_DRDS_IDX].trim().equals(RplConstants.DRDS_HINT_PREFIX)) {
+        int hintEndIdx = query.indexOf(hintEnd);
+        if (hintEndIdx == -1) {
+            log.error("Not found hint end, query: " + query);
             return null;
         }
-        String findTrace = hintKeyArray[RplConstants.KEY_TRACE_IDX];
-        log.info("find trace : " + findTrace);
-        this.queryLog = query;
-        return findTrace;
+
+        String hint = query.substring(0, hintEndIdx);
+        String[] splits = hint.split(hintDivision);
+        if (splits.length != hintSplitNum) {
+            log.error("Unexpected hint split num, hint " + hint);
+            return null;
+        }
+
+        res = splits[hintTraceIdIdx];
+        log.info("Find a trace id : " + res);
+
+        return res;
     }
 
-    private DBMSRowChange fillFuzzyOption(DBMSRowChange rowChange) {
+    private static boolean matchTraceId(String fromLog, String fromUser) {
+        if (StringUtils.isEmpty(fromUser)) {
+            throw new IllegalArgumentException("trace id from user is empty!");
+        }
+        if (StringUtils.isEmpty(fromLog)) {
+            log.info("trace id from log is empty!");
+            return false;
+        }
+
+        // 精确匹配某个逻辑SQL
+        if (fromUser.contains(hintTraceIdLogicalSqlSpliter)) {
+            return StringUtils.equals(fromLog, fromUser);
+        }
+
+        // 匹配某个事务内所有的逻辑SQL
+        String txnId = fromLog;
+        if (fromLog.contains(hintTraceIdLogicalSqlSpliter)) {
+            String[] splits = fromLog.split(hintTraceIdLogicalSqlSpliter);
+            if (splits.length != 2) {
+                log.error("Unexpected trace id split num, trace id: " + fromLog);
+                return false;
+            }
+            txnId = splits[0];
+        }
+        return StringUtils.equals(txnId, fromUser);
+    }
+
+    private DefaultRowChange fillFuzzyOption(DefaultRowChange rowChange) {
         if (rowChange == null) {
             return null;
         }
@@ -204,7 +239,7 @@ public class RecoveryFilter {
         return rowChange;
     }
 
-    private DBMSRowChange generateEndFlag() {
+    private DefaultRowChange generateEndFlag() {
         log.info("set end flag");
         DefaultRowChange
             defaultRowChange = new DefaultRowChange(DBMSAction.INSERT, "end_flag", "end_flag", new DefaultColumnSet(
@@ -217,12 +252,6 @@ public class RecoveryFilter {
     }
 
     private Timestamp getEventTimestamp(DBMSEvent event) {
-        DefaultOption option = (DefaultOption) event.getOption(RplConstants.BINLOG_EVENT_OPTION_TIMESTAMP);
-        return (Timestamp) option.getValue();
-    }
-
-    private String getPosition(DBMSEvent event) {
-        DefaultOption option = (DefaultOption) event.getOption(RplConstants.BINLOG_EVENT_OPTION_POSITION);
-        return (String) option.getValue();
+        return new Timestamp(event.getSourceTimeStamp());
     }
 }

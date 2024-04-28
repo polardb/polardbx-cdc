@@ -33,6 +33,7 @@ import com.aliyun.polardbx.binlog.monitor.MonitorValue;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.util.GmsTimeUtil;
 import org.apache.commons.lang3.time.DateFormatUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
@@ -152,7 +153,8 @@ public class BinlogCleaner {
 
     private void cleanRemoteFiles() {
         Date expireTime =
-            new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(getInt(BINLOG_BACKUP_FILE_PRESERVE_DAYS)));
+            new Date(
+                GmsTimeUtil.getCurrentTimeMillis() - TimeUnit.DAYS.toMillis(getInt(BINLOG_BACKUP_FILE_PRESERVE_DAYS)));
         logger.info("try to clean remote binlog files! expire time: " + DateFormatUtils
             .format(expireTime, "yyyy-MM-dd HH:mm:ss"));
 

@@ -151,7 +151,7 @@ public abstract class AbstractEventParser implements BinlogEventParser {
 
         final AtomicReference<BinlogPosition> positionReference = new AtomicReference<BinlogPosition>();
         positionReference.set(position);
-        // 构造bin log parser
+        // 构造binlog parser
         // 启动工作线程
         parseThread = new Thread(() -> {
             ErosaConnection erosaConnection = null;

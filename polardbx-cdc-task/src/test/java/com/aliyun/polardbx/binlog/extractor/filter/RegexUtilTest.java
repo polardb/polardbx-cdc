@@ -20,11 +20,6 @@ import com.aliyun.polardbx.binlog.util.RegexUtil;
 import org.junit.Assert;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.regex.Pattern;
-
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX;
 
 public class RegexUtilTest extends BaseTest {
@@ -38,298 +33,185 @@ public class RegexUtilTest extends BaseTest {
     }
 
     @Test
-    public void testAlterUser() {
-        String config = DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX);
-        String sql1 = "alter user ";
-        String sql2 = "alter \n user";
-        String sql3 = "alter       user ";
-        String sql4 = "Alter UsEr";
-        Assert.assertTrue(RegexUtil.match(config, sql1));
-        Assert.assertTrue(RegexUtil.match(config, sql2));
-        Assert.assertTrue(RegexUtil.match(config, sql3));
-        Assert.assertTrue(RegexUtil.match(config, sql4));
-    }
-
-    @Test
-    public void testRegex() {
-        String regexString = "^grant\\s+\\w+\\s+on\\s+.*,^savepoint.*,.*__drds_global_tx_log.*,^create sequence.*";
-
-        String grant = "Grant xa_recover_admin on *.* to 'rds_polardb_x'@'%'";
-        String savePoint = "Savepoint xxx";
+    public void testAlterSystemTable() {
+        String regexString = DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX);
         String empty = "";
         String createTable = "create table";
-        String drds = "test__Drds_global_tx_log__test";
+
+        String drds6 = "alter table b`__drds_global_tx_log`\r\n"
+            + "drop partition `p_1461439929572655104`";
+
+        String drds7 = "alter table `polarx_global_trx_log```b`\n"
+            + "drop partition `p_1461439929572655104`";
+
+        String drds8 = "alter table b `__drds_global_tx_log`\r\n"
+            + "drop partition `p_1461439929572655104`";
+
+        String drds9 = "alter table `polarx_global_trx_log`drop partition `p_1461439929572655104`";
+
         String drds2 = "alter table `__drds_global_tx_log`\n"
             + "drop partition `p_1461439929572655104`";
         String drds3 = "alter table `__drds_global_tx_log`\r\n"
             + "drop partition `p_1461439929572655104`";
 
-        String drds4 = "create sequence pxc_seq_64056c9e413d6f79544c4938f86c8d6e start with 1 cache 100000";
+        String drds4 = "alter table `polarx_global_trx_log`\n"
+            + "drop partition `p_1461439929572655104`";
+        String drds5 = "alter table `polarx_global_trx_log`\r\n"
+            + "drop partition `p_1461439929572655104`";
 
-        Assert.assertTrue(RegexUtil.match(regexString, grant));
-        Assert.assertTrue(RegexUtil.match(regexString, savePoint));
-        Assert.assertTrue(RegexUtil.match(regexString, drds));
+        String drds10 = "create table `polarx_global_trx_log`(id bigint primary key)";
+        String drds11 = "create table polarx_global_trx_log(id bigint primary key)";
+        String drds12 = "create table polarx_global_trx_log (id bigint primary key)";
+        String drds13 = "create table polarx_global_trx_log\n(id bigint primary key)";
+        String drds14 = "create table polarx_global_trx_log_(id bigint primary key)";
+        String drds15 = "create table polarx_global_trx_log_ id bigint primary key)";
+        String drds16 = "create table `polarx_global_trx_log_ `(id bigint primary key)";
+
         Assert.assertFalse(RegexUtil.match(regexString, empty));
         Assert.assertFalse(RegexUtil.match(regexString, createTable));
+
+        Assert.assertFalse(RegexUtil.match(regexString, drds6));
+        Assert.assertFalse(RegexUtil.match(regexString, drds7));
+        Assert.assertFalse(RegexUtil.match(regexString, drds8));
+        Assert.assertFalse(RegexUtil.match(regexString, drds9));
+
         Assert.assertTrue(RegexUtil.match(regexString, drds2));
         Assert.assertTrue(RegexUtil.match(regexString, drds3));
         Assert.assertTrue(RegexUtil.match(regexString, drds4));
+        Assert.assertTrue(RegexUtil.match(regexString, drds5));
+
+        Assert.assertTrue(RegexUtil.match(regexString, drds10));
+        Assert.assertTrue(RegexUtil.match(regexString, drds11));
+        Assert.assertTrue(RegexUtil.match(regexString, drds12));
+        Assert.assertTrue(RegexUtil.match(regexString, drds13));
+        Assert.assertFalse(RegexUtil.match(regexString, drds14));
+        Assert.assertFalse(RegexUtil.match(regexString, drds15));
+        Assert.assertFalse(RegexUtil.match(regexString, drds16));
     }
 
     @Test
-    public void testPerformanceAllMatch() {
-        String regexString = "^grant\\s+\\w+\\s+on\\s+.*,^savepoint.*,.*__drds_global_tx_log.*";
-//        String regexString = "^grant\\s+\\w+\\s+on\\s+.*,^savepoint.*";
+    public void testCreateProcedureOrFunction() {
+        String c1 =
+            "CREATE PROCEDURE citycount (IN country CHAR(3), OUT cities INT)\n"
+                + "       BEGIN\n"
+                + "         SELECT COUNT(*) INTO cities FROM world.city\n"
+                + "         WHERE CountryCode = country;\n"
+                + "       END";
+        String c2 = "CREATE DEFINER = 'admin'@'localhost' PROCEDURE account_count()\n"
+            + "BEGIN\n"
+            + "  SELECT 'Number of accounts:', COUNT(*) FROM mysql.user;\n"
+            + "END;";
 
-        String[] targets = new String[] {
-            "Savepoint xxx", "test__Drds_global_tx_log__test", "Grant xa_recover_admin on *.* to 'rds_polardb_x'@'%'"};
+        String c3 = "CREATE FUNCTION calculate_total (price DOUBLE, quantity INT)\n"
+            + "RETURNS DOUBLE\n"
+            + "BEGIN\n"
+            + "  DECLARE total_price DOUBLE;\n"
+            + "  SET total_price = price * quantity;\n"
+            + "  RETURN total_price;\n"
+            + "END";
 
-        execute(10, 10000, targets, regexString, REGEX_STRING);
-        printSplitLine();
-        execute(10, 10000, targets, regexString, REGEX_PATTERNS);
-        printSplitLine();
-        execute(10, 10000, targets, regexString, IF_EXPRESS);
+        String c4 = "create definer=`admin`@`%` function `mysql`.`udf_hfew`(\n"
+            + "        data char(255)\n"
+            + ") returns char(255) charset utf8\n"
+            + "    no sql\n"
+            + "    comment 'magic_polarx'\n"
+            + "return data";
+
+        String c5 = "create table PROCEDURE(id bigint primary key)";
+        String c6 = "create table PROCEDURE_6(id bigint primary key)";
+
+        String regexString = DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX);
+        //^create\\s+(DEFINER\\s*=\\s*'\\w+'@'[\\w|\\.]+'\\s+)function\\s+.*,^create\\s+procedure\\s+.*
+        Assert.assertTrue(RegexUtil.match(regexString, c1));
+        Assert.assertTrue(RegexUtil.match(regexString, c2));
+        Assert.assertTrue(RegexUtil.match(regexString, c3));
+        Assert.assertTrue(RegexUtil.match(regexString, c4));
+        Assert.assertFalse(RegexUtil.match(regexString, c5));
+        Assert.assertFalse(RegexUtil.match(regexString, c6));
     }
 
     @Test
-    public void testPerformanceBigDdl() {
-
-        String regexString = "^grant\\s+\\w+\\s+on\\s+.*,^savepoint.*,.*__drds_global_tx_log.*";
-//        String regexString = "^grant\\s+\\w+\\s+on\\s+.*,^savepoint.*";
-        String[] targets = new String[] {
-            "CREATE [TEMPORARY] TABLE [IF NOT EXISTS] tbl_name\n"
-                + "    (create_definition,...)\n"
-                + "    [table_options]\n"
-                + "    [partition_options]\n"
-                + "\n"
-                + "CREATE [TEMPORARY] TABLE [IF NOT EXISTS] tbl_name\n"
-                + "    [(create_definition,...)]\n"
-                + "    [table_options]\n"
-                + "    [partition_options]\n"
-                + "    [IGNORE | REPLACE]\n"
-                + "    [AS] query_expression\n"
-                + "\n"
-                + "CREATE [TEMPORARY] TABLE [IF NOT EXISTS] tbl_name\n"
-                + "    { LIKE old_tbl_name | (LIKE old_tbl_name) }\n"
-                + "\n"
-                + "create_definition: {\n"
-                + "    col_name column_definition\n"
-                + "  | {INDEX | KEY} [index_name] [index_type] (key_part,...)\n"
-                + "      [index_option] ...\n"
-                + "  | {FULLTEXT | SPATIAL} [INDEX | KEY] [index_name] (key_part,...)\n"
-                + "      [index_option] ...\n"
-                + "  | [CONSTRAINT [symbol]] PRIMARY KEY\n"
-                + "      [index_type] (key_part,...)\n"
-                + "      [index_option] ...\n"
-                + "  | [CONSTRAINT [symbol]] UNIQUE [INDEX | KEY]\n"
-                + "      [index_name] [index_type] (key_part,...)\n"
-                + "      [index_option] ...\n"
-                + "  | [CONSTRAINT [symbol]] FOREIGN KEY\n"
-                + "      [index_name] (col_name,...)\n"
-                + "      reference_definition\n"
-                + "  | check_constraint_definition\n"
-                + "}\n"
-                + "\n"
-                + "column_definition: {\n"
-                + "    data_type [NOT NULL | NULL] [DEFAULT {literal | (expr)} ]\n"
-                + "      [VISIBLE | INVISIBLE]\n"
-                + "      [AUTO_INCREMENT] [UNIQUE [KEY]] [[PRIMARY] KEY]\n"
-                + "      [COMMENT 'string']\n"
-                + "      [COLLATE collation_name]\n"
-                + "      [COLUMN_FORMAT {FIXED | DYNAMIC | DEFAULT}]\n"
-                + "      [ENGINE_ATTRIBUTE [=] 'string']\n"
-                + "      [SECONDARY_ENGINE_ATTRIBUTE [=] 'string']\n"
-                + "      [STORAGE {DISK | MEMORY}]\n"
-                + "      [reference_definition]\n"
-                + "      [check_constraint_definition]\n"
-                + "  | data_type\n"
-                + "      [COLLATE collation_name]\n"
-                + "      [GENERATED ALWAYS] AS (expr)\n"
-                + "      [VIRTUAL | STORED] [NOT NULL | NULL]\n"
-                + "      [VISIBLE | INVISIBLE]\n"
-                + "      [UNIQUE [KEY]] [[PRIMARY] KEY]\n"
-                + "      [COMMENT 'string']\n"
-                + "      [reference_definition]\n"
-                + "      [check_constraint_definition]\n"
-                + "}\n"
-                + "\n"
-                + "data_type:\n"
-                + "    (see Chapter 11, Data Types)\n"
-                + "\n"
-                + "key_part: {col_name [(length)] | (expr)} [ASC | DESC]\n"
-                + "\n"
-                + "index_type:\n"
-                + "    USING {BTREE | HASH}\n"
-                + "\n"
-                + "index_option: {\n"
-                + "    KEY_BLOCK_SIZE [=] value\n"
-                + "  | index_type\n"
-                + "  | WITH PARSER parser_name\n"
-                + "  | COMMENT 'string'\n"
-                + "  | {VISIBLE | INVISIBLE}\n"
-                + "  |ENGINE_ATTRIBUTE [=] 'string'\n"
-                + "  |SECONDARY_ENGINE_ATTRIBUTE [=] 'string'\n"
-                + "}\n"
-                + "\n"
-                + "check_constraint_definition:\n"
-                + "    [CONSTRAINT [symbol]] CHECK (expr) [[NOT] ENFORCED]\n"
-                + "\n"
-                + "reference_definition:\n"
-                + "    REFERENCES tbl_name (key_part,...)\n"
-                + "      [MATCH FULL | MATCH PARTIAL | MATCH SIMPLE]\n"
-                + "      [ON DELETE reference_option]\n"
-                + "      [ON UPDATE reference_option]\n"
-                + "\n"
-                + "reference_option:\n"
-                + "    RESTRICT | CASCADE | SET NULL | NO ACTION | SET DEFAULT\n"
-                + "\n"
-                + "table_options:\n"
-                + "    table_option [[,] table_option] ...\n"
-                + "\n"
-                + "table_option: {\n"
-                + "    AUTOEXTEND_SIZE [=] value\n"
-                + "  | AUTO_INCREMENT [=] value\n"
-                + "  | AVG_ROW_LENGTH [=] value\n"
-                + "  | [DEFAULT] CHARACTER SET [=] charset_name\n"
-                + "  | CHECKSUM [=] {0 | 1}\n"
-                + "  | [DEFAULT] COLLATE [=] collation_name\n"
-                + "  | COMMENT [=] 'string'\n"
-                + "  | COMPRESSION [=] {'ZLIB' | 'LZ4' | 'NONE'}\n"
-                + "  | CONNECTION [=] 'connect_string'\n"
-                + "  | {DATA | INDEX} DIRECTORY [=] 'absolute path to directory'\n"
-                + "  | DELAY_KEY_WRITE [=] {0 | 1}\n"
-                + "  | ENCRYPTION [=] {'Y' | 'N'}\n"
-                + "  | ENGINE [=] engine_name\n"
-                + "  | ENGINE_ATTRIBUTE [=] 'string'\n"
-                + "  | INSERT_METHOD [=] { NO | FIRST | LAST }\n"
-                + "  | KEY_BLOCK_SIZE [=] value\n"
-                + "  | MAX_ROWS [=] value\n"
-                + "  | MIN_ROWS [=] value\n"
-                + "  | PACK_KEYS [=] {0 | 1 | DEFAULT}\n"
-                + "  | PASSWORD [=] 'string'\n"
-                + "  | ROW_FORMAT [=] {DEFAULT | DYNAMIC | FIXED | COMPRESSED | REDUNDANT | COMPACT}\n"
-                + "  | SECONDARY_ENGINE_ATTRIBUTE [=] 'string'\n"
-                + "  | STATS_AUTO_RECALC [=] {DEFAULT | 0 | 1}\n"
-                + "  | STATS_PERSISTENT [=] {DEFAULT | 0 | 1}\n"
-                + "  | STATS_SAMPLE_PAGES [=] value\n"
-                + "  | TABLESPACE tablespace_name [STORAGE {DISK | MEMORY}]\n"
-                + "  | UNION [=] (tbl_name[,tbl_name]...)\n"
-                + "}", "partition_options:\n"
-            + "    PARTITION BY\n"
-            + "        { [LINEAR] HASH(expr)\n"
-            + "        | [LINEAR] KEY [ALGORITHM={1 | 2}] (column_list)\n"
-            + "        | RANGE{(expr) | COLUMNS(column_list)}\n"
-            + "        | LIST{(expr) | COLUMNS(column_list)} }\n"
-            + "    [PARTITIONS num]\n"
-            + "    [SUBPARTITION BY\n"
-            + "        { [LINEAR] HASH(expr)\n"
-            + "        | [LINEAR] KEY [ALGORITHM={1 | 2}] (column_list) }\n"
-            + "      [SUBPARTITIONS num]\n"
-            + "    ]\n"
-            + "    [(partition_definition [, partition_definition] ...)]\n"
-            + "\n"
-            + "partition_definition:\n"
-            + "    PARTITION partition_name\n"
-            + "        [VALUES\n"
-            + "            {LESS THAN {(expr | value_list) | MAXVALUE}\n"
-            + "            |\n"
-            + "            IN (value_list)}]\n"
-            + "        [[STORAGE] ENGINE [=] engine_name]\n"
-            + "        [COMMENT [=] 'string' ]\n"
-            + "        [DATA DIRECTORY [=] 'data_dir']\n"
-            + "        [INDEX DIRECTORY [=] 'index_dir']\n"
-            + "        [MAX_ROWS [=] max_number_of_rows]\n"
-            + "        [MIN_ROWS [=] min_number_of_rows]\n"
-            + "        [TABLESPACE [=] tablespace_name]\n"
-            + "        [(subpartition_definition [, subpartition_definition] ...)]\n"
-            + "\n"
-            + "subpartition_definition:\n"
-            + "    SUBPARTITION logical_name\n"
-            + "        [[STORAGE] ENGINE [=] engine_name]\n"
-            + "        [COMMENT [=] 'string' ]\n"
-            + "        [DATA DIRECTORY [=] 'data_dir']\n"
-            + "        [INDEX DIRECTORY [=] 'index_dir']\n"
-            + "        [MAX_ROWS [=] max_number_of_rows]\n"
-            + "        __drds_global_tx_log\n"
-            + "        [TABLESPACE [=] tablespace_name]\n"
-            + "\n"
-            + "query_expression:\n"
-            + "    SELECT ...   (Some valid select or union statement)",
-            "Grant xa_recover_admin on *.* to 'rds_polardb_x'@'%'"};
-
-        Assert.assertFalse(RegexUtil.match(regexString, targets[0]));
-        Assert.assertTrue(RegexUtil.match(regexString, targets[1]));
-
-        execute(10, 10000, targets, regexString, REGEX_STRING);
-        printSplitLine();
-        execute(10, 10000, targets, regexString, REGEX_PATTERNS);
-        printSplitLine();
-        execute(10, 10000, targets, regexString, IF_EXPRESS);
+    public void testDropProcedureOrFunction() {
+        //DROP {PROCEDURE | FUNCTION} [IF EXISTS] sp_name
+        String s1 = "drop procedure if exist c1";
+        String s2 = "drop FUNCTION  c2";
+        String s3 = "drop table  procedure_t";
+        String s4 = "drop table  function_";
+        String s5 = "drop database  function_";
+        String regexString = DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX);
+        Assert.assertTrue(RegexUtil.match(regexString, s1));
+        Assert.assertTrue(RegexUtil.match(regexString, s2));
+        Assert.assertFalse(RegexUtil.match(regexString, s3));
+        Assert.assertFalse(RegexUtil.match(regexString, s4));
+        Assert.assertFalse(RegexUtil.match(regexString, s5));
     }
 
-    private void execute(int threadCount, int dataCount, String[] targets, String regexString, String mode) {
-        List<String> mockData = new ArrayList<>();
+    @Test
+    public void testSequenceAndSavePoint() {
 
-        for (int i = 0; i < dataCount; i++) {
-            mockData.addAll(Arrays.asList(targets));
-        }
+        String s1 = "savepoint s1";
+        String s2 = "release SAVEPOINT xx";
+        String s3 = "ROLLBACK TO SAVEPOINT xx";
+        String s4 = "ROLLBACK WORK TO SAVEPOINT xx";
 
-        ConsumeThread[] threads = new ConsumeThread[threadCount];
-        for (int i = 0; i < threadCount; i++) {
-            threads[i] = new ConsumeThread(mockData, regexString, mode);
-        }
+        String s5 = "create sequence q1 async=true";
+        String s6 = "drop sequence sales1_seq";
 
-        for (Thread thread : threads) {
-            thread.start();
-            try {
-                thread.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
+        String s7 = "XA ROLLBACK xid";
+        String regexString = DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX);
+        Assert.assertTrue(RegexUtil.match(regexString, s1));
+        Assert.assertTrue(RegexUtil.match(regexString, s2));
+        Assert.assertTrue(RegexUtil.match(regexString, s3));
+        Assert.assertTrue(RegexUtil.match(regexString, s4));
+        Assert.assertTrue(RegexUtil.match(regexString, s5));
+        Assert.assertTrue(RegexUtil.match(regexString, s6));
+
+        Assert.assertFalse(RegexUtil.match(regexString, s7));
     }
 
-    static class ConsumeThread extends Thread {
-        private final List<String> mockData;
-        private final String regexString;
-        private final String mode;
-        List<Pattern> regexPatterns;
+    @Test
+    public void testGrant() {
+        String s1 = "GRANT SELECT ON *.* TO 'userA'@'localhost' IDENTIFIED BY 'passwordA'";
+        String s2 = "GRANT ALL PRIVILEGES ON mydb.* TO 'userB'@'localhost' IDENTIFIED BY 'passwordB'";
+        String s3 = "GRANT SELECT, INSERT, UPDATE, DELETE ON db1.* TO 'userC'@'localhost' IDENTIFIED BY 'passwordC'";
+        String s4 = "GRANT SELECT ON db2.* TO 'userC'@'localhost';\n";
+        String s5 = "GRANT SELECT, UPDATE ON `mydb`.`orders` TO 'userD'@'localhost' IDENTIFIED BY 'passwordD'";
+        String s6 = "GRANT SELECT ON `mydb`.`customers` TO 'userD'@'localhost';";
+        String s7 = "create table GRANT (ON bigint primary key, to varchar(20));";
+        String regexString = DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX);
+        Assert.assertTrue(RegexUtil.match(regexString, s1));
+        Assert.assertTrue(RegexUtil.match(regexString, s2));
+        Assert.assertTrue(RegexUtil.match(regexString, s3));
+        Assert.assertTrue(RegexUtil.match(regexString, s4));
+        Assert.assertTrue(RegexUtil.match(regexString, s5));
+        Assert.assertTrue(RegexUtil.match(regexString, s6));
+        Assert.assertFalse(RegexUtil.match(regexString, s7));
+    }
 
-        public ConsumeThread(List<String> mockData, String regexString, String mode) {
-            this.mockData = mockData;
-            this.mode = mode;
-            this.regexString = regexString;
-            this.regexPatterns = RegexUtil.convert2Patterns(regexString);
+    @Test
+    public void testAlterUser() {
+        String s1 = "ALTER USER 'userA'@'localhost' IDENTIFIED BY 'newPasswordA';\n";
+        String s2 = "ALTER USER 'userC'@'%' WITH MAX_QUERIES_PER_HOUR 0;\n";
+        String s3 = "ALTER USER 'userC'@'localhost' WITH MAX_UPDATES_PER_HOUR 100;\n";
+        String s4 = "ALTER USER 'userD'@'localhost' ACCOUNT UNLOCK;\n";
+        String s5 = "ALTER USER 'userE'@'localhost' ACCOUNT LOCK;\n";
+        String s6 = "ALTER USER 'userF'@'localhost' WITH MAX_USER_CONNECTIONS 5;\n";
+        String s7 = "ALTER USER 'userF'@'localhost' WITH MAX_TMP_TABLE_SIZE 100M;\n";
+        String s8 = "ALTER USER 'userF'@'localhost' WITH MAX_TMP_TABLE_SIZE 100M;\n";
+        String s9 = "ALTER USER 'userF'@'localhost' WITH MAX_TMP_TABLE_SIZE 100M;\n";
+        String s10 = "ALTER table USER add column c bigint default 0";
 
-        }
+        String regexString = DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX);
+        Assert.assertTrue(RegexUtil.match(regexString, s1));
+        Assert.assertTrue(RegexUtil.match(regexString, s2));
+        Assert.assertTrue(RegexUtil.match(regexString, s3));
+        Assert.assertTrue(RegexUtil.match(regexString, s4));
+        Assert.assertTrue(RegexUtil.match(regexString, s5));
+        Assert.assertTrue(RegexUtil.match(regexString, s6));
+        Assert.assertTrue(RegexUtil.match(regexString, s7));
+        Assert.assertTrue(RegexUtil.match(regexString, s8));
+        Assert.assertTrue(RegexUtil.match(regexString, s9));
 
-        @Override
-        public void run() {
-            Long start = System.currentTimeMillis();
-            if (REGEX_PATTERNS.equals(mode)) {
-                for (String target : mockData) {
-                    RegexUtil.match(regexPatterns, target);
-                }
-            } else if (REGEX_STRING.equals(mode)) {
-                for (String target : mockData) {
-                    RegexUtil.match(regexString, target);
-                }
-            } else if (IF_EXPRESS.equals(mode)) {
-                for (String target : mockData) {
-                    if (target.toLowerCase().startsWith("savepoint")) {
-                        continue;
-                    }
-                    if (target.toLowerCase().startsWith("grant")) {
-                        continue;
-                    }
-                    target.toLowerCase().contains("__drds_global_tx_log");
-                }
-            }
-
-            Long end = System.currentTimeMillis();
-            double avg = (end - start) / (double) mockData.size();
-            System.out.printf("mode:%s total: %d ms, avg: %f ms%n", mode, (end - start), avg);
-
-        }
+        Assert.assertFalse(RegexUtil.match(regexString, s10));
     }
 }

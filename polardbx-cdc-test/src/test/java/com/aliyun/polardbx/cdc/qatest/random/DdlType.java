@@ -18,5 +18,5 @@ package com.aliyun.polardbx.cdc.qatest.random;
  * created by ziyang.lb
  **/
 public enum DdlType {
-    AddColumn, DropColumn, ModifyColumn
+    AddColumn, DropColumn, ModifyColumn, AlterTableCharset
 }

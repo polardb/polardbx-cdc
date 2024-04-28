@@ -78,6 +78,11 @@ public class SystemDbConfig {
             }
 
             try {
+                // step0. 将老参数名转换成新参数名，可能有一些环境依赖的还是老参数名
+                if (ConfigNameMap.isOldConfigName(configName)) {
+                    configName = ConfigNameMap.getNewConfigName(configName);
+                }
+
                 // step1. read from binlog_system_config by cluster_id:config_name
                 String clusterId = SpringContextHolder.getPropertiesValue(ConfigKeys.CLUSTER_ID);
                 String clusterKey = clusterId + ":" + configName;
@@ -106,8 +111,6 @@ public class SystemDbConfig {
                     return res;
                 }
 
-                // step4. read from inst_config
-                res = getConfigValue(configName, SystemDbConfig::getInstConfig);
                 return res;
             } catch (Exception e) {
                 logger.error("read config:{} from db error, will try to read from spring context", configName, e);

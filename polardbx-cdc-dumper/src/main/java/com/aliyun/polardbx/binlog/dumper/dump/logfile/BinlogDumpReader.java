@@ -14,23 +14,35 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.domain.BinlogCursor;
+import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.UnsafeByteOperations;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ArrayUtils;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.EVENT_LEN_OFFSET;
+import static com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg.BINLOG_CHECKSUM_ALG_UNDEF;
+import static com.aliyun.polardbx.binlog.format.utils.EventGenerator.EVENT_LEN_LEN;
+import static com.aliyun.polardbx.binlog.format.utils.EventGenerator.FLAGS_OFFSET;
+import static com.aliyun.polardbx.binlog.format.utils.EventGenerator.FLAG_LEN;
+import static com.aliyun.polardbx.binlog.format.utils.EventGenerator.LOG_POS_LEN;
+import static com.aliyun.polardbx.binlog.format.utils.EventGenerator.LOG_POS_OFFSET;
+import static com.aliyun.polardbx.binlog.util.ServerConfigUtil.SERVER_ID;
 
 /**
  * Created by ShuGuang
@@ -52,9 +64,9 @@ public class BinlogDumpReader {
 
     // https://dev.mysql.com/doc/refman/5.7/en/replication-options-binary-log.html
     String fileName;
-    long pos;
+    long startPosition;
 
-    long fp;
+    long lastPosition = 0;
     CdcFile cdcFile;
     BinlogFileReadChannel channel;
     ByteBuffer buffer;
@@ -62,27 +74,61 @@ public class BinlogDumpReader {
     int left = 0;
 
     long timestamp;
-    private byte seq = 1;
+
+    private byte packetSequence = 1;
+
     private boolean rotateNext = true;
     protected List<BinlogDumpRotateObserver> rotateObservers;
     private DumpMode mode = DumpMode.NORMAL;
     private BinlogDumpDownloader dumpDownloader = null;
+    private EnumBinlogChecksumAlg eventChecksumAlg;
+    private final EnumBinlogChecksumAlg slaveChecksumAlg;
 
-    public BinlogDumpReader(LogFileManager logFileManager, String fileName, long pos, int maxPacketSize,
-                            int readBufferSize) {
-        if (pos == 0) {
-            pos = 4;
+    public static final int NET_HEADER_SIZE = 4;
+    public static final int NET_HEADER_PACKET_LENGTH_SIZE = 3;
+    public static final int RPL_PROTOCOL_STATUS_SIZE = 1;
+    public static final byte RPL_PROTOCOL_STATUS_OK = (byte) 0;
+    public static final byte RPL_PROTOCOL_STATUS_ERR = (byte) 0xff;
+    public static final byte RPL_PROTOCOL_STATUS_INVALID = (byte) -1;
+
+    public BinlogDumpReader(LogFileManager logFileManager, String fileName, long startPosition, int maxPacketSize,
+                            int readBufferSize, EnumBinlogChecksumAlg slaveChecksumAlg) {
+        if (startPosition <= 0) {
+            startPosition = 4;
         }
         this.logFileManager = logFileManager;
         this.fileName = fileName;
-        this.pos = pos;
+        this.startPosition = startPosition;
         this.maxPacketSize = maxPacketSize;
         this.readBufferSize = readBufferSize;
+        this.slaveChecksumAlg = slaveChecksumAlg;
+        // m_event_checksum_alg should be set to the checksum algorithm in Format_description_log_event.
+        // But it is used by fake_rotate_event() which will be called before reading any Format_description_log_event.
+        // In that case, m_slave_checksum_alg is set as the value of m_event_checksum_alg.
+        this.eventChecksumAlg = this.slaveChecksumAlg;
         this.buffer = ByteBuffer.allocate(readBufferSize);
         this.rotateObservers = new ArrayList<>();
     }
 
-    public void init() throws IOException {
+    public void init() throws Exception {
+        // MySQL标准行为，这个值应该从binlog的Format_description_log_event里读
+        // 但是使用远程下载模式时，在等待文件下载的过程中可能需要给下游发送心跳，等不及从Format_description_log_event里读了
+        // 所以这里直接从配置文件里读这个配置
+        this.eventChecksumAlg = EnumBinlogChecksumAlg.fromName(
+            DynamicApplicationConfig.getString(ConfigKeys.BINLOG_DUMP_M_EVENT_CHECKSUM_ALG));
+
+        Boolean checkCheckSumAlg =
+            DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_DUMP_CHECK_CHECKSUM_ALG_SWITCH);
+        if (checkCheckSumAlg) {
+            if (this.slaveChecksumAlg == BINLOG_CHECKSUM_ALG_UNDEF && eventChecksumOn()) {
+                log.error(
+                    "Master is configured to log replication events with checksum, "
+                        + "but will not send such events to slaves that cannot process them");
+                throw new Exception(
+                    "Slave can not handle replication events with the checksum that master is configured to log");
+            }
+        }
+
         if (mode == DumpMode.QUICK) {
             cdcFile = dumpDownloader.getFile(fileName);
         } else {
@@ -105,11 +151,12 @@ public class BinlogDumpReader {
         // dump请求的是最新的binlog文件
         if (ret == 0) {
             // 请求的位点大于binlog文件的最大位点
-            if (pos > logFileManager.getLatestFileCursor().getFilePosition()) {
-                log.info("valid fileName={}, pos={}, cursor={}", fileName, pos, logFileManager.getLatestFileCursor());
+            if (startPosition > logFileManager.getLatestFileCursor().getFilePosition()) {
+                log.info("valid fileName={}, pos={}, cursor={}", fileName, startPosition,
+                    logFileManager.getLatestFileCursor());
                 throw new PolardbxException("invalid log position");
             }
-            if (pos == logFileManager.getLatestFileCursor().getFilePosition()) {
+            if (startPosition == logFileManager.getLatestFileCursor().getFilePosition()) {
                 return;
             }
         } else if (ret < 0) {
@@ -119,7 +166,7 @@ public class BinlogDumpReader {
 
         byte[] data = new byte[1024];
         ByteBuffer buffer = ByteBuffer.wrap(data);
-        channel.read(buffer, pos);
+        channel.read(buffer, startPosition);
         buffer.flip();
         /*
           Event Structure:
@@ -144,23 +191,23 @@ public class BinlogDumpReader {
         if (eventType < 0 || eventType > 0x23) {
             throw new PolardbxException("invalid event type:" + eventType);
         }
-        if (eventSize != endPos - pos) {
+        if (eventSize != endPos - startPosition) {
             throw new PolardbxException(
-                "invalid event size! next_position:" + endPos + ", cur_position:" + pos + ", event_size:" + eventSize);
+                "invalid event size! next_position:" + endPos + ", cur_position:" + startPosition + ", event_size:"
+                    + eventSize);
         }
     }
 
-    public ByteString fakeRotateEvent() {
-        long length = logFileManager.getLatestFileCursor().getFilePosition();
-        Pair<byte[], Integer> rotateEvent = EventGenerator.makeFakeRotate(0L, fileName,
-            Math.min(pos, length), true);
-        ByteArray ba = new ByteArray(new byte[5]);
-        ba.writeLong(rotateEvent.getRight() + 1, 3);
-        ba.write(seq++);
-        ByteString rotateEventStr = ByteString.copyFrom(rotateEvent.getLeft(), 0,
-            rotateEvent.getRight());
-        return ByteString.copyFrom(
-            ArrayUtils.addAll(ba.getData(), rotateEventStr.toByteArray()));
+    public ByteString fakeRotateEventPacket() {
+        byte[] fakeRotateEvent = EventGenerator.makeFakeRotate(fileName, startPosition, eventChecksumOn(),
+            ServerConfigUtil.getGlobalNumberVar(SERVER_ID));
+        byte[] packetHeader =
+            makePacketHeader(fakeRotateEvent.length, this.packetSequence++, true, RPL_PROTOCOL_STATUS_OK);
+        return ByteString.copyFrom(ArrayUtils.addAll(packetHeader, fakeRotateEvent));
+    }
+
+    private boolean eventChecksumOn() {
+        return (this.eventChecksumAlg == EnumBinlogChecksumAlg.BINLOG_CHECKSUM_ALG_CRC32);
     }
 
     public ByteString fakeFormatEvent() throws IOException {
@@ -174,20 +221,20 @@ public class BinlogDumpReader {
         byte[] data = new byte[5 + length];
         buffer.reset();
         buffer.get(data, 5, length);
-        fp += 4 + length;
+        lastPosition += 4 + length;
         //相比show binlog events, payload 前面增加了以下5个byte
         ByteArray ba = new ByteArray(data);
         ba.writeLong(length + 1, 3);
-        ba.write(seq++);
+        ba.write(packetSequence++);
         // Network streams are requested with COM_BINLOG_DUMP and prepend each Binlog Event with 00 OK-byte.
         ba.write((byte) 0);
 
         ba.skip(13);
-        if (pos > 4) {
+        if (startPosition > 4) {
             //fake format with next position 0
             // make real format or fake format, different of next position
             ba.writeLong(0, 4);
-            channel.position(pos);
+            channel.position(startPosition);
         } else {
             ba.skip(4);
             channel.position(4 + length);
@@ -197,34 +244,87 @@ public class BinlogDumpReader {
         return ByteString.copyFrom(data);
     }
 
-    public ByteString heartbeatEvent() {
-        Pair<byte[], Integer> heartBeat = EventGenerator.makeHeartBeat(this.fileName, this.fp, true);
-        ByteArray ba = new ByteArray(new byte[5]);
-        ba.writeLong(heartBeat.getRight() + 1, 3);
-        ba.write(seq++);
-        ByteString heartbeat = ByteString.copyFrom(heartBeat.getLeft(), 0,
-            heartBeat.getRight());
-        return ByteString.copyFrom(
-            ArrayUtils.addAll(ba.getData(), heartbeat.toByteArray()));
+    public ByteString formatDescriptionPacket() throws IOException {
+        byte[] formatDescriptionEvent = readFormatDescriptionEvent();
+        byte[] packetHeader =
+            makePacketHeader(formatDescriptionEvent.length, this.packetSequence++, true, RPL_PROTOCOL_STATUS_OK);
+        return ByteString.copyFrom(ArrayUtils.addAll(packetHeader, formatDescriptionEvent));
+    }
+
+    private byte[] readFormatDescriptionEvent() throws IOException {
+        ByteBuffer buffer = ByteBuffer.allocate(512);
+        channel.read(buffer, 4);
+        ByteArray byteArray = new ByteArray(buffer.array());
+        // TODO: error on slave does not support checksum
+        int eventLen = byteArray.readInteger(EVENT_LEN_OFFSET, EVENT_LEN_LEN);
+        this.lastPosition = 4 + eventLen;
+
+        if (startPosition > 4) {
+            // set log pos to 0 means this is a fake format desc event
+            byteArray.writeLong(LOG_POS_OFFSET, 0, LOG_POS_LEN);
+            channel.position(startPosition);
+        } else {
+            channel.position(lastPosition);
+        }
+
+        byteArray.writeLong(FLAGS_OFFSET, 0, FLAG_LEN);
+        byte[] eventData = new byte[eventLen];
+        buffer.position(0);
+        buffer.get(eventData, 0, eventLen);
+        // calculate checksum
+        EventGenerator.updateChecksum(eventData, 0, eventLen);
+        return eventData;
+    }
+
+    public ByteString heartbeatEventPacket() {
+        byte[] heartbeatEvent = EventGenerator.makeHeartBeat(this.fileName, this.lastPosition, eventChecksumOn(),
+            ServerConfigUtil.getGlobalNumberVar(SERVER_ID));
+        byte[] packetHeader =
+            makePacketHeader(heartbeatEvent.length, this.packetSequence++, true, RPL_PROTOCOL_STATUS_OK);
+        return ByteString.copyFrom(ArrayUtils.addAll(packetHeader, heartbeatEvent));
+    }
+
+    /**
+     * Binlog Network streams are requested with COM_BINLOG_DUMP and each Binlog Event is prepended with a status byte.
+     * The data sent over network is then network protocol (4 bytes) + 1 byte status flag + <n bytes> event data.
+     * 注：每个event都需要作为一个packet来发送，其前面需要加一个packet header。但是为了发送效率，可以将多个packet组合在一起一次发送出去
+     * 每次发送的大packet最后需要增加一个status
+     * <p>
+     * Packet Header Format:
+     * - packet length (3 bytes)
+     * - packet sequence (1 byte)
+     * Replication protocol status byte:
+     * - uint<1> OK (0) or ERR (ff) or End of File, EOF, (fe)
+     */
+    public static byte[] makePacketHeader(int eventLen, byte packetSequence, boolean hasStatus, byte status) {
+        int packetHeaderLen = NET_HEADER_SIZE + (hasStatus ? RPL_PROTOCOL_STATUS_SIZE : 0);
+        int packetLen = eventLen + (hasStatus ? 1 : 0);
+        ByteArray packetHeader = new ByteArray(new byte[packetHeaderLen]);
+        packetHeader.writeLong(packetLen, NET_HEADER_PACKET_LENGTH_SIZE);
+        packetHeader.write(packetSequence);
+        if (hasStatus) {
+            packetHeader.write(status);
+        }
+        return packetHeader.getData();
     }
 
     public ByteString eofEvent() {
         ByteArray ba = new ByteArray(new byte[9]);
         ba.writeLong(5, 3);
-        ba.write(seq++);
+        ba.write(packetSequence++);
         ba.write((byte) 0xfe);
         ba.writeLong(0, 2);
         ba.writeLong(0x0002, 2);
         return ByteString.copyFrom(ba.getData());
     }
 
-    public void start() throws IOException {
+    public void start() throws Exception {
         final long position = channel.position();
-        if (pos > position) {
-            channel.position(pos);
-            fp = pos;
+        if (startPosition > position) {
+            channel.position(startPosition);
+            lastPosition = startPosition;
         } else {
-            fp = position;
+            lastPosition = position;
         }
 
         read();
@@ -247,23 +347,23 @@ public class BinlogDumpReader {
      * @return next dump pack
      * @see <a href="mysqlbinlog.cc">https://github.com/mysql/mysql-server/blob/8.0/client/mysqlbinlog.cc</a>
      */
-    protected ByteString nextDumpPack() {
-        int length = 0;// length
+    protected ByteString nextDumpPack() throws Exception {
+        int eventLength = 0;
         try {
             if (buffer.remaining() == 0) {
                 buffer.compact();
                 this.read();
             }
-            if (buffer.remaining() == 0 && hasNext() && fp == channel.size()) {
+            if (buffer.remaining() == 0 && hasNext() && lastPosition == channel.size()) {
                 log.info("rotate, buffer={}, {}, {}<->{}", buffer, hasNext(), channel.position(), channel.size());
                 rotate();
-                return fakeRotateEvent();
+                return fakeRotateEventPacket();
             }
             int cur = buffer.position();
             boolean withStatus = true;
             if (left > 0) {
                 withStatus = false;
-                length = left;
+                eventLength = left;
             } else {
                 if (buffer.remaining() < 13) {
                     if (log.isDebugEnabled()) {
@@ -274,24 +374,24 @@ public class BinlogDumpReader {
                     this.read();
                 }
                 buffer.position(cur + 9);//go to length
-                length = (0xff & buffer.get()) | ((0xff & buffer.get()) << 8) | ((0xff & buffer.get()) << 16)
+                eventLength = (0xff & buffer.get()) | ((0xff & buffer.get()) << 8) | ((0xff & buffer.get()) << 16)
                     | ((buffer.get()) << 24);
             }
-            if (length >= 0xFFFFFF) {
-                left = withStatus ? (length - 0xFFFFFF + 1) : length - 0xFFFFFF;
-                length = withStatus ? 0xFFFFFF - 1 : 0xFFFFFF;
+            if (eventLength >= 0xFFFFFF) {
+                left = withStatus ? (eventLength - 0xFFFFFF + 1) : eventLength - 0xFFFFFF;
+                eventLength = withStatus ? 0xFFFFFF - 1 : 0xFFFFFF;
             } else {
                 left = 0;
             }
-            if (buffer.remaining() < length - 13) {
+            if (buffer.remaining() < eventLength - 13) {
                 if (log.isDebugEnabled()) {
-                    log.debug("buffer.remaining() < length - 13  cause read, length={},buffer={}", length, buffer);
+                    log.debug("buffer.remaining() < length - 13  cause read, length={},buffer={}", eventLength, buffer);
                 }
                 buffer.position(cur);//go to length
                 buffer.compact();
                 cur = 0;
                 this.read();
-                while (buffer.remaining() < length) {
+                while (buffer.remaining() < eventLength) {
                     this.read();
                 }
             }
@@ -299,26 +399,26 @@ public class BinlogDumpReader {
             //packet #n:   3 bytes length + sequence + status + [event_header + (event data - 1)]
             //packet #n+1: 3 bytes length + sequence + last byte of the event data.
             int nrp_len = withStatus ? 5 : 4;
-            byte[] data = new byte[nrp_len + length];
+            byte[] data = new byte[nrp_len + eventLength];
             //相比show binlog events, payload 前面增加了以下5个byte https://mariadb.com/kb/en/3-binlog-network-stream/
             //Network Replication Protocol, 5 Bytes
             //packet size [3] = 23 00 00 => 00 00 23 => 35 (ok byte + event size)
             //pkt sequence [1] = 04
             //OK indicator [1] = 0 (OK)
             ByteArray ba = new ByteArray(data);
-            ba.writeLong(withStatus ? length + 1 : length, 3);
-            ba.write(seq++);
+            ba.writeLong(withStatus ? eventLength + 1 : eventLength, 3);
+            ba.write(packetSequence++);
             // Network streams are requested with COM_BINLOG_DUMP and prepend each Binlog Event with 00 OK-byte.
             if (withStatus) {
                 ba.write((byte) 0x00);
             }
             buffer.position(cur);
-            buffer.get(data, nrp_len, length);
-            fp += length;
+            buffer.get(data, nrp_len, eventLength);
+            lastPosition += eventLength;
             //ByteString bytes = ByteString.copyFrom(data);
             ByteString bytes = UnsafeByteOperations.unsafeWrap(data);
             if (log.isDebugEnabled()) {
-                log.debug("dumpPack {}@{}#{}", fileName, fp - length, fp);
+                log.debug("dumpPack {}@{}#{}", fileName, lastPosition - eventLength, lastPosition);
             }
             // try parse event header timestamp
             try {
@@ -331,9 +431,12 @@ public class BinlogDumpReader {
             }
 
             return bytes;
+        } catch (InterruptedException e) {
+            log.info("binlog dump has been interrupted.");
+            throw new InterruptedException("remote closed");
         } catch (Exception e) {
-            log.warn("buffer parse fail {}@{} {} {}", fileName, fp, length, buffer, e);
-            throw new PolardbxException();
+            log.warn("buffer parse fail {}@{} {} {}", fileName, lastPosition, eventLength, buffer, e);
+            throw new Exception(e);
         }
     }
 
@@ -341,7 +444,7 @@ public class BinlogDumpReader {
      * @return next dump pack
      * @see <a href="mysqlbinlog.cc">https://github.com/mysql/mysql-server/blob/8.0/client/mysqlbinlog.cc</a>
      */
-    public ByteString nextDumpPacks() {
+    public ByteString nextDumpPacks() throws Exception {
         ByteString result = ByteString.EMPTY;
         while (hasNext()) {
             result = result.concat(nextDumpPack());
@@ -362,12 +465,12 @@ public class BinlogDumpReader {
     protected void read() throws IOException {
         // binlog文件开头的4个字节是魔法值，可以直接跳过
         if (channel.position() == 0) {
-            fp = 4;
+            lastPosition = 4;
             channel.position(4);
         }
 
         if (log.isDebugEnabled()) {
-            log.debug("will read from {}#{}, fp={}, buffer={}", fileName, channel.position(), fp,
+            log.debug("will read from {}#{}, fp={}, buffer={}", fileName, channel.position(), lastPosition,
                 bufferMessage(buffer));
         }
 
@@ -378,7 +481,7 @@ public class BinlogDumpReader {
             if (!checkFileStatus() || (channel.size() < cdcFile.size() && (read = channel.read(buffer)) <= 0)) {
                 throw new PolardbxException(String.format(
                     "unexpected channel stat!! fp = %s , fileName = %s, channel size = %s , buffer = %s.",
-                    fp, fileName, channel.size(), buffer));
+                    lastPosition, fileName, channel.size(), buffer));
             }
         }
 
@@ -398,7 +501,7 @@ public class BinlogDumpReader {
         int ret = cursor.getFileName().compareTo(fileName);
         if (ret == 0) {
             long latestCursor = cursor.getFilePosition();
-            return fp < latestCursor;
+            return lastPosition < latestCursor;
         } else if (ret > 0) {
             int seq1 = logFileManager.parseFileNumber(fileName);
             int seq2 = logFileManager.parseFileNumber(cursor.getFileName());
@@ -412,11 +515,11 @@ public class BinlogDumpReader {
         }
     }
 
-    protected void rotate() throws IOException {
+    protected void rotate() throws Exception {
         rotateObservers.forEach(BinlogDumpRotateObserver::onRotate);
         this.close();
         this.fileName = BinlogFileUtil.getNextBinlogFileName(fileName);
-        this.pos = 4;
+        this.startPosition = 4;
 
         if (mode == DumpMode.QUICK) {
             if (!dumpDownloader.isFinished()) {
@@ -441,7 +544,9 @@ public class BinlogDumpReader {
     public void close() {
         try {
             buffer.clear();
-            channel.close();
+            if (channel != null) {
+                channel.close();
+            }
         } catch (Exception e) {
             log.warn("{} close fail ", fileName, e);
         }

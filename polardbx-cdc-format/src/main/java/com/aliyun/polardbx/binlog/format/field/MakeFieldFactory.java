@@ -24,26 +24,25 @@ import java.io.Serializable;
 public class MakeFieldFactory {
 
     @SneakyThrows
-    public static Field makField4TypeMisMatch(String typefunc, Serializable data, String charset, boolean nullable,
+    public static Field makField4TypeMisMatch(String typefunc, Serializable data, String mysqlCharset, boolean nullable,
                                               String logicDefault, boolean unsigned) {
         try {
-            CreateField createField = CreateField.parse(typefunc, data, charset, nullable, unsigned);
+            CreateField createField = CreateField.parse(typefunc, data, mysqlCharset, nullable, unsigned);
             return makeFieldInternal(createField);
         } catch (InvalidInputDataException e) {
-            CreateField createField = CreateField.parse(typefunc, logicDefault, charset, nullable, unsigned);
-            return makeFieldInternal(createField);
+            return makeField(typefunc, logicDefault, mysqlCharset, nullable, unsigned);
         }
     }
 
     @SneakyThrows
-    public static Field makeField(String typefunc, Serializable data, String charset, boolean nullable,
+    public static Field makeField(String typefunc, Serializable data, String mysqlCharset, boolean nullable,
                                   boolean unsigned) {
         try {
-            CreateField createField = CreateField.parse(typefunc, data, charset, nullable, unsigned);
+            CreateField createField = CreateField.parse(typefunc, data, mysqlCharset, nullable, unsigned);
             return makeFieldInternal(createField);
         } catch (Throwable t) {
             throw new PolardbxException(
-                "make filed error! type:" + typefunc + ", data:" + data + ", charset" + charset + ", nullable:"
+                "make filed error! type:" + typefunc + ", data:" + data + ", charset" + mysqlCharset + ", nullable:"
                     + nullable + ",unsigned:" + unsigned, t);
         }
     }

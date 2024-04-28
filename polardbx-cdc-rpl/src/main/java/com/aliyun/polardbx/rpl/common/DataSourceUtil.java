@@ -20,6 +20,9 @@ import com.alibaba.druid.pool.vendor.MySqlValidConnectionChecker;
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.rpl.applier.SqlContext;
 import com.google.common.collect.Maps;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.jdbc.support.JdbcUtils;
 
 import java.io.Serializable;
 import java.sql.Connection;
@@ -33,10 +36,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
-
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
-import org.springframework.jdbc.support.JdbcUtils;
 
 /**
  * @author shicai.xsc 2020/12/1 22:36
@@ -64,6 +63,7 @@ public class DataSourceUtil {
         // 关闭每次读取read-only状态,提升batch性能
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("readOnlyPropagatesToServer", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("connectTimeout", "1000");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("socketTimeout", "60000");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("autoReconnect", "true");
         // 将0000-00-00的时间类型返回null
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("zeroDateTimeBehavior", "convertToNull");
@@ -80,6 +80,10 @@ public class DataSourceUtil {
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useServerPrepStmts", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useInformationSchema", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("pedantic", "true");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowLoadLocalInfile", "false");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowLocalInfile", "false");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowUrlInLocalInfile", "false");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("autoDeserialize", "false");
     }
 
     @FunctionalInterface
@@ -173,16 +177,11 @@ public class DataSourceUtil {
         return count;
     }
 
-    /**
-     * Get key column out from one db table
-     * NOTE: This method DOESN'T close data source
-     */
-    public static List<String> getKeyColumnsInTable(DruidDataSource dataSource, String tableName) throws Exception {
-        Connection conn = dataSource.getConnection();
+    public static List<String> getKeyColumns(Connection conn, String dbName, String tableName) throws SQLException {
         PreparedStatement stmt = null;
         ResultSet rs = null;
 
-        /**
+        /*
          * This SQL should return result looks like this
          * +-----------------+-------------+
          * | CONSTRAINT TYPE | COLUMN_NAME |
@@ -194,18 +193,20 @@ public class DataSourceUtil {
          * | FOREIGN KEY     | order_id    |
          * +-----------------+-------------+
          */
-        String sql = String.format("SELECT t.CONSTRAINT_TYPE, k.COLUMN_NAME\n"
+        String sql = String.format("SELECT distinct t.CONSTRAINT_TYPE, k.COLUMN_NAME\n"
             + "FROM information_schema.table_constraints t\n"
             + "         LEFT JOIN information_schema.key_column_usage k\n"
             + "                   USING(constraint_name,table_schema,table_name)\n"
             + "WHERE t.table_schema='%s'\n"
-            + "  AND t.table_name='%s'", conn.getCatalog(), tableName);
+            + "  AND t.table_name='%s'", dbName, tableName);
         log.debug("Try retrieving keys from table. SQL: {}", sql);
         List<String> keyTypeList = new ArrayList<>();
         List<String> keyList = new ArrayList<>();
+
         try {
             stmt = conn.prepareStatement(sql);
             rs = stmt.executeQuery();
+
             while (rs.next()) {
                 keyTypeList.add(rs.getString(1));
                 keyList.add(rs.getString(2));
@@ -214,7 +215,8 @@ public class DataSourceUtil {
             log.error("failed in getTables: {}", sql, e);
             throw e;
         } finally {
-            DataSourceUtil.closeQuery(rs, stmt, conn);
+            JdbcUtils.closeResultSet(rs);
+            JdbcUtils.closeStatement(stmt);
         }
 
         List<String> keyColumns = new ArrayList<>();
@@ -228,6 +230,21 @@ public class DataSourceUtil {
         }
 
         return keyColumns;
+    }
+
+    /**
+     * Get key column out from one db table
+     * NOTE: This method DOESN'T close data source
+     */
+    public static List<String> getKeyColumnsInTable(DruidDataSource dataSource, String tableName) throws Exception {
+        Connection conn = dataSource.getConnection();
+        List<String> result = null;
+        try {
+            result = getKeyColumns(conn, conn.getCatalog(), tableName);
+        } finally {
+            JdbcUtils.closeConnection(conn);
+        }
+        return result;
     }
 
     /**
@@ -338,7 +355,7 @@ public class DataSourceUtil {
                     return mapper.process(rs);
                 }
             } catch (Exception e) {
-                log.error("TryTimes: {}, current round: {}, Error query: {}, {}", tryTimes, i, query, e);
+                log.error("TryTimes: {}, current round: {}, Error query: {}", tryTimes, i, query, e);
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e2) {
@@ -400,6 +417,17 @@ public class DataSourceUtil {
         JdbcUtils.closeResultSet(rs);
         JdbcUtils.closeStatement(stmt);
         JdbcUtils.closeConnection(conn);
+    }
+
+    public static DruidDataSource createPolarxDataSource(String url, String user, String passwd) throws SQLException {
+        DruidDataSource druidDs = new DruidDataSource();
+        druidDs.setUrl(url);
+        druidDs.setUsername(user);
+        druidDs.setPassword(passwd);
+        druidDs.setRemoveAbandoned(false);
+        druidDs.setMaxActive(30);
+        druidDs.init();
+        return druidDs;
     }
 
     public static DruidDataSource createDruidMySqlDataSource(boolean usePolarxPoolCN, String ip, int port,

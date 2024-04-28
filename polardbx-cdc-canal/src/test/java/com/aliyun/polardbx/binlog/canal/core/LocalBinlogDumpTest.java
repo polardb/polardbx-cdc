@@ -14,12 +14,12 @@
  */
 package com.aliyun.polardbx.binlog.canal.core;
 
-import com.aliyun.polardbx.binlog.canal.binlog.FileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.FileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import org.junit.Ignore;
 import org.junit.Test;

@@ -24,7 +24,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.util.ByteUtil;
 
-import java.sql.Timestamp;
 import java.util.UUID;
 
 /**
@@ -35,12 +34,11 @@ import java.util.UUID;
 public class MessageEvent {
 
     private DBMSEvent dbmsEvent;
-    private Timestamp sourceTimestamp;
-    private Timestamp extractTimestamp;
-    private String position;
+
     private DBMSXATransaction xaTransaction;
 
     private RepoUnit repoUnit;
+
     private String persistKey;
 
     public MessageEvent() {
@@ -66,7 +64,9 @@ public class MessageEvent {
         try {
             repoUnit.put(ByteUtil.bytes(persistKey), SerializationUtils.serialize(dbmsEvent));
             dbmsEvent = null;
-            log.info("message event is persisted, with key " + persistKey);
+            if (log.isDebugEnabled()) {
+                log.debug("message event is persisted, with key " + persistKey);
+            }
         } catch (RocksDBException e) {
             throw new PolardbxException("persist failed !", e);
         }
@@ -81,18 +81,20 @@ public class MessageEvent {
         }
         try {
             repoUnit.delete(ByteUtil.bytes(persistKey));
-            log.info("persisted mysql dbms event is released, with key " + persistKey);
+            if (log.isDebugEnabled()) {
+                log.debug("persisted mysql dbms event is released, with key " + persistKey);
+            }
             persistKey = null;
         } catch (Throwable e) {
             throw new PolardbxException("release persisted event failed !", e);
         }
     }
 
-    public DBMSEvent getUnderlyingDbmsEvent() {
+    public DBMSEvent getDbmsEventDirect() {
         return dbmsEvent;
     }
 
-    public DBMSEvent getDbmsEventWithEffect() {
+    public DBMSEvent getDbmsEventEffective() {
         if (StringUtils.isNotBlank(persistKey)) {
             try {
                 byte[] bytes = repoUnit.get(ByteUtil.bytes(persistKey));
@@ -107,30 +109,6 @@ public class MessageEvent {
 
     public void setDbmsEvent(DBMSEvent dbmsEvent) {
         this.dbmsEvent = dbmsEvent;
-    }
-
-    public Timestamp getSourceTimestamp() {
-        return sourceTimestamp;
-    }
-
-    public void setSourceTimestamp(Timestamp sourceTimestamp) {
-        this.sourceTimestamp = sourceTimestamp;
-    }
-
-    public Timestamp getExtractTimestamp() {
-        return extractTimestamp;
-    }
-
-    public void setExtractTimestamp(Timestamp extractTimestamp) {
-        this.extractTimestamp = extractTimestamp;
-    }
-
-    public String getPosition() {
-        return position;
-    }
-
-    public void setPosition(String position) {
-        this.position = position;
     }
 
     public DBMSXATransaction getXaTransaction() {

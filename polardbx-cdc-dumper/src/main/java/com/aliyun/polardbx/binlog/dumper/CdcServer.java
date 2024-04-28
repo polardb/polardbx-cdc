@@ -24,10 +24,12 @@ import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManagerCollection;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileReader;
 import com.aliyun.polardbx.binlog.dumper.metrics.DumpClientMetric;
 import com.aliyun.polardbx.binlog.dumper.metrics.MetricsManager;
+import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.rpc.cdc.BinaryLog;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc;
@@ -35,6 +37,8 @@ import com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest;
 import com.aliyun.polardbx.rpc.cdc.ChangeReplicationFilterRequest;
 import com.aliyun.polardbx.rpc.cdc.DumpRequest;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
+import com.aliyun.polardbx.rpc.cdc.FullBinaryLog;
+import com.aliyun.polardbx.rpc.cdc.FullMasterStatus;
 import com.aliyun.polardbx.rpc.cdc.MasterStatus;
 import com.aliyun.polardbx.rpc.cdc.Request;
 import com.aliyun.polardbx.rpc.cdc.ResetSlaveRequest;
@@ -126,6 +130,7 @@ public class CdcServer {
                     if (request.getExcludeRemoteFiles()) {
                         files = logFileManager.getAllLocalBinlogFilesOrdered();
                     } else {
+                        // FIXME: 本地文件file size = 0, binlog_oss_record表中size非0，导致空洞
                         files = logFileManager.getAllBinlogFilesOrdered();
                     }
 
@@ -142,15 +147,61 @@ public class CdcServer {
             }
 
             @Override
+            public void showFullBinaryLogs(Request request, StreamObserver<FullBinaryLog> responseObserver) {
+                try {
+                    MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
+
+                    log.info("CDC Server receive a show full binary logs request, with stream name:{}",
+                        request.getStreamName());
+
+                    LogFileManager logFileManager = getLogFileManager(request.getStreamName());
+                    List<CdcFile> files;
+                    if (request.getExcludeRemoteFiles()) {
+                        files = logFileManager.getAllLocalBinlogFilesOrdered();
+                    } else {
+                        files = logFileManager.getAllBinlogFilesOrdered();
+                    }
+
+                    for (CdcFile file : files) {
+                        responseObserver.onNext(FullBinaryLog.newBuilder()
+                            .setLogName(file.getName())
+                            .setFileSize(file.size())
+                            .setCreatedTime(file.getCreatedTime())
+                            .setLastModifyTime(file.getLastModifyTime())
+                            .setFirstEventTime(file.getFirstEventTime())
+                            .setLastEventTime(file.getLastEventTime())
+                            .setLastTso(file.getLastTso())
+                            .setUploadStatus(file.getUploadStatus())
+                            .setFileLocation(file.getLocation())
+                            .setExt("")
+                            .build());
+                    }
+
+                    responseObserver.onCompleted();
+                } finally {
+                    MDC.remove(MDC_THREAD_LOGGER_KEY);
+                }
+            }
+
+            // case1 : show binlog events [with stream_name], no file_name
+            // case2 : show binlog events in file_name, no stream_name
+            // case3 : show binlog events in file_name with stream_name
+            @Override
             public void showBinlogEvents(ShowBinlogEventsRequest request,
                                          StreamObserver<BinlogEvent> responseObserver) {
                 try {
                     MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
-                    log.info("CDC Server receive a show binlog events request, with stream name: {}, log name: {}",
-                        request.getStreamName(), request.getLogName());
+                    log.info(
+                        "CDC Server receive a show binlog events request with log name:{}, pos:{}, offset:{}, rowCount:{}, streamName:{}",
+                        request.getLogName(), request.getPos(), request.getOffset(), request.getRowCount(),
+                        request.getStreamName());
+
                     final ServerCallStreamObserver<BinlogEvent> serverCallStreamObserver =
                         (ServerCallStreamObserver<BinlogEvent>) responseObserver;
-                    LogFileManager logFileManager = getLogFileManager(request.getStreamName());
+
+                    String streamName = StringUtils.isEmpty(request.getStreamName()) ?
+                        BinlogFileUtil.extractStreamName(request.getLogName()) : request.getStreamName();
+                    LogFileManager logFileManager = getLogFileManager(streamName);
                     LogFileReader logFileReader = new LogFileReader(logFileManager);
                     CdcFile cdcFile = StringUtils.isEmpty(request.getLogName()) ? logFileManager.getMinBinlogFile() :
                         logFileManager.getBinlogFileByName(request.getLogName());
@@ -178,6 +229,55 @@ public class CdcServer {
                         responseObserver.onNext(MasterStatus.newBuilder().setFile(fileName)
                             .setPosition(4).build());
                     }
+                    responseObserver.onCompleted();
+                } finally {
+                    MDC.remove(MDC_THREAD_LOGGER_KEY);
+                }
+            }
+
+            @Override
+            public void showFullMasterStatus(Request request, StreamObserver<FullMasterStatus> responseObserver) {
+                try {
+                    MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
+                    log.info("CDC Server receive a show full master status request, with stream name: {}",
+                        request.getStreamName());
+                    LogFileManager logFileManager = getLogFileManager(request.getStreamName());
+
+                    String streamName =
+                        StringUtils.isEmpty(request.getStreamName()) ? STREAM_NAME_GLOBAL : request.getStreamName();
+                    StreamMetrics streamMetrics = metricsManager.getStreamMetrics(streamName);
+                    MetricsManager.StreamMetricsAverage streamMetricsAvg =
+                        metricsManager.getStreamMetricsAvg(streamName);
+
+                    String fileName;
+                    long position;
+                    String lastTso = "";
+                    BinlogCursor cursor = logFileManager.getLatestFileCursor();
+                    if (cursor != null) {
+                        fileName = cursor.getFileName();
+                        position = cursor.getFilePosition();
+                        lastTso = cursor.getTso();
+                    } else {
+                        CdcFile maxFile = logFileManager.getMaxBinlogFile();
+                        fileName = maxFile.getName();
+                        position = 4L;
+                    }
+
+                    responseObserver.onNext(
+                        FullMasterStatus.newBuilder()
+                            .setFile(fileName)
+                            .setPosition(position)
+                            .setLastTso(lastTso)
+                            .setDelayTime(streamMetrics.getLatestDelayTimeOnCommit())
+                            .setAvgRevBps(streamMetricsAvg.getAvgRevBps())
+                            .setAvgRevEps(streamMetricsAvg.getAvgRevEps())
+                            .setAvgWriteBps(streamMetricsAvg.getAvgWriteBps())
+                            .setAvgWriteBps(streamMetricsAvg.getAvgWriteBps())
+                            .setAvgWriteTps(streamMetricsAvg.getAvgWriteTps())
+                            .setAvgUploadBps(streamMetricsAvg.getAvgUploadBps())
+                            .setAvgDumpBps(streamMetricsAvg.getAvgDumpBps())
+                            .build());
+
                     responseObserver.onCompleted();
                 } finally {
                     MDC.remove(MDC_THREAD_LOGGER_KEY);

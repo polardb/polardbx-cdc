@@ -229,7 +229,7 @@ public class DumperController {
         if (dumperInfoInDb.isPresent()) {
             // 兼容一下老版调度引擎的逻辑，如果version为0，进行更新
             RuntimeMode runtimeMode = RuntimeMode.valueOf(getString(RUNTIME_MODE));
-            if (dumperInfoInDb.get().getVersion() == 0 || runtimeMode == RuntimeMode.LOCAL) {
+            if (dumperInfoInDb.get().getVersion() == 0 || RuntimeMode.isLocalMode(runtimeMode)) {
                 dumperInfo.setId(dumperInfoInDb.get().getId());
                 dumperInfoMapper.updateByPrimaryKeySelective(dumperInfo);
             } else {

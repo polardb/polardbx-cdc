@@ -17,34 +17,16 @@ package com.aliyun.polardbx.rpl.taskmeta;
 public enum FilterType {
 
     // 无filter， 自行在applier中实现过滤逻辑
-    NO_FILTER(0),
+    NO_FILTER,
 
     // 标准filter，目前用于data import
-    IMPORT_FILTER(10),
+    IMPORT_FILTER,
 
     // replica使用的filter
-    RPL_FILTER(20),
+    RPL_FILTER,
 
     // 闪回使用的filter
-    FLASHBACK_FILTER(30);
+    FLASHBACK_FILTER
 
-    private int value;
-
-    public int getValue() {
-        return value;
-    }
-
-    FilterType(int value) {
-        this.value = value;
-    }
-
-    public static FilterType from(int state) {
-        for (FilterType i : FilterType.values()) {
-            if (i.value == state) {
-                return i;
-            }
-        }
-        return null;
-    }
 }
 

@@ -51,4 +51,12 @@ public class DateTime2FieldTest {
         Assert.assertArrayEquals(new byte[] {3}, field.doGetTableMeta());
         Assert.assertArrayEquals(new byte[] {-103, -80, -16, 125, -73, 17, -48}, field.encode());
     }
+
+    @Test
+    public void testZero() {
+        Field field =
+            MakeFieldFactory.makeField("datetime", "0000-00-00 00:00:0", defaultCharset, false, false);
+        Assert.assertArrayEquals(new byte[] {0}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {-128, 0, 0, 0, 0}, field.encode());
+    }
 }

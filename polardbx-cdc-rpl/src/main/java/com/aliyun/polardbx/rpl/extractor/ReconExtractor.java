@@ -14,19 +14,16 @@
  */
 package com.aliyun.polardbx.rpl.extractor;
 
+import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.ValidationDiffDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.ValidationDiffMapper;
-import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
-import com.aliyun.polardbx.rpl.filter.DataImportFilter;
-import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
+import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.ReconExtractorConfig;
-import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
-import com.aliyun.polardbx.rpl.validation.ReconCoordinator;
-import com.aliyun.polardbx.rpl.validation.ValidationContext;
+import com.aliyun.polardbx.rpl.validation.RepairCoordinator;
 import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -43,50 +40,38 @@ import java.util.concurrent.Future;
  */
 @Slf4j
 public class ReconExtractor extends BaseExtractor {
-    private ReconExtractorConfig extractorConfig;
-    private ExecutorService executorService;
-    private List<Future> runningProcessors;
-    private HostInfo srcHost;
-    private HostInfo dstHost;
-    private String extractorName;
-    private DataImportFilter filter;
-    private List<ValidationContext> contextList;
+    private final ExecutorService executorService;
+    private final List<Future<?>> runningProcessors;
 
-    public ReconExtractor(ReconExtractorConfig extractorConfig, HostInfo srcHost, HostInfo dstHost,
-                          DataImportFilter filter) {
+    public ReconExtractor(ReconExtractorConfig extractorConfig) {
         super(extractorConfig);
-        this.extractorName = "ReconExtractor";
         this.extractorConfig = extractorConfig;
-        this.srcHost = srcHost;
-        this.dstHost = dstHost;
-        this.filter = filter;
-        executorService = ThreadPoolUtil.createExecutorWithFixedNum(extractorConfig.getParallelCount(),
-            extractorName);
+        executorService =
+            ThreadPoolUtil.createExecutorWithFixedNum(1, "ReconExecutor");
         runningProcessors = new ArrayList<>();
     }
 
     @Override
     public void init() throws Exception {
         super.init();
-        contextList = ValidationContext.getFactory().createCtxList(srcHost, dstHost, filter);
     }
 
     @Override
     public void start() throws Exception {
-        log.info("Starting {}", extractorName);
+        log.info("Starting recon extractor");
+        DataImportMeta.ValidationMeta validationMeta =
+            JSON.parseObject(extractorConfig.getPrivateMeta(), DataImportMeta.ValidationMeta.class);
+        validationMeta.setType(ValidationTypeEnum.FORWARD);
 
-        for (ValidationContext context : contextList) {
-            ReconCoordinator coordinator = new ReconCoordinator(context);
-            Future future = executorService.submit(() -> coordinator.reconFullLoad());
-            runningProcessors.add(future);
-            log.info("Running recon for src DB {} and dst DB {}", context.getSrcPhyDB(), context.getDstLogicalDB());
-        }
+        RepairCoordinator coordinator = new RepairCoordinator(validationMeta);
+        Future<?> future = executorService.submit(coordinator::doRepair);
+        runningProcessors.add(future);
     }
 
     @Override
     public boolean isDone() {
         boolean allDone = true;
-        for (Future future : runningProcessors) {
+        for (Future<?> future : runningProcessors) {
             allDone &= future.isDone();
         }
         if (allDone) {
@@ -103,30 +88,15 @@ public class ReconExtractor extends BaseExtractor {
     private boolean isReconFinished() {
         String fsmId = Long.toString(TaskContext.getInstance().getStateMachineId());
         // compute corresponding validation task id
-        String taskId = Long.toString(TaskContext.getInstance().getTaskId() -
-            TaskContext.getInstance().getPhysicalNum());
+        String taskId = Long.toString(TaskContext.getInstance().getTaskId() - 1);
         ValidationDiffMapper mapper = SpringContextHolder.getObject(ValidationDiffMapper.class);
         long diffCnt = mapper.count(s -> s
             .where(ValidationDiffDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(fsmId))
             .and(ValidationDiffDynamicSqlSupport.taskId, SqlBuilder.isEqualTo(taskId))
-            .and(ValidationDiffDynamicSqlSupport.type, SqlBuilder.isEqualTo(getType().getValue()))
             .and(ValidationDiffDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false)));
 
         log.info("Checking recon tasks. Remaining diff cnt: {}", diffCnt);
 
         return diffCnt == 0;
-    }
-
-    private ValidationTypeEnum getType() {
-        RplService rplService = TaskContext.getInstance().getService();
-        switch (ServiceType.from(rplService.getServiceType())) {
-        case FULL_VALIDATION:
-        case RECONCILIATION:
-            return ValidationTypeEnum.FORWARD;
-        case FULL_VALIDATION_CROSSCHECK:
-        case RECONCILIATION_CROSSCHECK:
-            return ValidationTypeEnum.BACKWARD;
-        }
-        return ValidationTypeEnum.FORWARD;
     }
 }

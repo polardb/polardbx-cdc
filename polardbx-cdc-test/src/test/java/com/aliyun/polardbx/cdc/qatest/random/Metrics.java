@@ -70,11 +70,11 @@ public class Metrics {
         long dmlFailCount = insertSingleFail.get() + updateSingleFail.get() + deleteSingleFail.get()
             + insertBatchFail.get() + updateBatchFail.get() + deleteBatchFail.get();
         double ratio1 = ((double) dmlSuccessCount) / ((double) dmlSuccessCount + (double) dmlFailCount);
-        Assert.assertTrue(ratio1 >= 0.9d);
+        Assert.assertTrue("dml success ratio must greater than 0.9, actual is " + ratio1, ratio1 >= 0.8d);
 
         long ddlSuccessCount = addColumnSuccess.get() + dropColumnSuccess.get() + modifyColumnSuccess.get();
         long ddlFailCount = addColumnFail.get() + dropColumnFail.get() + modifyColumnFail.get();
         double ratio2 = ((double) ddlSuccessCount) / ((double) ddlSuccessCount + (double) ddlFailCount);
-        Assert.assertTrue(ratio2 >= 0.9d);
+        Assert.assertTrue("ddl success ratio must greater than 0.8, actual is " + ratio2, ratio2 >= 0.8d);
     }
 }

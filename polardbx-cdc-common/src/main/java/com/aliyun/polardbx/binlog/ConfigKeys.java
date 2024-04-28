@@ -75,6 +75,10 @@ public abstract class ConfigKeys {
      */
     public static final String COMMON_PORTS = "common_ports";
     /**
+     * 分配给该实例的列存可用端口
+     */
+    public static final String COLUMNAR_PORT = "columnarPort";
+    /**
      * 当前运行时的模式，Local or Cluster
      */
     public static final String RUNTIME_MODE = "runtime_mode";
@@ -112,11 +116,6 @@ public abstract class ConfigKeys {
     public static final String DAEMON_REST_API_ACL_AK = "daemon_rest_api_acl_ak";
     public static final String DAEMON_REST_API_ACL_SK = "daemon_rest_api_acl_sk";
     /**
-     * deamon接口acl aksk
-     */
-    public static final String DEAMON_REST_API_ACL_AK = "deamon_rest_api_acl_ak";
-    public static final String DEAMON_REST_API_ACL_SK = "deamon_rest_api_acl_sk";
-    /**
      * 当前cdc集群类型
      */
     public static final String CLUSTER_TYPE = "cluster_type";
@@ -135,6 +134,15 @@ public abstract class ConfigKeys {
 
     public static final String SIGAR_ENABLED = "sigar_enabled";
 
+    /**
+     * 强制reset binlog开关,开发环境使用
+     */
+    public static final String FORCE_RESET_ENABLE = "force_reset_enable";
+
+    /**
+     * releaseNote路径， 单元测试和线上不同
+     */
+    public static final String RELEASE_NOTE_PATH = "release_note_path";
     /**
      * meta db 连接串
      */
@@ -354,8 +362,17 @@ public abstract class ConfigKeys {
     public static final String BINLOG_DUMP_READ_BUFFER_SIZE = "binlog_dump_read_buffer_size";
     /**
      * dumper对现有消费订阅，当长时间没有数据时，发送heartbeat的频率，默认1s
+     * 该值的单位是纳秒
      */
-    public static final String BINLOG_DUMP_HEARTBEAT_INTERVAL_MS = "binlog_dump_heartbeat_interval_ms";
+    public static final String BINLOG_DUMP_MASTER_HEARTBEAT_PERIOD = "binlog_dump_master_heartbeat_period";
+    /**
+     * dumper通过binlog dump发送出去的binlog event是否带checksum
+     */
+    public static final String BINLOG_DUMP_M_EVENT_CHECKSUM_ALG = "binlog_dump_m_event_checksum_alg";
+    /**
+     * dumper在进行binlog dump之前是否校验slave的checksum alg
+     */
+    public static final String BINLOG_DUMP_CHECK_CHECKSUM_ALG_SWITCH = "binlog_dump_check_checksum_alg_switch";
     /**
      * binlog dump触发反压控制时的休眠时间，单位微妙
      */
@@ -392,6 +409,8 @@ public abstract class ConfigKeys {
      * dump文件下载失败后的重试次数
      */
     public static final String BINLOG_DUMP_DOWNLOAD_ERROR_RETRY_TIMES = "binlog_dump_download_error_retry_times";
+
+    public static final String BINLOG_DUMP_DOWNLOAD_MAX_WAIT_TIME_SECONDS = "binlog_dump_download_max_wait_seconds";
 
     /**
      * 逻辑Binlog文件的备份方式，OSS or Lindorm or NULL
@@ -467,6 +486,11 @@ public abstract class ConfigKeys {
      * 通过该配置，可以对binlog文件中的last tso进行overwrite，格式 [old tso, overwritten tso]
      */
     public static final String BINLOG_RECOVER_TSO_OVERWRITE_CONFIG = "binlog_recover_tso_overwrite_config";
+    public static final String BINLOG_DDL_SET_TABLE_GROUP_ENABLED = "binlog_ddl_set_table_group_enabled";
+    public static final String BINLOG_DDL_ALTER_MANUALLY_TABLE_GROUP_ENABLED =
+        "binlog_ddl_alter_manually_table_group_enabled";
+    public static final String BINLOG_DDL_ALTER_IMPLICIT_TABLE_GROUP_ENABLED =
+        "binlog_ddl_alter_implicit_table_group_enabled";
     /**
      * 逻辑Binlog文件上传到OSS的accessKeyId
      */
@@ -547,7 +571,7 @@ public abstract class ConfigKeys {
     /**
      * 任务整形数据Log开关
      */
-    public static final String TASK_EXTRACTOR_REBUILD_DATA_LOG = "task_extractor_rebuild_data_log";
+    public static final String TASK_EXTRACT_REBUILD_DATA_LOG = "task_extract_rebuild_data_log";
     /**
      * 是否强制从backup存储下载rds binlog并消费
      */
@@ -1104,6 +1128,8 @@ public abstract class ConfigKeys {
      */
     public static final String META_BUILD_RECORD_SQL_WITH_EXISTS_ENABLED =
         "meta_build_record_sql_with_exists_enabled";
+
+    public static final String META_BUILD_RECORD_IGNORED_DDL_ENABLED = "meta_build_record_ignored_ddl_enabled";
     /**
      * 逻辑ddl 软删除支持
      */
@@ -1143,6 +1169,7 @@ public abstract class ConfigKeys {
      * 举例：alter table vvv modify column b bigint after c ALGORITHM=OMC，需要把OMC去掉
      */
     public static final String TASK_REFORMAT_DDL_ALGORITHM_BLACKLIST = "task_reformat_ddl_algorithm_blacklist";
+    public static final String TASK_REFORMAT_DDL_HINT_BLACKLIST = "task_reformat_ddl_hint_blacklist";
     /**
      * 元数据转储到磁盘时，根存储目录
      */
@@ -1173,10 +1200,8 @@ public abstract class ConfigKeys {
     public static final String META_BUILD_FULL_SNAPSHOT_CHECK_INTERVAL_SEC =
         "meta_build_full_snapshot_check_interval_sec";
 
-    /**
-     * CDC 是否支持snapshot能力
-     */
-    public static final String ENABLE_CDC_META_BUILD_SNAPSHOT = "ENABLE_CDC_META_BUILD_SNAPSHOT";
+    public static final String META_WRITE_ALL_VARIABLE_TO_DB_SWITCH =
+        "meta_write_all_variable_to_db_switch";
     /**
      * 恢复模式是否强制使用精确snapshot
      */
@@ -1323,9 +1348,9 @@ public abstract class ConfigKeys {
      */
     public static final String RPL_SUPPORT_RUNNING_CHECK = "rpl_task_support_running_check";
 
-    public static final String RPL_VALIDATION_PER_DB_PARALLELISM = "rpl_validation_per_db_parallelism";
+    public static final String RPL_SINGLE_TASK_MEMORY_WHEN_DISTRIBUTE = "rpl_single_task_memory_when_distribute";
 
-    public static final String RPL_VALIDATION_CHUNK_SIZE = "rpl_validation_chunk_size";
+    public static final String RPL_RANDOM_COMPARE_ALL = "rpl_random_compare_all";
 
     public static final String RPL_ROCKSDB_DESERIALIZE_PARALLELISM = "rpl_rocksdb_deserialize_parallelism";
 
@@ -1351,9 +1376,91 @@ public abstract class ConfigKeys {
 
     public static final String RPL_DDL_RETRY_MAX_COUNT = "rpl_ddl_retry_max_count";
 
+    public static final String RPL_DDL_WAIT_ALIGN_INTERVAL_MILLS = "rpl_ddl_wait_align_interval_mills";
+
+    public static final String RPL_DDL_APPLY_COLUMNAR_ENABLED = "rpl_ddl_apply_columnar_enabled";
+
     public static final String RPL_DELAY_ALARM_THRESHOLD_SECOND = "rpl_delay_alarm_threshold_second";
 
+    public static final String RPL_DDL_PARSE_ERROR_PROCESS_MODE = "rpl_ddl_parse_error_process_mode";
+
     public static final String RPL_ERROR_SQL_TRUNCATE_LENGTH = "rpl_error_sql_truncate_length";
+
+    public static final String RPL_FULL_VALID_MIN_BATCH_ROWS_COUNT = "rpl_full_valid_min_batch_rows_count";
+
+    public static final String RPL_FULL_VALID_MIN_BATCH_BYTE_SIZE = "rpl_full_valid_min_batch_byte_size";
+
+    public static final String RPL_FULL_VALID_BATCH_SIZE = "rpl_full_valid_batch_size";
+
+    public static final String RPL_FULL_VALID_MAX_SAMPLE_PERCENTAGE = "rpl_full_valid_max_sample_percentage";
+
+    public static final String RPL_FULL_VALID_MAX_SAMPLE_ROWS_COUNT = "rpl_full_valid_max_sample_rows_count";
+
+    public static final String RPL_FULL_VALID_PARALLELISM = "rpl_full_valid_parallelism";
+
+    public static final String RPL_REPAIR_PARALLELISM = "rpl_repair_parallelism";
+
+    public static final String RPL_FULL_VALID_MAX_PERSIST_ROWS_COUNT = "rpl_full_valid_max_persist_rows_count";
+
+    public static final String RPL_FULL_VALID_RECORDS_PER_SECOND = "rpl_full_valid_records_per_second";
+
+    public static final String RPL_FULL_VALID_SKIP_COLLECT_STATISTIC = "rpl_full_valid_skip_collect_statistic";
+
+    public static final String RPL_FULL_VALID_AUTO_RESET_ERROR_TASKS = "rpl_full_valid_auto_reset_error_tasks";
+
+    public static final String RPL_SET_MAX_STATEMENT_TIME_OPTION = "rpl_set_max_statement_time_option";
+
+    public static final String RPL_ASYNC_DDL_ENABLED = "rpl_async_ddl_enabled";
+
+    public static final String RPL_ASYNC_DDL_THRESHOLD_IN_SECOND = "rpl_async_ddl_threshold_in_second";
+
+    public static final String RPL_PARALLEL_SCHEMA_APPLY_ENABLED = "rpl_parallel_schema_apply_enabled";
+
+    public static final String RPL_PARALLEL_SCHEMA_CHANNEL_ENABLED = "rpl_parallel_schema_channel_enabled";
+
+    public static final String RPL_PARALLEL_SCHEMA_CHANNEL_PARALLELISM = "rpl_parallel_schema_channel_parallelism";
+
+    public static final String RPL_PARALLEL_TABLE_APPLY_ENABLED = "rpl_parallel_table_apply_enabled";
+
+    public static final String RPL_PARALLEL_SCHEMA_APPLY_BATCH_SIZE = "rpl_parallel_schema_apply_batch_size";
+
+    public static final String RPL_DEFAULT_MEMORY = "rpl_default_memory";
+
+    public static final String RPL_CONNECTION_INIT_SQL = "rpl_connection_init_sql";
+
+    public static final String RPL_APPLY_USE_CACHED_THREAD_POOL_ENABLED = "rpl_apply_use_cached_thread_pool_enabled";
+
+    /**
+     * 全量校验，表分批校验的临界行数
+     */
+    public static final String RPL_FULL_VALID_MAX_BATCH_ROWS_COUNT = "rpl_full_valid_max_batch_rows_count";
+
+    /**
+     * 全量校验，表分批校验的临界大小，单位：字节
+     */
+    public static final String RPL_FULL_VALID_MAX_BATCH_SIZE = "rpl_full_valid_max_batch_size";
+
+    public static final String RPL_FULL_VALID_RUNNER_THREAD_POOL_CORE_SIZE =
+        "rpl_full_valid_runner_thread_pool_core_size";
+    public static final String RPL_FULL_VALID_RUNNER_THREAD_POOL_MAX_SIZE =
+        "rpl_full_valid_runner_thread_pool_max_size";
+    public static final String RPL_FULL_VALID_RUNNER_THREAD_POOL_KEEP_ALIVE_TIME_SECONDS =
+        "rpl_full_valid_runner_thread_pool_keep_alive_time_seconds";
+    public static final String RPL_FULL_VALID_RUNNER_THREAD_POOL_QUEUE_SIZE =
+        "rpl_full_valid_runner_thread_pool_queue_size";
+    public static final String RPL_FULL_VALID_CHECK_DETAIL_FETCH_SIZE = "rpl_full_valid_check_detail_fetch_size";
+
+    public static final String RPL_FULL_VALID_CN_CONN_POOL_COUNT = "rpl_full_valid_cn_conn_pool_count";
+
+    public static final String RPL_FULL_VALID_MOCK_SAMPLE = "rpl_full_valid_mock_sample";
+
+    public static final String RPL_EXTRACTOR_DDL_LOG_OPEN = "rpl_extractor_ddl_log_open";
+
+    /**
+     * Columnar是否已经心跳超时的阈值
+     */
+    public static final String COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_MS =
+        "columnar_process_heartbeat_timeout_ms";
 
     /**
      * 实验室相关配置

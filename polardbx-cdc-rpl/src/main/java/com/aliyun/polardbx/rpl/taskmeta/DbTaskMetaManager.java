@@ -14,6 +14,8 @@
  */
 package com.aliyun.polardbx.rpl.taskmeta;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
@@ -49,11 +51,12 @@ import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
-import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.AbstractFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
 import com.aliyun.polardbx.rpl.validation.common.ValidationStateEnum;
+import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.joda.time.DateTime;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.mybatis.dynamic.sql.render.RenderingStrategies;
@@ -79,6 +82,9 @@ public class DbTaskMetaManager {
     private static final RplDdlMapper ddlMapper =
         SpringContextHolder.getObject(RplDdlMapper.class);
 
+    private static final RplDdlSubMapper ddlSubMapper =
+        SpringContextHolder.getObject(RplDdlSubMapper.class);
+
     private static final RplTaskMapper taskMapper =
         SpringContextHolder.getObject(RplTaskMapper.class);
 
@@ -103,9 +109,6 @@ public class DbTaskMetaManager {
     private static final RplTaskConfigMapper taskConfigMapper =
         SpringContextHolder.getObject(RplTaskConfigMapper.class);
 
-    private static final RplDdlSubMapper DDL_SUB_MAPPER =
-        SpringContextHolder.getObject(RplDdlSubMapper.class);
-
     private static final RplStatMetricsMapper RPL_STAT_METRICS_MAPPER =
         SpringContextHolder.getObject(RplStatMetricsMapper.class);
 
@@ -114,10 +117,10 @@ public class DbTaskMetaManager {
                                                      String channel, String clusterId, String context) {
         RplStateMachine record = new RplStateMachine();
         record.setConfig(config);
-        record.setStatus(StateMachineStatus.STOPPED.getValue());
-        record.setType(type.getValue());
+        record.setStatus(StateMachineStatus.STOPPED.name());
+        record.setType(type.name());
         record.setClassName(fsm.getClass().getName());
-        record.setState(fsm.getInitialState().getValue());
+        record.setState(fsm.getInitialState().name());
         record.setClusterId(clusterId);
         record.setContext(context);
         switch (type) {
@@ -135,24 +138,24 @@ public class DbTaskMetaManager {
         return stateMachineMapper
             .selectMany(SqlBuilder.select(RplStateMachineDynamicSqlSupport.rplStateMachine.allColumns())
                 .from(RplStateMachineDynamicSqlSupport.rplStateMachine)
-                .where(RplStateMachineDynamicSqlSupport.status, SqlBuilder.isEqualTo(status.getValue()))
+                .where(RplStateMachineDynamicSqlSupport.status, SqlBuilder.isEqualTo(status.name()))
                 .and(RplStateMachineDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                 .build()
                 .render(RenderingStrategies.MYBATIS3));
     }
 
-    public static int countTotalValTask(long stateMachineId, int type) {
+    public static int countTotalValTask(long stateMachineId, ValidationTypeEnum type) {
         return (int) valTaskMapper.count(s -> s
             .where(ValidationTaskDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(Long.toString(stateMachineId)))
-            .and(ValidationTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(type))
+            .and(ValidationTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(type.name()))
             .and(ValidationTaskDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false)));
     }
 
-    public static int countDoneValTask(long stateMachineId, int type) {
+    public static int countDoneValTask(long stateMachineId, ValidationTypeEnum type) {
         return (int) valTaskMapper.count(s -> s
             .where(ValidationTaskDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(Long.toString(stateMachineId)))
-            .and(ValidationTaskDynamicSqlSupport.state, SqlBuilder.isEqualTo(ValidationStateEnum.DONE.getValue()))
-            .and(ValidationTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(type))
+            .and(ValidationTaskDynamicSqlSupport.state, SqlBuilder.isEqualTo(ValidationStateEnum.DONE.name()))
+            .and(ValidationTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(type.name()))
             .and(ValidationTaskDynamicSqlSupport.deleted, SqlBuilder.isEqualTo(false)));
     }
 
@@ -160,7 +163,7 @@ public class DbTaskMetaManager {
         return stateMachineMapper
             .selectMany(SqlBuilder.select(RplStateMachineDynamicSqlSupport.rplStateMachine.allColumns())
                 .from(RplStateMachineDynamicSqlSupport.rplStateMachine)
-                .where(RplStateMachineDynamicSqlSupport.type, SqlBuilder.isEqualTo(StateMachineType.REPLICA.getValue()))
+                .where(RplStateMachineDynamicSqlSupport.type, SqlBuilder.isEqualTo(StateMachineType.REPLICA.name()))
                 .build()
                 .render(RenderingStrategies.MYBATIS3));
     }
@@ -168,8 +171,8 @@ public class DbTaskMetaManager {
     public static RplStateMachine getRplStateMachine(String channel) {
         Optional<RplStateMachine> res = stateMachineMapper
             .selectOne(i -> i.where(RplStateMachineDynamicSqlSupport.channel, SqlBuilder.isEqualTo(channel))
-                .and(RplStateMachineDynamicSqlSupport.type, SqlBuilder.isEqualTo(StateMachineType.REPLICA.getValue())));
-        return res.isPresent() ? res.get() : null;
+                .and(RplStateMachineDynamicSqlSupport.type, SqlBuilder.isEqualTo(StateMachineType.REPLICA.name())));
+        return res.orElse(null);
     }
 
     public static List<RplStateMachine> listRplChannelNotNullStateMachine() {
@@ -177,16 +180,9 @@ public class DbTaskMetaManager {
             .selectMany(SqlBuilder.select(RplStateMachineDynamicSqlSupport.rplStateMachine.allColumns())
                 .from(RplStateMachineDynamicSqlSupport.rplStateMachine)
                 .where(RplStateMachineDynamicSqlSupport.channel, SqlBuilder.isNotNull())
-                .and(RplStateMachineDynamicSqlSupport.type, SqlBuilder.isEqualTo(StateMachineType.REPLICA.getValue()))
+                .and(RplStateMachineDynamicSqlSupport.type, SqlBuilder.isEqualTo(StateMachineType.REPLICA.name()))
                 .build()
                 .render(RenderingStrategies.MYBATIS3));
-    }
-
-    public static RplStateMachine getRplChannelNullStateMachine() {
-        Optional<RplStateMachine> res = stateMachineMapper
-            .selectOne(i -> i.where(RplStateMachineDynamicSqlSupport.channel, SqlBuilder.isNull())
-                .and(RplStateMachineDynamicSqlSupport.type, SqlBuilder.isEqualTo(StateMachineType.REPLICA.getValue())));
-        return res.isPresent() ? res.get() : null;
     }
 
     public static RplStateMachine getStateMachine(long id) {
@@ -203,7 +199,7 @@ public class DbTaskMetaManager {
     public static RplStateMachine updateStateMachineStatus(long id, StateMachineStatus status) {
         RplStateMachine record = new RplStateMachine();
         record.setId(id);
-        record.setStatus(status.getValue());
+        record.setStatus(status.name());
         stateMachineMapper.updateByPrimaryKeySelective(record);
         return getStateMachine(id);
     }
@@ -221,10 +217,10 @@ public class DbTaskMetaManager {
             return null;
         }
         log.info("Update state machine state [id : {}] from : {} to: {}",
-            id, FSMState.from(record.getState()).name(), state.name());
+            id, record.getState(), state.name());
         RplStateMachine newRecord = new RplStateMachine();
         newRecord.setId(id);
-        newRecord.setState(state.getValue());
+        newRecord.setState(state.name());
         stateMachineMapper.updateByPrimaryKeySelective(newRecord);
         return getStateMachine(id);
     }
@@ -252,8 +248,8 @@ public class DbTaskMetaManager {
     public static RplService addService(long stateMachineId, ServiceType type, List<FSMState> stateList) {
         RplService record = new RplService();
         record.setStateMachineId(stateMachineId);
-        record.setStatus(ServiceStatus.NULL.getValue());
-        record.setServiceType(type.getValue());
+        record.setStatus(ServiceStatus.NULL.name());
+        record.setServiceType(type.name());
         record.setStateList(FSMState.listToString(stateList));
         serviceMapper.insert(record);
         return record;
@@ -262,14 +258,14 @@ public class DbTaskMetaManager {
     public static RplService getService(long id) {
         Optional<RplService> res = serviceMapper
             .selectOne(i -> i.where(RplServiceDynamicSqlSupport.id, SqlBuilder.isEqualTo(id)));
-        return res.isPresent() ? res.get() : null;
+        return res.orElse(null);
     }
 
     public static RplService getService(long stateMachineId, ServiceType type) {
         Optional<RplService> res = serviceMapper
             .selectOne(i -> i.where(RplServiceDynamicSqlSupport.stateMachineId, SqlBuilder.isEqualTo(stateMachineId))
-                .and(RplServiceDynamicSqlSupport.serviceType, SqlBuilder.isEqualTo(type.getValue())));
-        return res.isPresent() ? res.get() : null;
+                .and(RplServiceDynamicSqlSupport.serviceType, SqlBuilder.isEqualTo(type.name())));
+        return res.orElse(null);
     }
 
     public static List<RplService> listService(long stateMachineId) {
@@ -284,7 +280,7 @@ public class DbTaskMetaManager {
     public static RplService updateServiceStatus(long id, ServiceStatus status) {
         RplService record = new RplService();
         record.setId(id);
-        record.setStatus(status.getValue());
+        record.setStatus(status.name());
         serviceMapper.updateByPrimaryKeySelective(record);
         return getService(id);
     }
@@ -310,8 +306,8 @@ public class DbTaskMetaManager {
         RplTask record = new RplTask();
         record.setStateMachineId(stateMachineId);
         record.setServiceId(serviceId);
-        record.setStatus(TaskStatus.NULL.getValue());
-        record.setType(type.getValue());
+        record.setStatus(TaskStatus.NULL.name());
+        record.setType(type.name());
         record.setLastError("");
         record.setPosition("");
         record.setClusterId(clusterId);
@@ -325,7 +321,7 @@ public class DbTaskMetaManager {
                                   String extractorConfig, String pipelineConfig, String applierConfig,
                                   ServiceType type, int sequenceId, String clusterId) {
         return addTaskWithMemory(stateMachineId, serviceId, extractorConfig, pipelineConfig, applierConfig, type,
-            sequenceId, clusterId, RplConstants.DEFAULT_MEMORY_SIZE);
+            sequenceId, clusterId, DynamicApplicationConfig.getInt(ConfigKeys.RPL_DEFAULT_MEMORY));
     }
 
     public static RplTaskConfig addTaskConfig(long taskId, String extractorConfig,
@@ -356,7 +352,7 @@ public class DbTaskMetaManager {
     }
 
     public static List<RplDdlSub> listDdlSubByServiceIdOnce(long serviceId, long fsmId, String tso) {
-        return DDL_SUB_MAPPER.selectMany(SqlBuilder.select(RplDdlSubDynamicSqlSupport.rplDdlSub.allColumns())
+        return ddlSubMapper.selectMany(SqlBuilder.select(RplDdlSubDynamicSqlSupport.rplDdlSub.allColumns())
             .from(RplDdlSubDynamicSqlSupport.rplDdlSub)
             .where(RplDdlSubDynamicSqlSupport.serviceId, SqlBuilder.isEqualTo(serviceId))
             .and(RplDdlSubDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(fsmId))
@@ -377,7 +373,7 @@ public class DbTaskMetaManager {
     public static List<RplTask> listClusterTask(TaskStatus status, String clusterId) {
         return taskMapper.selectMany(SqlBuilder.select(RplTaskDynamicSqlSupport.rplTask.allColumns())
             .from(RplTaskDynamicSqlSupport.rplTask)
-            .where(RplTaskDynamicSqlSupport.status, SqlBuilder.isEqualTo(status.getValue()))
+            .where(RplTaskDynamicSqlSupport.status, SqlBuilder.isEqualTo(status.name()))
             .and(RplTaskDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
             .build()
             .render(RenderingStrategies.MYBATIS3));
@@ -386,7 +382,7 @@ public class DbTaskMetaManager {
     public static List<RplTask> listTaskByService(String worker, TaskStatus status, String clusterId) {
         return taskMapper.selectMany(SqlBuilder.select(RplTaskDynamicSqlSupport.rplTask.allColumns())
             .from(RplTaskDynamicSqlSupport.rplTask)
-            .where(RplTaskDynamicSqlSupport.status, SqlBuilder.isEqualTo(status.getValue()))
+            .where(RplTaskDynamicSqlSupport.status, SqlBuilder.isEqualTo(status.name()))
             .and(RplTaskDynamicSqlSupport.worker, SqlBuilder.isEqualTo(worker))
             .and(RplTaskDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
             .build()
@@ -396,9 +392,8 @@ public class DbTaskMetaManager {
     public static List<RplTask> listRunningTaskByType(String worker, ServiceType type, String clusterId) {
         return taskMapper.selectMany(SqlBuilder.select(RplTaskDynamicSqlSupport.rplTask.allColumns())
             .from(RplTaskDynamicSqlSupport.rplTask)
-            .where(RplTaskDynamicSqlSupport.status, SqlBuilder.isIn(TaskStatus.RUNNING.getValue(),
-                TaskStatus.READY.getValue()))
-            .and(RplTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(type.getValue()))
+            .where(RplTaskDynamicSqlSupport.status, SqlBuilder.isIn(TaskStatus.RUNNING.name(), TaskStatus.READY.name()))
+            .and(RplTaskDynamicSqlSupport.type, SqlBuilder.isEqualTo(type.name()))
             .and(RplTaskDynamicSqlSupport.worker, SqlBuilder.isEqualTo(worker))
             .and(RplTaskDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
             .build()
@@ -410,7 +405,7 @@ public class DbTaskMetaManager {
         RplTask record = new RplTask();
         record.setId(id);
         if (status != null) {
-            record.setStatus(status.getValue());
+            record.setStatus(status.name());
         }
         record.setWorker(worker);
         record.setPosition(position);
@@ -420,20 +415,53 @@ public class DbTaskMetaManager {
         return getTask(id);
     }
 
-    public static void updateDdlStateByTso(long fsmId, String tso, int targetState, int originState) {
-        ddlMapper.update(s -> s.set(RplDdlDynamicSqlSupport.state).equalTo(targetState)
+    public static void updateDdlStateByTso(long fsmId, String tso, DdlState targetState, DdlState originState) {
+        ddlMapper.update(s -> s.set(RplDdlDynamicSqlSupport.state).equalTo(targetState.name())
             .where(RplDdlDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(fsmId))
             .and(RplDdlDynamicSqlSupport.ddlTso, SqlBuilder.isEqualTo(tso))
-            .and(RplDdlDynamicSqlSupport.state, SqlBuilder.isEqualTo(originState)));
+            .and(RplDdlDynamicSqlSupport.state, SqlBuilder.isEqualTo(originState.name())));
     }
 
-    public static void updateDdlSubStateByServiceIdOnce(long serviceId, long fsmId, String tso, int targetState,
-                                                        int originState) {
-        DDL_SUB_MAPPER.update(s -> s.set(RplDdlSubDynamicSqlSupport.state).equalTo(targetState)
+    public static void updateAsyncDdlStateByTso(long fsmId, String tso, DdlState targetState, DdlState originState) {
+        ddlMapper.update(s -> s.set(RplDdlDynamicSqlSupport.asyncState).equalTo(targetState.name())
+            .where(RplDdlDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(fsmId))
+            .and(RplDdlDynamicSqlSupport.ddlTso, SqlBuilder.isEqualTo(tso))
+            .and(RplDdlDynamicSqlSupport.asyncState, SqlBuilder.isEqualTo(originState.name())));
+    }
+
+    public static List<RplDdl> getAsyncDdlTasksByState(long fsmId, DdlState ddlState) {
+        return ddlMapper.select(s -> s.where(RplDdlDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(fsmId))
+            .and(RplDdlDynamicSqlSupport.asyncFlag, SqlBuilder.isEqualTo(true))
+            .and(RplDdlDynamicSqlSupport.asyncState, SqlBuilder.isEqualTo(ddlState.name())));
+    }
+
+    public static void updateDdlSubStateByServiceIdOnce(long serviceId, long fsmId, String tso, DdlState targetState,
+                                                        DdlState originState) {
+        ddlSubMapper.update(s -> s.set(RplDdlSubDynamicSqlSupport.state).equalTo(targetState.name())
             .where(RplDdlSubDynamicSqlSupport.serviceId, SqlBuilder.isEqualTo(serviceId))
             .and(RplDdlSubDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(fsmId))
             .and(RplDdlSubDynamicSqlSupport.ddlTso, SqlBuilder.isEqualTo(tso))
-            .and(RplDdlSubDynamicSqlSupport.state, SqlBuilder.isEqualTo(originState)));
+            .and(RplDdlSubDynamicSqlSupport.state, SqlBuilder.isEqualTo(originState.name())));
+    }
+
+    public static String getLatestSubmittedTsoByTask(long fsmId, long taskId) {
+        List<RplDdl> listMain = ddlMapper.select(s ->
+            s.where(RplDdlDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(fsmId))
+                .and(RplDdlDynamicSqlSupport.taskId, SqlBuilder.isEqualTo(taskId))
+                .orderBy(RplDdlDynamicSqlSupport.ddlTso.descending()).limit(1));
+        List<RplDdlSub> listSub = ddlSubMapper.select(s ->
+            s.where(RplDdlSubDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(fsmId))
+                .and(RplDdlSubDynamicSqlSupport.taskId, SqlBuilder.isEqualTo(taskId))
+                .orderBy(RplDdlSubDynamicSqlSupport.ddlTso.descending()).limit(1));
+
+        Optional<RplDdl> mainDdlOptional = listMain.stream().findFirst();
+        Optional<RplDdlSub> subDdlOptional = listSub.stream().findFirst();
+
+        String mainDdlTso = mainDdlOptional.map(RplDdl::getDdlTso).orElse(null);
+        String subDdlTso = subDdlOptional.map(RplDdlSub::getDdlTso).orElse(null);
+
+        // 比较两个ddlTso并返回较新的值
+        return StringUtils.compare(mainDdlTso, subDdlTso) >= 0 ? mainDdlTso : subDdlTso;
     }
 
     public static RplTask updateTaskLastError(long id, String lastError) {
@@ -573,13 +601,13 @@ public class DbTaskMetaManager {
     }
 
     public static RplDdlSub addRplDdlSub(RplDdlSub rplDdlSub) {
-        DDL_SUB_MAPPER.insert(rplDdlSub);
+        ddlSubMapper.insert(rplDdlSub);
         return rplDdlSub;
     }
 
     public static void deleteDdlByFSM(long FSMId) {
         ddlMapper.delete(i -> i.where(RplDdlDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(FSMId)));
-        DDL_SUB_MAPPER.delete(i -> i.where(RplDdlSubDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(FSMId)));
+        ddlSubMapper.delete(i -> i.where(RplDdlSubDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(FSMId)));
     }
 
     public static void deleteValidationTaskByFSM(long FSMId) {
@@ -605,6 +633,11 @@ public class DbTaskMetaManager {
     public static void deleteValidationDiffByTask(long taskId) {
         validationDiffMapper.delete(i -> i.where(ValidationTaskDynamicSqlSupport.taskId,
             SqlBuilder.isEqualTo(String.valueOf(taskId))));
+    }
+
+    public static void deleteValidationDiffByValTaskId(String valTaskId) {
+        validationDiffMapper.delete(i -> i.where(ValidationDiffDynamicSqlSupport.validationTaskId,
+            SqlBuilder.isEqualTo(valTaskId)));
     }
 
     /************************* node ***************************/

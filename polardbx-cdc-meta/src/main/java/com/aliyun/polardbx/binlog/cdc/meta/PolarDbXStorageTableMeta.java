@@ -31,18 +31,24 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicBasicInfo;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.PhyTableTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
 import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistory;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.aliyun.polardbx.binlog.service.BinlogPhyDdlHistoryService;
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.base.Preconditions;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.Sets;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -50,7 +56,8 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_IGNORE_APPLY_ERROR;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_META_MAX_SIZE;
-import static com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig.getString;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
+import static com.aliyun.polardbx.binlog.util.SQLUtils.buildCreateLikeSql;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
@@ -106,13 +113,19 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
         logger.info("build physical meta snapshot started, current used memory -> young:{}, old:{}",
             jvmSnapshot.getYoungUsed(), jvmSnapshot.getOldUsed());
 
+        RandomNameConverterMapping nameConverter = new RandomNameConverterMapping();
+
         // 获取Logic Snapshot
         Map<String, String> snapshot = polarDbXLogicTableMeta.snapshot();
-        snapshot.forEach((k, v) -> super.apply(null, k, v, null));
+        snapshot.forEach((k, v) -> {
+            super.apply(null, nameConverter.convert(k), v, null);
+        });
         //用于订正逻辑表和物理表结构不一致的情况
         Map<String, String> snapshotToFix = polarDbXLogicTableMeta.distinctPhySnapshot();
         if (snapshotToFix != null && !snapshotToFix.isEmpty()) {
-            snapshotToFix.forEach((k, v) -> super.apply(null, k, v, null));
+            snapshotToFix.forEach((k, v) -> {
+                super.apply(null, nameConverter.convert(k), v, null);
+            });
         } else {
             logger.info("All logical and physical tables is compatible for snapshot tso:{}...", snapshotTso);
         }
@@ -127,22 +140,24 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
                 for (String table : tables) {
                     LogicBasicInfo logicBasicInfo = topologyManager.getLogicBasicInfo(phyTable.getSchema(), table);
                     checkLogicBasicInfo(logicBasicInfo, phyTable, table);
+                    String schemeName = logicBasicInfo.getSchemaName();
                     String tableName = logicBasicInfo.getTableName();
-                    String createTableSql = "create table `" + CommonUtils.escape(table) + "` like `" +
-                        CommonUtils.escape(logicBasicInfo.getSchemaName()) + "`.`" + CommonUtils.escape(tableName)
-                        + "`";
+                    String createTableSql = buildCreateLikeSql(table, nameConverter.convert(schemeName), tableName);
                     super.apply(null, phyTable.getSchema(), createTableSql, null);
                     applyCount++;
 
                     if (logger.isDebugEnabled()) {
                         logger.debug("apply from logic table, phy:{}.{}, logic:{}.{} [{}] ...", phyTable.getSchema(),
-                            table, logicBasicInfo.getSchemaName(), tableName, createTableSql);
+                            table, schemeName, tableName, createTableSql);
                     }
                 }
             }
         }
         //drop 逻辑库
-        snapshot.forEach((k, v) -> super.apply(null, k, "drop database `" + k + "`", null));
+        snapshot.forEach((k, v) -> {
+            String newSchema = nameConverter.convert(k);
+            super.apply(null, newSchema, "drop database `" + newSchema + "`", null);
+        });
 
         //log after apply snapshot
         long costTime = System.currentTimeMillis() - startTime;
@@ -244,7 +259,7 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
                 .tso(position.getRtso())
                 .dbName(schema)
                 .ddl(ddl)
-                .clusterId(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID))
+                .clusterId(getString(ConfigKeys.CLUSTER_ID))
                 .extra(extra).build(),
             String.format("already applyHistoryToDB, ignore this time, position is : %s, schema is %s, tso is %s,"
                 + " extra is %s", position, schema, position.getRtso(), extra));
@@ -310,6 +325,30 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
 
     public long getQueryDdlHistoryCount() {
         return queryDdlHistoryCount;
+    }
+
+    static class RandomNameConverterMapping {
+        private static final int RANDOM_DB_COUNT = 20;
+
+        private static final AtomicLong sequenceGenerator = new AtomicLong(0);
+        private static final String RANDOM_PREFIX = "_cdc_tmp_";
+        private final LoadingCache<String, String> cache =
+            CacheBuilder.newBuilder().build(new CacheLoader<String, String>() {
+                @Override
+                public String load(String key) throws Exception {
+                    return RANDOM_PREFIX + sequenceGenerator.incrementAndGet() + "_" + StringUtils.lowerCase(
+                        RandomStringUtils.randomAlphabetic(RANDOM_DB_COUNT));
+                }
+            });
+
+        public String convert(String db) {
+            try {
+                return cache.get(db);
+            } catch (ExecutionException e) {
+                throw new PolardbxException(e);
+            }
+        }
+
     }
 
 }

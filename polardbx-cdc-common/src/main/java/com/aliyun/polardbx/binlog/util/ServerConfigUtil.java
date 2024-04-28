@@ -38,33 +38,43 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_CHECK_SERVER_ID
  */
 @Slf4j
 public class ServerConfigUtil {
+    public static final String SERVER_ID = "SERVER_ID";
+
     private static final CacheLoader<String, String> GLOBAL_SYSTEM_VARIABLE_LOADER = new CacheLoader<String, String>() {
         @Override
         public String load(String key) {
-            // change 'select @@GLOBAL.xxx' to 'show global variables like ...'
-            // @see https://aone.alibaba-inc.com/v2/project/860366/bug/51153559
-            JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
-            List<String> list = template.query("show global variables like '" + key + "'",
-                (rs, rowNum) -> rs.getString(2));
-
-            if (list.size() == 1) {
-                return list.get(0);
-            } else {
-                throw new PolardbxException("invalid variables result set " + list);
-            }
+            return get(key);
         }
     };
     private static final LoadingCache<String, String> CACHE = CacheBuilder.newBuilder()
         .maximumSize(1024)
-        .expireAfterWrite(120, TimeUnit.SECONDS)
+        .expireAfterWrite(30, TimeUnit.SECONDS)
         .build(GLOBAL_SYSTEM_VARIABLE_LOADER);
 
-    public static Object getGlobalVar(String var) {
+    public static String getGlobalVar(String var) {
         return CACHE.getUnchecked(var);
     }
 
     public static long getGlobalNumberVar(String var) {
         return Long.parseLong(CACHE.getUnchecked(var));
+    }
+
+    public static long getGlobalNumberVarDirect(String var) {
+        return Long.parseLong(get(var));
+    }
+
+    private static String get(String key) {
+        // change 'select @@GLOBAL.xxx' to 'show global variables like ...'
+        // @see https://aone.alibaba-inc.com/v2/project/860366/bug/51153559
+        JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
+        List<String> list = template.query("show global variables like '" + key + "'",
+            (rs, rowNum) -> rs.getString(2));
+
+        if (list.size() == 1) {
+            return list.get(0);
+        } else {
+            throw new PolardbxException("invalid variables result set " + list);
+        }
     }
 
     public static Set<Long> getTargetServerIds() {

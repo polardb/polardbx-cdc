@@ -16,14 +16,14 @@ package com.aliyun.polardbx.binlog.format.utils.generator;
 
 import com.aliyun.polardbx.binlog.MarkType;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
-import com.aliyun.polardbx.binlog.canal.binlog.FileLogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.SequenceLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.FileLogFetcher;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
 import com.aliyun.polardbx.binlog.format.GcnEventBuilder;

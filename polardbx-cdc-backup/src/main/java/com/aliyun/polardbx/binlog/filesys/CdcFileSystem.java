@@ -80,7 +80,11 @@ public class CdcFileSystem {
         if (remoteFileSystem != null) {
             List<CdcFile> remoteFiles = listRemoteFiles();
             for (CdcFile f : remoteFiles) {
-                fileMap.putIfAbsent(f.getName(), f);
+                if (fileMap.containsKey(f.getName())) {
+                    fileMap.get(f.getName()).setRecord(f.getRecord());
+                } else {
+                    fileMap.putIfAbsent(f.getName(), f);
+                }
             }
         }
         ArrayList<CdcFile> res = new ArrayList<>(fileMap.values());

@@ -232,7 +232,7 @@ public class OssManager implements IRemoteManager {
     }
 
     @Override
-    public void download(String fileName, String localPath) {
+    public void download(String fileName, String localPath) throws Throwable {
         DownloadModeEnum downloadMode =
             DownloadModeEnum.valueOf(DynamicApplicationConfig.getString(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MODE));
         if (downloadMode == DownloadModeEnum.PARALLEL) {
@@ -252,7 +252,7 @@ public class OssManager implements IRemoteManager {
         }
     }
 
-    private void parallelDownload(String fileName, String localPath) {
+    private void parallelDownload(String fileName, String localPath) throws Throwable {
         OSS client = getOssClient();
         String ossFileName = BinlogFileUtil.buildRemoteFileFullName(fileName, ossConfig.polardbxInstance);
         Long partSize = DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_PART_SIZE);
@@ -263,8 +263,6 @@ public class OssManager implements IRemoteManager {
         downloadFileRequest.setTaskNum(taskNum);
         try {
             client.downloadFile(downloadFileRequest);
-        } catch (Throwable e) {
-            throw new RuntimeException(e);
         } finally {
             client.shutdown();
         }

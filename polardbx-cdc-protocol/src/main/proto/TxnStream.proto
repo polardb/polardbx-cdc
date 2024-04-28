@@ -134,6 +134,7 @@ message TxnToken{
    */
   google.protobuf.Int64Value serverId = 14;
   string          ddl = 15;
+  int32           ddlScope = 16;
 }
 
 message TxnMergedToken{

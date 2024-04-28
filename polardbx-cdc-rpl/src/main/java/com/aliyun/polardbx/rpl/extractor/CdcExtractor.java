@@ -16,13 +16,14 @@ package com.aliyun.polardbx.rpl.extractor;
 
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.DynamicApplicationVersionConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.TimelineEnvConfig;
 import com.aliyun.polardbx.binlog.canal.MySqlInfo;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.StreamObserverLogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.handle.EventHandle;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
@@ -48,7 +49,6 @@ import com.aliyun.polardbx.rpc.cdc.DumpRequest;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.extractor.cdc.DefaultCdcExtractHandler;
-import com.aliyun.polardbx.rpl.extractor.cdc.buffer.StreamObserverBuffer;
 import com.aliyun.polardbx.rpl.filter.BaseFilter;
 import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
@@ -69,6 +69,7 @@ import org.springframework.util.CollectionUtils;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.text.MessageFormat;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -175,7 +176,7 @@ public class CdcExtractor extends BaseExtractor {
     }
 
     private void modifyHeartbeatFlushIntervalIfNeed(int sec) {
-        Long interval = DynamicApplicationVersionConfig.getLong(ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL);
+        Long interval = new TimelineEnvConfig().getLong(ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL);
         if (interval.intValue() == sec) {
             return;
         }
@@ -213,10 +214,13 @@ public class CdcExtractor extends BaseExtractor {
             position = FSMMetaManager.findStartPosition(channel);
         }
 
-        StreamObserverBuffer logBuffer = new StreamObserverBuffer();
+        Map<String, String> ext = new HashMap<>();
+        ext.put("master_binlog_checksum", "CRC32");
+        StreamObserverLogFetcher logBuffer = new StreamObserverLogFetcher();
         CdcServiceGrpc.CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
         cdcServiceStub.dump(DumpRequest.newBuilder()
             .setFileName(position.getFileName())
+            .setExt(JSON.toJSONString(ext))
             .setPosition(position.getPosition()).build(), logBuffer);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -240,7 +244,7 @@ public class CdcExtractor extends BaseExtractor {
 
         ImportLogEventConvert convert = new ImportLogEventConvert(hostInfo, baseFilter, position, HostType.POLARX2);
         convert.init();
-        handle = new DefaultCdcExtractHandler(convert, pipeline);
+        handle = new DefaultCdcExtractHandler(convert, pipeline, this);
 
         handle.onStart();
         LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);

@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * This class defines a set of one or more row changes. Default implementation of {@link DBMSRowChange DBMSRowChange}
+ * This class defines a set of one or more row changes. Default implementation of {@link DefaultRowChange DefaultRowChange}
  * For insert and delete operations, we store operation data in an array of {@link DBMSRowData DBMSRowData} and you can
  * get a row in the operation data by method {@link #getRowData(int)} getRowData}, the parameter is the number of the
  * row in the array which starts from 1. We also provide a convenient method {@link #getRowValue(int, int) getRowValue}
@@ -307,7 +307,7 @@ public class DefaultRowChange extends DBMSRowChange {
     /**
      * Add changed row to row-change data.
      *
-     * @param data The changed row-data.
+     * @param change The changed row-data.
      */
     public void addChangeData(DBMSRowData change) {
         changeDataSet.add(change);

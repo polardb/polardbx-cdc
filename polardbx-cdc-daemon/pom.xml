@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>2.3.0-SNAPSHOT</version>
+        <version>5.4.19-SNAPSHOT</version>
     </parent>
     <artifactId>polardbx-cdc-daemon</artifactId>
     <url>http://maven.apache.org</url>
@@ -33,12 +33,19 @@
         </dependency>
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
-            <artifactId>polardbx-cdc-monitor</artifactId>
+            <artifactId>polardbx-cdc-rpl</artifactId>
             <version>${project.version}</version>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
-            <artifactId>polardbx-cdc-rpl</artifactId>
+            <artifactId>polardbx-cdc-dumper</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-task</artifactId>
             <version>${project.version}</version>
             <scope>compile</scope>
         </dependency>
@@ -53,6 +60,10 @@
         <dependency>
             <groupId>joda-time</groupId>
             <artifactId>joda-time</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.fusesource</groupId>
+            <artifactId>sigar</artifactId>
         </dependency>
 
         <!-- jetty -->
@@ -105,6 +116,12 @@
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-columnar</artifactId>
+            <version>5.4.19-SNAPSHOT</version>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 </project>

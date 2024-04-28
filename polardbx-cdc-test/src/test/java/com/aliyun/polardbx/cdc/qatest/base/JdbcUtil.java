@@ -242,6 +242,23 @@ public class JdbcUtil {
         return result;
     }
 
+    public static List<String> executeQueryAndGetStringList(String sql, Connection c, int columnIndex) {
+        Statement ps = createStatement(c);
+        ResultSet rs = null;
+        List<String> result = new ArrayList<>();
+        try {
+            rs = ps.executeQuery(sql);
+            while (rs.next()) {
+                result.add(rs.getString(columnIndex));
+            }
+        } catch (SQLException e) {
+            String errorMs = "[Execute preparedStatement query] failed! sql is: " + sql;
+            log.error(errorMs, e);
+//            Assert.fail(errorMs + " \n" + e);
+        }
+        return result;
+    }
+
     /**
      * 执行更新
      */
@@ -1763,6 +1780,10 @@ public class JdbcUtil {
             while (rs.next()) {
                 String column = rs.getString(1);
                 String type = rs.getString(2);
+                //https://dev.mysql.com/doc/refman/8.0/en/charset-unicode-utf8mb3.html
+                if ("utf8mb3".equalsIgnoreCase(type)) {
+                    type = "utf8";
+                }
                 charsetMap.put(column, type);
             }
         }
@@ -1805,7 +1826,8 @@ public class JdbcUtil {
         Set<String> keys = new HashSet<>();
         String sql = String.format("SELECT column_name FROM `INFORMATION_SCHEMA`.`KEY_COLUMN_USAGE`" +
             "WHERE table_schema='%s' AND table_name='%s' AND constraint_name='PRIMARY'", dbName, tbName);
-        try (ResultSet rs = executeQuerySuccess(conn, sql)) {
+        try (Statement stmt = conn.createStatement();
+            ResultSet rs = executeQuery(sql, stmt)) {
             while (rs.next()) {
                 String name = rs.getString(1);
                 keys.add(name);

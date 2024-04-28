@@ -66,6 +66,7 @@ public class BinlogUrlDownloader {
     private final String localDirectory;
     private ExecutorService executorService;
     private volatile boolean running = false;
+    private volatile Thread distributeWorker;
 
     public BinlogUrlDownloader() {
         maxLocalFileNumber = 3;
@@ -79,11 +80,12 @@ public class BinlogUrlDownloader {
             ", localDirectory: " + localDirectory);
     }
 
-    public void init() throws IOException {
-        downloadFileQueue.clear();
-        nLocalFile.set(0);
-        nDownloadedFile.set(0);
-
+    public void init() throws IOException, InterruptedException {
+        running = false;
+        if (distributeWorker != null) {
+            distributeWorker.interrupt();
+            distributeWorker.join();
+        }
         if (executorService != null) {
             executorService.shutdown();
             try {
@@ -92,6 +94,9 @@ public class BinlogUrlDownloader {
                 log.error("stop old executor failed!", e);
             }
         }
+        downloadFileQueue.clear();
+        nLocalFile.set(0);
+        nDownloadedFile.set(0);
 
         log.info("all downloader complete!");
 
@@ -111,8 +116,12 @@ public class BinlogUrlDownloader {
         });
     }
 
-    public void stop() {
+    public void stop() throws InterruptedException {
         running = false;
+        if (distributeWorker != null) {
+            distributeWorker.interrupt();
+            distributeWorker.join();
+        }
         if (executorService != null) {
             executorService.shutdown();
         }
@@ -123,13 +132,11 @@ public class BinlogUrlDownloader {
             return;
         }
         running = true;
-        Thread t = new Thread(this::dispatchTask);
+        distributeWorker = new Thread(this::dispatchTask);
 
-        t.setName("binlog-download-dispatcher");
-        t.setDaemon(true);
-        t.start();
-
-        // Runtime.getRuntime().addShutdownHook(new Thread(this::cleanLocalDirectory));
+        distributeWorker.setName("binlog-download-dispatcher");
+        distributeWorker.setDaemon(true);
+        distributeWorker.start();
     }
 
     /**
@@ -155,7 +162,7 @@ public class BinlogUrlDownloader {
     private void dispatchTask() {
         while (running) {
             try {
-                if (maxLocalFileNumber == -1 || maxLocalFileNumber >= nLocalFile.get()) {
+                if (maxLocalFileNumber == -1 || maxLocalFileNumber > nLocalFile.get()) {
                     BinlogFile binlogFile = downloadFileQueue.poll(4, TimeUnit.SECONDS);
                     if (binlogFile == null) {
                         continue;
@@ -165,8 +172,11 @@ public class BinlogUrlDownloader {
                     executorService.execute(new Downloader(binlogFile));
                 }
                 Thread.sleep(1000L);
-            } catch (Exception e) {
-                log.error("dispatcher download binlog failed!", e);
+            } catch (InterruptedException e1) {
+                // switching parser
+                log.error("dispatcher download binlog failed1!", e1);
+            } catch (Exception e2) {
+                log.error("dispatcher download binlog failed2!", e2);
                 TaskContext.getInstance().getPipeline().stop();
             }
         }

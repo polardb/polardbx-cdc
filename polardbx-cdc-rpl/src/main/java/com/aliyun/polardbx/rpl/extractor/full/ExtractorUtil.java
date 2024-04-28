@@ -14,19 +14,16 @@
  */
 package com.aliyun.polardbx.rpl.extractor.full;
 
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
+import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
+import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
+
 import java.io.Serializable;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowChange;
-import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
-import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
-import com.aliyun.polardbx.rpl.pipeline.MessageEvent;
 
 /**
  * 全量使用的工具类
@@ -79,6 +76,16 @@ public class ExtractorUtil {
             || sqlType == Types.BIGINT || sqlType == Types.NUMERIC || sqlType == Types.DECIMAL);
     }
 
+    public static boolean isInteger(int sqlType) {
+        return (sqlType == Types.TINYINT || sqlType == Types.SMALLINT || sqlType == Types.INTEGER
+            || sqlType == Types.BIGINT);
+    }
+
+    public static boolean isFloat(int sqlType) {
+        return (sqlType == Types.FLOAT || sqlType == Types.DOUBLE || sqlType == Types.NUMERIC
+            || sqlType == Types.DECIMAL);
+    }
+
     public static RowChangeBuilder buildRowChangeMeta(TableInfo tableInfo, String schema, String tbName,
                                                       DBMSAction action) {
         RowChangeBuilder builder = RowChangeBuilder.createBuilder(schema, tbName, action);
@@ -92,7 +99,7 @@ public class ExtractorUtil {
         return builder;
     }
 
-//    public static DBMSRowChange buildMessageEvent(RowChangeBuilder builder, TableInfo tableInfo,
+//    public static DefaultRowChange buildMessageEvent(RowChangeBuilder builder, TableInfo tableInfo,
 //                                                  ResultSet resultSet) throws Exception {
 //        Map<String, Serializable> fieldValueMap = new HashMap<>(tableInfo.getColumns().size());
 //        for (ColumnInfo column : tableInfo.getColumns()) {

@@ -170,7 +170,7 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
                         logger.warn("detected abnormal server node with address {}", s);
                     }
                 } catch (Throwable t) {
-                    logger.warn("detected abnormal server node with address {}, {}", s, t);
+                    logger.warn("detected abnormal server node with address {}", s, t);
                 }
                 return true;
             }).collect(Collectors.toSet());
@@ -284,7 +284,7 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
             try {
                 readWriteLock.readLock().lock();
 
-                if (nestedAddresses.size() == 0) {
+                if (nestedAddresses.isEmpty()) {
                     throw new PolardbxException("no server node is ready, please retry later.");
                 }
 

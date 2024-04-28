@@ -44,12 +44,23 @@ public class Timestamp2Field extends Field {
         String data = buildDataStr();
         MDate mDate = new MDate();
         mDate.parse(data);
-        Calendar calendar = Calendar.getInstance();
-        calendar.set(mDate.getYear(), mDate.getMonth() - 1, mDate.getDay(), mDate.getHours(),
-            mDate.getMinutes(), mDate.getSeconds());
 
         ByteBuffer byteBuffer;
-        long sec = TimeUnit.MILLISECONDS.toSeconds(calendar.getTimeInMillis());
+        long sec;
+        if (mDate.getYear() == 0 &&
+            mDate.getMonth() == 0 &&
+            mDate.getDay() == 0 &&
+            mDate.getHours() == 0 &&
+            mDate.getMinutes() == 0 &&
+            mDate.getSeconds() == 0 &&
+            mDate.getMillsecond() == 0) {
+            sec = 0;
+        } else {
+            Calendar calendar = Calendar.getInstance();
+            calendar.set(mDate.getYear(), mDate.getMonth() - 1, mDate.getDay(), mDate.getHours(),
+                mDate.getMinutes(), mDate.getSeconds());
+            sec = TimeUnit.MILLISECONDS.toSeconds(calendar.getTimeInMillis());
+        }
         long mill = mDate.getMillsecond();
         switch (desc) {
         case 1:

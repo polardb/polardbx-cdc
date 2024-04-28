@@ -37,9 +37,9 @@ import java.util.Random;
 @Slf4j
 public class DynamicApplicationConfig {
 
-    private static Map<String, List<PropertyChangeListener>> changeListenerMap = Maps.newHashMap();
-    private static Map<String, String> propBeforeImageMap = Maps.newHashMap();
-    private static List<String> watchPropList = Lists.newArrayList();
+    private static final Map<String, List<PropertyChangeListener>> changeListenerMap = Maps.newHashMap();
+    private static final Map<String, String> propBeforeImageMap = Maps.newHashMap();
+    private static final List<String> watchPropList = Lists.newArrayList();
     private static IConfigDataProvider provider = new DbConfigDataProvider();
 
     public static String getValue(String key) {
@@ -135,11 +135,8 @@ public class DynamicApplicationConfig {
 
     public static void addPropListener(String prop, PropertyChangeListener listener) {
         synchronized (changeListenerMap) {
-            List<PropertyChangeListener> propertyChangeListenerList = changeListenerMap.get(prop);
-            if (propertyChangeListenerList == null) {
-                propertyChangeListenerList = Lists.newCopyOnWriteArrayList();
-                changeListenerMap.put(prop, propertyChangeListenerList);
-            }
+            List<PropertyChangeListener> propertyChangeListenerList =
+                changeListenerMap.computeIfAbsent(prop, k -> Lists.newCopyOnWriteArrayList());
             propertyChangeListenerList.add(listener);
             watchPropList.add(prop);
         }

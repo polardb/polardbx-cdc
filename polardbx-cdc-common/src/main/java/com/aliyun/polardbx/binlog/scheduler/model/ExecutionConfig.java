@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.scheduler.model;
 
+import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import lombok.Data;
 
 import java.util.List;
@@ -29,6 +30,7 @@ public class ExecutionConfig {
     public static final String ORIGIN_TSO = "000000000000000000000000000000000000000000000000000000";
     public static final String MAX_TSO = "999999999999999999999999999999999999999999999999999999";
     public static final String ORIGIN_BINLOG_FILE = "ORIGIN_BINLOG_FILE";
+
     /**
      * source type @see com.aliyun.polardbx.binlog.domain.TaskType
      */
@@ -77,4 +79,12 @@ public class ExecutionConfig {
      * 是否需要清空上一版本的binlog文件
      */
     boolean needCleanBinlogOfPreVersion = true;
+    /**
+     * 当前运行时使用的serverId
+     */
+    Long serverId;
+
+    public long getServerIdWithCompatibility() {
+        return serverId == null ? ServerConfigUtil.getGlobalNumberVar(ServerConfigUtil.SERVER_ID) : serverId;
+    }
 }
