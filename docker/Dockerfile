@@ -7,6 +7,7 @@ RUN yum update -y && \
     wget https://repo.mysql.com//mysql80-community-release-el7-1.noarch.rpm && \
     rpm -ivh mysql80-community-release-el7-1.noarch.rpm && \
     rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2022 && \
+    sed -i 's/gpgcheck=1/gpgcheck=0/g' /etc/yum.repos.d/mysql-community.repo && \
     yum install -y mysql
 
 # Create user "admin" and add it into sudo group
