@@ -500,8 +500,9 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                 if (dropTableStatement.getTableSources().size() > 1) {
                     Optional<SQLExprTableSource> optional = dropTableStatement.getTableSources().stream()
                         .filter(ts ->
-                            tableName.equalsIgnoreCase(ts.getTableName(true)) && (StringUtils.isBlank(ts.getSchema())
-                                || schema.equalsIgnoreCase(SQLUtils.normalize(ts.getSchema())))
+                            tableName.equalsIgnoreCase(SQLUtils.normalizeNoTrim(ts.getTableName())) && (
+                                StringUtils.isBlank(ts.getSchema())
+                                    || schema.equalsIgnoreCase(SQLUtils.normalize(ts.getSchema())))
                         ).findFirst();
                     if (!optional.isPresent()) {
                         throw new PolardbxException(String.format("can`t find table %s in sql %s", tableName, ddl));
@@ -530,7 +531,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             SQLTruncateStatement sqlTruncateStatement = (SQLTruncateStatement) sqlStatement;
             if (sqlTruncateStatement.getTableSources().size() == 1) {
                 SQLExprTableSource source = sqlTruncateStatement.getTableSources().get(0);
-                String sqlTable = source.getTableName(true);
+                String sqlTable = SQLUtils.normalizeNoTrim(source.getTableName());
                 if (StringUtils.equalsIgnoreCase("__test_" + sqlTable, tableName)) {
                     source.setSimpleName(tableName);
                     return sqlTruncateStatement.toUnformattedString();

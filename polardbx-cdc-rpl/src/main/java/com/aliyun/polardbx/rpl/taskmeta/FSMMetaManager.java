@@ -1175,11 +1175,13 @@ public class FSMMetaManager {
         newStateMachine.setId(stateMachine.getId());
         newStateMachine.setState(FSMState.REPLICA_INIT.name());
         List<RplService> services = DbTaskMetaManager.listService(stateMachine.getId());
+        ReplicaMeta replicaMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
         for (RplService service : services) {
             DbTaskMetaManager.updateServiceStatus(service.getId(), ServiceStatus.STOPPED);
             List<RplTask> tasks = DbTaskMetaManager.listTaskByService(service.getId());
             for (RplTask task : tasks) {
                 DbTaskMetaManager.updateTaskStatus(task.getId(), TaskStatus.STOPPED);
+                updateReplicaTaskConfig(task, replicaMeta, true);
             }
         }
         DbTaskMetaManager.updateStateMachine(newStateMachine);
@@ -1238,6 +1240,7 @@ public class FSMMetaManager {
             extractorConfig.setFilterType(FilterType.RPL_FILTER);
             extractorConfig.setPrivateMeta(JSON.toJSONString(meta));
             extractorConfig.setHostInfo(getRplExtractorHostInfo(meta));
+            extractorConfig.setEnableSrcLogicalMetaSnapshot(meta.isEnableSrcLogicalMetaSnapshot());
             extractorConfigStr = JSON.toJSONString(extractorConfig);
 
             PipelineConfig pipelineConfig = rplTaskConfig.getPipelineConfig() != null ?
@@ -1293,6 +1296,8 @@ public class FSMMetaManager {
         DbTaskMetaManager.deleteDbFullPositionByFSM(stateMachine.getId());
         DbTaskMetaManager.deleteDdlByFSM(stateMachine.getId());
         DbTaskMetaManager.deleteRplStatMetricsByFSM(stateMachine.getId());
+        DbTaskMetaManager.deleteValidationTaskByFSM(stateMachine.getId());
+        DbTaskMetaManager.deleteValidationDiffByFSM(stateMachine.getId());
         List<RplService> services = DbTaskMetaManager.listService(stateMachine.getId());
         for (RplService service : services) {
             FSMMetaManager.clearReplicaTasksHistory(service);
@@ -1306,7 +1311,6 @@ public class FSMMetaManager {
         for (RplTask task : tasks) {
             defaultLogger.info("clear history of rpl task start, task: {}", task.getId());
             DbTaskMetaManager.clearHistory(task.getId());
-            DbTaskMetaManager.updateBinlogPosition(task.getId(), CommonUtil.getRplInitialPosition());
         }
     }
 
@@ -1383,24 +1387,6 @@ public class FSMMetaManager {
                     cdcExtractorConfig.setPrivateMeta(JSON.toJSONString(meta.getBackFlowMeta()));
                     cdcExtractorConfig.setHostInfo(getImportApplierHostInfo(physicalMeta));
                     extractorConfigStr = JSON.toJSONString(cdcExtractorConfig);
-                    break;
-                case FULL_VALIDATION_CROSSCHECK:
-                    ValidationExtractorConfig validationCrossCheckExtractorConfig = new ValidationExtractorConfig();
-                    validationCrossCheckExtractorConfig.setExtractorType(ExtractorType.FULL_VALIDATION_CROSSCHECK);
-                    validationCrossCheckExtractorConfig.setFilterType(FilterType.IMPORT_FILTER);
-                    validationCrossCheckExtractorConfig.setParallelCount(meta.getProducerParallelCount());
-                    validationCrossCheckExtractorConfig.setHostInfo(getImportApplierHostInfo(physicalMeta));
-                    validationCrossCheckExtractorConfig.setPrivateMeta(JSON.toJSONString(meta.getBackFlowMeta()));
-                    extractorConfigStr = JSON.toJSONString(validationCrossCheckExtractorConfig);
-                    break;
-                case RECONCILIATION_CROSSCHECK:
-                    ReconExtractorConfig reconCrossCheckConfig = new ReconExtractorConfig();
-                    reconCrossCheckConfig.setExtractorType(ExtractorType.RECONCILIATION_CROSSCHECK);
-                    reconCrossCheckConfig.setFilterType(FilterType.IMPORT_FILTER);
-                    reconCrossCheckConfig.setParallelCount(meta.getProducerParallelCount());
-                    reconCrossCheckConfig.setHostInfo(getImportApplierHostInfo(physicalMeta));
-                    reconCrossCheckConfig.setPrivateMeta(JSON.toJSONString(meta.getBackFlowMeta()));
-                    extractorConfigStr = JSON.toJSONString(reconCrossCheckConfig);
                     break;
                 default:
                     break;

@@ -15,7 +15,13 @@
 package com.aliyun.polardbx.binlog.dumper;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.InstructionType;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.TimelineEnvConfig;
 import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
@@ -65,6 +71,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.MDC;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -76,9 +84,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL_WITH_DUMP;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_KEY;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_VALUE_BINLOG_SYNC;
+import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.MAX_TSO;
 import static io.grpc.internal.GrpcUtil.getThreadFactory;
 
 /**
@@ -291,6 +301,8 @@ public class CdcServer {
                     log.info("CDC Server receive a dump request, with stream name: {}, file name: {}, position: {}, "
                             + "registered: {}, ext: {}.", request.getStreamName(), request.getFileName(),
                         request.getPosition(), request.getRegistered(), request.getExt());
+
+                    tryAdjustCdcHeartbeatWriteInterval();
                     final ServerCallStreamObserver<DumpStream> serverCallStreamObserver =
                         (ServerCallStreamObserver<DumpStream>) responseObserver;
                     LogFileManager logFileManager = getLogFileManager(request.getStreamName());
@@ -301,6 +313,8 @@ public class CdcServer {
                         request = DumpRequest.newBuilder()
                             .setFileName(searchFile)
                             .setPosition(request.getPosition())
+                            .setRegistered(request.getRegistered())
+                            .setExt(request.getExt())
                             .build();
                     }
 
@@ -462,8 +476,40 @@ public class CdcServer {
         }
     }
 
-    public void setLocalMode(boolean localMode) {
-        this.localMode = localMode;
+    // 只要发生binlog dump，则调大cdc heartbeat记录到binlog file中的频率，覆盖默认配置，即使后续不再有dump
+    private void tryAdjustCdcHeartbeatWriteInterval() {
+        try {
+            int newInterval = DynamicApplicationConfig.getInt(BINLOG_WRITE_HEARTBEAT_INTERVAL_WITH_DUMP);
+            if (newInterval <= 0) {
+                return;
+            }
+
+            TimelineEnvConfig timelineEnvConfig = new TimelineEnvConfig();
+            timelineEnvConfig.initConfigByTso(MAX_TSO);
+            int currentInterval = timelineEnvConfig.getInt(ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL);
+            if (currentInterval <= newInterval) {
+                return;
+            }
+
+            final String name = ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL;
+            final String value = newInterval + "";
+            final String TRANSACTION_POLICY = "set drds_transaction_policy='TSO'";
+            final String SEND_CONFIG_UPDATE_COMMAND =
+                "insert ignore into __cdc_instruction__(INSTRUCTION_TYPE, INSTRUCTION_CONTENT, INSTRUCTION_ID) values(?,?,?)";
+
+            JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
+            TransactionTemplate transactionTemplate = SpringContextHolder.getObject("polarxTransactionTemplate");
+            transactionTemplate.execute((o) -> transactionTemplate.execute(transactionStatus -> {
+                template.execute(TRANSACTION_POLICY);
+                JSONObject newObject = new JSONObject();
+                newObject.put(name, value);
+                template.update(SEND_CONFIG_UPDATE_COMMAND, InstructionType.CdcEnvConfigChange.name(),
+                    newObject.toJSONString(), "binlog_dump_auto_adjust_heartbeat_interval");
+                return null;
+            }));
+        } catch (Throwable t) {
+            log.error("try adjust cdc heartbeat write interval error!!", t);
+        }
     }
 
 }

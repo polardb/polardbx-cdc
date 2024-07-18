@@ -95,8 +95,8 @@ public class ReplicaFullValidRunner {
 
         // 所有的全量校验任务共用一个连接池
         int poolSize = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_CN_CONN_POOL_COUNT);
-        srcMetaCache = new DbMetaCache(srcHostInfo, poolSize, poolSize);
-        dstMetaCache = new DbMetaCache(dstHostInfo, poolSize, poolSize);
+        srcMetaCache = new DbMetaCache(srcHostInfo, poolSize, poolSize, true);
+        dstMetaCache = new DbMetaCache(dstHostInfo, poolSize, poolSize, true);
 
         // 所有的全量校验任务共用一个线程池
         subTaskExecutor = createThreadPool();

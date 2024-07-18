@@ -36,6 +36,7 @@ public class RowEventBuilder extends BinlogBuilder {
     public static final int ROW_FLAG_NO_FOREIGN_KEY_CHECK = 0x0002;
     public static final int ROW_FLAG_NO_UNIQUE_KEY_CHECK = 0x0004;
     public static final int ROW_FLAG_HAS_ONE_COLUMN = 0x0008;
+    public static final int ROW_FLAG_HAS_HIDDEN_PK = 128;
     private long tableId;
     private byte[] extraData = new byte[0];
     /**

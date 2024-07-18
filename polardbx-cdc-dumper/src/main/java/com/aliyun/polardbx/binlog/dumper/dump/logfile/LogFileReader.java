@@ -204,7 +204,7 @@ public class LogFileReader {
             int timeout = 10, noData = 0;
             int checkFileStatusInterval = getInt(BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND);
             Timer checkFileStatusTimer = new Timer(checkFileStatusInterval * 1000L);
-            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000);
+            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000000);
             long backPressureSleepTime = getLong(BINLOG_DUMP_BACK_PRESSURE_SLEEP_TIME_US);
             while (true) {
                 if (serverCallStreamObserver.isCancelled()) {

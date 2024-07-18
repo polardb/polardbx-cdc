@@ -43,22 +43,28 @@ public class Resource {
      * cdc进程最多占用90%的内存，daemon最多占用min（10%内存，256Mb）
      */
     public int getFreeMemMb() {
-        double mem = memory_mb * getRatio();
+        double mem = memory_mb * getAvailableRatio();
         return Double.valueOf(mem).intValue() - used;
+    }
+
+    public int getReservedMemMb() {
+        return Double.valueOf(memory_mb * (1 - getAvailableRatio())).intValue() - 256;
     }
 
     public int getFreeMemMbWithoutRatio() {
         return memory_mb - used;
     }
 
-    //如果节点的内存比较小，ratio则不能太大，需要给daemon和rocksdb预留一部分空间
-    private double getRatio() {
+    //如果节点的内存比较小，ratio则不能太大，需要给daemon/rocksdb/grpc预留一部分空间
+    private double getAvailableRatio() {
         double ratio = DynamicApplicationConfig.getDouble(TOPOLOGY_RESOURCE_USE_RATIO);
         if (memory_mb <= 1024) {
-            ratio = Math.min(0.7, ratio);
+            ratio = Math.min(0.6, ratio);
         } else if (memory_mb <= 2048) {
-            ratio = Math.min(0.8, ratio);
+            ratio = Math.min(0.7, ratio);
         } else if (memory_mb <= 4096) {
+            ratio = Math.min(0.8, ratio);
+        } else if (memory_mb <= 8192) {
             ratio = Math.min(0.85, ratio);
         }
         return ratio;

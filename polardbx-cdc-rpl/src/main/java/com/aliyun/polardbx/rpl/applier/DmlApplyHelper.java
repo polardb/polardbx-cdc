@@ -223,39 +223,35 @@ public class DmlApplyHelper {
             }
             paramsList.add(params);
         }
-        if (StringUtils.isBlank(dstTbInfo.getSqlTemplate().get(insertMode))) {
-            StringBuilder nameSqlSb = new StringBuilder();
-            StringBuilder valueSqlSb = new StringBuilder();
-            valueSqlSb.append("(");
-            Iterator<? extends DBMSColumn> it = columns.iterator();
-            while (it.hasNext()) {
-                DBMSColumn column = it.next();
-                nameSqlSb.append(repairDMLName(column.getName()));
-                valueSqlSb.append("?");
-                if (it.hasNext()) {
-                    nameSqlSb.append(',');
-                    valueSqlSb.append(',');
-                }
+        StringBuilder nameSqlSb = new StringBuilder();
+        StringBuilder valueSqlSb = new StringBuilder();
+        valueSqlSb.append("(");
+        Iterator<? extends DBMSColumn> it = columns.iterator();
+        while (it.hasNext()) {
+            DBMSColumn column = it.next();
+            nameSqlSb.append(repairDMLName(column.getName()));
+            valueSqlSb.append("?");
+            if (it.hasNext()) {
+                nameSqlSb.append(',');
+                valueSqlSb.append(',');
             }
-            valueSqlSb.append(")");
-            String sql;
-            switch (insertMode) {
-            case RplConstants.INSERT_MODE_INSERT_IGNORE:
-                sql = INSERT_IGNORE_SQL;
-                break;
-            case RplConstants.INSERT_MODE_REPLACE:
-                sql = REPLACE_SQL;
-                break;
-            default:
-                sql = SIMPLE_INSERT_SQL;
-                break;
-            }
-            dstTbInfo.getSqlTemplate().put(insertMode,
-                String.format(sql, CommonUtils.escape(dstTbInfo.getSchema()),
-                    CommonUtils.escape(dstTbInfo.getName()), nameSqlSb, valueSqlSb));
         }
-        return new SqlContextV2(dstTbInfo.getSqlTemplate().get(insertMode),
-            dstTbInfo.getSchema(), dstTbInfo.getName(), paramsList);
+        valueSqlSb.append(")");
+        String sql;
+        switch (insertMode) {
+        case RplConstants.INSERT_MODE_INSERT_IGNORE:
+            sql = INSERT_IGNORE_SQL;
+            break;
+        case RplConstants.INSERT_MODE_REPLACE:
+            sql = REPLACE_SQL;
+            break;
+        default:
+            sql = SIMPLE_INSERT_SQL;
+            break;
+        }
+        return new SqlContextV2(String.format(sql, CommonUtils.escape(dstTbInfo.getSchema()),
+            CommonUtils.escape(dstTbInfo.getName()), nameSqlSb, valueSqlSb), dstTbInfo.getSchema(), dstTbInfo.getName(),
+            paramsList);
     }
 
     public static SqlContext getDeleteSqlExecContext(DefaultRowChange rowChange, TableInfo dstTbInfo) {
@@ -673,5 +669,10 @@ public class DmlApplyHelper {
         }
         allTbWhereColumns.put(fullTbName, whereColumns);
         return whereColumns;
+    }
+
+    public static boolean isNoPkTable(DefaultRowChange rowChange) throws Exception {
+        TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
+        return tbInfo.isNoPkTable();
     }
 }

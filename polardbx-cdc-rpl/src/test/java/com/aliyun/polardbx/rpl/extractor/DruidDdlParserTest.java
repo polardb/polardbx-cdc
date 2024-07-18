@@ -44,4 +44,10 @@ public class DruidDdlParserTest {
         Assert.assertEquals("d1", ddlResult.getSchemaName());
         Assert.assertEquals("rename_target_auto", ddlResult.getTableName());
     }
+
+    @Test
+    public void testCall() {
+        String sql = "CALL __polardbx_inner_procedure__.trigger_sync_point_trx()";
+        DdlResult ddlResult = DruidDdlParser.parse(sql, "abc");
+    }
 }

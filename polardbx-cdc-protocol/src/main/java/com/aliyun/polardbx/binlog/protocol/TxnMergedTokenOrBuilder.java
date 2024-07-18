@@ -21,71 +21,102 @@ public interface TxnMergedTokenOrBuilder extends
     // @@protoc_insertion_point(interface_extends:com.aliyun.polardbx.binlog.protocol.TxnMergedToken)
     com.google.protobuf.MessageOrBuilder {
 
-  /**
-   * <code>string tso = 1;</code>
-   * @return The tso.
-   */
-  java.lang.String getTso();
-  /**
-   * <code>string tso = 1;</code>
-   * @return The bytes for tso.
-   */
-  com.google.protobuf.ByteString
-      getTsoBytes();
+    /**
+     * <code>string tso = 1;</code>
+     *
+     * @return The tso.
+     */
+    java.lang.String getTso();
 
-  /**
-   * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
-   * @return The enum numeric value on the wire for type.
-   */
-  int getTypeValue();
-  /**
-   * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
-   * @return The type.
-   */
-  com.aliyun.polardbx.binlog.protocol.TxnType getType();
+    /**
+     * <code>string tso = 1;</code>
+     *
+     * @return The bytes for tso.
+     */
+    com.google.protobuf.ByteString
+    getTsoBytes();
 
-  /**
-   * <code>string schema = 3;</code>
-   * @return The schema.
-   */
-  java.lang.String getSchema();
-  /**
-   * <code>string schema = 3;</code>
-   * @return The bytes for schema.
-   */
-  com.google.protobuf.ByteString
-      getSchemaBytes();
+    /**
+     * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+     *
+     * @return The enum numeric value on the wire for type.
+     */
+    int getTypeValue();
 
-  /**
-   * <code>bytes payload = 4;</code>
-   * @return The payload.
-   */
-  com.google.protobuf.ByteString getPayload();
+    /**
+     * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+     *
+     * @return The type.
+     */
+    com.aliyun.polardbx.binlog.protocol.TxnType getType();
 
-  /**
-   * <code>string table = 5;</code>
-   * @return The table.
-   */
-  java.lang.String getTable();
-  /**
-   * <code>string table = 5;</code>
-   * @return The bytes for table.
-   */
-  com.google.protobuf.ByteString
-      getTableBytes();
+    /**
+     * <code>string schema = 3;</code>
+     *
+     * @return The schema.
+     */
+    java.lang.String getSchema();
 
-  /**
-   * <code>.google.protobuf.Int64Value serverId = 6;</code>
-   * @return Whether the serverId field is set.
-   */
-  boolean hasServerId();
-  /**
-   * <code>.google.protobuf.Int64Value serverId = 6;</code>
-   * @return The serverId.
-   */
-  com.google.protobuf.Int64Value getServerId();
-  /**
-   * <code>.google.protobuf.Int64Value serverId = 6;</code>
-   */
-  com.google.protobuf.Int64ValueOrBuilder getServerIdOrBuilder();
+    /**
+     * <code>string schema = 3;</code>
+     *
+     * @return The bytes for schema.
+     */
+    com.google.protobuf.ByteString
+    getSchemaBytes();
+
+    /**
+     * <code>bytes payload = 4;</code>
+     *
+     * @return The payload.
+     */
+    com.google.protobuf.ByteString getPayload();
+
+    /**
+     * <code>string table = 5;</code>
+     *
+     * @return The table.
+     */
+    java.lang.String getTable();
+
+    /**
+     * <code>string table = 5;</code>
+     *
+     * @return The bytes for table.
+     */
+    com.google.protobuf.ByteString
+    getTableBytes();
+
+    /**
+     * <code>.google.protobuf.Int64Value serverId = 6;</code>
+     *
+     * @return Whether the serverId field is set.
+     */
+    boolean hasServerId();
+
+    /**
+     * <code>.google.protobuf.Int64Value serverId = 6;</code>
+     *
+     * @return The serverId.
+     */
+    com.google.protobuf.Int64Value getServerId();
+
+    /**
+     * <code>.google.protobuf.Int64Value serverId = 6;</code>
+     */
+    com.google.protobuf.Int64ValueOrBuilder getServerIdOrBuilder();
+
+    /**
+     * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+     *
+     * @return The enum numeric value on the wire for txnFlag.
+     */
+    int getTxnFlagValue();
+
+    /**
+     * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+     *
+     * @return The txnFlag.
+     */
+    com.aliyun.polardbx.binlog.protocol.TxnFlag getTxnFlag();
 }

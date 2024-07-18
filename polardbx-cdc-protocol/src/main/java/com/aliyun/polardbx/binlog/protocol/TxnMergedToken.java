@@ -24,1176 +24,1437 @@ public final class TxnMergedToken extends
     com.google.protobuf.GeneratedMessageV3 implements
     // @@protoc_insertion_point(message_implements:com.aliyun.polardbx.binlog.protocol.TxnMergedToken)
     TxnMergedTokenOrBuilder {
-private static final long serialVersionUID = 0L;
-  // Use TxnMergedToken.newBuilder() to construct.
-  private TxnMergedToken(com.google.protobuf.GeneratedMessageV3.Builder<?> builder) {
-    super(builder);
-  }
-  private TxnMergedToken() {
-    tso_ = "";
-    type_ = 0;
-    schema_ = "";
-    payload_ = com.google.protobuf.ByteString.EMPTY;
-    table_ = "";
-  }
+    private static final long serialVersionUID = 0L;
 
-  @java.lang.Override
-  @SuppressWarnings({"unused"})
-  protected java.lang.Object newInstance(
-      UnusedPrivateParameter unused) {
-    return new TxnMergedToken();
-  }
-
-  @java.lang.Override
-  public final com.google.protobuf.UnknownFieldSet
-  getUnknownFields() {
-    return this.unknownFields;
-  }
-  private TxnMergedToken(
-      com.google.protobuf.CodedInputStream input,
-      com.google.protobuf.ExtensionRegistryLite extensionRegistry)
-      throws com.google.protobuf.InvalidProtocolBufferException {
-    this();
-    if (extensionRegistry == null) {
-      throw new java.lang.NullPointerException();
+    // Use TxnMergedToken.newBuilder() to construct.
+    private TxnMergedToken(com.google.protobuf.GeneratedMessageV3.Builder<?> builder) {
+        super(builder);
     }
-    com.google.protobuf.UnknownFieldSet.Builder unknownFields =
-        com.google.protobuf.UnknownFieldSet.newBuilder();
-    try {
-      boolean done = false;
-      while (!done) {
-        int tag = input.readTag();
-        switch (tag) {
-          case 0:
-            done = true;
-            break;
-          case 10: {
-            java.lang.String s = input.readStringRequireUtf8();
 
-            tso_ = s;
-            break;
-          }
-          case 16: {
-            int rawValue = input.readEnum();
+    private TxnMergedToken() {
+        tso_ = "";
+        type_ = 0;
+        schema_ = "";
+        payload_ = com.google.protobuf.ByteString.EMPTY;
+        table_ = "";
+        txnFlag_ = 0;
+    }
 
-            type_ = rawValue;
-            break;
-          }
-          case 26: {
-            java.lang.String s = input.readStringRequireUtf8();
+    @java.lang.Override
+    @SuppressWarnings({"unused"})
+    protected java.lang.Object newInstance(
+        UnusedPrivateParameter unused) {
+        return new TxnMergedToken();
+    }
 
-            schema_ = s;
-            break;
-          }
-          case 34: {
+    @java.lang.Override
+    public final com.google.protobuf.UnknownFieldSet
+    getUnknownFields() {
+        return this.unknownFields;
+    }
 
-            payload_ = input.readBytes();
-            break;
-          }
-          case 42: {
-            java.lang.String s = input.readStringRequireUtf8();
-
-            table_ = s;
-            break;
-          }
-          case 50: {
-            com.google.protobuf.Int64Value.Builder subBuilder = null;
-            if (serverId_ != null) {
-              subBuilder = serverId_.toBuilder();
-            }
-            serverId_ = input.readMessage(com.google.protobuf.Int64Value.parser(), extensionRegistry);
-            if (subBuilder != null) {
-              subBuilder.mergeFrom(serverId_);
-              serverId_ = subBuilder.buildPartial();
-            }
-
-            break;
-          }
-          default: {
-            if (!parseUnknownField(
-                input, unknownFields, extensionRegistry, tag)) {
-              done = true;
-            }
-            break;
-          }
+    private TxnMergedToken(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+        this();
+        if (extensionRegistry == null) {
+            throw new java.lang.NullPointerException();
         }
-      }
-    } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-      throw e.setUnfinishedMessage(this);
-    } catch (java.io.IOException e) {
-      throw new com.google.protobuf.InvalidProtocolBufferException(
-          e).setUnfinishedMessage(this);
-    } finally {
-      this.unknownFields = unknownFields.build();
-      makeExtensionsImmutable();
-    }
-  }
-  public static final com.google.protobuf.Descriptors.Descriptor
-      getDescriptor() {
-    return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_descriptor;
-  }
+        com.google.protobuf.UnknownFieldSet.Builder unknownFields =
+            com.google.protobuf.UnknownFieldSet.newBuilder();
+        try {
+            boolean done = false;
+            while (!done) {
+                int tag = input.readTag();
+                switch (tag) {
+                case 0:
+                    done = true;
+                    break;
+                case 10: {
+                    java.lang.String s = input.readStringRequireUtf8();
 
-  @java.lang.Override
-  protected com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
-      internalGetFieldAccessorTable() {
-    return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_fieldAccessorTable
-        .ensureFieldAccessorsInitialized(
-            com.aliyun.polardbx.binlog.protocol.TxnMergedToken.class, com.aliyun.polardbx.binlog.protocol.TxnMergedToken.Builder.class);
-  }
+                    tso_ = s;
+                    break;
+                }
+                case 16: {
+                    int rawValue = input.readEnum();
 
-  public static final int TSO_FIELD_NUMBER = 1;
-  private volatile java.lang.Object tso_;
-  /**
-   * <code>string tso = 1;</code>
-   * @return The tso.
-   */
-  @java.lang.Override
-  public java.lang.String getTso() {
-    java.lang.Object ref = tso_;
-    if (ref instanceof java.lang.String) {
-      return (java.lang.String) ref;
-    } else {
-      com.google.protobuf.ByteString bs = 
-          (com.google.protobuf.ByteString) ref;
-      java.lang.String s = bs.toStringUtf8();
-      tso_ = s;
-      return s;
-    }
-  }
-  /**
-   * <code>string tso = 1;</code>
-   * @return The bytes for tso.
-   */
-  @java.lang.Override
-  public com.google.protobuf.ByteString
-      getTsoBytes() {
-    java.lang.Object ref = tso_;
-    if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
-          com.google.protobuf.ByteString.copyFromUtf8(
-              (java.lang.String) ref);
-      tso_ = b;
-      return b;
-    } else {
-      return (com.google.protobuf.ByteString) ref;
-    }
-  }
+                    type_ = rawValue;
+                    break;
+                }
+                case 26: {
+                    java.lang.String s = input.readStringRequireUtf8();
 
-  public static final int TYPE_FIELD_NUMBER = 2;
-  private int type_;
-  /**
-   * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
-   * @return The enum numeric value on the wire for type.
-   */
-  @java.lang.Override public int getTypeValue() {
-    return type_;
-  }
-  /**
-   * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
-   * @return The type.
-   */
-  @java.lang.Override public com.aliyun.polardbx.binlog.protocol.TxnType getType() {
-    @SuppressWarnings("deprecation")
-    com.aliyun.polardbx.binlog.protocol.TxnType result = com.aliyun.polardbx.binlog.protocol.TxnType.valueOf(type_);
-    return result == null ? com.aliyun.polardbx.binlog.protocol.TxnType.UNRECOGNIZED : result;
-  }
+                    schema_ = s;
+                    break;
+                }
+                case 34: {
 
-  public static final int SCHEMA_FIELD_NUMBER = 3;
-  private volatile java.lang.Object schema_;
-  /**
-   * <code>string schema = 3;</code>
-   * @return The schema.
-   */
-  @java.lang.Override
-  public java.lang.String getSchema() {
-    java.lang.Object ref = schema_;
-    if (ref instanceof java.lang.String) {
-      return (java.lang.String) ref;
-    } else {
-      com.google.protobuf.ByteString bs = 
-          (com.google.protobuf.ByteString) ref;
-      java.lang.String s = bs.toStringUtf8();
-      schema_ = s;
-      return s;
-    }
-  }
-  /**
-   * <code>string schema = 3;</code>
-   * @return The bytes for schema.
-   */
-  @java.lang.Override
-  public com.google.protobuf.ByteString
-      getSchemaBytes() {
-    java.lang.Object ref = schema_;
-    if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
-          com.google.protobuf.ByteString.copyFromUtf8(
-              (java.lang.String) ref);
-      schema_ = b;
-      return b;
-    } else {
-      return (com.google.protobuf.ByteString) ref;
-    }
-  }
+                    payload_ = input.readBytes();
+                    break;
+                }
+                case 42: {
+                    java.lang.String s = input.readStringRequireUtf8();
 
-  public static final int PAYLOAD_FIELD_NUMBER = 4;
-  private com.google.protobuf.ByteString payload_;
-  /**
-   * <code>bytes payload = 4;</code>
-   * @return The payload.
-   */
-  @java.lang.Override
-  public com.google.protobuf.ByteString getPayload() {
-    return payload_;
-  }
+                    table_ = s;
+                    break;
+                }
+                case 50: {
+                    com.google.protobuf.Int64Value.Builder subBuilder = null;
+                    if (serverId_ != null) {
+                        subBuilder = serverId_.toBuilder();
+                    }
+                    serverId_ = input.readMessage(com.google.protobuf.Int64Value.parser(), extensionRegistry);
+                    if (subBuilder != null) {
+                        subBuilder.mergeFrom(serverId_);
+                        serverId_ = subBuilder.buildPartial();
+                    }
 
-  public static final int TABLE_FIELD_NUMBER = 5;
-  private volatile java.lang.Object table_;
-  /**
-   * <code>string table = 5;</code>
-   * @return The table.
-   */
-  @java.lang.Override
-  public java.lang.String getTable() {
-    java.lang.Object ref = table_;
-    if (ref instanceof java.lang.String) {
-      return (java.lang.String) ref;
-    } else {
-      com.google.protobuf.ByteString bs = 
-          (com.google.protobuf.ByteString) ref;
-      java.lang.String s = bs.toStringUtf8();
-      table_ = s;
-      return s;
-    }
-  }
-  /**
-   * <code>string table = 5;</code>
-   * @return The bytes for table.
-   */
-  @java.lang.Override
-  public com.google.protobuf.ByteString
-      getTableBytes() {
-    java.lang.Object ref = table_;
-    if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
-          com.google.protobuf.ByteString.copyFromUtf8(
-              (java.lang.String) ref);
-      table_ = b;
-      return b;
-    } else {
-      return (com.google.protobuf.ByteString) ref;
-    }
-  }
+                    break;
+                }
+                case 56: {
+                    int rawValue = input.readEnum();
 
-  public static final int SERVERID_FIELD_NUMBER = 6;
-  private com.google.protobuf.Int64Value serverId_;
-  /**
-   * <code>.google.protobuf.Int64Value serverId = 6;</code>
-   * @return Whether the serverId field is set.
-   */
-  @java.lang.Override
-  public boolean hasServerId() {
-    return serverId_ != null;
-  }
-  /**
-   * <code>.google.protobuf.Int64Value serverId = 6;</code>
-   * @return The serverId.
-   */
-  @java.lang.Override
-  public com.google.protobuf.Int64Value getServerId() {
-    return serverId_ == null ? com.google.protobuf.Int64Value.getDefaultInstance() : serverId_;
-  }
-  /**
-   * <code>.google.protobuf.Int64Value serverId = 6;</code>
-   */
-  @java.lang.Override
-  public com.google.protobuf.Int64ValueOrBuilder getServerIdOrBuilder() {
-    return getServerId();
-  }
+                    txnFlag_ = rawValue;
+                    break;
+                }
+                default: {
+                    if (!parseUnknownField(
+                        input, unknownFields, extensionRegistry, tag)) {
+                        done = true;
+                    }
+                    break;
+                }
+                }
+            }
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+            throw e.setUnfinishedMessage(this);
+        } catch (java.io.IOException e) {
+            throw new com.google.protobuf.InvalidProtocolBufferException(
+                e).setUnfinishedMessage(this);
+        } finally {
+            this.unknownFields = unknownFields.build();
+            makeExtensionsImmutable();
+        }
+    }
 
-  private byte memoizedIsInitialized = -1;
-  @java.lang.Override
-  public final boolean isInitialized() {
-    byte isInitialized = memoizedIsInitialized;
-    if (isInitialized == 1) return true;
-    if (isInitialized == 0) return false;
-
-    memoizedIsInitialized = 1;
-    return true;
-  }
-
-  @java.lang.Override
-  public void writeTo(com.google.protobuf.CodedOutputStream output)
-                      throws java.io.IOException {
-    if (!getTsoBytes().isEmpty()) {
-      com.google.protobuf.GeneratedMessageV3.writeString(output, 1, tso_);
-    }
-    if (type_ != com.aliyun.polardbx.binlog.protocol.TxnType.DML.getNumber()) {
-      output.writeEnum(2, type_);
-    }
-    if (!getSchemaBytes().isEmpty()) {
-      com.google.protobuf.GeneratedMessageV3.writeString(output, 3, schema_);
-    }
-    if (!payload_.isEmpty()) {
-      output.writeBytes(4, payload_);
-    }
-    if (!getTableBytes().isEmpty()) {
-      com.google.protobuf.GeneratedMessageV3.writeString(output, 5, table_);
-    }
-    if (serverId_ != null) {
-      output.writeMessage(6, getServerId());
-    }
-    unknownFields.writeTo(output);
-  }
-
-  @java.lang.Override
-  public int getSerializedSize() {
-    int size = memoizedSize;
-    if (size != -1) return size;
-
-    size = 0;
-    if (!getTsoBytes().isEmpty()) {
-      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(1, tso_);
-    }
-    if (type_ != com.aliyun.polardbx.binlog.protocol.TxnType.DML.getNumber()) {
-      size += com.google.protobuf.CodedOutputStream
-        .computeEnumSize(2, type_);
-    }
-    if (!getSchemaBytes().isEmpty()) {
-      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(3, schema_);
-    }
-    if (!payload_.isEmpty()) {
-      size += com.google.protobuf.CodedOutputStream
-        .computeBytesSize(4, payload_);
-    }
-    if (!getTableBytes().isEmpty()) {
-      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(5, table_);
-    }
-    if (serverId_ != null) {
-      size += com.google.protobuf.CodedOutputStream
-        .computeMessageSize(6, getServerId());
-    }
-    size += unknownFields.getSerializedSize();
-    memoizedSize = size;
-    return size;
-  }
-
-  @java.lang.Override
-  public boolean equals(final java.lang.Object obj) {
-    if (obj == this) {
-     return true;
-    }
-    if (!(obj instanceof com.aliyun.polardbx.binlog.protocol.TxnMergedToken)) {
-      return super.equals(obj);
-    }
-    com.aliyun.polardbx.binlog.protocol.TxnMergedToken other = (com.aliyun.polardbx.binlog.protocol.TxnMergedToken) obj;
-
-    if (!getTso()
-        .equals(other.getTso())) return false;
-    if (type_ != other.type_) return false;
-    if (!getSchema()
-        .equals(other.getSchema())) return false;
-    if (!getPayload()
-        .equals(other.getPayload())) return false;
-    if (!getTable()
-        .equals(other.getTable())) return false;
-    if (hasServerId() != other.hasServerId()) return false;
-    if (hasServerId()) {
-      if (!getServerId()
-          .equals(other.getServerId())) return false;
-    }
-    if (!unknownFields.equals(other.unknownFields)) return false;
-    return true;
-  }
-
-  @java.lang.Override
-  public int hashCode() {
-    if (memoizedHashCode != 0) {
-      return memoizedHashCode;
-    }
-    int hash = 41;
-    hash = (19 * hash) + getDescriptor().hashCode();
-    hash = (37 * hash) + TSO_FIELD_NUMBER;
-    hash = (53 * hash) + getTso().hashCode();
-    hash = (37 * hash) + TYPE_FIELD_NUMBER;
-    hash = (53 * hash) + type_;
-    hash = (37 * hash) + SCHEMA_FIELD_NUMBER;
-    hash = (53 * hash) + getSchema().hashCode();
-    hash = (37 * hash) + PAYLOAD_FIELD_NUMBER;
-    hash = (53 * hash) + getPayload().hashCode();
-    hash = (37 * hash) + TABLE_FIELD_NUMBER;
-    hash = (53 * hash) + getTable().hashCode();
-    if (hasServerId()) {
-      hash = (37 * hash) + SERVERID_FIELD_NUMBER;
-      hash = (53 * hash) + getServerId().hashCode();
-    }
-    hash = (29 * hash) + unknownFields.hashCode();
-    memoizedHashCode = hash;
-    return hash;
-  }
-
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
-      java.nio.ByteBuffer data)
-      throws com.google.protobuf.InvalidProtocolBufferException {
-    return PARSER.parseFrom(data);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
-      java.nio.ByteBuffer data,
-      com.google.protobuf.ExtensionRegistryLite extensionRegistry)
-      throws com.google.protobuf.InvalidProtocolBufferException {
-    return PARSER.parseFrom(data, extensionRegistry);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
-      com.google.protobuf.ByteString data)
-      throws com.google.protobuf.InvalidProtocolBufferException {
-    return PARSER.parseFrom(data);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
-      com.google.protobuf.ByteString data,
-      com.google.protobuf.ExtensionRegistryLite extensionRegistry)
-      throws com.google.protobuf.InvalidProtocolBufferException {
-    return PARSER.parseFrom(data, extensionRegistry);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(byte[] data)
-      throws com.google.protobuf.InvalidProtocolBufferException {
-    return PARSER.parseFrom(data);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
-      byte[] data,
-      com.google.protobuf.ExtensionRegistryLite extensionRegistry)
-      throws com.google.protobuf.InvalidProtocolBufferException {
-    return PARSER.parseFrom(data, extensionRegistry);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(java.io.InputStream input)
-      throws java.io.IOException {
-    return com.google.protobuf.GeneratedMessageV3
-        .parseWithIOException(PARSER, input);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
-      java.io.InputStream input,
-      com.google.protobuf.ExtensionRegistryLite extensionRegistry)
-      throws java.io.IOException {
-    return com.google.protobuf.GeneratedMessageV3
-        .parseWithIOException(PARSER, input, extensionRegistry);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseDelimitedFrom(java.io.InputStream input)
-      throws java.io.IOException {
-    return com.google.protobuf.GeneratedMessageV3
-        .parseDelimitedWithIOException(PARSER, input);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseDelimitedFrom(
-      java.io.InputStream input,
-      com.google.protobuf.ExtensionRegistryLite extensionRegistry)
-      throws java.io.IOException {
-    return com.google.protobuf.GeneratedMessageV3
-        .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
-      com.google.protobuf.CodedInputStream input)
-      throws java.io.IOException {
-    return com.google.protobuf.GeneratedMessageV3
-        .parseWithIOException(PARSER, input);
-  }
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
-      com.google.protobuf.CodedInputStream input,
-      com.google.protobuf.ExtensionRegistryLite extensionRegistry)
-      throws java.io.IOException {
-    return com.google.protobuf.GeneratedMessageV3
-        .parseWithIOException(PARSER, input, extensionRegistry);
-  }
-
-  @java.lang.Override
-  public Builder newBuilderForType() { return newBuilder(); }
-  public static Builder newBuilder() {
-    return DEFAULT_INSTANCE.toBuilder();
-  }
-  public static Builder newBuilder(com.aliyun.polardbx.binlog.protocol.TxnMergedToken prototype) {
-    return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
-  }
-  @java.lang.Override
-  public Builder toBuilder() {
-    return this == DEFAULT_INSTANCE
-        ? new Builder() : new Builder().mergeFrom(this);
-  }
-
-  @java.lang.Override
-  protected Builder newBuilderForType(
-      com.google.protobuf.GeneratedMessageV3.BuilderParent parent) {
-    Builder builder = new Builder(parent);
-    return builder;
-  }
-  /**
-   * Protobuf type {@code com.aliyun.polardbx.binlog.protocol.TxnMergedToken}
-   */
-  public static final class Builder extends
-      com.google.protobuf.GeneratedMessageV3.Builder<Builder> implements
-      // @@protoc_insertion_point(builder_implements:com.aliyun.polardbx.binlog.protocol.TxnMergedToken)
-      com.aliyun.polardbx.binlog.protocol.TxnMergedTokenOrBuilder {
     public static final com.google.protobuf.Descriptors.Descriptor
-        getDescriptor() {
-      return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_descriptor;
+    getDescriptor() {
+        return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_descriptor;
     }
 
     @java.lang.Override
     protected com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
-        internalGetFieldAccessorTable() {
-      return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_fieldAccessorTable
-          .ensureFieldAccessorsInitialized(
-              com.aliyun.polardbx.binlog.protocol.TxnMergedToken.class, com.aliyun.polardbx.binlog.protocol.TxnMergedToken.Builder.class);
+    internalGetFieldAccessorTable() {
+        return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_fieldAccessorTable
+            .ensureFieldAccessorsInitialized(
+                com.aliyun.polardbx.binlog.protocol.TxnMergedToken.class,
+                com.aliyun.polardbx.binlog.protocol.TxnMergedToken.Builder.class);
     }
 
-    // Construct using com.aliyun.polardbx.binlog.protocol.TxnMergedToken.newBuilder()
-    private Builder() {
-      maybeForceBuilderInitialization();
-    }
+    public static final int TSO_FIELD_NUMBER = 1;
+    private volatile java.lang.Object tso_;
 
-    private Builder(
-        com.google.protobuf.GeneratedMessageV3.BuilderParent parent) {
-      super(parent);
-      maybeForceBuilderInitialization();
-    }
-    private void maybeForceBuilderInitialization() {
-      if (com.google.protobuf.GeneratedMessageV3
-              .alwaysUseFieldBuilders) {
-      }
-    }
-    @java.lang.Override
-    public Builder clear() {
-      super.clear();
-      tso_ = "";
-
-      type_ = 0;
-
-      schema_ = "";
-
-      payload_ = com.google.protobuf.ByteString.EMPTY;
-
-      table_ = "";
-
-      if (serverIdBuilder_ == null) {
-        serverId_ = null;
-      } else {
-        serverId_ = null;
-        serverIdBuilder_ = null;
-      }
-      return this;
-    }
-
-    @java.lang.Override
-    public com.google.protobuf.Descriptors.Descriptor
-        getDescriptorForType() {
-      return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_descriptor;
-    }
-
-    @java.lang.Override
-    public com.aliyun.polardbx.binlog.protocol.TxnMergedToken getDefaultInstanceForType() {
-      return com.aliyun.polardbx.binlog.protocol.TxnMergedToken.getDefaultInstance();
-    }
-
-    @java.lang.Override
-    public com.aliyun.polardbx.binlog.protocol.TxnMergedToken build() {
-      com.aliyun.polardbx.binlog.protocol.TxnMergedToken result = buildPartial();
-      if (!result.isInitialized()) {
-        throw newUninitializedMessageException(result);
-      }
-      return result;
-    }
-
-    @java.lang.Override
-    public com.aliyun.polardbx.binlog.protocol.TxnMergedToken buildPartial() {
-      com.aliyun.polardbx.binlog.protocol.TxnMergedToken result = new com.aliyun.polardbx.binlog.protocol.TxnMergedToken(this);
-      result.tso_ = tso_;
-      result.type_ = type_;
-      result.schema_ = schema_;
-      result.payload_ = payload_;
-      result.table_ = table_;
-      if (serverIdBuilder_ == null) {
-        result.serverId_ = serverId_;
-      } else {
-        result.serverId_ = serverIdBuilder_.build();
-      }
-      onBuilt();
-      return result;
-    }
-
-    @java.lang.Override
-    public Builder clone() {
-      return super.clone();
-    }
-    @java.lang.Override
-    public Builder setField(
-        com.google.protobuf.Descriptors.FieldDescriptor field,
-        java.lang.Object value) {
-      return super.setField(field, value);
-    }
-    @java.lang.Override
-    public Builder clearField(
-        com.google.protobuf.Descriptors.FieldDescriptor field) {
-      return super.clearField(field);
-    }
-    @java.lang.Override
-    public Builder clearOneof(
-        com.google.protobuf.Descriptors.OneofDescriptor oneof) {
-      return super.clearOneof(oneof);
-    }
-    @java.lang.Override
-    public Builder setRepeatedField(
-        com.google.protobuf.Descriptors.FieldDescriptor field,
-        int index, java.lang.Object value) {
-      return super.setRepeatedField(field, index, value);
-    }
-    @java.lang.Override
-    public Builder addRepeatedField(
-        com.google.protobuf.Descriptors.FieldDescriptor field,
-        java.lang.Object value) {
-      return super.addRepeatedField(field, value);
-    }
-    @java.lang.Override
-    public Builder mergeFrom(com.google.protobuf.Message other) {
-      if (other instanceof com.aliyun.polardbx.binlog.protocol.TxnMergedToken) {
-        return mergeFrom((com.aliyun.polardbx.binlog.protocol.TxnMergedToken)other);
-      } else {
-        super.mergeFrom(other);
-        return this;
-      }
-    }
-
-    public Builder mergeFrom(com.aliyun.polardbx.binlog.protocol.TxnMergedToken other) {
-      if (other == com.aliyun.polardbx.binlog.protocol.TxnMergedToken.getDefaultInstance()) return this;
-      if (!other.getTso().isEmpty()) {
-        tso_ = other.tso_;
-        onChanged();
-      }
-      if (other.type_ != 0) {
-        setTypeValue(other.getTypeValue());
-      }
-      if (!other.getSchema().isEmpty()) {
-        schema_ = other.schema_;
-        onChanged();
-      }
-      if (other.getPayload() != com.google.protobuf.ByteString.EMPTY) {
-        setPayload(other.getPayload());
-      }
-      if (!other.getTable().isEmpty()) {
-        table_ = other.table_;
-        onChanged();
-      }
-      if (other.hasServerId()) {
-        mergeServerId(other.getServerId());
-      }
-      this.mergeUnknownFields(other.unknownFields);
-      onChanged();
-      return this;
-    }
-
-    @java.lang.Override
-    public final boolean isInitialized() {
-      return true;
-    }
-
-    @java.lang.Override
-    public Builder mergeFrom(
-        com.google.protobuf.CodedInputStream input,
-        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
-        throws java.io.IOException {
-      com.aliyun.polardbx.binlog.protocol.TxnMergedToken parsedMessage = null;
-      try {
-        parsedMessage = PARSER.parsePartialFrom(input, extensionRegistry);
-      } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-        parsedMessage = (com.aliyun.polardbx.binlog.protocol.TxnMergedToken) e.getUnfinishedMessage();
-        throw e.unwrapIOException();
-      } finally {
-        if (parsedMessage != null) {
-          mergeFrom(parsedMessage);
-        }
-      }
-      return this;
-    }
-
-    private java.lang.Object tso_ = "";
     /**
      * <code>string tso = 1;</code>
+     *
      * @return The tso.
      */
+    @java.lang.Override
     public java.lang.String getTso() {
-      java.lang.Object ref = tso_;
-      if (!(ref instanceof java.lang.String)) {
-        com.google.protobuf.ByteString bs =
-            (com.google.protobuf.ByteString) ref;
-        java.lang.String s = bs.toStringUtf8();
-        tso_ = s;
-        return s;
-      } else {
-        return (java.lang.String) ref;
-      }
-    }
-    /**
-     * <code>string tso = 1;</code>
-     * @return The bytes for tso.
-     */
-    public com.google.protobuf.ByteString
-        getTsoBytes() {
-      java.lang.Object ref = tso_;
-      if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
-            com.google.protobuf.ByteString.copyFromUtf8(
-                (java.lang.String) ref);
-        tso_ = b;
-        return b;
-      } else {
-        return (com.google.protobuf.ByteString) ref;
-      }
-    }
-    /**
-     * <code>string tso = 1;</code>
-     * @param value The tso to set.
-     * @return This builder for chaining.
-     */
-    public Builder setTso(
-        java.lang.String value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  
-      tso_ = value;
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string tso = 1;</code>
-     * @return This builder for chaining.
-     */
-    public Builder clearTso() {
-      
-      tso_ = getDefaultInstance().getTso();
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string tso = 1;</code>
-     * @param value The bytes for tso to set.
-     * @return This builder for chaining.
-     */
-    public Builder setTsoBytes(
-        com.google.protobuf.ByteString value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  checkByteStringIsUtf8(value);
-      
-      tso_ = value;
-      onChanged();
-      return this;
+        java.lang.Object ref = tso_;
+        if (ref instanceof java.lang.String) {
+            return (java.lang.String) ref;
+        } else {
+            com.google.protobuf.ByteString bs =
+                (com.google.protobuf.ByteString) ref;
+            java.lang.String s = bs.toStringUtf8();
+            tso_ = s;
+            return s;
+        }
     }
 
-    private int type_ = 0;
+    /**
+     * <code>string tso = 1;</code>
+     *
+     * @return The bytes for tso.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+    getTsoBytes() {
+        java.lang.Object ref = tso_;
+        if (ref instanceof java.lang.String) {
+            com.google.protobuf.ByteString b =
+                com.google.protobuf.ByteString.copyFromUtf8(
+                    (java.lang.String) ref);
+            tso_ = b;
+            return b;
+        } else {
+            return (com.google.protobuf.ByteString) ref;
+        }
+    }
+
+    public static final int TYPE_FIELD_NUMBER = 2;
+    private int type_;
+
     /**
      * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+     *
      * @return The enum numeric value on the wire for type.
      */
-    @java.lang.Override public int getTypeValue() {
-      return type_;
+    @java.lang.Override
+    public int getTypeValue() {
+        return type_;
     }
+
     /**
      * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
-     * @param value The enum numeric value on the wire for type to set.
-     * @return This builder for chaining.
-     */
-    public Builder setTypeValue(int value) {
-      
-      type_ = value;
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+     *
      * @return The type.
      */
     @java.lang.Override
     public com.aliyun.polardbx.binlog.protocol.TxnType getType() {
-      @SuppressWarnings("deprecation")
-      com.aliyun.polardbx.binlog.protocol.TxnType result = com.aliyun.polardbx.binlog.protocol.TxnType.valueOf(type_);
-      return result == null ? com.aliyun.polardbx.binlog.protocol.TxnType.UNRECOGNIZED : result;
-    }
-    /**
-     * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
-     * @param value The type to set.
-     * @return This builder for chaining.
-     */
-    public Builder setType(com.aliyun.polardbx.binlog.protocol.TxnType value) {
-      if (value == null) {
-        throw new NullPointerException();
-      }
-      
-      type_ = value.getNumber();
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
-     * @return This builder for chaining.
-     */
-    public Builder clearType() {
-      
-      type_ = 0;
-      onChanged();
-      return this;
+        @SuppressWarnings("deprecation")
+        com.aliyun.polardbx.binlog.protocol.TxnType result = com.aliyun.polardbx.binlog.protocol.TxnType.valueOf(type_);
+        return result == null ? com.aliyun.polardbx.binlog.protocol.TxnType.UNRECOGNIZED : result;
     }
 
-    private java.lang.Object schema_ = "";
+    public static final int SCHEMA_FIELD_NUMBER = 3;
+    private volatile java.lang.Object schema_;
+
     /**
      * <code>string schema = 3;</code>
+     *
      * @return The schema.
      */
+    @java.lang.Override
     public java.lang.String getSchema() {
-      java.lang.Object ref = schema_;
-      if (!(ref instanceof java.lang.String)) {
-        com.google.protobuf.ByteString bs =
-            (com.google.protobuf.ByteString) ref;
-        java.lang.String s = bs.toStringUtf8();
-        schema_ = s;
-        return s;
-      } else {
-        return (java.lang.String) ref;
-      }
-    }
-    /**
-     * <code>string schema = 3;</code>
-     * @return The bytes for schema.
-     */
-    public com.google.protobuf.ByteString
-        getSchemaBytes() {
-      java.lang.Object ref = schema_;
-      if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
-            com.google.protobuf.ByteString.copyFromUtf8(
-                (java.lang.String) ref);
-        schema_ = b;
-        return b;
-      } else {
-        return (com.google.protobuf.ByteString) ref;
-      }
-    }
-    /**
-     * <code>string schema = 3;</code>
-     * @param value The schema to set.
-     * @return This builder for chaining.
-     */
-    public Builder setSchema(
-        java.lang.String value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  
-      schema_ = value;
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string schema = 3;</code>
-     * @return This builder for chaining.
-     */
-    public Builder clearSchema() {
-      
-      schema_ = getDefaultInstance().getSchema();
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string schema = 3;</code>
-     * @param value The bytes for schema to set.
-     * @return This builder for chaining.
-     */
-    public Builder setSchemaBytes(
-        com.google.protobuf.ByteString value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  checkByteStringIsUtf8(value);
-      
-      schema_ = value;
-      onChanged();
-      return this;
+        java.lang.Object ref = schema_;
+        if (ref instanceof java.lang.String) {
+            return (java.lang.String) ref;
+        } else {
+            com.google.protobuf.ByteString bs =
+                (com.google.protobuf.ByteString) ref;
+            java.lang.String s = bs.toStringUtf8();
+            schema_ = s;
+            return s;
+        }
     }
 
-    private com.google.protobuf.ByteString payload_ = com.google.protobuf.ByteString.EMPTY;
+    /**
+     * <code>string schema = 3;</code>
+     *
+     * @return The bytes for schema.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+    getSchemaBytes() {
+        java.lang.Object ref = schema_;
+        if (ref instanceof java.lang.String) {
+            com.google.protobuf.ByteString b =
+                com.google.protobuf.ByteString.copyFromUtf8(
+                    (java.lang.String) ref);
+            schema_ = b;
+            return b;
+        } else {
+            return (com.google.protobuf.ByteString) ref;
+        }
+    }
+
+    public static final int PAYLOAD_FIELD_NUMBER = 4;
+    private com.google.protobuf.ByteString payload_;
+
     /**
      * <code>bytes payload = 4;</code>
+     *
      * @return The payload.
      */
     @java.lang.Override
     public com.google.protobuf.ByteString getPayload() {
-      return payload_;
-    }
-    /**
-     * <code>bytes payload = 4;</code>
-     * @param value The payload to set.
-     * @return This builder for chaining.
-     */
-    public Builder setPayload(com.google.protobuf.ByteString value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  
-      payload_ = value;
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>bytes payload = 4;</code>
-     * @return This builder for chaining.
-     */
-    public Builder clearPayload() {
-      
-      payload_ = getDefaultInstance().getPayload();
-      onChanged();
-      return this;
+        return payload_;
     }
 
-    private java.lang.Object table_ = "";
+    public static final int TABLE_FIELD_NUMBER = 5;
+    private volatile java.lang.Object table_;
+
     /**
      * <code>string table = 5;</code>
+     *
      * @return The table.
      */
+    @java.lang.Override
     public java.lang.String getTable() {
-      java.lang.Object ref = table_;
-      if (!(ref instanceof java.lang.String)) {
-        com.google.protobuf.ByteString bs =
-            (com.google.protobuf.ByteString) ref;
-        java.lang.String s = bs.toStringUtf8();
-        table_ = s;
-        return s;
-      } else {
-        return (java.lang.String) ref;
-      }
+        java.lang.Object ref = table_;
+        if (ref instanceof java.lang.String) {
+            return (java.lang.String) ref;
+        } else {
+            com.google.protobuf.ByteString bs =
+                (com.google.protobuf.ByteString) ref;
+            java.lang.String s = bs.toStringUtf8();
+            table_ = s;
+            return s;
+        }
     }
+
     /**
      * <code>string table = 5;</code>
+     *
      * @return The bytes for table.
      */
+    @java.lang.Override
     public com.google.protobuf.ByteString
-        getTableBytes() {
-      java.lang.Object ref = table_;
-      if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
-            com.google.protobuf.ByteString.copyFromUtf8(
-                (java.lang.String) ref);
-        table_ = b;
-        return b;
-      } else {
-        return (com.google.protobuf.ByteString) ref;
-      }
-    }
-    /**
-     * <code>string table = 5;</code>
-     * @param value The table to set.
-     * @return This builder for chaining.
-     */
-    public Builder setTable(
-        java.lang.String value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  
-      table_ = value;
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string table = 5;</code>
-     * @return This builder for chaining.
-     */
-    public Builder clearTable() {
-      
-      table_ = getDefaultInstance().getTable();
-      onChanged();
-      return this;
-    }
-    /**
-     * <code>string table = 5;</code>
-     * @param value The bytes for table to set.
-     * @return This builder for chaining.
-     */
-    public Builder setTableBytes(
-        com.google.protobuf.ByteString value) {
-      if (value == null) {
-    throw new NullPointerException();
-  }
-  checkByteStringIsUtf8(value);
-      
-      table_ = value;
-      onChanged();
-      return this;
+    getTableBytes() {
+        java.lang.Object ref = table_;
+        if (ref instanceof java.lang.String) {
+            com.google.protobuf.ByteString b =
+                com.google.protobuf.ByteString.copyFromUtf8(
+                    (java.lang.String) ref);
+            table_ = b;
+            return b;
+        } else {
+            return (com.google.protobuf.ByteString) ref;
+        }
     }
 
+    public static final int SERVERID_FIELD_NUMBER = 6;
     private com.google.protobuf.Int64Value serverId_;
-    private com.google.protobuf.SingleFieldBuilderV3<
-        com.google.protobuf.Int64Value, com.google.protobuf.Int64Value.Builder, com.google.protobuf.Int64ValueOrBuilder> serverIdBuilder_;
+
     /**
      * <code>.google.protobuf.Int64Value serverId = 6;</code>
+     *
      * @return Whether the serverId field is set.
      */
+    @java.lang.Override
     public boolean hasServerId() {
-      return serverIdBuilder_ != null || serverId_ != null;
+        return serverId_ != null;
     }
+
     /**
      * <code>.google.protobuf.Int64Value serverId = 6;</code>
+     *
      * @return The serverId.
      */
+    @java.lang.Override
     public com.google.protobuf.Int64Value getServerId() {
-      if (serverIdBuilder_ == null) {
         return serverId_ == null ? com.google.protobuf.Int64Value.getDefaultInstance() : serverId_;
-      } else {
-        return serverIdBuilder_.getMessage();
-      }
     }
-    /**
-     * <code>.google.protobuf.Int64Value serverId = 6;</code>
-     */
-    public Builder setServerId(com.google.protobuf.Int64Value value) {
-      if (serverIdBuilder_ == null) {
-        if (value == null) {
-          throw new NullPointerException();
-        }
-        serverId_ = value;
-        onChanged();
-      } else {
-        serverIdBuilder_.setMessage(value);
-      }
 
-      return this;
-    }
     /**
      * <code>.google.protobuf.Int64Value serverId = 6;</code>
      */
-    public Builder setServerId(
-        com.google.protobuf.Int64Value.Builder builderForValue) {
-      if (serverIdBuilder_ == null) {
-        serverId_ = builderForValue.build();
-        onChanged();
-      } else {
-        serverIdBuilder_.setMessage(builderForValue.build());
-      }
-
-      return this;
-    }
-    /**
-     * <code>.google.protobuf.Int64Value serverId = 6;</code>
-     */
-    public Builder mergeServerId(com.google.protobuf.Int64Value value) {
-      if (serverIdBuilder_ == null) {
-        if (serverId_ != null) {
-          serverId_ =
-            com.google.protobuf.Int64Value.newBuilder(serverId_).mergeFrom(value).buildPartial();
-        } else {
-          serverId_ = value;
-        }
-        onChanged();
-      } else {
-        serverIdBuilder_.mergeFrom(value);
-      }
-
-      return this;
-    }
-    /**
-     * <code>.google.protobuf.Int64Value serverId = 6;</code>
-     */
-    public Builder clearServerId() {
-      if (serverIdBuilder_ == null) {
-        serverId_ = null;
-        onChanged();
-      } else {
-        serverId_ = null;
-        serverIdBuilder_ = null;
-      }
-
-      return this;
-    }
-    /**
-     * <code>.google.protobuf.Int64Value serverId = 6;</code>
-     */
-    public com.google.protobuf.Int64Value.Builder getServerIdBuilder() {
-      
-      onChanged();
-      return getServerIdFieldBuilder().getBuilder();
-    }
-    /**
-     * <code>.google.protobuf.Int64Value serverId = 6;</code>
-     */
+    @java.lang.Override
     public com.google.protobuf.Int64ValueOrBuilder getServerIdOrBuilder() {
-      if (serverIdBuilder_ != null) {
-        return serverIdBuilder_.getMessageOrBuilder();
-      } else {
-        return serverId_ == null ?
-            com.google.protobuf.Int64Value.getDefaultInstance() : serverId_;
-      }
+        return getServerId();
     }
+
+    public static final int TXNFLAG_FIELD_NUMBER = 7;
+    private int txnFlag_;
+
     /**
-     * <code>.google.protobuf.Int64Value serverId = 6;</code>
+     * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+     *
+     * @return The enum numeric value on the wire for txnFlag.
      */
-    private com.google.protobuf.SingleFieldBuilderV3<
-        com.google.protobuf.Int64Value, com.google.protobuf.Int64Value.Builder, com.google.protobuf.Int64ValueOrBuilder> 
-        getServerIdFieldBuilder() {
-      if (serverIdBuilder_ == null) {
-        serverIdBuilder_ = new com.google.protobuf.SingleFieldBuilderV3<
-            com.google.protobuf.Int64Value, com.google.protobuf.Int64Value.Builder, com.google.protobuf.Int64ValueOrBuilder>(
-                getServerId(),
-                getParentForChildren(),
-                isClean());
-        serverId_ = null;
+    @java.lang.Override
+    public int getTxnFlagValue() {
+        return txnFlag_;
+    }
+
+    /**
+     * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+     *
+     * @return The txnFlag.
+     */
+    @java.lang.Override
+    public com.aliyun.polardbx.binlog.protocol.TxnFlag getTxnFlag() {
+        @SuppressWarnings("deprecation")
+        com.aliyun.polardbx.binlog.protocol.TxnFlag result =
+            com.aliyun.polardbx.binlog.protocol.TxnFlag.valueOf(txnFlag_);
+        return result == null ? com.aliyun.polardbx.binlog.protocol.TxnFlag.UNRECOGNIZED : result;
+    }
+
+    private byte memoizedIsInitialized = -1;
+
+    @java.lang.Override
+    public final boolean isInitialized() {
+        byte isInitialized = memoizedIsInitialized;
+      if (isInitialized == 1) {
+        return true;
       }
-      return serverIdBuilder_;
-    }
-    @java.lang.Override
-    public final Builder setUnknownFields(
-        final com.google.protobuf.UnknownFieldSet unknownFields) {
-      return super.setUnknownFields(unknownFields);
-    }
+      if (isInitialized == 0) {
+        return false;
+      }
 
-    @java.lang.Override
-    public final Builder mergeUnknownFields(
-        final com.google.protobuf.UnknownFieldSet unknownFields) {
-      return super.mergeUnknownFields(unknownFields);
+        memoizedIsInitialized = 1;
+        return true;
     }
 
-
-    // @@protoc_insertion_point(builder_scope:com.aliyun.polardbx.binlog.protocol.TxnMergedToken)
-  }
-
-  // @@protoc_insertion_point(class_scope:com.aliyun.polardbx.binlog.protocol.TxnMergedToken)
-  private static final com.aliyun.polardbx.binlog.protocol.TxnMergedToken DEFAULT_INSTANCE;
-  static {
-    DEFAULT_INSTANCE = new com.aliyun.polardbx.binlog.protocol.TxnMergedToken();
-  }
-
-  public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken getDefaultInstance() {
-    return DEFAULT_INSTANCE;
-  }
-
-  private static final com.google.protobuf.Parser<TxnMergedToken>
-      PARSER = new com.google.protobuf.AbstractParser<TxnMergedToken>() {
     @java.lang.Override
-    public TxnMergedToken parsePartialFrom(
-        com.google.protobuf.CodedInputStream input,
+    public void writeTo(com.google.protobuf.CodedOutputStream output)
+        throws java.io.IOException {
+        if (!getTsoBytes().isEmpty()) {
+            com.google.protobuf.GeneratedMessageV3.writeString(output, 1, tso_);
+        }
+        if (type_ != com.aliyun.polardbx.binlog.protocol.TxnType.DML.getNumber()) {
+            output.writeEnum(2, type_);
+        }
+        if (!getSchemaBytes().isEmpty()) {
+            com.google.protobuf.GeneratedMessageV3.writeString(output, 3, schema_);
+        }
+        if (!payload_.isEmpty()) {
+            output.writeBytes(4, payload_);
+        }
+        if (!getTableBytes().isEmpty()) {
+            com.google.protobuf.GeneratedMessageV3.writeString(output, 5, table_);
+        }
+        if (serverId_ != null) {
+            output.writeMessage(6, getServerId());
+        }
+        if (txnFlag_ != com.aliyun.polardbx.binlog.protocol.TxnFlag.NORMAL.getNumber()) {
+            output.writeEnum(7, txnFlag_);
+        }
+        unknownFields.writeTo(output);
+    }
+
+    @java.lang.Override
+    public int getSerializedSize() {
+        int size = memoizedSize;
+      if (size != -1) {
+        return size;
+      }
+
+        size = 0;
+        if (!getTsoBytes().isEmpty()) {
+            size += com.google.protobuf.GeneratedMessageV3.computeStringSize(1, tso_);
+        }
+        if (type_ != com.aliyun.polardbx.binlog.protocol.TxnType.DML.getNumber()) {
+            size += com.google.protobuf.CodedOutputStream
+                .computeEnumSize(2, type_);
+        }
+        if (!getSchemaBytes().isEmpty()) {
+            size += com.google.protobuf.GeneratedMessageV3.computeStringSize(3, schema_);
+        }
+        if (!payload_.isEmpty()) {
+            size += com.google.protobuf.CodedOutputStream
+                .computeBytesSize(4, payload_);
+        }
+        if (!getTableBytes().isEmpty()) {
+            size += com.google.protobuf.GeneratedMessageV3.computeStringSize(5, table_);
+        }
+        if (serverId_ != null) {
+            size += com.google.protobuf.CodedOutputStream
+                .computeMessageSize(6, getServerId());
+        }
+        if (txnFlag_ != com.aliyun.polardbx.binlog.protocol.TxnFlag.NORMAL.getNumber()) {
+            size += com.google.protobuf.CodedOutputStream
+                .computeEnumSize(7, txnFlag_);
+        }
+        size += unknownFields.getSerializedSize();
+        memoizedSize = size;
+        return size;
+    }
+
+    @java.lang.Override
+    public boolean equals(final java.lang.Object obj) {
+        if (obj == this) {
+            return true;
+        }
+        if (!(obj instanceof com.aliyun.polardbx.binlog.protocol.TxnMergedToken)) {
+            return super.equals(obj);
+        }
+        com.aliyun.polardbx.binlog.protocol.TxnMergedToken other =
+            (com.aliyun.polardbx.binlog.protocol.TxnMergedToken) obj;
+
+      if (!getTso()
+          .equals(other.getTso())) {
+        return false;
+      }
+      if (type_ != other.type_) {
+        return false;
+      }
+      if (!getSchema()
+          .equals(other.getSchema())) {
+        return false;
+      }
+      if (!getPayload()
+          .equals(other.getPayload())) {
+        return false;
+      }
+      if (!getTable()
+          .equals(other.getTable())) {
+        return false;
+      }
+      if (hasServerId() != other.hasServerId()) {
+        return false;
+      }
+        if (hasServerId()) {
+          if (!getServerId()
+              .equals(other.getServerId())) {
+            return false;
+          }
+        }
+        if (txnFlag_ != other.txnFlag_) {
+            return false;
+        }
+      if (!unknownFields.equals(other.unknownFields)) {
+        return false;
+      }
+        return true;
+    }
+
+    @java.lang.Override
+    public int hashCode() {
+        if (memoizedHashCode != 0) {
+            return memoizedHashCode;
+        }
+        int hash = 41;
+        hash = (19 * hash) + getDescriptor().hashCode();
+        hash = (37 * hash) + TSO_FIELD_NUMBER;
+        hash = (53 * hash) + getTso().hashCode();
+        hash = (37 * hash) + TYPE_FIELD_NUMBER;
+        hash = (53 * hash) + type_;
+        hash = (37 * hash) + SCHEMA_FIELD_NUMBER;
+        hash = (53 * hash) + getSchema().hashCode();
+        hash = (37 * hash) + PAYLOAD_FIELD_NUMBER;
+        hash = (53 * hash) + getPayload().hashCode();
+        hash = (37 * hash) + TABLE_FIELD_NUMBER;
+        hash = (53 * hash) + getTable().hashCode();
+        if (hasServerId()) {
+            hash = (37 * hash) + SERVERID_FIELD_NUMBER;
+            hash = (53 * hash) + getServerId().hashCode();
+        }
+        hash = (37 * hash) + TXNFLAG_FIELD_NUMBER;
+        hash = (53 * hash) + txnFlag_;
+        hash = (29 * hash) + unknownFields.hashCode();
+        memoizedHashCode = hash;
+        return hash;
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
+        java.nio.ByteBuffer data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+        return PARSER.parseFrom(data);
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
+        java.nio.ByteBuffer data,
         com.google.protobuf.ExtensionRegistryLite extensionRegistry)
         throws com.google.protobuf.InvalidProtocolBufferException {
-      return new TxnMergedToken(input, extensionRegistry);
+        return PARSER.parseFrom(data, extensionRegistry);
     }
-  };
 
-  public static com.google.protobuf.Parser<TxnMergedToken> parser() {
-    return PARSER;
-  }
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
+        com.google.protobuf.ByteString data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+        return PARSER.parseFrom(data);
+    }
 
-  @java.lang.Override
-  public com.google.protobuf.Parser<TxnMergedToken> getParserForType() {
-    return PARSER;
-  }
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
+        com.google.protobuf.ByteString data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+        return PARSER.parseFrom(data, extensionRegistry);
+    }
 
-  @java.lang.Override
-  public com.aliyun.polardbx.binlog.protocol.TxnMergedToken getDefaultInstanceForType() {
-    return DEFAULT_INSTANCE;
-  }
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(byte[] data)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+        return PARSER.parseFrom(data);
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
+        byte[] data,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws com.google.protobuf.InvalidProtocolBufferException {
+        return PARSER.parseFrom(data, extensionRegistry);
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(java.io.InputStream input)
+        throws java.io.IOException {
+        return com.google.protobuf.GeneratedMessageV3
+            .parseWithIOException(PARSER, input);
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+        return com.google.protobuf.GeneratedMessageV3
+            .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseDelimitedFrom(java.io.InputStream input)
+        throws java.io.IOException {
+        return com.google.protobuf.GeneratedMessageV3
+            .parseDelimitedWithIOException(PARSER, input);
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseDelimitedFrom(
+        java.io.InputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+        return com.google.protobuf.GeneratedMessageV3
+            .parseDelimitedWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
+        com.google.protobuf.CodedInputStream input)
+        throws java.io.IOException {
+        return com.google.protobuf.GeneratedMessageV3
+            .parseWithIOException(PARSER, input);
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken parseFrom(
+        com.google.protobuf.CodedInputStream input,
+        com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+        throws java.io.IOException {
+        return com.google.protobuf.GeneratedMessageV3
+            .parseWithIOException(PARSER, input, extensionRegistry);
+    }
+
+    @java.lang.Override
+    public Builder newBuilderForType() {
+        return newBuilder();
+    }
+
+    public static Builder newBuilder() {
+        return DEFAULT_INSTANCE.toBuilder();
+    }
+
+    public static Builder newBuilder(com.aliyun.polardbx.binlog.protocol.TxnMergedToken prototype) {
+        return DEFAULT_INSTANCE.toBuilder().mergeFrom(prototype);
+    }
+
+    @java.lang.Override
+    public Builder toBuilder() {
+        return this == DEFAULT_INSTANCE
+            ? new Builder() : new Builder().mergeFrom(this);
+    }
+
+    @java.lang.Override
+    protected Builder newBuilderForType(
+        com.google.protobuf.GeneratedMessageV3.BuilderParent parent) {
+        Builder builder = new Builder(parent);
+        return builder;
+    }
+
+    /**
+     * Protobuf type {@code com.aliyun.polardbx.binlog.protocol.TxnMergedToken}
+     */
+    public static final class Builder extends
+        com.google.protobuf.GeneratedMessageV3.Builder<Builder> implements
+        // @@protoc_insertion_point(builder_implements:com.aliyun.polardbx.binlog.protocol.TxnMergedToken)
+        com.aliyun.polardbx.binlog.protocol.TxnMergedTokenOrBuilder {
+        public static final com.google.protobuf.Descriptors.Descriptor
+        getDescriptor() {
+            return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_descriptor;
+        }
+
+        @java.lang.Override
+        protected com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
+        internalGetFieldAccessorTable() {
+            return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_fieldAccessorTable
+                .ensureFieldAccessorsInitialized(
+                    com.aliyun.polardbx.binlog.protocol.TxnMergedToken.class,
+                    com.aliyun.polardbx.binlog.protocol.TxnMergedToken.Builder.class);
+        }
+
+        // Construct using com.aliyun.polardbx.binlog.protocol.TxnMergedToken.newBuilder()
+        private Builder() {
+            maybeForceBuilderInitialization();
+        }
+
+        private Builder(
+            com.google.protobuf.GeneratedMessageV3.BuilderParent parent) {
+            super(parent);
+            maybeForceBuilderInitialization();
+        }
+
+        private void maybeForceBuilderInitialization() {
+            if (com.google.protobuf.GeneratedMessageV3
+                .alwaysUseFieldBuilders) {
+            }
+        }
+
+        @java.lang.Override
+        public Builder clear() {
+            super.clear();
+            tso_ = "";
+
+            type_ = 0;
+
+            schema_ = "";
+
+            payload_ = com.google.protobuf.ByteString.EMPTY;
+
+            table_ = "";
+
+            if (serverIdBuilder_ == null) {
+                serverId_ = null;
+            } else {
+                serverId_ = null;
+                serverIdBuilder_ = null;
+            }
+            txnFlag_ = 0;
+
+            return this;
+        }
+
+        @java.lang.Override
+        public com.google.protobuf.Descriptors.Descriptor
+        getDescriptorForType() {
+            return com.aliyun.polardbx.binlog.protocol.TxnStream.internal_static_com_aliyun_polardbx_binlog_protocol_TxnMergedToken_descriptor;
+        }
+
+        @java.lang.Override
+        public com.aliyun.polardbx.binlog.protocol.TxnMergedToken getDefaultInstanceForType() {
+            return com.aliyun.polardbx.binlog.protocol.TxnMergedToken.getDefaultInstance();
+        }
+
+        @java.lang.Override
+        public com.aliyun.polardbx.binlog.protocol.TxnMergedToken build() {
+            com.aliyun.polardbx.binlog.protocol.TxnMergedToken result = buildPartial();
+            if (!result.isInitialized()) {
+                throw newUninitializedMessageException(result);
+            }
+            return result;
+        }
+
+        @java.lang.Override
+        public com.aliyun.polardbx.binlog.protocol.TxnMergedToken buildPartial() {
+            com.aliyun.polardbx.binlog.protocol.TxnMergedToken result =
+                new com.aliyun.polardbx.binlog.protocol.TxnMergedToken(this);
+            result.tso_ = tso_;
+            result.type_ = type_;
+            result.schema_ = schema_;
+            result.payload_ = payload_;
+            result.table_ = table_;
+            if (serverIdBuilder_ == null) {
+                result.serverId_ = serverId_;
+            } else {
+                result.serverId_ = serverIdBuilder_.build();
+            }
+            result.txnFlag_ = txnFlag_;
+            onBuilt();
+            return result;
+        }
+
+        @java.lang.Override
+        public Builder clone() {
+            return super.clone();
+        }
+
+        @java.lang.Override
+        public Builder setField(
+            com.google.protobuf.Descriptors.FieldDescriptor field,
+            java.lang.Object value) {
+            return super.setField(field, value);
+        }
+
+        @java.lang.Override
+        public Builder clearField(
+            com.google.protobuf.Descriptors.FieldDescriptor field) {
+            return super.clearField(field);
+        }
+
+        @java.lang.Override
+        public Builder clearOneof(
+            com.google.protobuf.Descriptors.OneofDescriptor oneof) {
+            return super.clearOneof(oneof);
+        }
+
+        @java.lang.Override
+        public Builder setRepeatedField(
+            com.google.protobuf.Descriptors.FieldDescriptor field,
+            int index, java.lang.Object value) {
+            return super.setRepeatedField(field, index, value);
+        }
+
+        @java.lang.Override
+        public Builder addRepeatedField(
+            com.google.protobuf.Descriptors.FieldDescriptor field,
+            java.lang.Object value) {
+            return super.addRepeatedField(field, value);
+        }
+
+        @java.lang.Override
+        public Builder mergeFrom(com.google.protobuf.Message other) {
+            if (other instanceof com.aliyun.polardbx.binlog.protocol.TxnMergedToken) {
+                return mergeFrom((com.aliyun.polardbx.binlog.protocol.TxnMergedToken) other);
+            } else {
+                super.mergeFrom(other);
+                return this;
+            }
+        }
+
+        public Builder mergeFrom(com.aliyun.polardbx.binlog.protocol.TxnMergedToken other) {
+          if (other == com.aliyun.polardbx.binlog.protocol.TxnMergedToken.getDefaultInstance()) {
+            return this;
+          }
+            if (!other.getTso().isEmpty()) {
+                tso_ = other.tso_;
+                onChanged();
+            }
+            if (other.type_ != 0) {
+                setTypeValue(other.getTypeValue());
+            }
+            if (!other.getSchema().isEmpty()) {
+                schema_ = other.schema_;
+                onChanged();
+            }
+            if (other.getPayload() != com.google.protobuf.ByteString.EMPTY) {
+                setPayload(other.getPayload());
+            }
+            if (!other.getTable().isEmpty()) {
+                table_ = other.table_;
+                onChanged();
+            }
+            if (other.hasServerId()) {
+                mergeServerId(other.getServerId());
+            }
+            if (other.txnFlag_ != 0) {
+                setTxnFlagValue(other.getTxnFlagValue());
+            }
+            this.mergeUnknownFields(other.unknownFields);
+            onChanged();
+            return this;
+        }
+
+        @java.lang.Override
+        public final boolean isInitialized() {
+            return true;
+        }
+
+        @java.lang.Override
+        public Builder mergeFrom(
+            com.google.protobuf.CodedInputStream input,
+            com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+            throws java.io.IOException {
+            com.aliyun.polardbx.binlog.protocol.TxnMergedToken parsedMessage = null;
+            try {
+                parsedMessage = PARSER.parsePartialFrom(input, extensionRegistry);
+            } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+                parsedMessage = (com.aliyun.polardbx.binlog.protocol.TxnMergedToken) e.getUnfinishedMessage();
+                throw e.unwrapIOException();
+            } finally {
+                if (parsedMessage != null) {
+                    mergeFrom(parsedMessage);
+                }
+            }
+            return this;
+        }
+
+        private java.lang.Object tso_ = "";
+
+        /**
+         * <code>string tso = 1;</code>
+         *
+         * @return The tso.
+         */
+        public java.lang.String getTso() {
+            java.lang.Object ref = tso_;
+            if (!(ref instanceof java.lang.String)) {
+                com.google.protobuf.ByteString bs =
+                    (com.google.protobuf.ByteString) ref;
+                java.lang.String s = bs.toStringUtf8();
+                tso_ = s;
+                return s;
+            } else {
+                return (java.lang.String) ref;
+            }
+        }
+
+        /**
+         * <code>string tso = 1;</code>
+         *
+         * @return The bytes for tso.
+         */
+        public com.google.protobuf.ByteString
+        getTsoBytes() {
+            java.lang.Object ref = tso_;
+            if (ref instanceof String) {
+                com.google.protobuf.ByteString b =
+                    com.google.protobuf.ByteString.copyFromUtf8(
+                        (java.lang.String) ref);
+                tso_ = b;
+                return b;
+            } else {
+                return (com.google.protobuf.ByteString) ref;
+            }
+        }
+
+        /**
+         * <code>string tso = 1;</code>
+         *
+         * @param value The tso to set.
+         * @return This builder for chaining.
+         */
+        public Builder setTso(
+            java.lang.String value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+
+            tso_ = value;
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>string tso = 1;</code>
+         *
+         * @return This builder for chaining.
+         */
+        public Builder clearTso() {
+
+            tso_ = getDefaultInstance().getTso();
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>string tso = 1;</code>
+         *
+         * @param value The bytes for tso to set.
+         * @return This builder for chaining.
+         */
+        public Builder setTsoBytes(
+            com.google.protobuf.ByteString value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+            checkByteStringIsUtf8(value);
+
+            tso_ = value;
+            onChanged();
+            return this;
+        }
+
+        private int type_ = 0;
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+         *
+         * @return The enum numeric value on the wire for type.
+         */
+        @java.lang.Override
+        public int getTypeValue() {
+            return type_;
+        }
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+         *
+         * @param value The enum numeric value on the wire for type to set.
+         * @return This builder for chaining.
+         */
+        public Builder setTypeValue(int value) {
+
+            type_ = value;
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+         *
+         * @return The type.
+         */
+        @java.lang.Override
+        public com.aliyun.polardbx.binlog.protocol.TxnType getType() {
+            @SuppressWarnings("deprecation")
+            com.aliyun.polardbx.binlog.protocol.TxnType result =
+                com.aliyun.polardbx.binlog.protocol.TxnType.valueOf(type_);
+            return result == null ? com.aliyun.polardbx.binlog.protocol.TxnType.UNRECOGNIZED : result;
+        }
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+         *
+         * @param value The type to set.
+         * @return This builder for chaining.
+         */
+        public Builder setType(com.aliyun.polardbx.binlog.protocol.TxnType value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+
+            type_ = value.getNumber();
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnType type = 2;</code>
+         *
+         * @return This builder for chaining.
+         */
+        public Builder clearType() {
+
+            type_ = 0;
+            onChanged();
+            return this;
+        }
+
+        private java.lang.Object schema_ = "";
+
+        /**
+         * <code>string schema = 3;</code>
+         *
+         * @return The schema.
+         */
+        public java.lang.String getSchema() {
+            java.lang.Object ref = schema_;
+            if (!(ref instanceof java.lang.String)) {
+                com.google.protobuf.ByteString bs =
+                    (com.google.protobuf.ByteString) ref;
+                java.lang.String s = bs.toStringUtf8();
+                schema_ = s;
+                return s;
+            } else {
+                return (java.lang.String) ref;
+            }
+        }
+
+        /**
+         * <code>string schema = 3;</code>
+         *
+         * @return The bytes for schema.
+         */
+        public com.google.protobuf.ByteString
+        getSchemaBytes() {
+            java.lang.Object ref = schema_;
+            if (ref instanceof String) {
+                com.google.protobuf.ByteString b =
+                    com.google.protobuf.ByteString.copyFromUtf8(
+                        (java.lang.String) ref);
+                schema_ = b;
+                return b;
+            } else {
+                return (com.google.protobuf.ByteString) ref;
+            }
+        }
+
+        /**
+         * <code>string schema = 3;</code>
+         *
+         * @param value The schema to set.
+         * @return This builder for chaining.
+         */
+        public Builder setSchema(
+            java.lang.String value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+
+            schema_ = value;
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>string schema = 3;</code>
+         *
+         * @return This builder for chaining.
+         */
+        public Builder clearSchema() {
+
+            schema_ = getDefaultInstance().getSchema();
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>string schema = 3;</code>
+         *
+         * @param value The bytes for schema to set.
+         * @return This builder for chaining.
+         */
+        public Builder setSchemaBytes(
+            com.google.protobuf.ByteString value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+            checkByteStringIsUtf8(value);
+
+            schema_ = value;
+            onChanged();
+            return this;
+        }
+
+        private com.google.protobuf.ByteString payload_ = com.google.protobuf.ByteString.EMPTY;
+
+        /**
+         * <code>bytes payload = 4;</code>
+         *
+         * @return The payload.
+         */
+        @java.lang.Override
+        public com.google.protobuf.ByteString getPayload() {
+            return payload_;
+        }
+
+        /**
+         * <code>bytes payload = 4;</code>
+         *
+         * @param value The payload to set.
+         * @return This builder for chaining.
+         */
+        public Builder setPayload(com.google.protobuf.ByteString value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+
+            payload_ = value;
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>bytes payload = 4;</code>
+         *
+         * @return This builder for chaining.
+         */
+        public Builder clearPayload() {
+
+            payload_ = getDefaultInstance().getPayload();
+            onChanged();
+            return this;
+        }
+
+        private java.lang.Object table_ = "";
+
+        /**
+         * <code>string table = 5;</code>
+         *
+         * @return The table.
+         */
+        public java.lang.String getTable() {
+            java.lang.Object ref = table_;
+            if (!(ref instanceof java.lang.String)) {
+                com.google.protobuf.ByteString bs =
+                    (com.google.protobuf.ByteString) ref;
+                java.lang.String s = bs.toStringUtf8();
+                table_ = s;
+                return s;
+            } else {
+                return (java.lang.String) ref;
+            }
+        }
+
+        /**
+         * <code>string table = 5;</code>
+         *
+         * @return The bytes for table.
+         */
+        public com.google.protobuf.ByteString
+        getTableBytes() {
+            java.lang.Object ref = table_;
+            if (ref instanceof String) {
+                com.google.protobuf.ByteString b =
+                    com.google.protobuf.ByteString.copyFromUtf8(
+                        (java.lang.String) ref);
+                table_ = b;
+                return b;
+            } else {
+                return (com.google.protobuf.ByteString) ref;
+            }
+        }
+
+        /**
+         * <code>string table = 5;</code>
+         *
+         * @param value The table to set.
+         * @return This builder for chaining.
+         */
+        public Builder setTable(
+            java.lang.String value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+
+            table_ = value;
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>string table = 5;</code>
+         *
+         * @return This builder for chaining.
+         */
+        public Builder clearTable() {
+
+            table_ = getDefaultInstance().getTable();
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>string table = 5;</code>
+         *
+         * @param value The bytes for table to set.
+         * @return This builder for chaining.
+         */
+        public Builder setTableBytes(
+            com.google.protobuf.ByteString value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+            checkByteStringIsUtf8(value);
+
+            table_ = value;
+            onChanged();
+            return this;
+        }
+
+        private com.google.protobuf.Int64Value serverId_;
+        private com.google.protobuf.SingleFieldBuilderV3<
+            com.google.protobuf.Int64Value, com.google.protobuf.Int64Value.Builder, com.google.protobuf.Int64ValueOrBuilder>
+            serverIdBuilder_;
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         *
+         * @return Whether the serverId field is set.
+         */
+        public boolean hasServerId() {
+            return serverIdBuilder_ != null || serverId_ != null;
+        }
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         *
+         * @return The serverId.
+         */
+        public com.google.protobuf.Int64Value getServerId() {
+            if (serverIdBuilder_ == null) {
+                return serverId_ == null ? com.google.protobuf.Int64Value.getDefaultInstance() : serverId_;
+            } else {
+                return serverIdBuilder_.getMessage();
+            }
+        }
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         */
+        public Builder setServerId(com.google.protobuf.Int64Value value) {
+            if (serverIdBuilder_ == null) {
+                if (value == null) {
+                    throw new NullPointerException();
+                }
+                serverId_ = value;
+                onChanged();
+            } else {
+                serverIdBuilder_.setMessage(value);
+            }
+
+            return this;
+        }
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         */
+        public Builder setServerId(
+            com.google.protobuf.Int64Value.Builder builderForValue) {
+            if (serverIdBuilder_ == null) {
+                serverId_ = builderForValue.build();
+                onChanged();
+            } else {
+                serverIdBuilder_.setMessage(builderForValue.build());
+            }
+
+            return this;
+        }
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         */
+        public Builder mergeServerId(com.google.protobuf.Int64Value value) {
+            if (serverIdBuilder_ == null) {
+                if (serverId_ != null) {
+                    serverId_ =
+                        com.google.protobuf.Int64Value.newBuilder(serverId_).mergeFrom(value).buildPartial();
+                } else {
+                    serverId_ = value;
+                }
+                onChanged();
+            } else {
+                serverIdBuilder_.mergeFrom(value);
+            }
+
+            return this;
+        }
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         */
+        public Builder clearServerId() {
+            if (serverIdBuilder_ == null) {
+                serverId_ = null;
+                onChanged();
+            } else {
+                serverId_ = null;
+                serverIdBuilder_ = null;
+            }
+
+            return this;
+        }
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         */
+        public com.google.protobuf.Int64Value.Builder getServerIdBuilder() {
+
+            onChanged();
+            return getServerIdFieldBuilder().getBuilder();
+        }
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         */
+        public com.google.protobuf.Int64ValueOrBuilder getServerIdOrBuilder() {
+            if (serverIdBuilder_ != null) {
+                return serverIdBuilder_.getMessageOrBuilder();
+            } else {
+                return serverId_ == null ?
+                    com.google.protobuf.Int64Value.getDefaultInstance() : serverId_;
+            }
+        }
+
+        /**
+         * <code>.google.protobuf.Int64Value serverId = 6;</code>
+         */
+        private com.google.protobuf.SingleFieldBuilderV3<
+            com.google.protobuf.Int64Value, com.google.protobuf.Int64Value.Builder, com.google.protobuf.Int64ValueOrBuilder>
+        getServerIdFieldBuilder() {
+            if (serverIdBuilder_ == null) {
+                serverIdBuilder_ = new com.google.protobuf.SingleFieldBuilderV3<
+                    com.google.protobuf.Int64Value, com.google.protobuf.Int64Value.Builder, com.google.protobuf.Int64ValueOrBuilder>(
+                    getServerId(),
+                    getParentForChildren(),
+                    isClean());
+                serverId_ = null;
+            }
+            return serverIdBuilder_;
+        }
+
+        private int txnFlag_ = 0;
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+         *
+         * @return The enum numeric value on the wire for txnFlag.
+         */
+        @java.lang.Override
+        public int getTxnFlagValue() {
+            return txnFlag_;
+        }
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+         *
+         * @param value The enum numeric value on the wire for txnFlag to set.
+         * @return This builder for chaining.
+         */
+        public Builder setTxnFlagValue(int value) {
+
+            txnFlag_ = value;
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+         *
+         * @return The txnFlag.
+         */
+        @java.lang.Override
+        public com.aliyun.polardbx.binlog.protocol.TxnFlag getTxnFlag() {
+            @SuppressWarnings("deprecation")
+            com.aliyun.polardbx.binlog.protocol.TxnFlag result =
+                com.aliyun.polardbx.binlog.protocol.TxnFlag.valueOf(txnFlag_);
+            return result == null ? com.aliyun.polardbx.binlog.protocol.TxnFlag.UNRECOGNIZED : result;
+        }
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+         *
+         * @param value The txnFlag to set.
+         * @return This builder for chaining.
+         */
+        public Builder setTxnFlag(com.aliyun.polardbx.binlog.protocol.TxnFlag value) {
+            if (value == null) {
+                throw new NullPointerException();
+            }
+
+            txnFlag_ = value.getNumber();
+            onChanged();
+            return this;
+        }
+
+        /**
+         * <code>.com.aliyun.polardbx.binlog.protocol.TxnFlag txnFlag = 7;</code>
+         *
+         * @return This builder for chaining.
+         */
+        public Builder clearTxnFlag() {
+
+            txnFlag_ = 0;
+            onChanged();
+            return this;
+        }
+
+        @java.lang.Override
+        public final Builder setUnknownFields(
+            final com.google.protobuf.UnknownFieldSet unknownFields) {
+            return super.setUnknownFields(unknownFields);
+        }
+
+        @java.lang.Override
+        public final Builder mergeUnknownFields(
+            final com.google.protobuf.UnknownFieldSet unknownFields) {
+            return super.mergeUnknownFields(unknownFields);
+        }
+
+        // @@protoc_insertion_point(builder_scope:com.aliyun.polardbx.binlog.protocol.TxnMergedToken)
+    }
+
+    // @@protoc_insertion_point(class_scope:com.aliyun.polardbx.binlog.protocol.TxnMergedToken)
+    private static final com.aliyun.polardbx.binlog.protocol.TxnMergedToken DEFAULT_INSTANCE;
+
+    static {
+        DEFAULT_INSTANCE = new com.aliyun.polardbx.binlog.protocol.TxnMergedToken();
+    }
+
+    public static com.aliyun.polardbx.binlog.protocol.TxnMergedToken getDefaultInstance() {
+        return DEFAULT_INSTANCE;
+    }
+
+    private static final com.google.protobuf.Parser<TxnMergedToken>
+        PARSER = new com.google.protobuf.AbstractParser<TxnMergedToken>() {
+        @java.lang.Override
+        public TxnMergedToken parsePartialFrom(
+            com.google.protobuf.CodedInputStream input,
+            com.google.protobuf.ExtensionRegistryLite extensionRegistry)
+            throws com.google.protobuf.InvalidProtocolBufferException {
+            return new TxnMergedToken(input, extensionRegistry);
+        }
+    };
+
+    public static com.google.protobuf.Parser<TxnMergedToken> parser() {
+        return PARSER;
+    }
+
+    @java.lang.Override
+    public com.google.protobuf.Parser<TxnMergedToken> getParserForType() {
+        return PARSER;
+    }
+
+    @java.lang.Override
+    public com.aliyun.polardbx.binlog.protocol.TxnMergedToken getDefaultInstanceForType() {
+        return DEFAULT_INSTANCE;
+    }
 
 }
 

@@ -69,11 +69,17 @@ public class ReplicaMeta {
     ConflictStrategy conflictStrategy = ConflictStrategy.OVERWRITE;
 
     /*
-     * 多流新增参数
+     * 控制是否同步ddl
      * enable ddl: default true
      */
     boolean enableDdl = true;
     String streamGroup;
+
+    /*
+     * 源为2.0时该参数控制是否采用快照解析
+     * enableSrcLogicalMetaSnapshot: default true
+     */
+    boolean enableSrcLogicalMetaSnapshot = true;
 
     /*
      * dynamic cn

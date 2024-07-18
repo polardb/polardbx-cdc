@@ -28,6 +28,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropPartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableReorgPartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCallStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
@@ -58,6 +59,7 @@ import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.utils.SqlModeUtil;
 import com.aliyun.polardbx.binlog.relay.DdlRouteMode;
+import com.aliyun.polardbx.binlog.service.RplSyncPointService;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.LogUtil;
@@ -74,6 +76,7 @@ import lombok.SneakyThrows;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.time.DateFormatUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -104,6 +107,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_RETRY_MAX_COUNT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_WAIT_ALIGN_INTERVAL_MILLS;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.canal.LogEventUtil.SYNC_POINT_PROCEDURE_NAME;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.PRIVATE_DDL_DDL_ROUTE_PREFIX;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.PRIVATE_DDL_TSO_PREFIX;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql;
@@ -352,6 +356,11 @@ public class DdlApplyHelper {
                     && !result.getHasIfExistsOrNotExists()) {
                     sqlContext.setSql(sqlContext.getSql().replaceAll("(?i)create role",
                         "create role if not exists"));
+                } else if (result.getSqlStatement() instanceof SQLCallStatement) {
+                    SQLCallStatement stmt = (SQLCallStatement) result.getSqlStatement();
+                    if (SYNC_POINT_PROCEDURE_NAME.equals(stmt.getProcedureName().getSimpleName())) {
+                        sqlContext.setSyncPoint(true);
+                    }
                 }
             default:
                 break;
@@ -580,6 +589,13 @@ public class DdlApplyHelper {
             if (Thread.interrupted()) {
                 throw new InterruptedException();
             }
+
+            if (sqlContext.isSyncPoint()) {
+                processSyncPoint(dbMetaCache.getDataSource("__cdc__"), tso);
+                markDdlSucceed(tso, false);
+                return;
+            }
+
             boolean res;
             if (asyncDdl) {
                 res = executeDdlInternalAsync(dataSource, sqlContext, firstDdl, tso, rplDdl, needAlign, retry);
@@ -630,6 +646,43 @@ public class DdlApplyHelper {
             AsyncDdlMonitor.getInstance().submitNewDdl(rplDdl);
         }
         return true;
+    }
+
+    @SneakyThrows
+    private static void processSyncPoint(DataSource dataSource, String primary_tso) {
+        log.info("prepare to process sync point. primary tso:{}", primary_tso);
+
+        // 等待心跳将DN上的tso推高
+        pushDNLocalSeq(dataSource);
+
+        String secondary_tso = null;
+        try (Connection conn = dataSource.getConnection();
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery("select tso_timestamp()")) {
+            if (rs.next()) {
+                secondary_tso = rs.getString(1);
+            }
+            log.info("success to get tso from gms, secondary tso:{}", secondary_tso);
+        }
+
+        if (secondary_tso != null) {
+            final RplSyncPointService service = getObject(RplSyncPointService.class);
+            service.insert(primary_tso.substring(0, secondary_tso.length()), secondary_tso);
+        }
+    }
+
+    @SneakyThrows
+    private static void pushDNLocalSeq(DataSource dataSource) {
+        long now = System.currentTimeMillis();
+        String nowFormat = DateFormatUtils.format(now, "yyyy-MM-dd HH:mm:ss.SSS");
+        final String sql = String.format(
+            "replace into `__cdc__`.`__cdc_heartbeat__`(id, sname, gmt_modified) values(1, 'heartbeat', '%s')",
+            nowFormat);
+        try (Connection conn = dataSource.getConnection();
+            Statement stmt = conn.createStatement()) {
+            stmt.execute("SET TRANSACTION_POLICY = TSO");
+            stmt.execute(sql);
+        }
     }
 
     @SneakyThrows

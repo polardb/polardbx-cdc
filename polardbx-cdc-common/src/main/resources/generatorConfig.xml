@@ -49,6 +49,7 @@
         <table schema="polardbx_meta_db_polardbx" tableName="server_info" domainObjectName="ServerInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="node_info" domainObjectName="PolarxCNodeInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="user_priv" domainObjectName="UserPriv"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="cdc_sync_point_meta" domainObjectName="CdcSyncPointMeta"/>
         -->
 
         <!-- Binlog相关表 -->
@@ -126,6 +127,7 @@
         <table schema="polardbx_meta_db_polardbx" tableName="rpl_full_valid_sub_task"
                domainObjectName="RplFullValidSubTask"/>
         <table schema="polardbx_meta_db_polardbx" tableName="rpl_full_valid_diff" domainObjectName="RplFullValidDiff"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="rpl_sync_point" domainObjectName="RplSyncPoint"/>
         -->
 
         <!-- Columnar 相关表 -->
@@ -135,6 +137,6 @@
         <table schema="polardbx_meta_db_polardbx" tableName="columnar_task_config" domainObjectName="ColumnarTaskConfig"/>
         <table schema="polardbx_meta_db_polardbx" tableName="columnar_checkpoints" domainObjectName="ColumnarCheckpoints"/>
         -->
-        
+
     </context>
 </generatorConfiguration>

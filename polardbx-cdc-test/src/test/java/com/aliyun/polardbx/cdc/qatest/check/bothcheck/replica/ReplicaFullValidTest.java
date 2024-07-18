@@ -156,7 +156,7 @@ public class ReplicaFullValidTest extends RplBaseTestCase {
                 throw new UnexpectedException("check replica timeout!");
             });
         } catch (Exception e) {
-            log.error("retry check status failed!", e);
+            log.error("retry check status failed! db {}, tb {}", db, table, e);
             res = false;
         }
         return res;

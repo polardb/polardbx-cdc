@@ -134,6 +134,7 @@ public class MysqlFullExtractor extends BaseExtractor {
                     "",
                     1,
                     extractorConfig.getParallelCount(),
+                    true,
                     null,
                     newConnectionSqls);
             dataSourceMap.put(db, dataSource);
@@ -147,7 +148,7 @@ public class MysqlFullExtractor extends BaseExtractor {
             }
             for (String tbName : dataImportFilter.getDoTables().get(dbName)) {
                 String dstDbName = dataImportFilter.getRewriteDb(dbName, DBMSAction.INSERT);
-                String dstTbName = dataImportFilter.getRewriteTable(tbName);
+                String dstTbName = dataImportFilter.getRewriteTable(dbName, tbName);
                 if (isReplicaFull) {
                     Optional<String> ddl = Optional.ofNullable(structureImportDdl.get(dstDbName))
                         .map(data -> data.get(dstTbName));
@@ -226,7 +227,7 @@ public class MysqlFullExtractor extends BaseExtractor {
         structureImportDdl = new HashMap<>();
         Map<String, Set<String>> doTables = new HashMap<>();
         Map<String, String> dbMappings = new HashMap<>();
-        DbMetaCache dbMetaCache = new DbMetaCache(hostInfo, 2);
+        DbMetaCache dbMetaCache = new DbMetaCache(hostInfo, 2, true);
         List<String> dbs = dbMetaCache.getDatabases();
         Set<String> doDbs = new HashSet<>();
         log.info("source db list: {}", dbs);
@@ -258,7 +259,6 @@ public class MysqlFullExtractor extends BaseExtractor {
         DataImportMeta.PhysicalMeta importMeta = new DataImportMeta.PhysicalMeta();
         importMeta.setRewriteTableMapping(new HashMap<>());
         importMeta.setIgnoreServerIds("");
-        ;
         importMeta.setDstDbMapping(dbMappings);
         importMeta.setSrcDbList(doDbs);
         importMeta.setPhysicalDoTableList(doTables);

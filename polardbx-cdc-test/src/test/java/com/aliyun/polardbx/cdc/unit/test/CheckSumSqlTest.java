@@ -34,7 +34,6 @@ import java.util.List;
  **/
 @RunWith(PowerMockRunner.class)
 public class CheckSumSqlTest {
-
     // ==================  test DataConsistencyTest::buildCheckSumSql ============= //
 
     @Test

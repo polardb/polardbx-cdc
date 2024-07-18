@@ -62,7 +62,7 @@ public class JdbcUtil {
     public static final String CREATE_TABLE_LIKE_SQL = "create table %s like %s";
     private static final Logger log = LoggerFactory.getLogger(JdbcUtil.class);
     private static final String URL_PATTERN = "jdbc:mysql://%s:%s/%s?%s";
-    private static final String DEFAULT_CONN_PROPS =
+    public static final String DEFAULT_CONN_PROPS =
         "useUnicode=true&characterEncoding=utf8&useSSL=false&connectTimeout=5000&socketTimeout=12000";
 
     /**

@@ -60,7 +60,10 @@ public class RowsLogEventRebuilder {
         rowEvent.setFlags((short) lg.getFlags());
         int flags = rowsLogEvent.getFlags();
         if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_REFORMAT_NO_FOREIGN_KEY_CHECK)) {
-            flags = flags | RowsLogEvent.NO_FOREIGN_KEY_CHECKS_F;
+            flags = flags | RowEventBuilder.ROW_FLAG_NO_FOREIGN_KEY_CHECK;
+        }
+        if (tableMeta.isHasHiddenPk()) {
+            flags = flags | RowEventBuilder.ROW_FLAG_HAS_HIDDEN_PK;
         }
         rowEvent.set_flags(flags);
         rowEvent.setColumnCount(columnLen);

@@ -132,10 +132,14 @@ public class TableMetaHistoryDbHelper {
 
     private void tryCleanPhyDDL(String tso) {
         if (StringUtils.isNotBlank(tso)) {
-            // build snap 时会保障发生时， 不会有ddl正在运行或者将要运行， 这里可以安全的清理
-            int deleteCount = phyDdlHistoryMapper
-                .delete(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.tso, SqlBuilder.isLessThan(tso)));
-            log.info("delete phy ddl count : " + deleteCount);
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.META_PURGE_LOGIC_DDL_SOFT_DELETE_ENABLED)) {
+                log.warn("skip delete phy ddl count for tso {}, because soft delete is enabled.", tso);
+            } else {
+                // build snap 时会保障发生时， 不会有ddl正在运行或者将要运行， 这里可以安全的清理
+                int deleteCount = phyDdlHistoryMapper
+                    .delete(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.tso, SqlBuilder.isLessThan(tso)));
+                log.info("delete phy ddl count : " + deleteCount);
+            }
         }
     }
 

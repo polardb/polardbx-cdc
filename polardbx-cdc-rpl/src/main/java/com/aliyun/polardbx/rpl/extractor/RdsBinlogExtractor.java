@@ -155,7 +155,9 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
                     log.warn("oss rdsapi result: {}", result.toString());
                     if (result.getItems().isEmpty()) {
                         log.error("oss api returns no binlog file info");
-                        return;
+                        StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                            TaskContext.getInstance().getTaskId(), "no appropriate oss binlog，需要值班介入");
+                        throw new PolardbxException("no appropriate oss binlog");
                     }
                     for (BinlogFile file : result.getItems()) {
                         file.initRegionTime();

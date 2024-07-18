@@ -161,6 +161,7 @@ public class BinlogXTopologyBuilder {
             exeConfig.setStreamNameSet(v);
             exeConfig.setRuntimeVersion(newVersion);
             exeConfig.setServerId(serverId);
+            exeConfig.setReservedMemMb(container.getCapability().getReservedMemMb());
 
             BinlogTaskConfig taskConfig = createTask(container.getContainerId().hashCode(), TaskType.DumperX,
                 container, JSONObject.toJSONString(exeConfig), newVersion);
@@ -234,7 +235,7 @@ public class BinlogXTopologyBuilder {
             }
         }
 
-        Map<Integer, BinlogTaskConfig> assignedTaskMap = new HashMap<>();
+        Map<Integer, Pair<BinlogTaskConfig, Container>> assignedTaskMap = new HashMap<>();
         int taskSequence = 0;
         for (Container container : containerList) {
             if (!assignedCountMap.containsKey(container)) {
@@ -254,7 +255,7 @@ public class BinlogXTopologyBuilder {
                 taskConfig.setVcpu(cpu);
                 taskConfig.setStatus(BinlogTaskConfigStatus.ENABLE_AUTO_SCHEDULE);
                 container.deductMem(mem);
-                assignedTaskMap.put(taskSequence, taskConfig);
+                assignedTaskMap.put(taskSequence, Pair.of(taskConfig, container));
             }
         }
 
@@ -276,9 +277,10 @@ public class BinlogXTopologyBuilder {
 
         List<BinlogTaskConfig> result = new ArrayList<>();
         assignedExeConfigMap.forEach((k, v) -> {
-            BinlogTaskConfig taskConfig = assignedTaskMap.get(k + 1);
-            taskConfig.setConfig(JSONObject.toJSONString(v));
-            result.add(taskConfig);
+            Pair<BinlogTaskConfig, Container> pair = assignedTaskMap.get(k + 1);
+            v.setReservedMemMb(pair.getValue().getCapability().getReservedMemMb());
+            pair.getKey().setConfig(JSONObject.toJSONString(v));
+            result.add(pair.getKey());
         });
         return result;
     }

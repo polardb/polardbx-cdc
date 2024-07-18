@@ -84,6 +84,7 @@ public class WriteItem {
             .setTso(newTso)
             .setPayload(token.getPayload())
             .setTable(token.getTable())
+            .setTxnFlag(token.getTxnFlag())
             .build();
         if (token.hasServerId()) {
             mergedToken = mergedToken.toBuilder().setServerId(token.getServerId()).build();

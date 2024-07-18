@@ -37,7 +37,7 @@ import java.util.List;
 public class ValidationSampler {
 
     private static final String SAMPLE_SQL_FORMAT =
-        "/*+TDDL:cmd_extra(sample_percentage=%f,enable_push_sort=false,merge_union_size=1,enable_post_planner=false,enable_direct_plan=false)*/ SELECT %s FROM %s ORDER BY %s";
+        "/*+TDDL:cmd_extra(sample_percentage=%f,enable_push_sort=false,merge_union=false,enable_index_selection=false,enable_post_planner=false,enable_direct_plan=false)*/ SELECT %s FROM %s ORDER BY %s";
 
     /**
      * 对逻辑表进行采样，采样结果按主键有序
@@ -50,7 +50,7 @@ public class ValidationSampler {
         List<List<Object>> result = new ArrayList<>();
 
         if (CollectionUtils.isEmpty(primaryKeys)) {
-            throw new UnsupportedOperationException("Not Support Check Table without Primary Key!");
+            throw new NoPrimaryKeyException("Not Support Check Table without Primary Key!");
         }
 
         try (Connection conn = dataSource.getConnection()) {
@@ -135,19 +135,11 @@ public class ValidationSampler {
 
     private static boolean noNeedBatch(Connection conn, String dbName, String tableName) throws SQLException {
         long tableRows = ValidationUtil.getTableRowsCount(conn, dbName, tableName);
-        long avgSize = ValidationUtil.getTableAvgRowSize(conn, dbName, tableName);
         long minBatchRowsCount = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_MIN_BATCH_ROWS_COUNT);
         if (tableRows < minBatchRowsCount) {
             log.info("table rows:{} is smaller than min batch:{}", tableRows, minBatchRowsCount);
             return true;
         }
-        long minBatchByteSize = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_MIN_BATCH_BYTE_SIZE);
-        long totalSize = tableRows * avgSize;
-        if (totalSize < minBatchByteSize) {
-            log.info("total size:{} is smaller than min batch size:{}", totalSize, minBatchByteSize);
-            return true;
-        }
-
         return false;
     }
 

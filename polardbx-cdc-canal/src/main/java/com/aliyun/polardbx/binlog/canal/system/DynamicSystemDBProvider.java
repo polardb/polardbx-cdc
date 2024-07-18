@@ -63,6 +63,13 @@ public class DynamicSystemDBProvider extends AbstractSystemDBProvider {
             .endsWith(SINGLE_KEY_WORLD);
     }
 
+    @Override
+    public boolean isSyncPoint(String db, String phyTable) {
+        checkState();
+        return db.startsWith(LOGIC_SCHEMA) && StringUtils.equalsIgnoreCase(phyTable, POLARX_SYNC_POINT) && !db
+            .endsWith(SINGLE_KEY_WORLD);
+    }
+
     private void initTableMeta(String table) {
         template.query(String.format(SHOW_CREATE_TABLE, table), rs -> {
             String ddlSql = rs.getString("Create Table");
@@ -83,6 +90,7 @@ public class DynamicSystemDBProvider extends AbstractSystemDBProvider {
     private void postInit() {
         memoryTableMeta = new MemoryTableMeta(null, false);
         memoryTableMeta.apply(TableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_DRDS_GLOBAL_TX_LOG, null);
+        memoryTableMeta.apply(TableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_POLARX_SYNC_POINT, null);
         initTableMeta(DRDS_CDC_DDL_RECORD);
         initTableMeta(DRDS_CDC_INSTRUCTION);
         initTableMeta(DRDS_CDC_HEARTBEAT);
@@ -117,6 +125,12 @@ public class DynamicSystemDBProvider extends AbstractSystemDBProvider {
     public TableMeta getInstructionTableMeta() {
         checkState();
         return memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_INSTRUCTION);
+    }
+
+    @Override
+    public TableMeta getSyncPointTableMeta() {
+        checkState();
+        return memoryTableMeta.find(LOGIC_SCHEMA, POLARX_SYNC_POINT);
     }
 
     @Override

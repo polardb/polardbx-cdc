@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.rpl.validation.common;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.apache.commons.collections.CollectionUtils;
 
@@ -23,11 +24,15 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_FULL_VALID_SAMPLE_COUNT;
+
 /**
  * @author yudong
  * @since 2024/1/17 11:52
  **/
 public class ValidationUtil {
+
+    private static final boolean sampleCount = DynamicApplicationConfig.getBoolean(RPL_FULL_VALID_SAMPLE_COUNT);
 
     public static String buildFullTableName(String schemaName, String tableName) {
         return String.format("`%s`.`%s`", escape(schemaName), escape(tableName));
@@ -38,18 +43,32 @@ public class ValidationUtil {
         return str.replaceAll(regex, "``");
     }
 
-    public static long getTableRowsCount(Connection conn, String dbName, String tbName) throws SQLException {
-        String sql = String.format(
-            "SELECT `TABLE_ROWS` FROM `INFORMATION_SCHEMA`.`TABLES` WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'",
-            dbName, tbName);
-        try (Statement stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery(sql)) {
-            if (rs.next()) {
-                return rs.getLong("TABLE_ROWS");
-            } else {
-                throw new SQLException("failed to fetch table rows count!");
+    public static long getTableRowsCount(Connection conn, String dbName, String tbName)
+        throws SQLException {
+        long count;
+        if (sampleCount) {
+            String countSql = String.format("SELECT count(1) FROM `%s`.`%s`", dbName, tbName);
+            try (Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(countSql)) {
+                if (rs.next()) {
+                    return rs.getLong(1);
+                } else {
+                    throw new SQLException("failed to fetch table rows count!");
+                }
+            }
+        } else {
+            String infoSql = String.format("SELECT `TABLE_ROWS` FROM `INFORMATION_SCHEMA`.`TABLES` "
+                + "WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'", dbName, tbName);
+            try (Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(infoSql)) {
+                if (rs.next()) {
+                    count = rs.getLong("TABLE_ROWS");
+                } else {
+                    throw new SQLException("failed to fetch table rows count!");
+                }
             }
         }
+        return count;
     }
 
     public static long getTableAvgRowSize(Connection conn, String dbName, String tbName) throws SQLException {

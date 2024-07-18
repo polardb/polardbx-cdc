@@ -78,16 +78,8 @@ public class LogUtil {
         return LoggerFactory.getLogger(POSITION_LOGGER);
     }
 
-    public static Logger getConsoleLogger() {
-        return LoggerFactory.getLogger(CONSOLE_LOGGER);
-    }
-
     public static String generatePositionLog(String position) {
         return CommonUtil.getCurrentTime() + " " + position;
-    }
-
-    public static Logger getRplLogger() {
-        return LoggerFactory.getLogger(RPL_LOGGER);
     }
 
     public static String generateStatisticLogV2(RplStatMetrics rplStatMetrics) {
@@ -112,7 +104,8 @@ public class LogUtil {
             + " memUseRatio:" + rplStatMetrics.getMemUseRatio()
             + " fullGcCount:" + rplStatMetrics.getFullGcCount()
             + " workerIp:" + rplStatMetrics.getWorkerIp()
-            + " totalCommitCount" + rplStatMetrics.getTotalCommitCount();
+            + " totalCommitCount" + rplStatMetrics.getTotalCommitCount()
+            + " trueDelayMills" + rplStatMetrics.getTrueDelayMills();
     }
 
     public static void logFullCommitInfo(List<DBMSEvent> dbmsEvents, String physicalInfo) {

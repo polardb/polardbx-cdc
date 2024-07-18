@@ -61,7 +61,7 @@ public class StatisticCounter {
             if (peek == null) {
                 return 0;
             }
-            if (!isOutdate(peek)) {
+            if (!isOutdated(peek)) {
                 break;
             }
 
@@ -71,7 +71,7 @@ public class StatisticCounter {
         return totalCount.get();
     }
 
-    private boolean isOutdate(Counter counter) {
+    private boolean isOutdated(Counter counter) {
         return DateTime.now()
             .minusSeconds(DynamicApplicationConfig.getInt(ConfigKeys.RPL_STATE_METRICS_FLUSH_INTERVAL_SECOND)).
             isAfter(counter.timestamp);

@@ -18,6 +18,7 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.unit.SearchRecorderMetrics;
 import com.aliyun.polardbx.binlog.collect.Collector;
 import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.error.CollectException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.metrics.MergeMetrics;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
@@ -30,6 +31,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -167,8 +169,13 @@ public class LogEventMerger implements Merger {
                     break;
                 } catch (Throwable t) {
                     MonitorManager.getInstance().triggerAlarm(MERGER_STAGE_LOOP_ERROR, ExceptionUtils.getStackTrace(t));
-                    logger.error("fatal error in merger loop, the merger thread will exit", t);
-                    throw t;
+                    if (t instanceof CollectException && t.getCause() instanceof DataAccessException) {
+                        logger.error("meet data access error in merger loop, process will exit.", t);
+                        Runtime.getRuntime().halt(1);
+                    } else {
+                        logger.error("fatal error in merger loop, the merger thread will exit", t);
+                        throw t;
+                    }
                 }
             }
         });

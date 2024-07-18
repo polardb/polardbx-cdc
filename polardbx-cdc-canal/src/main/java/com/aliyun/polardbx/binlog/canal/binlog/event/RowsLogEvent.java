@@ -40,6 +40,8 @@ public abstract class RowsLogEvent extends LogEvent {
      * Value of the OPTION_RELAXED_UNIQUE_CHECKS flag in thd->options
      */
     public static final int RELAXED_UNIQUE_CHECKS_F = (1 << 2);
+
+    public static final int HIDDEN_PK_FLAG = (1 << 7);
     /**
      * Indicates that rows in this event are complete, that is contain values for
      * all columns of the table.

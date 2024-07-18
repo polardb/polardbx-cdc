@@ -280,6 +280,10 @@ public abstract class ConfigKeys {
      */
     public static final String BINLOG_WRITE_HEARTBEAT_INTERVAL = "binlog_write_heartbeat_interval";
     /**
+     * 当有binlog dump请求时，心跳刷盘的频率
+     */
+    public static final String BINLOG_WRITE_HEARTBEAT_INTERVAL_WITH_DUMP = "binlog_write_heartbeat_interval_with_dump";
+    /**
      * 心跳是否以事务的形式记录
      */
     public static final String BINLOG_WRITE_HEARTBEAT_AS_TXN = "binlog_write_heartbeat_as_txn";
@@ -800,6 +804,11 @@ public abstract class ConfigKeys {
      * task 默认是否开启外键检查
      */
     public static final String TASK_REFORMAT_NO_FOREIGN_KEY_CHECK = "task_reformat_no_foreign_key_check";
+
+    public static final String TASK_EXTRACT_CHECK_SYNC_POINT_ENABLED = "task_extract_check_sync_point_enabled";
+
+    public static final String TASK_PROCESS_SYNC_POINT_WAIT_TIMEOUT_MILLISECOND =
+        "task_process_sync_point_wait_timeout_millisecond";
 
     //******************************************************************************************************************
     //***********************************************Daemon和调度相关参数*************************************************
@@ -1396,7 +1405,7 @@ public abstract class ConfigKeys {
 
     public static final String RPL_FULL_VALID_MAX_SAMPLE_ROWS_COUNT = "rpl_full_valid_max_sample_rows_count";
 
-    public static final String RPL_FULL_VALID_PARALLELISM = "rpl_full_valid_parallelism";
+    public static final String RPL_FULL_VALID_TABLE_PARALLELISM = "rpl_full_valid_table_parallelism";
 
     public static final String RPL_REPAIR_PARALLELISM = "rpl_repair_parallelism";
 
@@ -1406,7 +1415,11 @@ public abstract class ConfigKeys {
 
     public static final String RPL_FULL_VALID_SKIP_COLLECT_STATISTIC = "rpl_full_valid_skip_collect_statistic";
 
+    public static final String RPL_FULL_VALID_SAMPLE_COUNT = "rpl_full_valid_sample_count";
+
     public static final String RPL_FULL_VALID_AUTO_RESET_ERROR_TASKS = "rpl_full_valid_auto_reset_error_tasks";
+
+    public static final String RPL_POLARDBX1_OLD_VERSION_OPTION = "rpl_polardbx1_old_version_option";
 
     public static final String RPL_SET_MAX_STATEMENT_TIME_OPTION = "rpl_set_max_statement_time_option";
 
@@ -1455,6 +1468,20 @@ public abstract class ConfigKeys {
     public static final String RPL_FULL_VALID_MOCK_SAMPLE = "rpl_full_valid_mock_sample";
 
     public static final String RPL_EXTRACTOR_DDL_LOG_OPEN = "rpl_extractor_ddl_log_open";
+
+    public static final String RPL_LONG_SOCKET_TIMEOUT_MILLS = "rpl_long_socket_timeout_mills";
+
+    public static final String RPL_SHORT_SOCKET_TIMEOUT_MILLS = "rpl_short_socket_timeout_mills";
+
+    public static final String RPL_MERGE_SAME_RDS_TASK = "rpl_merge_same_rds_task";
+
+    public static final String RPL_INC_BLACK_TABLE_LIST = "rpl_inc_black_table_list";
+
+    public static final String RPL_INC_STOP_TIME_SECONDS = "rpl_inc_stop_time_seconds";
+
+    public static final String RPL_INC_LOCAL_FILE_NUM = "rpl_inc_local_file_num";
+
+    public static final String RPL_FULL_USE_IMPLICIT_ID = "rpl_full_use_implicit_id";
 
     /**
      * Columnar是否已经心跳超时的阈值

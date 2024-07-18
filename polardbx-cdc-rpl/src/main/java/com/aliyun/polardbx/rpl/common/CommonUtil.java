@@ -55,7 +55,7 @@ public class CommonUtil {
 
     public static String createInitialBinlogPosition() {
         String timeStr = new SimpleDateFormat(RplConstants.DEFAULT_DATE_FORMAT).format(System.currentTimeMillis());
-        return CommonUtil.getRollBackBinlogPositon(timeStr);
+        return CommonUtil.getRollBackBinlogPosition(timeStr);
     }
 
     public static boolean isMeaninglessBinlogFileName(BinlogPosition binlogPosition) {
@@ -70,7 +70,6 @@ public class CommonUtil {
         if (res != 0) {
             return res;
         }
-
         return StringUtils.compare(detailsA.get(1), detailsB.get(1));
     }
 
@@ -148,13 +147,13 @@ public class CommonUtil {
     /**
      * 传入2015-04-16 08:00:00格式的时间字符串，返回这个时间对应的binlog位点
      */
-    private static String getRollBackBinlogPositon(String timeStr) {
+    private static String getRollBackBinlogPosition(String timeStr) {
         Date date = CalendarUtil.toDate(timeStr, CalendarUtil.TIME_PATTERN);
         if (date == null) {
             return null;
         }
-        long postionTime = date.getTime() / 1000;
-        return "0:0#" + RplConstants.ROLLBACK_STRING + "." + postionTime;
+        long positionTime = date.getTime() / 1000;
+        return "0:0#" + RplConstants.ROLLBACK_STRING + "." + positionTime;
     }
 
     /**

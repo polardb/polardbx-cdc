@@ -83,7 +83,7 @@ public class MysqlApplier extends BaseApplier {
         }
         buildMaxPoolSize();
         buildExecutorService();
-        dbMetaCache = new DbMetaCache(hostInfo, applierConfig.getMaxPoolSize());
+        dbMetaCache = new DbMetaCache(hostInfo, applierConfig.getMaxPoolSize(), false);
 
         DmlApplyHelper.setCompareAll(applierConfig.isCompareAll());
         DmlApplyHelper.setInsertOnUpdateMiss(applierConfig.isInsertOnUpdateMiss());

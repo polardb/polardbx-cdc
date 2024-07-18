@@ -85,6 +85,15 @@ public enum TxnType
    * <code>FLUSH_LOG = 7;</code>
    */
   FLUSH_LOG(7),
+  /**
+   * <pre>
+   **
+   *sync point
+   * </pre>
+   *
+   * <code>SYNC_POINT = 8;</code>
+   */
+  SYNC_POINT(8),
   UNRECOGNIZED(-1),
   ;
 
@@ -151,25 +160,33 @@ public enum TxnType
    * <code>FLUSH_LOG = 7;</code>
    */
   public static final int FLUSH_LOG_VALUE = 7;
-
-
-  public final int getNumber() {
-    if (this == UNRECOGNIZED) {
-      throw new java.lang.IllegalArgumentException(
-          "Can't get the number of an unknown enum value.");
-    }
-    return value;
-  }
-
   /**
-   * @param value The numeric wire value of the corresponding enum entry.
-   * @return The enum associated with the given numeric wire value.
-   * @deprecated Use {@link #forNumber(int)} instead.
+   * <pre>
+   **
+   *sync point
+   * </pre>
+   *
+   * <code>SYNC_POINT = 8;</code>
    */
-  @java.lang.Deprecated
-  public static TxnType valueOf(int value) {
-    return forNumber(value);
-  }
+  public static final int SYNC_POINT_VALUE = 8;
+
+    public final int getNumber() {
+        if (this == UNRECOGNIZED) {
+            throw new java.lang.IllegalArgumentException(
+                "Can't get the number of an unknown enum value.");
+        }
+        return value;
+    }
+
+    /**
+     * @param value The numeric wire value of the corresponding enum entry.
+     * @return The enum associated with the given numeric wire value.
+     * @deprecated Use {@link #forNumber(int)} instead.
+     */
+    @java.lang.Deprecated
+    public static TxnType valueOf(int value) {
+        return forNumber(value);
+    }
 
   /**
    * @param value The numeric wire value of the corresponding enum entry.
@@ -184,59 +201,63 @@ public enum TxnType
       case 5: return META_HEARTBEAT;
       case 6: return META_CONFIG_ENV_CHANGE;
       case 7: return FLUSH_LOG;
+      case 8: return SYNC_POINT;
       default: return null;
     }
   }
 
-  public static com.google.protobuf.Internal.EnumLiteMap<TxnType>
-      internalGetValueMap() {
-    return internalValueMap;
-  }
-  private static final com.google.protobuf.Internal.EnumLiteMap<
-      TxnType> internalValueMap =
+    public static com.google.protobuf.Internal.EnumLiteMap<TxnType>
+    internalGetValueMap() {
+        return internalValueMap;
+    }
+
+    private static final com.google.protobuf.Internal.EnumLiteMap<
+        TxnType> internalValueMap =
         new com.google.protobuf.Internal.EnumLiteMap<TxnType>() {
-          public TxnType findValueByNumber(int number) {
-            return TxnType.forNumber(number);
-          }
+            public TxnType findValueByNumber(int number) {
+                return TxnType.forNumber(number);
+            }
         };
 
-  public final com.google.protobuf.Descriptors.EnumValueDescriptor
-      getValueDescriptor() {
-    if (this == UNRECOGNIZED) {
-      throw new java.lang.IllegalStateException(
-          "Can't get the descriptor of an unrecognized enum value.");
+    public final com.google.protobuf.Descriptors.EnumValueDescriptor
+    getValueDescriptor() {
+        if (this == UNRECOGNIZED) {
+            throw new java.lang.IllegalStateException(
+                "Can't get the descriptor of an unrecognized enum value.");
+        }
+        return getDescriptor().getValues().get(ordinal());
     }
-    return getDescriptor().getValues().get(ordinal());
-  }
-  public final com.google.protobuf.Descriptors.EnumDescriptor
-      getDescriptorForType() {
-    return getDescriptor();
-  }
-  public static final com.google.protobuf.Descriptors.EnumDescriptor
-      getDescriptor() {
-    return com.aliyun.polardbx.binlog.protocol.TxnStream.getDescriptor().getEnumTypes().get(2);
-  }
 
-  private static final TxnType[] VALUES = values();
-
-  public static TxnType valueOf(
-      com.google.protobuf.Descriptors.EnumValueDescriptor desc) {
-    if (desc.getType() != getDescriptor()) {
-      throw new java.lang.IllegalArgumentException(
-        "EnumValueDescriptor is not for this type.");
+    public final com.google.protobuf.Descriptors.EnumDescriptor
+    getDescriptorForType() {
+        return getDescriptor();
     }
-    if (desc.getIndex() == -1) {
-      return UNRECOGNIZED;
+
+    public static final com.google.protobuf.Descriptors.EnumDescriptor
+    getDescriptor() {
+        return com.aliyun.polardbx.binlog.protocol.TxnStream.getDescriptor().getEnumTypes().get(3);
     }
-    return VALUES[desc.getIndex()];
-  }
 
-  private final int value;
+    private static final TxnType[] VALUES = values();
 
-  private TxnType(int value) {
-    this.value = value;
-  }
+    public static TxnType valueOf(
+        com.google.protobuf.Descriptors.EnumValueDescriptor desc) {
+        if (desc.getType() != getDescriptor()) {
+            throw new java.lang.IllegalArgumentException(
+                "EnumValueDescriptor is not for this type.");
+        }
+        if (desc.getIndex() == -1) {
+            return UNRECOGNIZED;
+        }
+        return VALUES[desc.getIndex()];
+    }
 
-  // @@protoc_insertion_point(enum_scope:com.aliyun.polardbx.binlog.protocol.TxnType)
+    private final int value;
+
+    private TxnType(int value) {
+        this.value = value;
+    }
+
+    // @@protoc_insertion_point(enum_scope:com.aliyun.polardbx.binlog.protocol.TxnType)
 }
 

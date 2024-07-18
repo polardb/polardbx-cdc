@@ -77,9 +77,7 @@ public class StatMetrics {
             outBytes += event.getEventSize();
             lastEvent = event;
         }
-
         doStatOut(insertCount, updateCount, deleteCount, outBytes, lastEvent);
-
     }
 
     public void doStatOut(long insertCount, long updateCount, long deleteCount, long byteSize, DBMSEvent lastEvent) {
@@ -159,17 +157,16 @@ public class StatMetrics {
         return periodCommitCount.getAndSet(0);
     }
 
-    public void addCommitCount(long addCount) {
-        periodCommitCount.addAndGet(addCount);
+    public long getReceiveDelay() {
+        return receiveDelay.getAndSet(0);
     }
 
-    public double getCpuRatio() {
-        ProcSnapshot snapshot = ProcUtils.buildProcSnapshot();
-        if (snapshot != null) {
-            return snapshot.getCpuPercent();
-        } else {
-            return -1L;
-        }
+    public long getProcessDelay() {
+        return processDelay.getAndSet(0);
+    }
+
+    public void addCommitCount(long addCount) {
+        periodCommitCount.addAndGet(addCount);
     }
 
     @Override

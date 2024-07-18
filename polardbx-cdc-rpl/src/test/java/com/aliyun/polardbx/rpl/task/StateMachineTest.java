@@ -16,7 +16,6 @@ package com.aliyun.polardbx.rpl.task;
 
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
-import com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest;
 import com.aliyun.polardbx.rpl.RplTaskRunner;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
@@ -176,7 +175,8 @@ public class StateMachineTest {
     }
 
     private DataSource createDataSource(String schema) throws Exception {
-        DataSource dataSource = DataSourceUtil.createDruidMySqlDataSource("",
+        DataSource dataSource = DataSourceUtil.createDruidMySqlDataSource(false,
+            "",
             3307,
             "",
             "",
@@ -184,6 +184,7 @@ public class StateMachineTest {
             "",
             1,
             16,
+            true,
             null,
             null);
         return dataSource;
@@ -200,7 +201,7 @@ public class StateMachineTest {
         System.out.println(new String(utf8Bytes, "UTF-8"));
 
         DataSource dataSource = DataSourceUtil
-            .createDruidMySqlDataSource("", 3306, "", "root", "", "", 1, 1, null, null);
+            .createDruidMySqlDataSource(false, "", 3306, "", "root", "", "", 1, 1, true, null, null);
 
         // 目标库 col_charset_gbk_utf8，编码 utf8mb4
         // 目标表 a (id int, value mediumtext)
@@ -267,7 +268,7 @@ public class StateMachineTest {
     @Test
     public void testMysql() throws Exception {
         DataSource dataSource = DataSourceUtil
-            .createDruidMySqlDataSource("127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, null, null);
+            .createDruidMySqlDataSource(false, "127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, true, null, null);
 
         String tableName = "checkout_order";
         String[] columnNames = {"id", "checkout_order_no", "payer_id", "gmt_create", "gmt_modified", "version"};
@@ -303,7 +304,7 @@ public class StateMachineTest {
     @Test
     public void testMysql2() throws Exception {
         DataSource dataSource = DataSourceUtil
-            .createDruidMySqlDataSource("127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, null, null);
+            .createDruidMySqlDataSource(false, "127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, true, null, null);
 
         String tableName = "checkout_order";
         PreparedStatement ps = dataSource.getConnection().prepareStatement("show full columns from ?");
@@ -318,7 +319,7 @@ public class StateMachineTest {
     @Test
     public void testMysql3() throws Exception {
         DataSource dataSource = DataSourceUtil
-            .createDruidMySqlDataSource("127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, null, null);
+            .createDruidMySqlDataSource(false, "127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, true, null, null);
 
         String col = "%" + "100" + "%";
         String sql = "SELECT * FROM flink_test_dst WHERE name LIKE ?";
@@ -334,7 +335,7 @@ public class StateMachineTest {
     @Test
     public void testMysql4() throws Exception {
         DataSource dataSource = DataSourceUtil
-            .createDruidMySqlDataSource("127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, null, null);
+            .createDruidMySqlDataSource(false, "127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, true, null, null);
 
         PreparedStatement stmt = dataSource.getConnection()
             .prepareStatement("SELECT count(1) FROM flink_test_dst WHERE name LIKE ?");
@@ -348,7 +349,7 @@ public class StateMachineTest {
     @Test
     public void testMysql5() throws Exception {
         DataSource dataSource = DataSourceUtil
-            .createDruidMySqlDataSource("127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, null, null);
+            .createDruidMySqlDataSource(false, "127.0.0.1", 3306, "rpl", "root", "123456", "", 1, 16, true, null, null);
 
         PreparedStatement ps = dataSource.getConnection()
             .prepareStatement("select * from INFORMATION_SCHEMA.COLUMNS where TABLE_SCHEMA=? and TABLE_NAME=?");

@@ -43,7 +43,8 @@ public class StatisticalProxyTest extends RplWithGmsTablesBaseTest {
             StatMetrics.getInstance().addOutMessageCount(300);
         }
         RplStatMetrics rplStatMetrics = new RplStatMetrics();
-        StatisticalProxy.getInstance().fill(rplStatMetrics);
+        StatisticalProxy.getInstance().fill(rplStatMetrics, StatMetrics.getInstance(), null,
+            null);
         Assert.assertEquals(rplStatMetrics.getApplyCount().intValue(), 1);
         Assert.assertEquals(rplStatMetrics.getApplyCount().intValue(), 1);
         Assert.assertEquals(rplStatMetrics.getOutRps().intValue(), 300);

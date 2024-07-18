@@ -47,9 +47,9 @@ public class TableMetaCache {
     private final TableMetaTSDB memoryTableMeta;
     private final int MAX_RETRY = 3;
 
-    public TableMetaCache(DataSource dataSource, boolean isPolarx) {
+    public TableMetaCache(DataSource dataSource, boolean enableSrcLogicalMetaSnapshot) {
         this.dataSource = dataSource;
-        if (isPolarx) {
+        if (enableSrcLogicalMetaSnapshot) {
             this.memoryTableMeta = new PolarxTableMetaProxy(dataSource);
         } else {
             this.memoryTableMeta = new MemoryTableMeta(logger, true);

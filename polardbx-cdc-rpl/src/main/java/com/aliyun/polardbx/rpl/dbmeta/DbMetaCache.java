@@ -54,6 +54,8 @@ public class DbMetaCache {
     private final int minPoolSize;
     private final int maxPoolSize;
     private final String sqlMode;
+    private boolean enablePolardbxServerId;
+    private final boolean longSql;
 
     private final LoadingCache<String, DruidDataSource> dataSources = CacheBuilder.newBuilder()
         .expireAfterAccess(120, TimeUnit.SECONDS)
@@ -86,15 +88,18 @@ public class DbMetaCache {
             }
         });
 
-    public DbMetaCache(HostInfo hostInfo, int maxPoolSize) {
-        this(hostInfo, 1, maxPoolSize);
+    public DbMetaCache(HostInfo hostInfo, int maxPoolSize, boolean longSql) {
+        this(hostInfo, 1, maxPoolSize, longSql);
     }
 
-    public DbMetaCache(HostInfo hostInfo, int minPoolSize, int maxPoolSize) {
+    public DbMetaCache(HostInfo hostInfo, int minPoolSize, int maxPoolSize, boolean longSql) {
         this.hostInfo = hostInfo;
         this.minPoolSize = minPoolSize;
         this.maxPoolSize = maxPoolSize;
         this.sqlMode = DynamicApplicationConfig.getString(ConfigKeys.RPL_DEFAULT_SQL_MODE);
+        this.longSql = longSql;
+        this.enablePolardbxServerId = !DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
+
     }
 
     public DataSource getDataSource(String schema) {
@@ -126,6 +131,7 @@ public class DbMetaCache {
             "",
             minPoolSize,
             maxPoolSize,
+            longSql,
             null,
             connectionInitSqls);
     }
@@ -135,7 +141,7 @@ public class DbMetaCache {
         connectionInitSqls.add(String.format(SET_SQL_MODE, sqlMode));
 
         if (hostInfo.getType() == HostType.POLARX2 || hostInfo.getType() == HostType.POLARX1) {
-            if (hostInfo.getServerId() != 0) {
+            if (enablePolardbxServerId && hostInfo.getServerId() != 0) {
                 String setServerIdSql = String.format(SET_POLARX_SERVER_ID,
                     Math.abs(Long.valueOf(hostInfo.getServerId()).intValue()));
                 connectionInitSqls.add(setServerIdSql);

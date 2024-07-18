@@ -256,6 +256,7 @@ public class TestBase {
                 "utf8mb4",
                 1,
                 60,
+                true,
                 null,
                 null);
         } catch (Throwable e) {

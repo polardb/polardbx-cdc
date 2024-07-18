@@ -34,6 +34,14 @@ public class SystemDB {
         return provider.isSys(db);
     }
 
+    public static boolean isMysql(String db) {
+        return provider.isMysql(db);
+    }
+
+    public static boolean isMetaDb(String db) {
+        return provider.isMetaDb(db);
+    }
+
     public static boolean isInstruction(String db, String table) {
         return provider.instructionTable(db, table);
     }
@@ -54,12 +62,20 @@ public class SystemDB {
         return provider.heartbeatTable(db, phyTable);
     }
 
+    public static boolean isSyncPoint(String db, String phyTable) {
+        return provider.isSyncPoint(db, phyTable);
+    }
+
     public static TableMeta getDdlTableMeta() {
         return provider.getDdlTableMeta();
     }
 
     public static TableMeta getInstructionTableMeta() {
         return provider.getInstructionTableMeta();
+    }
+
+    public static TableMeta getSyncPointTableMeta() {
+        return provider.getSyncPointTableMeta();
     }
 
     public static TableMeta getHeartbeatTableMeta() {
@@ -80,5 +96,9 @@ public class SystemDB {
 
     public static boolean isDrdsRedoLogTable(String tableName) {
         return provider.isDrdsRedoLogTable(tableName);
+    }
+
+    public static boolean isAndorDatabase(String db) {
+        return provider.isAndorDatabase(db);
     }
 }

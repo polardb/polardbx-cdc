@@ -123,9 +123,9 @@ public class DataImportMeta {
         private Map<String, Set<String>> physicalDoTableList;
 
         /**
-         * mapping: src physical table -> src logical table
+         * mapping: src physical db -> (src physical table -> src logical table)
          */
-        private Map<String, String> rewriteTableMapping;
+        private Map<String, Map<String, String>> rewriteTableMapping;
 
         private boolean skipException = false;
         private int fixedTpsLimit = -1;

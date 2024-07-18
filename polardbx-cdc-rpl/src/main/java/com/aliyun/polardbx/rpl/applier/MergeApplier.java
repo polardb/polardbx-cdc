@@ -223,7 +223,7 @@ public class MergeApplier extends MysqlApplier {
                 whereColumns,
                 insertRowChanges.get(fullTbName),
                 deleteRowChanges.get(fullTbName),
-                deleteBeforeInsert);
+                !DmlApplyHelper.isNoPkTable(rowChange) && deleteBeforeInsert);
 
             lastRowChanges.put(fullTbName, rowChange);
         }

@@ -27,4 +27,5 @@ public class ExtractorConfig {
     protected HostInfo hostInfo;
     protected String privateMeta;
     protected int eventBufferSize = 2048;
+    protected boolean enableSrcLogicalMetaSnapshot = false;
 }

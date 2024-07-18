@@ -16,5 +16,6 @@ package com.aliyun.polardbx.binlog;
 
 public enum MarkCommandEnum {
     ConfigChange,
-    FlushLog;
+    FlushLog,
+    SyncPoint;
 }

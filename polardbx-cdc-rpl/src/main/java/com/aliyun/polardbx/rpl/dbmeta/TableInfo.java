@@ -137,4 +137,8 @@ public class TableInfo {
         }
         return Types.NULL;
     }
+
+    public boolean isNoPkTable() {
+        return CollectionUtils.isEmpty(pks);
+    }
 }

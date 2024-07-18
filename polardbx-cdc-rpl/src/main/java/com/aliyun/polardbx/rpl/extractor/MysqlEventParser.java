@@ -436,8 +436,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                         }
 
                         // 记录一下上一个事务结束的位置，即下一个事务的position
-                        // position = current +
-                        // data.length，代表该事务的下一条offest，避免多余的事务重复
+                        // position = current + data.length，代表该事务的下一条offset，避免多余的事务重复
                         if (dbmsEvent instanceof DBMSTransactionEnd || dbmsEvent instanceof DBMSTransactionBegin) {
                             entryPosition = new BinlogPosition(logfilename, logfileoffset, masterId, logposTimestamp);
                             if (log.isDebugEnabled()) {

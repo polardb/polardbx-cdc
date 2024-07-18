@@ -75,7 +75,7 @@ public class ReplicaFullValidTaskManager {
     private static final TransactionTemplate metaTransactionTemplate =
         SpringContextHolder.getObject("metaTransactionTemplate");
 
-    public static ResultCode<?> createTask(String channel, String dbName, String tbName) {
+    public static ResultCode<?> createTask(String channel, String dbName, String tbName, String mode) {
         try {
             RplStateMachine stateMachine = DbTaskMetaManager.getRplStateMachine(channel);
             if (null == stateMachine) {
@@ -94,7 +94,7 @@ public class ReplicaFullValidTaskManager {
 
             logger.info("Try to create full valid task for tables: {}", tables);
             for (String tb : tables) {
-                createTask(stateMachine.getId(), dbName, tb, dbName, tb, ReplicaFullValidType.FULL_DATA);
+                createTask(stateMachine.getId(), dbName, tb, dbName, tb, ReplicaFullValidType.FULL_DATA, mode);
             }
         } catch (Exception e) {
             logger.error("Failed to create task for table {}.{}", dbName, tbName, e);
@@ -112,7 +112,7 @@ public class ReplicaFullValidTaskManager {
      * 如果当前系统中没有这张表对应的全量校验任务，则直接进行创建
      */
     private static void createTask(long fsmId, String srcDb, String srcTb, String dstDb, String dstTb,
-                                   ReplicaFullValidType type) {
+                                   ReplicaFullValidType type, String mode) {
         Optional<RplFullValidTask> optional = selectTaskByTableName(dstDb, dstTb);
         if (optional.isPresent()) {
             RplFullValidTask task = optional.get();
@@ -120,7 +120,7 @@ public class ReplicaFullValidTaskManager {
                 logger.info("Task has already finished, will recreate a new task. table:{}.{}", dstDb, dstTb);
                 metaTransactionTemplate.execute(t -> {
                     purgeTaskImpl(task.getId());
-                    createTaskImpl(fsmId, srcDb, srcTb, dstDb, dstTb, type);
+                    createTaskImpl(fsmId, srcDb, srcTb, dstDb, dstTb, type, mode);
                     return null;
                 });
             } else {
@@ -129,7 +129,7 @@ public class ReplicaFullValidTaskManager {
         } else {
             logger.info("There exists no task, will create. table:{}.{}", dstDb, dstTb);
             metaTransactionTemplate.execute(t -> {
-                createTaskImpl(fsmId, srcDb, srcTb, dstDb, dstTb, type);
+                createTaskImpl(fsmId, srcDb, srcTb, dstDb, dstTb, type, mode);
                 return null;
             });
         }
@@ -139,7 +139,7 @@ public class ReplicaFullValidTaskManager {
      * 为逻辑表创建全量校验任务
      */
     private static void createTaskImpl(long fsmId, String srcDb, String srcTb, String dstDb, String dstTb,
-                                       ReplicaFullValidType type) {
+                                       ReplicaFullValidType type, String mode) {
         RplFullValidTask task = new RplFullValidTask();
         task.setStateMachineId(fsmId);
         // TODO: @jiyue table name mapping
@@ -162,7 +162,7 @@ public class ReplicaFullValidTaskManager {
         RplFullValidSubTask subTask;
         if (type == ReplicaFullValidType.FULL_DATA) {
             ReplicaFullValidInitTask.TaskConfig config =
-                new ReplicaFullValidInitTask.TaskConfig(srcDb, srcTb, dstDb, dstTb);
+                new ReplicaFullValidInitTask.TaskConfig(srcDb, srcTb, dstDb, dstTb, mode);
             subTask = ReplicaFullValidInitTask.generateTaskMeta(fsmId, task.getId(), config);
             subTaskMapper.insertSelective(subTask);
         } else if (type == ReplicaFullValidType.SCHEMA) {
@@ -181,7 +181,7 @@ public class ReplicaFullValidTaskManager {
         if (null == stateMachine) {
             throw new IllegalArgumentException("channel not exists! channel:" + channel);
         }
-        createTask(stateMachine.getId(), null, null, null, null, ReplicaFullValidType.SCHEMA);
+        createTask(stateMachine.getId(), null, null, null, null, ReplicaFullValidType.SCHEMA, null);
         return ResultCode.builder().code(RplConstants.SUCCESS_CODE).msg("create replica schema check task success")
             .data(RplConstants.SUCCESS).build();
     }
@@ -394,7 +394,7 @@ public class ReplicaFullValidTaskManager {
                     metaTransactionTemplate.execute(t -> {
                         cancelTaskImpl(task.getId());
                         createTaskImpl(task.getStateMachineId(), task.getSrcLogicalDb(), task.getSrcLogicalTable(),
-                            task.getDstLogicalDb(), task.getDstLogicalTable(), ReplicaFullValidType.FULL_DATA);
+                            task.getDstLogicalDb(), task.getDstLogicalTable(), ReplicaFullValidType.FULL_DATA, null);
                         return null;
                     });
                 }
@@ -418,7 +418,7 @@ public class ReplicaFullValidTaskManager {
                 metaTransactionTemplate.execute(t -> {
                     cancelTaskImpl(task.getId());
                     createTaskImpl(task.getStateMachineId(), task.getSrcLogicalDb(), task.getSrcLogicalTable(),
-                        task.getDstLogicalDb(), task.getDstLogicalTable(), ReplicaFullValidType.SCHEMA);
+                        task.getDstLogicalDb(), task.getDstLogicalTable(), ReplicaFullValidType.SCHEMA, null);
                     return null;
                 });
             }
@@ -574,7 +574,7 @@ public class ReplicaFullValidTaskManager {
     public static void resetErrorTasks(long fsmId) {
         List<RplFullValidTask> errorTasks = selectTasksByState(fsmId, ReplicaFullValidTaskState.ERROR);
         for (RplFullValidTask task : errorTasks) {
-            logger.info("reset error task:{}", task);
+            logger.info("reset error task:{}", task.getId());
             resetTask(task.getDstLogicalDb(), task.getDstLogicalTable());
         }
     }

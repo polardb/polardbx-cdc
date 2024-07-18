@@ -24,6 +24,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAnalyzeTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCallStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateFunctionStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateJavaFunctionStatement;
@@ -84,12 +85,14 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalize;
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement.Type.SHADOW;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PARALLEL_SCHEMA_CHANNEL_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PARALLEL_SCHEMA_CHANNEL_PARALLELISM;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PARALLEL_TABLE_APPLY_ENABLED;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.canal.LogEventUtil.SYNC_POINT_PROCEDURE_NAME;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.DependencyCheckResult.OBJ_TYPE_FUNCTION;
 import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.DependencyCheckResult.OBJ_TYPE_SEQ;
@@ -187,7 +190,7 @@ public class ParallelSchemaApplier {
                 String originalDdlSql = DdlApplyHelper.getOriginSql(queryLog.getQuery());
 
                 if (StringUtils.equalsAnyIgnoreCase(schemaName, "cdc_token_db")
-                    || isCrossDatabase(originalDdlSql, schemaName)) {
+                    || isCrossDatabase(originalDdlSql, schemaName) || isSyncPoint(originalDdlSql, schemaName)) {
                     log.warn("meet a serial executing ddl sql {}, with schema {} ", originalDdlSql, schemaName);
 
                     // flush previous events
@@ -274,11 +277,24 @@ public class ParallelSchemaApplier {
         return false;
     }
 
+    boolean isSyncPoint(String sql, String schema) {
+        if (StringUtils.equalsIgnoreCase(schema, "polardbx") && StringUtils.startsWithIgnoreCase(sql, "call")) {
+            SQLStatement stmt = SQLUtils.parseSQLStatement(sql);
+            if (stmt instanceof SQLCallStatement) {
+                if (StringUtils.equalsIgnoreCase(SYNC_POINT_PROCEDURE_NAME,
+                    ((SQLCallStatement) stmt).getProcedureName().getSimpleName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private String parseSchemaName(SQLExprTableSource tableSource, String defaultSchema) {
         if (tableSource != null && tableSource.getExpr() != null && tableSource.getExpr() instanceof SQLPropertyExpr) {
             SQLPropertyExpr sqlPropertyExpr = (SQLPropertyExpr) tableSource.getExpr();
             SQLIdentifierExpr owner = (SQLIdentifierExpr) sqlPropertyExpr.getOwner();
-            return normalize(owner.getName());
+            return normalizeNoTrim(owner.getName());
         }
         return defaultSchema;
     }
@@ -840,7 +856,7 @@ public class ParallelSchemaApplier {
             return;
         }
 
-        result.setObjName(normalize(createTableStatement.getTableName()).toLowerCase());
+        result.setObjName(normalizeNoTrim(createTableStatement.getTableName()).toLowerCase());
         result.setParallelPossibility(true);
         result.setObjType(OBJ_TYPE_TABLE);
 
@@ -849,7 +865,7 @@ public class ParallelSchemaApplier {
             if (element instanceof MysqlForeignKey) {
                 MysqlForeignKey foreignKey = (MysqlForeignKey) element;
                 String dependencyTable =
-                    normalize(foreignKey.getReferencedTableName().getSimpleName()).toLowerCase();
+                    normalizeNoTrim(foreignKey.getReferencedTableName().getSimpleName()).toLowerCase();
                 result.getDependencyObjs().add(Pair.of(OBJ_TYPE_TABLE, dependencyTable));
             }
         }
@@ -858,7 +874,8 @@ public class ParallelSchemaApplier {
     private void checkDependencyForDropTable(SQLDropTableStatement dropTableStatement,
                                              DependencyCheckResult result) {
         if (dropTableStatement.getTableSources().size() == 1) {
-            result.setObjName(dropTableStatement.getTableSources().get(0).getTableName(true).toLowerCase());
+            result.setObjName(normalizeNoTrim(
+                dropTableStatement.getTableSources().get(0).getTableName()).toLowerCase());
             result.setParallelPossibility(true);
             result.setObjType(OBJ_TYPE_TABLE);
         }
@@ -872,13 +889,13 @@ public class ParallelSchemaApplier {
                 if (addConstraint.getConstraint() instanceof MysqlForeignKey) {
                     MysqlForeignKey foreignKey = (MysqlForeignKey) addConstraint.getConstraint();
                     String dependencyTable =
-                        normalize(foreignKey.getReferencedTableName().getSimpleName()).toLowerCase();
+                        normalizeNoTrim(foreignKey.getReferencedTableName().getSimpleName()).toLowerCase();
                     result.getDependencyObjs().add(Pair.of(OBJ_TYPE_TABLE, dependencyTable));
                 }
             }
         }
 
-        result.setObjName(normalize(alterTableStatement.getTableName()).toLowerCase());
+        result.setObjName(normalizeNoTrim(alterTableStatement.getTableName()).toLowerCase());
         result.setParallelPossibility(true);
         result.setObjType(OBJ_TYPE_TABLE);
     }
@@ -896,7 +913,7 @@ public class ParallelSchemaApplier {
     }
 
     private void checkDependencyForDropIndex(SQLDropIndexStatement dropIndexStatement, DependencyCheckResult result) {
-        String tableName = dropIndexStatement.getTableName().getTableName(true).toLowerCase();
+        String tableName = normalizeNoTrim(dropIndexStatement.getTableName().getTableName()).toLowerCase();
         result.setParallelPossibility(true);
         result.setObjName(tableName);
         result.setObjType(OBJ_TYPE_TABLE);
@@ -928,7 +945,7 @@ public class ParallelSchemaApplier {
 
     private void checkDependencyForTruncateTable(SQLTruncateStatement truncateStatement, DependencyCheckResult result) {
         if (truncateStatement.getTableSources().size() == 1) {
-            String tableName = normalize(truncateStatement.getTableSources()
+            String tableName = normalizeNoTrim(truncateStatement.getTableSources()
                 .get(0).getName().getSimpleName()).toLowerCase();
             result.setParallelPossibility(true);
             result.setObjName(tableName);
@@ -939,7 +956,7 @@ public class ParallelSchemaApplier {
     private void checkDependencyForAnalyzeTable(SQLAnalyzeTableStatement analyzeTableStatement,
                                                 DependencyCheckResult result) {
         if (analyzeTableStatement.getTables().size() == 1) {
-            String tableName = normalize(analyzeTableStatement.getTables()
+            String tableName = normalizeNoTrim(analyzeTableStatement.getTables()
                 .get(0).getName().getSimpleName()).toLowerCase();
             result.setParallelPossibility(true);
             result.setObjName(tableName);

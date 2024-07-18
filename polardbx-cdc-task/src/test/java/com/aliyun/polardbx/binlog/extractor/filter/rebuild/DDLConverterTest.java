@@ -28,8 +28,8 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_DDL_HINT_BLACK
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSql;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSqlForMysqlPart;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSqlForPolarPart;
-import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.tryRemoveAutoShardKey;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql;
 
 /**
  * created by ziyang.lb
@@ -420,6 +420,22 @@ public class DDLConverterTest extends BaseTest {
         buildDdlEventSqlForMysqlPart(sb, "__test_truncate_gsi_test_7", "utf8mb4", "utf8_general_cs", ddl);
         Assert.assertEquals(
             "CREATE TABLE __test_truncate_gsi_test_7 ( id int PRIMARY KEY, name varchar(20), INDEX __test_g_i_truncate_test_7(name) ) DEFAULT CHARACTER SET = utf8 DEFAULT COLLATE = utf8_general_cs",
+            sb.toString());
+
+        sb = new StringBuilder();
+        ddl =
+            "CREATE TABLE my_modify_ttl_t1 ( a int NOT NULL AUTO_INCREMENT, b datetime DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (a) ) TTL = TTL_DEFINITION( TTL_ENABLE = 'OFF', TTL_EXPR = `b` EXPIRE AFTER 2 MONTH TIMEZONE '+08:00', TTL_JOB = CRON '*/1 * * * * ?' TIMEZONE '+08:00', ARCHIVE_TYPE = '', ARCHIVE_TABLE_SCHEMA = '', ARCHIVE_TABLE_NAME = '', ARCHIVE_TABLE_PRE_ALLOCATE = 3, ARCHIVE_TABLE_POST_ALLOCATE = 4 ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci PARTITION BY KEY (a) PARTITIONS 2 WITH TABLEGROUP = tg5055 IMPLICIT";
+        buildDdlEventSqlForMysqlPart(sb, "my_modify_ttl_t1", "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals(
+            "CREATE TABLE my_modify_ttl_t1 ( a int NOT NULL AUTO_INCREMENT, b datetime DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (a) ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci",
+            sb.toString());
+
+        sb = new StringBuilder();
+        ddl =
+            "alter table test_tbl modify ttl  set  TTL_ENABLE = 'OFF', TTL_EXPR = `b` EXPIRE AFTER 2 MONTH TIMEZONE '+08:00', TTL_JOB = CRON '*/1 * * * * ?' TIMEZONE '+08:00', ARCHIVE_TYPE = '', ARCHIVE_TABLE_SCHEMA = '', ARCHIVE_TABLE_NAME = '', ARCHIVE_TABLE_PRE_ALLOCATE = 3, ARCHIVE_TABLE_POST_ALLOCATE = 4";
+        buildDdlEventSqlForMysqlPart(sb, "test_tbl", "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals(
+            "ALTER TABLE test_tbl",
             sb.toString());
     }
 
@@ -992,5 +1008,19 @@ public class DDLConverterTest extends BaseTest {
         Assert.assertEquals(dropIndexSql4, str4);
         Assert.assertEquals(dropIndexSql1, str5);
         Assert.assertEquals(dropIndexSql2, str6);
+    }
+
+    @Test
+    public void testAlterTableGroupWithLocality() {
+        String sql = "ALTER TABLEGROUP tg2241 SPLIT PARTITION pd INTO ("
+            + "PARTITION p3 VALUES IN (1003) LOCALITY 'dn=xdevelop-240518031954-c338-dsj4-dn-0' SUBPARTITIONS 2, "
+            + "PARTITION `pd` VALUES IN (DEFAULT) "
+            + "( SUBPARTITION `pdsp1`, SUBPARTITION `pdsp2`, SUBPARTITION `pdsp3`, SUBPARTITION `pdsp4` ))";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8_general_cs", "");
+        Assert.assertEquals(
+            "# POLARX_ORIGIN_SQL=ALTER TABLEGROUP tg2241 SPLIT PARTITION pd INTO (PARTITION p3 VALUES IN (1003) SUBPARTITIONS 2, PARTITION `pd` VALUES IN (DEFAULT) ( SUBPARTITION `pdsp1`, SUBPARTITION `pdsp2`, SUBPARTITION `pdsp3`, SUBPARTITION `pdsp4` )) \n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=0\n", sb.toString());
     }
 }

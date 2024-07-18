@@ -66,31 +66,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
     public static Map<String, String> DEFAULT_MYSQL_CONNECTION_PROPERTIES = Maps.newHashMap();
 
     static {
-
-        // 开启多语句能力
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowMultiQueries", "true");
-        // 全量目标数据源加上这个批量的参数
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("rewriteBatchedStatements", "true");
-        // 关闭每次读取read-only状态,提升batch性能
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("readOnlyPropagatesToServer", "false");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("connectTimeout", "1000");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("socketTimeout", "60000");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("autoReconnect", "true");
-        // 将0000-00-00的时间类型返回null
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("zeroDateTimeBehavior", "convertToNull");
-        // 直接返回字符串，不做year转换date处理
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("yearIsDateType", "false");
-        // 返回时间类型的字符串,不做时区处理
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("noDatetimeStringSync", "true");
-        // 不处理tinyint转为bit
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("tinyInt1isBit", "false");
-        // 16MB，兼容一下ADS不支持mysql，5.1.38+的server变量查询为大写的问题，人肉指定一下最大包大小
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("maxAllowedPacket", "1073741824");
-        // net_write_timeout
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("netTimeoutForStreamingResults", "72000");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useServerPrepStmts", "false");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useInformationSchema", "false");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("pedantic", "true");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.putAll(DataSourceUtil.DEFAULT_MYSQL_CONNECTION_PROPERTIES);
     }
 
     protected ReentrantReadWriteLock readWriteLock;
@@ -137,7 +113,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
         setTimeBetweenEvictionRunsMillis(60 * 1000);
         setMinEvictableIdleTimeMillis(50 * 1000);
         setUseUnfairLock(true);
-        if (newConnectionSQLs != null && newConnectionSQLs.size() > 0) {
+        if (newConnectionSQLs != null && !newConnectionSQLs.isEmpty()) {
             setConnectionInitSqls(newConnectionSQLs);
         }
         setConnectProperties(prop);

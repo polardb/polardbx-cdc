@@ -22,7 +22,6 @@ import com.aliyun.polardbx.binlog.dao.ValidationTaskMapper;
 import com.aliyun.polardbx.binlog.domain.po.ValidationDiff;
 import com.aliyun.polardbx.binlog.domain.po.ValidationTask;
 import com.aliyun.polardbx.rpl.common.TaskContext;
-import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.validation.common.DiffStateEnum;
 import com.aliyun.polardbx.rpl.validation.common.ValidationStateEnum;
 import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
@@ -116,7 +115,7 @@ public class ValidationTaskRepository {
     }
 
     public static void resetValTask(ValidationTask task) {
-        DbTaskMetaManager.deleteValidationDiffByValTaskId(task.getExternalId());
+        // DbTaskMetaManager.deleteValidationDiffByValTaskId(task.getExternalId());
         updateValTaskState(task.getId(), ValidationStateEnum.INIT);
     }
 

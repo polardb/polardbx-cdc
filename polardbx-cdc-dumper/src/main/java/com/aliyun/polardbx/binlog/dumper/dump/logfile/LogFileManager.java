@@ -124,7 +124,7 @@ public class LogFileManager implements ICursorProvider {
                     restoreManager.start();
                 }
                 logFileCopier = new LogFileCopier(this, writeBufferSize,
-                    DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE));
+                    DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE), executionConfig);
                 logFileCopier.start();
             }
         } catch (Throwable t) {

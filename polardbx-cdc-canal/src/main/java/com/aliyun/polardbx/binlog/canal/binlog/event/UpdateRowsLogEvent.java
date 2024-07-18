@@ -32,7 +32,7 @@ public final class UpdateRowsLogEvent extends RowsLogEvent {
 
     @Override
     public String info() {
-        if (getFlags() == 1) {
+        if (getFlags(STMT_END_F) == 1) {
             return String.format("table_id: %s flags: STMT_END_F", getTableId());
         } else {
             return String.format("table_id: %s", getTableId());

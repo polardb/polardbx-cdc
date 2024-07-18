@@ -47,6 +47,11 @@ message TxnMessage{
   TxnTag        txnTag = 5;
 }
 
+enum TxnFlag{
+  NORMAL = 0;
+  ARCHIVE = 1;
+}
+
 enum MessageType{
   /**
     Begin,Data,End未拆分，一个完整的消息体
@@ -135,6 +140,8 @@ message TxnToken{
   google.protobuf.Int64Value serverId = 14;
   string          ddl = 15;
   int32           ddlScope = 16;
+
+  TxnFlag        txnFlag = 17;
 }
 
 message TxnMergedToken{
@@ -144,6 +151,7 @@ message TxnMergedToken{
   bytes           payload = 4;
   string          table = 5;
   google.protobuf.Int64Value serverId = 6;
+  TxnFlag        txnFlag = 7;
 }
 
 message TxnItem{
@@ -225,4 +233,8 @@ enum TxnType{
     滚动binlog
    */
   FLUSH_LOG = 7;
+  /**
+    sync point
+   */
+  SYNC_POINT = 8;
 }

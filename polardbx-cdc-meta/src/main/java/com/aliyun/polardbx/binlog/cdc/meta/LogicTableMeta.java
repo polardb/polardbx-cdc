@@ -30,6 +30,7 @@ public class LogicTableMeta {
     private String phyTable;
     private List<FieldMetaExt> logicFields = new ArrayList<>();
     private List<FieldMetaExt> pkList = new ArrayList<>();
+    private boolean hasHiddenPk = false;
 
     public void addPk(FieldMetaExt fieldMetaExt) {
         pkList.add(fieldMetaExt);
@@ -45,6 +46,14 @@ public class LogicTableMeta {
 
     public void setCompatible(boolean compatible) {
         this.compatible = compatible;
+    }
+
+    public boolean isHasHiddenPk() {
+        return hasHiddenPk;
+    }
+
+    public void setHasHiddenPk(boolean hasHiddenPk) {
+        this.hasHiddenPk = hasHiddenPk;
     }
 
     public String getLogicSchema() {

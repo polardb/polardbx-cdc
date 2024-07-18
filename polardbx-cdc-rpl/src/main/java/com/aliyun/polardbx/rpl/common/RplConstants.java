@@ -117,6 +117,8 @@ public class RplConstants {
 
     public static final String MASTER_LOG_POS = "MASTER_LOG_POS";
 
+    public static final String MASTER_LOG_TIME_SECOND = "MASTER_LOG_TIME_SECOND";
+
     public static final String IGNORE_SERVER_IDS = "IGNORE_SERVER_IDS";
 
     public static final String SOURCE_HOST_TYPE = "SOURCE_HOST_TYPE";
@@ -150,7 +152,7 @@ public class RplConstants {
 
     public static final String ENABLE_DYNAMIC_MASTER_HOST = "ENABLE_DYNAMIC_MASTER_HOST";
 
-    public static final String ENABLE_AUTO_POSITION = "ENABLE_AUTO_POSITION";
+    public static final String ENABLE_SRC_LOGICAL_META_SNAPSHOT = "ENABLE_SRC_LOGICAL_META_SNAPSHOT";
 
     public static final String TRIGGER_DYNAMIC_MASTER_HOST = "TRIGGER_DYNAMIC_MASTER_HOST";
 
@@ -239,4 +241,6 @@ public class RplConstants {
     public static final String RPL_FULL_VALID_DB = "dbName";
 
     public static final String RPL_FULL_VALID_TB = "tbName";
+
+    public static final String RPL_FULL_VALID_MODE = "mode";
 }

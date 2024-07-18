@@ -61,6 +61,7 @@ public class MysqlBinlogExtractor extends BaseExtractor {
     protected HostInfo metaHostInfo;
     protected BaseFilter filter;
     protected int extractorType;
+    protected boolean enableSrcLogicalMetaSnapshot;
 
     protected AuthenticationInfo srcAuthInfo;
     protected AuthenticationInfo metaAuthInfo;
@@ -73,6 +74,7 @@ public class MysqlBinlogExtractor extends BaseExtractor {
         this.metaHostInfo = metaHostInfo;
         this.position = position;
         this.filter = filter;
+        this.enableSrcLogicalMetaSnapshot = extractorConfig.isEnableSrcLogicalMetaSnapshot();
         initAuthInfo();
     }
 
@@ -81,8 +83,8 @@ public class MysqlBinlogExtractor extends BaseExtractor {
         try {
             parser = new MysqlEventParser(extractorConfig.getEventBufferSize(),
                 new RplEventRepository(pipeline.getPipeLineConfig().getPersistConfig()));
-            LogEventConvert logEventConvert =
-                new LogEventConvert(metaHostInfo, filter, position, srcHostInfo.getType());
+            LogEventConvert logEventConvert = new LogEventConvert(metaHostInfo, filter, position, srcHostInfo.getType(),
+                enableSrcLogicalMetaSnapshot);
             logEventConvert.init();
             ((MysqlEventParser) parser).setPolarx(srcHostInfo.getType() == HostType.POLARX2);
             ((MysqlEventParser) parser).setBinlogParser(logEventConvert);
@@ -149,15 +151,6 @@ public class MysqlBinlogExtractor extends BaseExtractor {
                     DBMSTransactionBegin begin = (DBMSTransactionBegin) dbmsEvent;
                     tid = begin.getThreadId() + "";
                     continue;
-                }
-
-                // 默认也过滤掉 DBMSTransactionEnd，避免占用ringbuffer空间，但是要保持心跳以推动位点，所以不能全部过滤
-                if (filterTransactionEnd && dbmsEvent instanceof DBMSTransactionEnd) {
-                    if (now - lastHeartTimestamp > 1000) {
-                        lastHeartTimestamp = now;
-                    } else {
-                        continue;
-                    }
                 }
 
                 if (StringUtils.isEmpty(tid)) {

@@ -39,7 +39,8 @@ public class ValidationCoordinator {
             validator.start();
         } catch (Exception e) {
             log.error("Table validation exception", e);
-            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR, e.getMessage());
+            StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR,
+                TaskContext.getInstance().getTaskId(), e.getMessage());
             StatisticalProxy.getInstance().recordLastError(e.toString());
             TaskContext.getInstance().getPipeline().stop();
         }

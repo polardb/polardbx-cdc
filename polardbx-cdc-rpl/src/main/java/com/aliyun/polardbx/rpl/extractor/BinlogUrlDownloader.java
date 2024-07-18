@@ -69,8 +69,8 @@ public class BinlogUrlDownloader {
     private volatile Thread distributeWorker;
 
     public BinlogUrlDownloader() {
-        maxLocalFileNumber = 3;
-        nDownloadThread = 3;
+        maxLocalFileNumber = DynamicApplicationConfig.getInt(ConfigKeys.RPL_INC_LOCAL_FILE_NUM);
+        nDownloadThread = DynamicApplicationConfig.getInt(ConfigKeys.RPL_INC_LOCAL_FILE_NUM);
         localDirectory =
             DynamicApplicationConfig.getString(ConfigKeys.FLASHBACK_BINLOG_DOWNLOAD_DIR) + System.getProperty(TASK_NAME)
                 + File.separator;

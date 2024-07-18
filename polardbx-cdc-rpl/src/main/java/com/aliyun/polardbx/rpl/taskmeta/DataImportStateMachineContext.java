@@ -18,5 +18,5 @@ import lombok.Data;
 
 @Data
 public class DataImportStateMachineContext {
-    private Boolean hasCollectStatistic;
+    private boolean hasCollectStatistic;
 }

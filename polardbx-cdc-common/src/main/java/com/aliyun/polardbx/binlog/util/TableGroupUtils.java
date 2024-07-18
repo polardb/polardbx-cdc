@@ -46,6 +46,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalize;
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 
 /**
@@ -173,7 +174,7 @@ public class TableGroupUtils {
         Map<String, String> result = new HashMap<>();
 
         MySqlCreateTableStatement createTableStatement = SQLUtils.parseSQLStatement(createSql);
-        String tableName = normalize(createTableStatement.getTableName()).toLowerCase();
+        String tableName = normalizeNoTrim(createTableStatement.getTableName()).toLowerCase();
 
         // parse implicit tableGroup from main table
         if (createTableStatement.isWithImplicitTablegroup()) {

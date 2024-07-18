@@ -14,24 +14,10 @@
  */
 package com.aliyun.polardbx.rpl.validation;
 
-import org.junit.Test;
+public class NoPrimaryKeyException extends RuntimeException {
 
-import java.math.BigInteger;
-
-/**
- * @author yudong
- * @since 2024/3/7 14:16
- **/
-public class CompareTest {
-
-    @Test
-    public void test() {
-        String k1 = "816085814676660224";
-        String k2 = "816085814676660225";
-
-        BigInteger v1 = new BigInteger(k1);
-        BigInteger v2 = new BigInteger(k2);
-
-        System.out.println(v1.compareTo(v2));
+    public NoPrimaryKeyException(String message) {
+        super(message);
     }
 }
+

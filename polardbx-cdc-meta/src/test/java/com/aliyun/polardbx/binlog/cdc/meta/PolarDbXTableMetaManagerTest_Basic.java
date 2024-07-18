@@ -15,6 +15,8 @@
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.alibaba.fastjson.JSONObject;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
@@ -27,7 +29,9 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.lang.reflect.Field;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -130,6 +134,25 @@ public class PolarDbXTableMetaManagerTest_Basic extends BaseTestWithGmsTables {
             });
         });
         Assert.assertEquals(seeds, checkSet);
+    }
+
+    @Test
+    public void testMetaCache() throws NoSuchFieldException, IllegalAccessException, InterruptedException {
+        LogicMetaTopology x = buildTopology("000",
+            () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
+
+        PolarDbXTableMetaManager metaManager1 = new PolarDbXTableMetaManager("polardbx-storage-0-master",
+            hiddenPkSupplier, dnVersionSupplier);
+        metaManager1.init();
+        metaManager1.applyBase(new BinlogPosition(null, "1"), x, "000");
+        metaManager1.compare("transfer_test_000002", "accounts_ap0Y", 2);
+        Field field = PolarDbXTableMetaManager.class.getDeclaredField("compareCache");
+        field.setAccessible(true);
+        Map<String, LogicTableMeta> cache = (Map<String, LogicTableMeta>) field.get(metaManager1);
+        Assert.assertEquals(1, cache.size());
+        DynamicApplicationConfig.setValue(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED, "true");
+        Thread.sleep(10000);
+        Assert.assertEquals(0, cache.size());
     }
 
     private void buildMetaManager() {

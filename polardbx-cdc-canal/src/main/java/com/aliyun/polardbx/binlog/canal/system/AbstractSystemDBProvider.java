@@ -42,6 +42,16 @@ public abstract class AbstractSystemDBProvider implements ISystemDBProvider {
     }
 
     @Override
+    public boolean isMysql(String db) {
+        return MYSQL_SCHEMA.equalsIgnoreCase(db);
+    }
+
+    @Override
+    public boolean isMetaDb(String db) {
+        return META_DB_SCHEMA.equalsIgnoreCase(db);
+    }
+
+    @Override
     public boolean isCdcSingleGroup(String groupName) {
         return CDC_SINGLE_GROUP_NAME.equalsIgnoreCase(groupName);
     }
@@ -59,6 +69,11 @@ public abstract class AbstractSystemDBProvider implements ISystemDBProvider {
     @Override
     public boolean isDrdsRedoLogTable(String tableName) {
         return DRDS_REDO_LOG.equalsIgnoreCase(tableName);
+    }
+
+    @Override
+    public boolean isAndorDatabase(String database) {
+        return "andor_qatest_polarx1".equalsIgnoreCase(database) || "andor_qatest_polarx2".equalsIgnoreCase(database);
     }
 
     @Override

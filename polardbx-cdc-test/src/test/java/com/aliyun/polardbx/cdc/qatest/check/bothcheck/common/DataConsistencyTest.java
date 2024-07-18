@@ -110,7 +110,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
             }
         }
         Assert.assertEquals(0, testSummary.getFailedTableCount());
-        log.info("forward data check test is finished!");
+        log.info("forward data check test is finished! total table count is " + testSummary.getTotalTableCount());
     }
 
     @Test
@@ -140,7 +140,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
             }
         }
         Assert.assertEquals(0, testSummary.getFailedTableCount());
-        log.info("backward data check test is finished!");
+        log.info("backward data check test is finished! total table count is " + testSummary.getTotalTableCount());
     }
 
     @Test
@@ -327,15 +327,16 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
     private Set<String> getIgnoreTableSet() throws SQLException {
         Set<String> sets = new HashSet<>();
-        Connection metaConn = getMetaConnection();
-        ResultSet rs =
-            JdbcUtil.executeQuery("select table_schema, table_name from tables where engine != 'InnoDB'", metaConn);
-        while (rs.next()) {
-            String schema = rs.getString("table_schema");
-            String tableName = rs.getString("table_name");
-            sets.add(schema.toLowerCase() + "." + tableName.toLowerCase());
+        try (Connection metaConn = getMetaConnection()) {
+            ResultSet rs =
+                JdbcUtil.executeQuery("select table_schema, table_name from tables where engine != 'InnoDB'", metaConn);
+            while (rs.next()) {
+                String schema = rs.getString("table_schema");
+                String tableName = rs.getString("table_name");
+                sets.add(schema.toLowerCase() + "." + tableName.toLowerCase());
+            }
+            return sets;
         }
-        return sets;
     }
 
     /**
@@ -493,8 +494,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
      * @return 数据是否一致
      */
     private boolean checkRows(String db, String table) throws Exception {
-        List<String> srcCheckSum = calculateSrcCheckSum(db, table, false, false);
-        List<String> dstCheckSum = calculateDstCheckSum(db, table, false, false);
+        List<String> srcCheckSum = calculateSrcCheckSum(db, table, true, false);
+        List<String> dstCheckSum = calculateDstCheckSum(db, table, true, false);
         DetailReport report = threadLocalReport.get();
         report.setSrcChecksum(srcCheckSum);
         report.setDstChecksum(dstCheckSum);
@@ -504,6 +505,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
             // polardbx无法保证不同物理库的主键不重复，那么，按主键排序时具有相同主键的数据，排序顺序可能不一样，所以需要进行二次校验
             srcCheckSum = calculateSrcCheckSum(db, table, false, true);
             dstCheckSum = calculateDstCheckSum(db, table, false, true);
+            report.setSrcChecksum(srcCheckSum);
+            report.setDstChecksum(dstCheckSum);
             checkResult = ListUtils.isEqualList(srcCheckSum, dstCheckSum);
         }
         return checkResult;

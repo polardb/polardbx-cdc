@@ -21,7 +21,7 @@ import com.aliyun.polardbx.binlog.dao.RplFullValidSubTaskDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RplFullValidSubTaskMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplFullValidSubTask;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
-import com.aliyun.polardbx.rpl.validation.fullvalid.ReplicaFullValidSampler;
+import com.aliyun.polardbx.rpl.validation.ValidationSampler;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -82,7 +82,7 @@ public class ReplicaFullValidInitTask extends ReplicaFullValidSubTask {
 
                 // do sample
                 List<List<Object>> sampleResult =
-                    ReplicaFullValidSampler.sample(dstDataSource, config.getDstDb(), config.getDstTb(),
+                    ValidationSampler.sample(dstDataSource, config.getDstDb(), config.getDstTb(),
                         dstTableInfo.getPks());
 
                 // build sub tasks
@@ -121,7 +121,7 @@ public class ReplicaFullValidInitTask extends ReplicaFullValidSubTask {
     private RplFullValidSubTask createCheckTaskMetaHelper(List<Object> lowerBound, List<Object> upperBound) {
         ReplicaFullValidCheckTask.TaskConfig taskConfig =
             new ReplicaFullValidCheckTask.TaskConfig(config.getSrcDb(), config.getSrcTb(), config.getDstDb(),
-                config.getDstTb(), lowerBound, upperBound);
+                config.getDstTb(), lowerBound, upperBound, config.mode);
         return ReplicaFullValidCheckTask.generateTaskMeta(context.getFsmId(), context.getFullValidTaskId(), taskConfig);
     }
 
@@ -143,6 +143,7 @@ public class ReplicaFullValidInitTask extends ReplicaFullValidSubTask {
         String srcTb;
         String dstDb;
         String dstTb;
+        String mode;
     }
 
 }

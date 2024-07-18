@@ -83,6 +83,10 @@ public class ExecutionConfig {
      * 当前运行时使用的serverId
      */
     Long serverId;
+    /**
+     * 容器预留的可用内存大小(一般给RockDB和grpc预留)
+     */
+    int reservedMemMb;
 
     public long getServerIdWithCompatibility() {
         return serverId == null ? ServerConfigUtil.getGlobalNumberVar(ServerConfigUtil.SERVER_ID) : serverId;

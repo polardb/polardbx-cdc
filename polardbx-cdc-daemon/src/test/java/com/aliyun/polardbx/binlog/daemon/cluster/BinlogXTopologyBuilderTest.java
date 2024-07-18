@@ -45,6 +45,6 @@ public class BinlogXTopologyBuilderTest extends BaseTest {
             .map(Container::getCapability)
             .map(Resource::getFreeMemMb)
             .collect(Collectors.toList());
-        Assert.assertEquals(Lists.newArrayList(210, 140, 70, 70, 35), sortedList);
+        Assert.assertEquals(Lists.newArrayList(180, 120, 60, 60, 30), sortedList);
     }
 }

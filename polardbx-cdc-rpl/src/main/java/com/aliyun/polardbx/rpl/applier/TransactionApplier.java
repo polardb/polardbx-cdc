@@ -60,7 +60,6 @@ public class TransactionApplier extends MysqlApplier {
                             i++;
                             continue;
                         }
-                        // 对于持久化的超大事务，不保证事务性，这里后面要想办法优化
                         if (curTransaction.isPersisted()) {
                             log.info("current transaction is persisted, will apply with stream mode!");
                             if (!curRowChanges.isEmpty()) {
@@ -68,16 +67,19 @@ public class TransactionApplier extends MysqlApplier {
                                 logCommitInfo((List<DBMSEvent>) (List<?>) curRowChanges);
                                 conn.commit();
                                 logTransactionCommit();
-                                curRowChanges = new ArrayList<>();
                             }
+                            // 对于持久化的事务，每个transaction commit一次
                             Transaction.RangeIterator iterator = curTransaction.rangeIterator();
                             while (iterator.hasNext()) {
                                 Transaction.Range range = iterator.next();
-                                DmlApplyHelper.executeDML(conn, (List<DefaultRowChange>) (List<?>) range.getEvents(),
-                                    conflictStrategy);
+                                curRowChanges = (List<DefaultRowChange>) (List<?>) range.getEvents();
+                                DmlApplyHelper.executeDML(conn, curRowChanges, conflictStrategy);
                                 // note that this transaction has not been finished : may not commit successfully
                                 logCommitInfo((List<DBMSEvent>) (List<?>) curRowChanges);
                             }
+                            conn.commit();
+                            logTransactionCommit();
+                            curRowChanges = new ArrayList<>();
                             i++;
                         } else {
                             if (curRowChanges.isEmpty() || curRowChanges.size() + curTransaction.getEventCount() <

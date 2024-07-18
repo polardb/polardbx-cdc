@@ -17,16 +17,19 @@ package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLIndexDefinition;
 import com.alibaba.polardbx.druid.sql.ast.SQLIndexOptions;
+import com.alibaba.polardbx.druid.sql.ast.SQLPartition;
 import com.alibaba.polardbx.druid.sql.ast.SQLPartitionBy;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.expr.SQLBinaryOpExpr;
 import com.alibaba.polardbx.druid.sql.ast.expr.SQLIdentifierExpr;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsMovePartition;
+import com.alibaba.polardbx.druid.sql.ast.statement.DrdsSplitPartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddColumn;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddIndex;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropColumnItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropIndex;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableGroupStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableSetOption;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
@@ -47,6 +50,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableElement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlUnique;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.DrdsAlterTableModifyTtlOptions;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.DrdsAlterTableSingle;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableOption;
@@ -239,6 +243,17 @@ public class DDLConverter {
             if (createIndexStatement.getPartitioning() != null) {
                 createIndexStatement.getPartitioning().getPartitions().forEach(p -> p.setLocality(null));
             }
+        } else if (sqlStatement instanceof SQLAlterTableGroupStatement) {
+            SQLAlterTableGroupStatement alterTableGroupStatement = (SQLAlterTableGroupStatement) sqlStatement;
+            if (alterTableGroupStatement.getItem() != null
+                && alterTableGroupStatement.getItem() instanceof DrdsSplitPartition) {
+                DrdsSplitPartition splitPartition = (DrdsSplitPartition) alterTableGroupStatement.getItem();
+                splitPartition.getPartitions().forEach(p -> {
+                    if (p instanceof SQLPartition) {
+                        ((SQLPartition) p).setLocality(null);
+                    }
+                });
+            }
         }
 
         SQLHintsFilter.filter(sqlStatement);
@@ -404,6 +419,7 @@ public class DDLConverter {
         }
         tryAddAutoShardIndex(createTableStatement, ddlRecordSql, keySet);
         hack4RepairTableName(tableName, createTableStatement);
+        removeTtlOption(createTableStatement);
     }
 
     private static boolean isColumnDefContainsUnique(SQLColumnDefinition columnDefinition) {
@@ -474,6 +490,10 @@ public class DDLConverter {
                         sqlIndexOptions.setIndexType(null);
                     }
                 }
+            }
+
+            if (item instanceof DrdsAlterTableModifyTtlOptions) {
+                iterator.remove();
             }
 
             if (item instanceof SQLAlterTableAddConstraint) {
@@ -740,12 +760,17 @@ public class DDLConverter {
         }
 
         String tableNameInSql = createTableStatement.getTableName();
-        String tableNameInSqlNormal = SQLUtils.normalize(tableNameInSql);
+        String tableNameInSqlNormal = SQLUtils.normalizeNoTrim(tableNameInSql);
 
         if (!StringUtils.equals(tableName, tableNameInSqlNormal)) {
             createTableStatement.setTableName("`" + escape(tableName) + "`");
             log.warn("repair table name in create sql, before : {}, after :{}", tableNameInSql, tableName);
         }
+    }
+
+    private static void removeTtlOption(SQLCreateTableStatement createTableStatement) {
+        createTableStatement.getTableOptions().removeIf(
+            item -> item.getTarget() != null && StringUtils.equalsIgnoreCase(item.getTarget().toString(), "TTL"));
     }
 
     private static Set<String> getAlgorithmBlacklist() {
