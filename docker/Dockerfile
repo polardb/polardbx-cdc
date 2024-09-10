@@ -1,4 +1,4 @@
-FROM centos:7
+FROM pxc-registry.cn-shanghai.cr.aliyuncs.com/base/centos:7
 
 # Install essential utils
 RUN yum update -y && \
