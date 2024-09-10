@@ -31,6 +31,7 @@ import com.aliyun.polardbx.binlog.util.MetricsReporter;
 import com.google.common.collect.Lists;
 import lombok.Data;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.time.DateFormatUtils;
 import org.hyperic.sigar.CpuPerc;
 import org.slf4j.Logger;
@@ -61,6 +62,7 @@ import static com.aliyun.polardbx.binlog.util.CommonMetricsHelper.addProcMetrics
 /**
  * Created by ziyang.lb
  **/
+@Slf4j
 public class MetricsManager {
 
     private static final Logger METRICS_LOGGER = LoggerFactory.getLogger("METRICS");
@@ -76,9 +78,9 @@ public class MetricsManager {
 
     private final Map<String, DumpClientMetric> dumpClientMetricsMap = new ConcurrentHashMap<>();
 
-    public MetricsManager(String taskName, TaskType taskType) {
+    public MetricsManager(long version, String taskName, TaskType taskType) {
         this.taskType = taskType;
-        this.leader = taskType == TaskType.DumperX || RuntimeLeaderElector.isDumperLeader(taskName);
+        this.leader = RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName);
         this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor((r) -> {
             Thread t = new Thread(r, "dumper-metrics-manager");
             t.setDaemon(true);
@@ -144,6 +146,8 @@ public class MetricsManager {
                     .triggerAlarm(MonitorType.DUMPER_STAGE_FOLLOWER_NODATA_ERROR, new MonitorValue(noDataTime / 1000),
                         noDataTime / 1000);
             }
+
+            log.info("send a no data alarm : {}s", noDataTime / 1000);
         }
     }
 

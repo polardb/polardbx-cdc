@@ -49,6 +49,13 @@ public class SqlContextExecutor {
                 }
             }
 
+            if (null != sqlContext.getFpOverrideNow()) {
+                try (Statement statement = conn.createStatement()) {
+                    statement.execute(
+                        String.format("set @FP_OVERRIDE_NOW='%s'", sqlContext.getFpOverrideNow()));
+                }
+            }
+
             try (PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql())) {
                 if (sqlContext.getParams() != null) {
                     // set value
@@ -67,6 +74,13 @@ public class SqlContextExecutor {
                     statement.execute(String.format(SET_SQL_MODE, holdingSqlMode));
                 }
             }
+
+            if (null != sqlContext.getFpOverrideNow()) {
+                try (Statement statement = conn.createStatement()) {
+                    statement.execute("set @FP_OVERRIDE_NOW=null");
+                }
+            }
+
         }
     }
 

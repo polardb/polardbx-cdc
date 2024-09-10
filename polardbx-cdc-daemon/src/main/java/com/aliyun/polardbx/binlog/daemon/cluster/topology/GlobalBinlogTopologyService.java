@@ -267,7 +267,7 @@ public class GlobalBinlogTopologyService implements TopologyService {
                     taskConfig.setStatus(null);
                     taskConfigMapper.updateByPrimaryKeySelective(taskConfig);
                 } else {
-                    taskConfigMapper.insert(taskConfig);
+                    taskConfigMapper.insertSelective(taskConfig);
                 }
             }
             Set<String> configs = taskConfigs.stream().map(BinlogTaskConfig::getTaskName).collect(Collectors.toSet());
@@ -292,7 +292,7 @@ public class GlobalBinlogTopologyService implements TopologyService {
                 info.setInstructionId("-1");
                 info.setClusterId(clusterId);
                 info.setGroupName(GROUP_NAME_GLOBAL);
-                storageHistoryMapper.insert(info);
+                storageHistoryMapper.insertSelective(info);
             }
 
             //对版本号进行+1并更新
@@ -305,7 +305,7 @@ public class GlobalBinlogTopologyService implements TopologyService {
             history.setClusterId(clusterId);
             history.setContent(JSONObject
                 .toJSONString(new ScheduleHistoryContent(executionSnapshot, taskConfigs, postClusterSnapshot)));
-            scheduleHistoryMapper.insert(history);
+            scheduleHistoryMapper.insertSelective(history);
             return null;
         });
     }

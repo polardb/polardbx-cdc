@@ -18,12 +18,15 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
 import javax.sql.DataSource;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.domain.po.RplDbFullPosition;
@@ -66,7 +69,9 @@ public class MysqlFullProcessor {
     private HostInfo hostInfo;
     private BasePipeline pipeline;
     private String orderKey;
+    private ColumnInfo orderKeyColumnInfo;
     private Object orderKeyStart;
+    private boolean useRdsImplicitId;
 
     public void preStart() {
         fullTableName = schema + "." + tbName;
@@ -86,31 +91,30 @@ public class MysqlFullProcessor {
             orderKey = null;
             if (tableInfo.getPks() != null && !tableInfo.getPks().isEmpty()) {
                 orderKey = tableInfo.getPks().get(0);
-            } else if (tableInfo.getUks() != null && !tableInfo.getUks().isEmpty()) {
-                for (ColumnInfo column : tableInfo.getColumns()) {
-                    if (column.getName().equals(tableInfo.getUks().get(0))) {
-                        if (!column.isNullable()) {
-                            orderKey = tableInfo.getUks().get(0);
-                        }
-                        break;
-                    }
+                orderKeyColumnInfo = tableInfo.getColumns().stream().filter(c -> c.getName()
+                    .equals(orderKey.toLowerCase())).findFirst().orElse(null);
+            } else if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_FULL_USE_IMPLICIT_ID)) {
+                // 无主键表，但启动隐藏主键
+                orderKey = RplConstants.RDS_IMPLICIT_ID;
+                if (checkOrderKeyExist()) {
+                    orderKeyColumnInfo = new ColumnInfo(RplConstants.RDS_IMPLICIT_ID, Types.BIGINT, null,
+                        false, false, null, 0);
+                    useRdsImplicitId = true;
+                } else {
+                    orderKey = null;
+                    orderKeyColumnInfo = null;
+                    useRdsImplicitId = false;
                 }
             }
-            if (orderKey == null) {
-                // 不含主键或非空uk的表，采用第一列作为order key
-                log.error("can't find orderKey for schema:{}, tbName:{}", schema, tbName);
-                orderKey = tableInfo.getColumns().get(0).getName();
+            if (orderKeyColumnInfo == null) {
+                log.error("can't find orderKey and orderKeyColumnInfo for schema:{}, tbName:{}", schema, tbName);
             }
             orderKeyStart = null;
-            if (StringUtils.isBlank(fullPosition.getPosition())) {
-                orderKeyStart = getMinOrderKey();
-            } else {
-                orderKeyStart = fullPosition.getPosition();
-            }
-            if (orderKeyStart == null) {
-                if (getTotalCount() == 0) {
-                    updateDbFullPosition(fullTableName, 0, null, RplConstants.FINISH);
-                    log.info("full transfer done, 0 record in table, schema:{}, tbName:{}", schema, tbName);
+            if (orderKeyColumnInfo != null) {
+                if (StringUtils.isBlank(fullPosition.getPosition())) {
+                    orderKeyStart = getMinOrderKey();
+                } else {
+                    orderKeyStart = fullPosition.getPosition();
                 }
             }
             fetchData();
@@ -157,11 +161,15 @@ public class MysqlFullProcessor {
                 nameSqlSb.append(",");
             }
         }
-        if (orderKeyStart != null) {
-            return String
+        if (useRdsImplicitId) {
+            nameSqlSb = new StringBuilder("`" + RplConstants.RDS_IMPLICIT_ID + "`," + nameSqlSb);
+        }
+        if (orderKeyColumnInfo != null) {
+            return orderKeyStart == null ?
+                String.format("select %s from `%s` order by `%s`", nameSqlSb, tbName, orderKey) : String
                 .format("select %s from `%s` where `%s` >= ? order by `%s`", nameSqlSb, tbName, orderKey, orderKey);
         }
-        return String.format("select %s from `%s` order by `%s`", nameSqlSb, tbName, orderKey);
+        return String.format("select %s from `%s`", nameSqlSb, tbName);
     }
 
     private void fetchData() throws Exception {
@@ -182,7 +190,7 @@ public class MysqlFullProcessor {
             // prepared statement
             stmt = conn.prepareStatement(fetchSql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
             stmt.setFetchSize(Integer.MIN_VALUE);
-            if (orderKeyStart != null) {
+            if (orderKeyColumnInfo != null && orderKeyStart != null) {
                 stmt.setObject(1, orderKeyStart);
             }
 
@@ -195,10 +203,16 @@ public class MysqlFullProcessor {
                 if (extractorConfig.getFetchBatchSize() == builder.getRowDatas().size()) {
                     DefaultRowChange rowChange = builder.build();
                     transfer(Collections.singletonList(rowChange));
-                    orderKeyStart = rowChange.getRowValue(extractorConfig.getFetchBatchSize(), orderKey);
-                    String position = StringUtils2.safeToString(orderKeyStart);
-                    updateDbFullPosition(fullTableName, extractorConfig.getFetchBatchSize(), position,
-                        RplConstants.NOT_FINISH);
+                    if (orderKeyColumnInfo != null) {
+                        orderKeyStart = ExtractorUtil.getColumnValue(rs, orderKeyColumnInfo.getName(),
+                            orderKeyColumnInfo.getType());
+                        String position = StringUtils2.safeToString(orderKeyStart);
+                        updateDbFullPosition(fullTableName, extractorConfig.getFetchBatchSize(), position,
+                            RplConstants.NOT_FINISH);
+                    } else {
+                        updateDbFullPosition(fullTableName, extractorConfig.getFetchBatchSize(), null,
+                            RplConstants.NOT_FINISH);
+                    }
                     StatisticalProxy.getInstance().heartbeat();
                     builder.getRowDatas().clear();
                 }
@@ -233,6 +247,16 @@ public class MysqlFullProcessor {
     private Object getMinOrderKey() throws SQLException {
         String sql = String.format("select min(`%s`) from `%s`", orderKey, tbName);
         return getMetaInfo(sql);
+    }
+
+    private boolean checkOrderKeyExist() {
+        try {
+            getMinOrderKey();
+        } catch (SQLException e) {
+            log.warn("SQLException:", e);
+            return false;
+        }
+        return true;
     }
 
     private long getTotalCount() throws SQLException {

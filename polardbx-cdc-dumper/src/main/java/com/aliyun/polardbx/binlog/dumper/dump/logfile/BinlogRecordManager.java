@@ -26,7 +26,6 @@ import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.LabEventType;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -58,6 +57,7 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 public class BinlogRecordManager implements IBinlogListener, Runnable {
     private static final Logger logger = LoggerFactory.getLogger(BinlogRecordManager.class);
     private final String binlogFullPath;
+    private final long version;
     private final String taskName;
     private final TaskType taskType;
     private final String group;
@@ -69,10 +69,12 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
     private final BinlogOssRecordMapper recordMapper;
     private final BinlogOssRecordService recordService;
 
-    public BinlogRecordManager(String group, String stream, String taskName, TaskType taskType, String rootPath) {
+    public BinlogRecordManager(long version, String group, String stream, String taskName, TaskType taskType,
+                               String rootPath) {
         this.recordMapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
         this.recordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
         this.binlogFullPath = BinlogFileUtil.getFullPath(rootPath, group, stream);
+        this.version = version;
         this.taskName = taskName;
         this.taskType = taskType;
         this.group = group;
@@ -97,7 +99,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
     public void run() {
         try {
             MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_BACKUP);
-            if (isDumperFollower()) {
+            if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
                 executor.shutdown();
                 return;
             }
@@ -177,7 +179,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
 
     @Override
     public void onCreateFile(File file) {
-        if (isDumperFollower()) {
+        if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
             return;
         }
 
@@ -198,7 +200,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
 
     @Override
     public void onFinishFile(File file, BinlogEndInfo binlogEndInfo) {
-        if (isDumperFollower()) {
+        if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
             return;
         }
 
@@ -224,10 +226,6 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
 
     @Override
     public void onDeleteFile(File file) {
-    }
-
-    private boolean isDumperFollower() {
-        return CommonUtils.isGlobalBinlog(group, stream) && !RuntimeLeaderElector.isDumperLeader(taskName);
     }
 
     interface RecordTask {

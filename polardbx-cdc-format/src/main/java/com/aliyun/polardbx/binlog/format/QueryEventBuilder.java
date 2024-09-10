@@ -292,4 +292,8 @@ public class QueryEventBuilder extends BinlogBuilder {
             outputData.put((byte) (v >> 56 & 0xFF));
         }
     }
+
+    public String getQueryString() {
+        return queryString;
+    }
 }

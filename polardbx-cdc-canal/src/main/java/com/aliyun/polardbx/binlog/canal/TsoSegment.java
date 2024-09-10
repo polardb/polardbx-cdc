@@ -15,11 +15,19 @@
 package com.aliyun.polardbx.binlog.canal;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import lombok.NoArgsConstructor;
 
+@NoArgsConstructor
 public class TsoSegment {
     private Long tso = 0L;
     private long txnId;
     private int sequence;
+
+    public TsoSegment(TsoSegment other) {
+        this.tso = other.tso;
+        this.txnId = other.txnId;
+        this.sequence = other.sequence;
+    }
 
     public void trySet(Long newTso, Long newTxnId) {
         if (this.tso == null || newTso > tso) {

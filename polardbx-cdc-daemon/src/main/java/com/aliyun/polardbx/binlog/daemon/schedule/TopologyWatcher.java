@@ -78,7 +78,7 @@ public class TopologyWatcher extends AbstractBinlogTimerTask {
                 SystemConfigInfo info = new SystemConfigInfo();
                 info.setConfigKey(CLUSTER_SNAPSHOT_VERSION_KEY);
                 info.setConfigValue(JSONObject.toJSONString(clusterSnapshot));
-                systemConfigInfoMapper.insert(info);
+                systemConfigInfoMapper.insertSelective(info);
             } catch (DataIntegrityViolationException e) {
                 log.info("System config for {} has already exist, init skipped.", CLUSTER_SNAPSHOT_VERSION_KEY);
             }

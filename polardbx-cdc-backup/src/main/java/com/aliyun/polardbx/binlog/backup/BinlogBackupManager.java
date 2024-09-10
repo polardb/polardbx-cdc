@@ -14,7 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.backup;
 
-import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import lombok.extern.slf4j.Slf4j;
 
@@ -52,11 +52,12 @@ public class BinlogBackupManager {
         }
     }
 
-    private boolean needStart() {
+    public boolean needStart() {
         if (!RemoteBinlogProxy.getInstance().isBackupOn()) {
             return false;
         }
-        TaskType taskType = streamContext.getTaskType();
-        return taskType == TaskType.Dumper || taskType == TaskType.DumperX;
+
+        return RuntimeLeaderElector.isDumperMasterOrX(streamContext.getVersion(), streamContext.getTaskType(),
+            streamContext.getTaskName());
     }
 }

@@ -30,6 +30,8 @@ public class DBMSTransactionBegin extends DBMSEvent {
 
     private String tso;
 
+    private boolean archive = false;
+
     @Override
     public DBMSAction getAction() {
         return DBMSAction.OTHER;
@@ -69,6 +71,14 @@ public class DBMSTransactionBegin extends DBMSEvent {
 
     public void setTso(String tso) {
         this.tso = tso;
+    }
+
+    public boolean isArchive() {
+        return archive;
+    }
+
+    public void setArchive(boolean archive) {
+        this.archive = archive;
     }
 
     public String toString() {

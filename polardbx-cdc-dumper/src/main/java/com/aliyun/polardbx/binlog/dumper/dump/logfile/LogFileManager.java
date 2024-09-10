@@ -77,9 +77,10 @@ public class LogFileManager implements ICursorProvider {
             cdcFileSystem = new CdcFileSystem(binlogRootPath, groupName, streamName);
             binlogListeners = new BinlogListenerWrapper();
             binlogListeners.addListener(
-                new BinlogRecordManager(groupName, streamName, taskName, taskType, binlogRootPath));
+                new BinlogRecordManager(executionConfig.getRuntimeVersion(), groupName, streamName, taskName, taskType,
+                    binlogRootPath));
 
-            if (taskType == TaskType.DumperX || RuntimeLeaderElector.isDumperLeader(taskName)) {
+            if (RuntimeLeaderElector.isDumperMasterOrX(executionConfig.getRuntimeVersion(), taskType, taskName)) {
                 if (isForceRecover(executionConfig)) {
                     BinlogFileUtil.deleteBinlogFiles(BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName));
                 } else {
@@ -124,7 +125,7 @@ public class LogFileManager implements ICursorProvider {
                     restoreManager.start();
                 }
                 logFileCopier = new LogFileCopier(this, writeBufferSize,
-                    DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE));
+                    DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE), executionConfig);
                 logFileCopier.start();
             }
         } catch (Throwable t) {

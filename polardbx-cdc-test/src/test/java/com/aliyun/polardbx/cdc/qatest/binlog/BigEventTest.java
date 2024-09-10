@@ -15,16 +15,23 @@
 package com.aliyun.polardbx.cdc.qatest.binlog;
 
 import com.aliyun.polardbx.cdc.qatest.base.CheckParameter;
+import com.aliyun.polardbx.cdc.qatest.base.ConfigConstant;
 import com.aliyun.polardbx.cdc.qatest.base.ConnectionManager;
 import com.aliyun.polardbx.cdc.qatest.base.JdbcUtil;
+import com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil;
 import com.aliyun.polardbx.cdc.qatest.base.RplBaseTestCase;
+import com.mysql.jdbc.PacketTooBigException;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.Properties;
 
 /**
  * created by ziyang.lb
@@ -61,5 +68,27 @@ public class BigEventTest extends RplBaseTestCase {
             "insert into " + DB_NAME + "." + TABLE_NAME + " values (3, repeat('2',3*16*1024*1024))");
 
         waitAndCheck(CheckParameter.builder().dbName(DB_NAME).tbName(TABLE_NAME).build());
+    }
+
+    @Test
+    public void testPacketTooBig() throws SQLException {
+        Properties configProp = PropertiesUtil.configProp;
+        String polardbxUser = configProp.getProperty(ConfigConstant.POLARDBX_USER);
+        String polardbxPassword = configProp.getProperty(ConfigConstant.POLARDBX_PASSWORD);
+        String polardbxPort = configProp.getProperty(ConfigConstant.POLARDBX_PORT);
+        String polardbxAddress = configProp.getProperty(ConfigConstant.POLARDBX_ADDRESS);
+        String url = String.format("jdbc:mysql://%s:%s/%s?useSSL=false&maxAllowedPacket=1048576",
+            polardbxAddress, polardbxPort, DB_NAME);
+
+        try (Connection connection = JdbcUtil.createConnection(url, polardbxUser, polardbxPassword)) {
+            String value = RandomStringUtils.randomAlphabetic(1024 * 1024 * 10);
+            PreparedStatement ps = connection.prepareStatement(String.format("insert into %s values(?,?)", TABLE_NAME));
+            ps.setInt(1, 4);
+            ps.setString(2, value);
+            ps.execute();
+            Assert.fail("should trigger Error: Packet for query is too large (10485793 > 1048576). "
+                + "You can change this value on the server by setting the max_allowed_packet' variable");
+        } catch (PacketTooBigException ignored) {
+        }
     }
 }

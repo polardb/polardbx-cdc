@@ -53,12 +53,14 @@ import java.util.TreeSet;
 public class CdcFileSystem {
     private final LocalFileSystem localFileSystem;
     private RemoteFileSystem remoteFileSystem;
+    private final BinlogOssRecordService binlogOssRecordService;
 
     public CdcFileSystem(String rootPath, String group, String stream) {
         localFileSystem = new LocalFileSystem(rootPath, group, stream);
         if (RemoteBinlogProxy.getInstance().isBackupOn()) {
             remoteFileSystem = new RemoteFileSystem(group, stream);
         }
+        binlogOssRecordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
     }
 
     public File newLocalFile(String fileName) {
@@ -68,6 +70,12 @@ public class CdcFileSystem {
     public void deleteRemoteFile(String fileName) {
         if (remoteFileSystem != null) {
             remoteFileSystem.delete(fileName);
+        }
+    }
+
+    public void deleteLocalFile(String fileName) {
+        if (fileName != null && !fileName.isEmpty()) {
+            localFileSystem.delete(fileName);
         }
     }
 
@@ -159,8 +167,17 @@ public class CdcFileSystem {
     private Map<String, CdcFile> getLocalFileMap() {
         Map<String, CdcFile> fileMap = new HashMap<>();
         List<CdcFile> localFiles = listLocalFiles();
+        List<BinlogOssRecord> records =
+            binlogOssRecordService.getRecords(localFileSystem.getGroup(), localFileSystem.getStream(),
+                DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID));
         for (CdcFile f : localFiles) {
             fileMap.put(f.getName(), f);
+        }
+        for (BinlogOssRecord record : records) {
+            String fileName = record.getBinlogFile();
+            if (fileMap.containsKey(fileName)) {
+                fileMap.get(fileName).setRecord(record);
+            }
         }
         return fileMap;
     }

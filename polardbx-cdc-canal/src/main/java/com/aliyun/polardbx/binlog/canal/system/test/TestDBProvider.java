@@ -46,10 +46,12 @@ public class TestDBProvider extends AbstractSystemDBProvider {
     String CREATE_CDC_HEARTBEAT_TABLE = String.format(
         "CREATE TABLE IF NOT EXISTS `%s` (`id` bigint(20) auto_increment primary key , sname varchar(20) ,gmt_modified timestamp) broadcast",
         DRDS_CDC_HEARTBEAT);
+
     private final TableMeta ddlTableMeta;
     private final TableMeta instructionTableMeta;
     private final TableMeta heartbeatTableMeta;
     private final TableMeta globalTxLogTableMeta;
+    private final TableMeta syncPointTableMeta;
 
     public TestDBProvider() {
         MemoryTableMeta memoryTableMeta =
@@ -58,10 +60,12 @@ public class TestDBProvider extends AbstractSystemDBProvider {
         memoryTableMeta.apply(null, LOGIC_SCHEMA, CREATE_CDC_INSTRUCTION_TABLE, null);
         memoryTableMeta.apply(null, LOGIC_SCHEMA, CREATE_DRDS_GLOBAL_TX_LOG, null);
         memoryTableMeta.apply(null, LOGIC_SCHEMA, CREATE_CDC_HEARTBEAT_TABLE, null);
+        memoryTableMeta.apply(null, LOGIC_SCHEMA, CREATE_POLARX_SYNC_POINT, null);
         ddlTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_DDL_RECORD);
         instructionTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_INSTRUCTION);
         heartbeatTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_HEARTBEAT);
         globalTxLogTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_GLOBAL_TX_LOG);
+        syncPointTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, POLARX_SYNC_POINT);
     }
 
     @Override
@@ -77,6 +81,11 @@ public class TestDBProvider extends AbstractSystemDBProvider {
     @Override
     public boolean heartbeatTable(String db, String phyTable) {
         return db.startsWith(LOGIC_SCHEMA) && phyTable.startsWith(DRDS_CDC_HEARTBEAT) && !db.endsWith(SINGLE_KEY_WORLD);
+    }
+
+    @Override
+    public boolean isSyncPoint(String db, String phyTable) {
+        return db.startsWith(LOGIC_SCHEMA) && phyTable.startsWith(POLARX_SYNC_POINT) && !db.endsWith(SINGLE_KEY_WORLD);
     }
 
     @Override
@@ -97,5 +106,10 @@ public class TestDBProvider extends AbstractSystemDBProvider {
     @Override
     public TableMeta getGlobalTxLogTableMeta() {
         return globalTxLogTableMeta;
+    }
+
+    @Override
+    public TableMeta getSyncPointTableMeta() {
+        return syncPointTableMeta;
     }
 }

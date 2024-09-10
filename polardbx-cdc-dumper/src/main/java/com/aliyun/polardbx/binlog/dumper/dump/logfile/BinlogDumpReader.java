@@ -25,8 +25,10 @@ import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
+import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.UnsafeByteOperations;
+import io.grpc.stub.ServerCallStreamObserver;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ArrayUtils;
 
@@ -444,9 +446,9 @@ public class BinlogDumpReader {
      * @return next dump pack
      * @see <a href="mysqlbinlog.cc">https://github.com/mysql/mysql-server/blob/8.0/client/mysqlbinlog.cc</a>
      */
-    public ByteString nextDumpPacks() throws Exception {
+    public ByteString nextDumpPacks(ServerCallStreamObserver<DumpStream> serverCallStreamObserver) throws Exception {
         ByteString result = ByteString.EMPTY;
-        while (hasNext()) {
+        while (hasNext() & !serverCallStreamObserver.isCancelled()) {
             result = result.concat(nextDumpPack());
             if (result.size() > maxPacketSize) {
                 break;

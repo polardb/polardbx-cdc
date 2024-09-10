@@ -46,6 +46,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalize;
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 
 /**
@@ -94,7 +95,13 @@ public class TableGroupUtils {
                     Set<String> tableSet = Sets.newTreeSet(Lists.newArrayList(
                         StringUtils.split(tables.toLowerCase(), ",")));
                     if (tableFilter != null) {
-                        tableSet.removeIf(t -> !tableFilter.apply(dbName + "." + t));
+                        tableSet.removeIf(t -> {
+                            String key = t;
+                            if (StringUtils.contains(t, ".")) {
+                                key = StringUtils.split(t, ".")[0];
+                            }
+                            return !tableFilter.apply(dbName + "." + key);
+                        });
                     }
 
                     tableGroupItem.getAllTableGroups().put(tgName, tableSet);
@@ -137,7 +144,7 @@ public class TableGroupUtils {
                 while (rs.next()) {
                     String database = rs.getString(1);
                     if (!StringUtils.equalsAnyIgnoreCase(database, "polardbx", "information_schema", "__cdc__")) {
-                        databases.add(database);
+                        databases.add(database.toLowerCase());
                     }
                 }
             }
@@ -173,7 +180,7 @@ public class TableGroupUtils {
         Map<String, String> result = new HashMap<>();
 
         MySqlCreateTableStatement createTableStatement = SQLUtils.parseSQLStatement(createSql);
-        String tableName = normalize(createTableStatement.getTableName()).toLowerCase();
+        String tableName = normalizeNoTrim(createTableStatement.getTableName()).toLowerCase();
 
         // parse implicit tableGroup from main table
         if (createTableStatement.isWithImplicitTablegroup()) {

@@ -14,12 +14,14 @@
  */
 package com.aliyun.polardbx.rpl.applier;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,6 +29,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_SPLIT_APPLY_IN_TRANSACTION_ENABLED;
 
 /**
  * @author shicai.xsc 2021/5/24 11:42
@@ -77,13 +81,10 @@ public class SplitApplier extends SplitTransactionApplier {
         }
 
         // 多个队列并行执行，每个队列内部不需要事务
-        parallelExecSqlContexts(allQueues, false);
+        boolean tbTranExec = DynamicApplicationConfig.getBoolean(RPL_SPLIT_APPLY_IN_TRANSACTION_ENABLED);
+        parallelExecSqlContexts(allQueues, tbTranExec);
 
-        // allSerialRowChanges 并行执行，每个队列内需要事务
-        for (String fullTbName : allSerialRowChanges.keySet()) {
-            log.info("{} serial row changes will be executed by SplitTransactionApplier, rowChanges: {}", fullTbName,
-                allSerialRowChanges.get(fullTbName).size());
-        }
+        logSerialExecuteInfo(allSerialRowChanges);
         parallelExecSqlContexts(allSerialRowChanges, true);
     }
 
@@ -91,6 +92,7 @@ public class SplitApplier extends SplitTransactionApplier {
                          Map<String, Map<RowKey, List<DefaultRowChange>>> allSplitRowChanges,
                          Map<String, List<DefaultRowChange>> allSerialRowChanges) throws Exception {
         Map<String, List<Integer>> allTbIdentifyColumns = new HashMap<>();
+        Map<String, List<Integer>> allTbPkColumns = new HashMap<>();
 
         Set<String> changedIdentifyColumnTables = new HashSet<>();
         for (DBMSEvent event : dbmsEvents) {
@@ -100,6 +102,8 @@ public class SplitApplier extends SplitTransactionApplier {
             // get identify columns
             List<Integer> identifyColumns =
                 DmlApplyHelper.getIdentifyColumnsIndex(allTbIdentifyColumns, fullTbName, rowChange);
+            List<Integer> pkColumns =
+                DmlApplyHelper.getPkColumnsIndex(allTbPkColumns, fullTbName, rowChange);
 
             // find out events which changed identify columns of a table
             if (!changedIdentifyColumnTables.contains(fullTbName)) {
@@ -125,7 +129,8 @@ public class SplitApplier extends SplitTransactionApplier {
                 continue;
             }
 
-            RowKey key = new RowKey(rowChange, identifyColumns);
+            // 注意 ： 不能按照 RowKey 去进行压缩，因为同一个 key 可能并不指向同一行数据
+            RowKey key = new RowKey(rowChange, pkColumns);
             Map<RowKey, List<DefaultRowChange>> tbSplitRowChanges =
                 allSplitRowChanges.computeIfAbsent(fullTbName, k -> new HashMap<>());
 
@@ -133,5 +138,20 @@ public class SplitApplier extends SplitTransactionApplier {
             List<DefaultRowChange> tbKeyRowChanges = tbSplitRowChanges.computeIfAbsent(key, k -> new ArrayList<>());
             tbKeyRowChanges.add(rowChange);
         }
+    }
+
+    boolean logSerialExecuteInfo(Map<String, List<DefaultRowChange>> allSerialRowChanges) {
+        // allSerialRowChanges 并行执行，每个队列内需要事务
+        for (String fullTbName : allSerialRowChanges.keySet()) {
+            if (log.isDebugEnabled()) {
+                log.debug("{} serial row changes will be executed by SplitTransactionApplier, rowChanges: {}",
+                    fullTbName, allSerialRowChanges.get(fullTbName).size());
+            }
+        }
+        return log.isDebugEnabled();
+    }
+
+    Logger getLogger() {
+        return log;
     }
 }

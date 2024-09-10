@@ -26,9 +26,14 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTabl
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlLockTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlUnlockTablesStatement;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
+
+import javax.sql.DataSource;
+import java.sql.SQLException;
 
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.removeSomeHints;
@@ -37,7 +42,7 @@ import static com.aliyun.polardbx.binlog.util.SQLUtils.toSQLStringWithTrueUcase;
 /**
  * created by ziyang.lb
  **/
-public class SQLUtilsTest {
+public class SQLUtilsTest extends BaseTestWithGmsTables {
 
     @Test
     public void testSubPartitionToString() {
@@ -462,5 +467,28 @@ public class SQLUtilsTest {
         SQLAlterTableStatement statement = parseSQLStatement(sql);
         statement.getItems().removeIf(i -> i instanceof MySqlAlterTableAlterFullTextIndex);
         Assert.assertEquals("ALTER TABLE `t_order_0`", statement.toString());
+    }
+
+    @Test
+    public void testLeaderBySqlQuery() {
+        DataSource dataSource = SpringContextHolder.getObject("metaDataSource");
+        try {
+            SQLUtils.isLeaderBySqlQuery(dataSource);
+        } catch (SQLException e) {
+            Assert.assertEquals("Table \"ALISQL_CLUSTER_LOCAL\" not found; SQL statement:\n"
+                + "select * from information_schema.alisql_cluster_local [42102-220]", e.getMessage());
+        }
+    }
+
+    @Test
+    public void testLeaderByDdl() {
+        DataSource dataSource = SpringContextHolder.getObject("metaDataSource");
+        try {
+            SQLUtils.isLeaderByDdl(dataSource);
+        } catch (SQLException e) {
+            Assert.assertEquals(
+                "Syntax error in SQL statement \"DROP [*]TEMPORARY TABLE IF EXISTS binlog_leader_test\"; expected \"TABLE, INDEX, USER, SEQUENCE, CONSTANT, TRIGGER, MATERIALIZED, VIEW, ROLE, ALIAS, SCHEMA, ALL OBJECTS, DOMAIN, TYPE, DATATYPE, AGGREGATE, SYNONYM\"; SQL statement:\n"
+                    + "DROP TEMPORARY TABLE IF EXISTS binlog_leader_test [42001-220]", e.getMessage());
+        }
     }
 }

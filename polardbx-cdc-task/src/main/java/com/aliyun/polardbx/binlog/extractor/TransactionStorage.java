@@ -107,8 +107,9 @@ public class TransactionStorage implements TransactionCommitListener {
     public void purge(Consumer<TransactionGroup> consumer) {
         List<Transaction> availableTransaction;
         while (!(availableTransaction = sorter.getAvailableTrans(transactionGroupSize)).isEmpty()) {
+            int diffSize = availableTransaction.size();
             consumer.accept(new TransactionGroup((LinkedList<Transaction>) availableTransaction));
-            refreshMetrics(-1 * availableTransaction.size());
+            refreshMetrics(-1 * diffSize);
         }
         refreshMetrics(0);
     }

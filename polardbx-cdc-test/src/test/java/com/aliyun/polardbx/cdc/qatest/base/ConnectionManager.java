@@ -258,14 +258,14 @@ public class ConnectionManager {
 
             if (usingBinlogX) {
                 this.cdcSyncDbDataSourceFirst =
-                    getDruidDataSource(cdcSyncDbAddressFirst, cdcSyncDbPortFirst, cdcSyncDbUserFirst,
-                        cdcSyncDbPasswordFirst, "mysql", true);
+                    getDruidDataSourceWithoutDB(cdcSyncDbAddressFirst, cdcSyncDbPortFirst, cdcSyncDbUserFirst,
+                        cdcSyncDbPasswordFirst, true);
                 this.cdcSyncDbDataSourceSecond =
-                    getDruidDataSource(cdcSyncDbAddressSecond, cdcSyncDbPortSecond, cdcSyncDbUserSecond,
-                        cdcSyncDbPasswordSecond, "mysql", true);
+                    getDruidDataSourceWithoutDB(cdcSyncDbAddressSecond, cdcSyncDbPortSecond, cdcSyncDbUserSecond,
+                        cdcSyncDbPasswordSecond, true);
                 this.cdcSyncDbDataSourceThird =
-                    getDruidDataSource(cdcSyncDbAddressThird, cdcSyncDbPortThird, cdcSyncDbUserThird,
-                        cdcSyncDbPasswordThird, "mysql", true);
+                    getDruidDataSourceWithoutDB(cdcSyncDbAddressThird, cdcSyncDbPortThird, cdcSyncDbUserThird,
+                        cdcSyncDbPasswordThird, true);
             } else {
                 // 去除附加的"mysql"，以兼容polardb-x作为测试下游
                 this.cdcSyncDbDataSource =

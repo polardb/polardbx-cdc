@@ -34,6 +34,7 @@ public class BinlogCursor implements Comparable<BinlogCursor> {
     private final String stream;
     private final String tso;
     private final Long version;
+    private final long timestamp;
 
     public BinlogCursor(String fileName, Long filePosition, String group, String stream, String tso, Long version) {
         this.fileName = fileName;
@@ -42,6 +43,7 @@ public class BinlogCursor implements Comparable<BinlogCursor> {
         this.stream = stream;
         this.tso = tso;
         this.version = version;
+        this.timestamp = System.currentTimeMillis();
     }
 
     public BinlogCursor(String fileName, Long filePosition) {

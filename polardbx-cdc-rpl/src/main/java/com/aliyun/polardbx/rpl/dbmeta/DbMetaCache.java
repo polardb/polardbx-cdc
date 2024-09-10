@@ -26,11 +26,13 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalListener;
 import com.google.common.collect.Lists;
 import lombok.Data;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -54,6 +56,8 @@ public class DbMetaCache {
     private final int minPoolSize;
     private final int maxPoolSize;
     private final String sqlMode;
+    private boolean enablePolardbxServerId;
+    private final boolean longSql;
 
     private final LoadingCache<String, DruidDataSource> dataSources = CacheBuilder.newBuilder()
         .expireAfterAccess(120, TimeUnit.SECONDS)
@@ -86,15 +90,18 @@ public class DbMetaCache {
             }
         });
 
-    public DbMetaCache(HostInfo hostInfo, int maxPoolSize) {
-        this(hostInfo, 1, maxPoolSize);
+    public DbMetaCache(HostInfo hostInfo, int maxPoolSize, boolean longSql) {
+        this(hostInfo, 1, maxPoolSize, longSql);
     }
 
-    public DbMetaCache(HostInfo hostInfo, int minPoolSize, int maxPoolSize) {
+    public DbMetaCache(HostInfo hostInfo, int minPoolSize, int maxPoolSize, boolean longSql) {
         this.hostInfo = hostInfo;
         this.minPoolSize = minPoolSize;
         this.maxPoolSize = maxPoolSize;
         this.sqlMode = DynamicApplicationConfig.getString(ConfigKeys.RPL_DEFAULT_SQL_MODE);
+        this.longSql = longSql;
+        this.enablePolardbxServerId = !DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
+
     }
 
     public DataSource getDataSource(String schema) {
@@ -112,7 +119,13 @@ public class DbMetaCache {
         }
     }
 
-    private DruidDataSource loadDataSource(String schema) throws Exception {
+    @SneakyThrows
+    public Connection getConnection(String schema) {
+        DataSource dataSource = getDataSource(schema);
+        return dataSource.getConnection();
+    }
+
+    DruidDataSource loadDataSource(String schema) throws Exception {
         log.warn("set server id: {}", Math.abs(new Long(hostInfo.getServerId()).intValue()));
         List<String> connectionInitSqls = prepareConnectionInitSqls();
 
@@ -126,6 +139,7 @@ public class DbMetaCache {
             "",
             minPoolSize,
             maxPoolSize,
+            longSql,
             null,
             connectionInitSqls);
     }
@@ -135,7 +149,7 @@ public class DbMetaCache {
         connectionInitSqls.add(String.format(SET_SQL_MODE, sqlMode));
 
         if (hostInfo.getType() == HostType.POLARX2 || hostInfo.getType() == HostType.POLARX1) {
-            if (hostInfo.getServerId() != 0) {
+            if (enablePolardbxServerId && hostInfo.getServerId() != 0) {
                 String setServerIdSql = String.format(SET_POLARX_SERVER_ID,
                     Math.abs(Long.valueOf(hostInfo.getServerId()).intValue()));
                 connectionInitSqls.add(setServerIdSql);
@@ -159,7 +173,7 @@ public class DbMetaCache {
 
     public DataSource getBuiltInDefaultDataSource() {
         String defaultSchema = hostInfo.getType() == HostType.POLARX2 ? POLARX_DEFAULT_SCHEMA : "";
-        return getDataSource(defaultSchema);
+        return dataSources.getUnchecked(defaultSchema.toLowerCase());
     }
 
     public List<String> getDatabases() throws Exception {

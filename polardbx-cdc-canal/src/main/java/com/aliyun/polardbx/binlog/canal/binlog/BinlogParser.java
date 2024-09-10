@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog;
 
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.AnonymousColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowData;
@@ -75,9 +76,15 @@ public class BinlogParser {
         this.binaryLog = binaryLog;
     }
 
+    public boolean isBinaryLog() {
+        return binaryLog;
+    }
+
     public DefaultRowChange parse(TableMeta tableMeta, RowsLogEvent rowsLogEvent,
                                   String charset) throws UnsupportedEncodingException {
-
+        if (!binaryLog && tableMeta == null) {
+            throw new NullPointerException("tableMeta should not be null when parser not in only binary data mode");
+        }
         this.tableMeta = tableMeta;
         this.rowsLogEvent = rowsLogEvent;
         this.rowsLogBuffer = rowsLogEvent.getRowsBuf(charset);
@@ -103,23 +110,33 @@ public class BinlogParser {
 
         // 构造列信息
         List<DBMSColumn> dbmsColumns = Lists.newArrayList();
-        List<FieldMeta> fieldMetas = tableMeta.getFields();
-        // 兼容一下canal的逻辑,认为DDL新增列都加在末尾,如果表结构的列比binlog的要多
-        int size = fieldMetas.size();
-        if (columnSize < size) {
-            size = columnSize;
-        }
-        for (int i = 0; i < size; i++) {
-            FieldMeta fieldMeta = fieldMetas.get(i);
-            // 先临时加一个sqlType=0的值
-            DefaultColumn column = new DefaultColumn(fieldMeta.getColumnName(),
-                i,
-                Types.OTHER,
-                fieldMeta.isUnsigned(),
-                fieldMeta.isNullable(),
-                fieldMeta.isKey(),
-                fieldMeta.isUnique());
-            dbmsColumns.add(column);
+        if (tableMeta == null) {
+            ColumnInfo[] columnInfo = table.getColumnInfo();
+            for (int i = 0; i < columnSize; i++) {
+
+                // 先临时加一个sqlType=0的值
+                AnonymousColumn column = new AnonymousColumn(i, columnInfo[i].type, columnInfo[i].meta);
+                dbmsColumns.add(column);
+            }
+        } else {
+            List<FieldMeta> fieldMetas = tableMeta.getFields();
+            // 兼容一下canal的逻辑,认为DDL新增列都加在末尾,如果表结构的列比binlog的要多
+            int size = fieldMetas.size();
+            if (columnSize < size) {
+                size = columnSize;
+            }
+            for (int i = 0; i < size; i++) {
+                FieldMeta fieldMeta = fieldMetas.get(i);
+                // 先临时加一个sqlType=0的值
+                DefaultColumn column = new DefaultColumn(fieldMeta.getColumnName(),
+                    i,
+                    Types.OTHER,
+                    fieldMeta.isUnsigned(),
+                    fieldMeta.isNullable(),
+                    fieldMeta.isKey(),
+                    fieldMeta.isUnique());
+                dbmsColumns.add(column);
+            }
         }
 
         rowChange = new DefaultRowChange(action,
@@ -128,6 +145,7 @@ public class BinlogParser {
             new DefaultColumnSet(dbmsColumns));
         BitSet actualChangeColumns = new BitSet(columnSize); // 需要处理到update类型时，基于数据内容进行判定
         rowChange.setChangeColumnsBitSet(actualChangeColumns);
+        rowChange.setHasHiddenPk((rowsLogEvent.getFlags() & RowsLogEvent.HIDDEN_PK_FLAG) != 0);
         boolean tableError = false;
         while (rowsLogBuffer.nextOneRow(columns)) {
             // 处理row记录

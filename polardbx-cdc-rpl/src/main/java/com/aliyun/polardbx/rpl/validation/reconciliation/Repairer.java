@@ -94,9 +94,9 @@ public class Repairer {
 
     private DruidDataSource createDataSourceHelper(DataImportMeta.ConnInfo connInfo, String dbName)
         throws Exception {
-        return DataSourceUtil.createDruidMySqlDataSource(connInfo.getHost(), connInfo.getPort(), dbName,
-            connInfo.getUser(), connInfo.getPassword(), "", parallelism, parallelism, null,
-            null);
+        return DataSourceUtil.createDruidMySqlDataSource(false, connInfo.getHost(), connInfo.getPort(),
+            dbName, connInfo.getUser(), connInfo.getPassword(), "", parallelism, parallelism, true,
+            null, null);
     }
 
     private void startRepair() {
@@ -145,6 +145,7 @@ public class Repairer {
                 }
             }
             futures.clear();
+            Thread.sleep(1000);
         }
     }
 
@@ -152,20 +153,20 @@ public class Repairer {
         try {
             DiffRecord.DiffType diffType = DiffRecord.DiffType.valueOf(diff.getType());
 
-            List<Object> keyVal = JSONObject.parseArray(diff.getSrcKeyColVal(), Object.class);
-            List<Object> row = selectFromSource(tableInfo, keyVal);
-            SqlContextBuilder.SqlContext sqlContext = null;
-            switch (diffType) {
-            case DIFF:
-            case MISS:
-                sqlContext = ValSQLGenerator.getReplaceIntoSql(dstDbName, tableName, tableInfo, row);
-                break;
-            case ORPHAN:
-                sqlContext = ValSQLGenerator.getDeleteFromSql(dstDbName, tableName, tableInfo, keyVal);
-                break;
+            List<Object> keyVal;
+            if (diffType == DiffRecord.DiffType.ORPHAN) {
+                keyVal = JSONObject.parseArray(diff.getDstKeyColVal(), Object.class);
+            } else {
+                keyVal = JSONObject.parseArray(diff.getSrcKeyColVal(), Object.class);
             }
-
-            int affectedRows = 0;
+            List<Object> row = selectFromSource(tableInfo, keyVal);
+            SqlContextBuilder.SqlContext sqlContext;
+            if (row.isEmpty()) {
+                sqlContext = ValSQLGenerator.getDeleteFromSql(dstDbName, tableName, tableInfo, keyVal);
+            } else {
+                sqlContext = ValSQLGenerator.getReplaceIntoSql(dstDbName, tableName, tableInfo, row);
+            }
+            int affectedRows;
             try (Connection conn = dstDs.get(dstDbName).getConnection();
                 PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql())) {
                 int i = 1;
@@ -186,7 +187,7 @@ public class Repairer {
     }
 
     private List<Object> selectFromSource(TableInfo tableInfo, List<Object> keyVal) throws SQLException {
-        List<Object> res = null;
+        List<Object> res = new ArrayList<>();
 
         SqlContextBuilder.SqlContext sqlContext = ValSQLGenerator.getPointSelectSql(tableInfo, keyVal);
         try (Connection conn = srcDs.get(tableInfo.getSchema()).getConnection();
@@ -198,8 +199,8 @@ public class Repairer {
             }
 
             try (ResultSet rs = stmt.executeQuery()) {
+                // assert only one row or 0 row returned
                 while (rs.next()) {
-                    res = new ArrayList<>();
                     for (ColumnInfo columnInfo : tableInfo.getColumns()) {
                         Object val = ExtractorUtil.getColumnValue(rs, columnInfo.getName(), columnInfo.getType());
                         res.add(val);

@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.rpl.applier;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSRowData;
@@ -22,6 +23,7 @@ import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
+import com.aliyun.polardbx.rpl.dbmeta.DbMetaCache;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.ConflictStrategy;
@@ -34,10 +36,14 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_MERGE_APPLY_GROUP_BY_TABLE_ENABLED;
 
 /**
  * @author shicai.xsc 2021/5/17 20:52
@@ -80,13 +86,47 @@ public class MergeApplier extends MysqlApplier {
 
         // 如果任务发生故障重启，需采取safe mode写入
         // 这里采用lazy处理，对于执行失败的采取safe mode写入
-
-        parallelExecuteDML(deleteRowChanges);
-        parallelExecuteDML(insertRowChanges);
+        boolean groupByTable = DynamicApplicationConfig.getBoolean(RPL_MERGE_APPLY_GROUP_BY_TABLE_ENABLED);
+        if (groupByTable) {
+            parallelExecuteDMLGroupByTable(deleteRowChanges);
+            parallelExecuteDMLGroupByTable(insertRowChanges);
+        } else {
+            parallelExecuteDML(deleteRowChanges);
+            parallelExecuteDML(insertRowChanges);
+        }
     }
 
-    private void parallelExecuteDML(Map<String, Map<RowKey, DefaultRowChange>> allRowChanges) throws Exception {
+    List<Future<Void>> parallelExecuteDMLGroupByTable(Map<String, Map<RowKey, DefaultRowChange>> allRowChanges)
+        throws Exception {
+        List<List<MergeDmlSqlContext>> mergeDmlSqlContexts = new ArrayList<>();
+        List<Future<Void>> futures = new ArrayList<>();
+
+        for (String tbName : allRowChanges.keySet()) {
+            Collection<DefaultRowChange> tbRowChanges = allRowChanges.get(tbName).values();
+            if (tbRowChanges.isEmpty()) {
+                continue;
+            }
+            // merge
+            List<MergeDmlSqlContext> sqlContexts = getMergeDmlSqlContexts(tbRowChanges,
+                RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE);
+            mergeDmlSqlContexts.add(sqlContexts);
+        }
+
+        for (List<MergeDmlSqlContext> sqlContexts : mergeDmlSqlContexts) {
+            futures.add(executorService.submit(getCallableTask(sqlContexts, dbMetaCache)));
+            StatMetrics.getInstance()
+                .addMergeBatchSize(sqlContexts.stream().mapToInt(c -> c.getOriginRowChanges().size()).sum());
+        }
+
+        checkResultAndReRun(futures,
+            mergeDmlSqlContexts.stream().flatMap(Collection::stream).collect(Collectors.toList()));
+        return futures;
+    }
+
+    private void parallelExecuteDML(Map<String, Map<RowKey, DefaultRowChange>> allRowChanges)
+        throws Exception {
         List<MergeDmlSqlContext> mergeDmlSqlContexts = new ArrayList<>();
+
         for (String tbName : allRowChanges.keySet()) {
             Collection<DefaultRowChange> tbRowChanges = allRowChanges.get(tbName).values();
             if (tbRowChanges.isEmpty()) {
@@ -102,20 +142,35 @@ public class MergeApplier extends MysqlApplier {
 
         // parallel execute, each table cost a thread
         for (MergeDmlSqlContext sqlContext : mergeDmlSqlContexts) {
-            Callable<Void> task = () -> {
-                // do not need to check affected rows
-                DataSource dataSource = dbMetaCache.getDataSource(sqlContext.getDstSchema());
-                try (Connection conn = dataSource.getConnection()) {
-                    DmlApplyHelper.execSqlContext(conn, sqlContext);
-                }
-                sqlContext.setSucceed(true);
-                return null;
-            };
-            futures.add(executorService.submit(task));
+            futures.add(executorService.submit(getCallableTask(sqlContext, dbMetaCache)));
             // record merge size
             StatMetrics.getInstance().addMergeBatchSize(sqlContext.getOriginRowChanges().size());
         }
         checkResultAndReRun(futures, mergeDmlSqlContexts);
+    }
+
+    Callable<Void> getCallableTask(final List<MergeDmlSqlContext> sqlContexts, final DbMetaCache dbMetaCache) {
+        return () -> {
+            // do not need to check affected rows
+            for (MergeDmlSqlContext sqlContext : sqlContexts) {
+                try (Connection conn = dbMetaCache.getConnection(sqlContext.getDstSchema())) {
+                    DmlApplyHelper.execSqlContext(conn, sqlContext);
+                }
+                sqlContext.setSucceed(true);
+            }
+            return null;
+        };
+    }
+
+    Callable<Void> getCallableTask(final MergeDmlSqlContext sqlContext, final DbMetaCache dbMetaCache) {
+        return () -> {
+            // do not need to check affected rows
+            try (Connection conn = dbMetaCache.getConnection(sqlContext.getDstSchema())) {
+                DmlApplyHelper.execSqlContext(conn, sqlContext);
+            }
+            sqlContext.setSucceed(true);
+            return null;
+        };
     }
 
     protected void checkResultAndReRun(List<Future<Void>> futures, List<MergeDmlSqlContext> mergeDmlSqlContexts) {
@@ -216,14 +271,14 @@ public class MergeApplier extends MysqlApplier {
             // get identify columns
             List<Integer> whereColumns = DmlApplyHelper.getWhereColumnsIndex(allTbWhereColumns, fullTbName, rowChange);
 
-            insertRowChanges.putIfAbsent(fullTbName, new HashMap<>());
-            deleteRowChanges.putIfAbsent(fullTbName, new HashMap<>());
+            insertRowChanges.putIfAbsent(fullTbName, new LinkedHashMap<>());
+            deleteRowChanges.putIfAbsent(fullTbName, new LinkedHashMap<>());
 
             mergeTableRowChanges(rowChange,
                 whereColumns,
                 insertRowChanges.get(fullTbName),
                 deleteRowChanges.get(fullTbName),
-                deleteBeforeInsert);
+                !DmlApplyHelper.isNoPkTable(rowChange) && deleteBeforeInsert);
 
             lastRowChanges.put(fullTbName, rowChange);
         }

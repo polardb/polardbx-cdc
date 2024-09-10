@@ -44,8 +44,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import javax.sql.DataSource;
 import java.io.Serializable;
@@ -64,8 +63,7 @@ import java.util.concurrent.Future;
  * @since 5.0.0.0
  */
 @Ignore
-@RunWith(PowerMockRunner.class)
-@PowerMockIgnore("javax.management.*")
+@RunWith(MockitoJUnitRunner.class)
 @Slf4j
 public class TestBase {
     protected final int WAIT_DML_SECOND = 1;
@@ -256,6 +254,7 @@ public class TestBase {
                 "utf8mb4",
                 1,
                 60,
+                true,
                 null,
                 null);
         } catch (Throwable e) {

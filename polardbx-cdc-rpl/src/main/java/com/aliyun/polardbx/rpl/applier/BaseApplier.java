@@ -15,6 +15,7 @@
 package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
+import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.LogUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
@@ -63,11 +64,11 @@ public class BaseApplier {
     }
 
     public void logTransactionCommit() {
-        LogUtil.getCommitLogger().info("COMMIT");
+        LogUtil.getCommitLogger().info("{} : COMMIT", CommonUtil.getCurrentTime());
     }
 
     public void logTransactionRollback() {
-        LogUtil.getCommitLogger().info("ROLLBACK");
+        LogUtil.getCommitLogger().info("{} : ROLLBACK", CommonUtil.getCurrentTime());
     }
 
     public void start() {

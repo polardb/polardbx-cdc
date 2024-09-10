@@ -166,7 +166,8 @@ public abstract class ConfigKeys {
      * 检测连接是否可用的超时时间
      */
     public static final String DATASOURCE_CHECK_VALID_TIMEOUT_SEC = "datasource_check_valid_timeout_sec";
-
+    public static final String DATASOURCE_CN_CONNECT_TIMEOUT_IN_SECOND = "datasource_cn_connect_timeout_in_second";
+    public static final String DATASOURCE_CN_GET_TIMEOUT_IN_SECOND = "datasource_cn_get_timeout_in_second";
     /**
      * 集群角色
      */
@@ -279,6 +280,10 @@ public abstract class ConfigKeys {
      * 心跳刷盘频率，默认30秒
      */
     public static final String BINLOG_WRITE_HEARTBEAT_INTERVAL = "binlog_write_heartbeat_interval";
+    /**
+     * 当有binlog dump请求时，心跳刷盘的频率
+     */
+    public static final String BINLOG_WRITE_HEARTBEAT_INTERVAL_WITH_DUMP = "binlog_write_heartbeat_interval_with_dump";
     /**
      * 心跳是否以事务的形式记录
      */
@@ -491,6 +496,18 @@ public abstract class ConfigKeys {
         "binlog_ddl_alter_manually_table_group_enabled";
     public static final String BINLOG_DDL_ALTER_IMPLICIT_TABLE_GROUP_ENABLED =
         "binlog_ddl_alter_implicit_table_group_enabled";
+
+    /**
+     * meta db leader ddl检测开关
+     */
+    public static final String BINLOG_META_LEADER_DETECT_BY_DDL_MODE_ENABLE =
+        "binlog_meta_leader_detect_by_ddl_mode_enable";
+
+    /**
+     * 是否忽略事务中的DDL语句
+     */
+    public static final String BINLOG_SKIP_DDL_IN_TRANSACTION = "binlog_skip_ddl_in_transaction";
+
     /**
      * 逻辑Binlog文件上传到OSS的accessKeyId
      */
@@ -801,6 +818,11 @@ public abstract class ConfigKeys {
      */
     public static final String TASK_REFORMAT_NO_FOREIGN_KEY_CHECK = "task_reformat_no_foreign_key_check";
 
+    public static final String TASK_EXTRACT_CHECK_SYNC_POINT_ENABLED = "task_extract_check_sync_point_enabled";
+
+    public static final String TASK_PROCESS_SYNC_POINT_WAIT_TIMEOUT_MILLISECOND =
+        "task_process_sync_point_wait_timeout_millisecond";
+
     //******************************************************************************************************************
     //***********************************************Daemon和调度相关参数*************************************************
     //******************************************************************************************************************
@@ -902,6 +924,12 @@ public abstract class ConfigKeys {
     public static final String DAEMON_AUTO_FLUSH_LOG_TEST = "daemon_auto_flush_log_test";
 
     /**
+     * Daemon clean接口是否强制检查集群参数
+     */
+    public static final String DAEMON_CLEAN_INTERFACE_FORCE_CHECK_CLUSTER_ENABLED =
+        "daemon_clean_interface_force_check_cluster_enabled";
+
+    /**
      * 进行拓扑构建时，对节点最小数量的要求
      */
     public static final String TOPOLOGY_NODE_MINSIZE = "topology_node_minsize";
@@ -964,6 +992,10 @@ public abstract class ConfigKeys {
      * 是否测试binlog下载功能
      */
     public static final String BINLOG_BACKUP_FORCE_DOWNLOAD_ENABLED = "binlog_backup_force_download_enabled";
+    /**
+     * 是否按时间清理本地binlog文件
+     */
+    public static final String BINLOG_BACKUP_PURGE_LOCAL_BY_TIME = "binlog_backup_purge_local_by_time";
 
     /**
      * RecoverTsoTestTimeTask强制刷新拓扑的时间间隔，如果需要定时重刷，设置为0
@@ -1092,6 +1124,11 @@ public abstract class ConfigKeys {
      * 是否优先使用HistoryTable中的记录构建Repository，修复数据场景使用
      */
     public static final String META_BUILD_APPLY_FROM_HISTORY_FIRST = "meta_build_apply_from_history_first";
+
+    /**
+     * 是否优先使用__cdc_ddl_record__中的记录构建Repository，修复数据场景使用
+     */
+    public static final String META_BUILD_APPLY_FROM_RECORD_FIRST = "meta_build_apply_from_record_first";
     /**
      * Rollback时，元数据的构建方式
      */
@@ -1159,6 +1196,11 @@ public abstract class ConfigKeys {
     public static final String META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX =
         "meta_build_physical_ddl_sql_blacklist_regex";
 
+    /**
+     * sql parse 后，case by case的方式过滤cdc不需要关注的queryEvent,parse报错后的处理方式
+     */
+    public static final String META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_FILTER_IGNORE_PARSE_ERROR =
+        "meta_build_physical_ddl_sql_blacklist_filter_ignore_parse_error";
     /**
      * meta rebuild 故障植入
      */
@@ -1343,6 +1385,8 @@ public abstract class ConfigKeys {
 
     public static final String RPL_PERSIST_BASE_PATH = "rpl_persist_base_path";
 
+    public static final String RPL_PERSIST_ENABLED = "rpl_persist_enabled";
+
     /**
      * rpl相关的任务，是否支持根据rplTask.gmt_modified探活
      */
@@ -1396,7 +1440,7 @@ public abstract class ConfigKeys {
 
     public static final String RPL_FULL_VALID_MAX_SAMPLE_ROWS_COUNT = "rpl_full_valid_max_sample_rows_count";
 
-    public static final String RPL_FULL_VALID_PARALLELISM = "rpl_full_valid_parallelism";
+    public static final String RPL_FULL_VALID_TABLE_PARALLELISM = "rpl_full_valid_table_parallelism";
 
     public static final String RPL_REPAIR_PARALLELISM = "rpl_repair_parallelism";
 
@@ -1406,7 +1450,11 @@ public abstract class ConfigKeys {
 
     public static final String RPL_FULL_VALID_SKIP_COLLECT_STATISTIC = "rpl_full_valid_skip_collect_statistic";
 
+    public static final String RPL_FULL_VALID_SAMPLE_COUNT = "rpl_full_valid_sample_count";
+
     public static final String RPL_FULL_VALID_AUTO_RESET_ERROR_TASKS = "rpl_full_valid_auto_reset_error_tasks";
+
+    public static final String RPL_POLARDBX1_OLD_VERSION_OPTION = "rpl_polardbx1_old_version_option";
 
     public static final String RPL_SET_MAX_STATEMENT_TIME_OPTION = "rpl_set_max_statement_time_option";
 
@@ -1456,11 +1504,40 @@ public abstract class ConfigKeys {
 
     public static final String RPL_EXTRACTOR_DDL_LOG_OPEN = "rpl_extractor_ddl_log_open";
 
+    public static final String RPL_LONG_SOCKET_TIMEOUT_MILLS = "rpl_long_socket_timeout_mills";
+
+    public static final String RPL_SHORT_SOCKET_TIMEOUT_MILLS = "rpl_short_socket_timeout_mills";
+
+    public static final String RPL_MERGE_SAME_RDS_TASK = "rpl_merge_same_rds_task";
+
+    public static final String RPL_INC_BLACK_TABLE_LIST = "rpl_inc_black_table_list";
+
+    public static final String RPL_INC_STOP_TIME_SECONDS = "rpl_inc_stop_time_seconds";
+
+    public static final String RPL_INC_LOCAL_FILE_NUM = "rpl_inc_local_file_num";
+
+    public static final String RPL_FULL_USE_IMPLICIT_ID = "rpl_full_use_implicit_id";
+
+    public static final String RPL_INC_DDL_SKIP_MISS_LOCAL_PARTITION_ERROR =
+        "rpl_inc_ddl_skip_miss_local_partition_error";
+
+    public static final String RPL_MERGE_APPLY_GROUP_BY_TABLE_ENABLED = "rpl_merge_apply_group_by_table_enabled";
+
+    public static final String RPL_SPLIT_APPLY_IN_TRANSACTION_ENABLED = "rpl_split_apply_in_transaction_enabled";
+
+    public static final String RPL_APPLY_DRY_RUN_ENABLED = "rpl_apply_dry_run_enabled";
+
     /**
      * Columnar是否已经心跳超时的阈值
      */
     public static final String COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_MS =
         "columnar_process_heartbeat_timeout_ms";
+
+    /**
+     * Columnar是否已经延迟超时的阈值
+     */
+    public static final String COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS =
+        "columnar_process_latency_timeout_ms";
 
     /**
      * 实验室相关配置

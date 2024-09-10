@@ -57,7 +57,7 @@ public class LogEventStorage implements Storage {
 
     private final ThreadPoolExecutor cleanBoss;
     private final CleanWorker[] cleanWorkers;
-    private final ScheduledExecutorService cleanTimer;
+    private ScheduledExecutorService cleanTimer;
     private final LoadingCache<String, SubCache> txnCache;
     private final TxnKey[] deleteBuffer;
     private final AtomicInteger deleteBufferPointer;
@@ -76,15 +76,6 @@ public class LogEventStorage implements Storage {
             new ThreadPoolExecutor.CallerRunsPolicy());
 
         this.cleanWorkers = new CleanWorker[cleanWorkerCount];
-        for (int i = 0; i < cleanWorkerCount; i++) {
-            cleanWorkers[i] = new CleanWorker("Storage-cleaner-worker-thread-" + i);
-        }
-
-        this.cleanTimer = Executors.newSingleThreadScheduledExecutor((r) -> {
-            Thread t = new Thread(r, "Storage-cleaner-timer-thread");
-            t.setDaemon(true);
-            return t;
-        });
 
         // 按照PartitionId对缓存进行分段，最大化避免线程间的锁竞争和减少单个缓存的数据量，以提升性能
         this.txnCache = CacheBuilder.newBuilder().build(new CacheLoader<String, SubCache>() {
@@ -110,9 +101,17 @@ public class LogEventStorage implements Storage {
         running = true;
 
         repository.open();
-        for (int i = 0; i < DEFAULT_WORKER_COUNT; i++) {
+        for (int i = 0; i < cleanWorkers.length; i++) {
+            cleanWorkers[i] = new CleanWorker("Storage-cleaner-worker-thread-" + i);
             cleanWorkers[i].start();
         }
+
+        this.cleanTimer = Executors.newSingleThreadScheduledExecutor((r) -> {
+            Thread t = new Thread(r, "Storage-cleaner-timer-thread");
+            t.setDaemon(true);
+            return t;
+        });
+
         cleanTimer.scheduleAtFixedRate(() -> {
             try {
                 checkDeleteBuffer();
@@ -131,9 +130,13 @@ public class LogEventStorage implements Storage {
         }
         running = false;
 
-        cleanTimer.shutdownNow();
-        for (int i = 0; i < DEFAULT_WORKER_COUNT; i++) {
-            cleanWorkers[i].interrupt();
+        if (cleanTimer != null) {
+            cleanTimer.shutdownNow();
+        }
+        for (CleanWorker cleanWorker : cleanWorkers) {
+            if (cleanWorker != null) {
+                cleanWorker.interrupt();
+            }
         }
         cleanBoss.shutdownNow();
         txnCache.invalidateAll();

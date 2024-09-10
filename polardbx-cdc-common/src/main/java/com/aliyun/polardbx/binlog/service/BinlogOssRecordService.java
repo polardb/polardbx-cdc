@@ -16,6 +16,7 @@ package com.aliyun.polardbx.binlog.service;
 
 import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
+import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -180,13 +181,20 @@ public class BinlogOssRecordService {
                 .and(binlogFile, isEqualTo(name)));
     }
 
+    public List<BinlogOssRecord> getRecords(String gid, String sid, String cid) {
+        return mapper.select(
+            s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid)));
+    }
+
     public List<BinlogOssRecord> getRecordsInTimeRange(String gid, String sid, Date start, Date end) {
         List<BinlogOssRecord> unfinishedFiles = mapper.select(
             s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(logEnd, isNull())
-                .and(logBegin, isLessThanOrEqualTo(end)));
+                .and(logBegin, isLessThanOrEqualTo(end))
+                .and(purgeStatus, isEqualTo(BinlogPurgeStatus.UN_COMPLETE.getValue())));
         List<BinlogOssRecord> finishedFiles = mapper.select(
             s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid))
-                .and(logEnd, isGreaterThanOrEqualTo(start)).and(logBegin, isLessThanOrEqualTo(end)));
+                .and(logEnd, isGreaterThanOrEqualTo(start)).and(logBegin, isLessThanOrEqualTo(end))
+                .and(purgeStatus, isEqualTo(BinlogPurgeStatus.UN_COMPLETE.getValue())));
 
         List<BinlogOssRecord> res = new ArrayList<>(finishedFiles);
         res.addAll(unfinishedFiles);

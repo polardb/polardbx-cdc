@@ -21,6 +21,7 @@ import com.aliyun.polardbx.binlog.MetaDbDataSource;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.domain.NodeRole;
+import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
@@ -102,14 +103,28 @@ public class RuntimeLeaderElector {
         return isDaemonLeader.get();
     }
 
-    public static boolean isDumperLeader(String taskName) {
+    public static boolean isDumperMaster(long version, String taskName) {
         String config = SystemDbConfig.getSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY);
         if (StringUtils.isBlank(config)) {
             return false;
-        } else {
-            ClusterSnapshot clusterSnapshot = JSONObject.parseObject(config, ClusterSnapshot.class);
-            return taskName.equals(clusterSnapshot.getDumperMaster());
         }
+
+        ClusterSnapshot clusterSnapshot = JSONObject.parseObject(config, ClusterSnapshot.class);
+        return version == clusterSnapshot.getVersion() && taskName.equals(clusterSnapshot.getDumperMaster());
+    }
+
+    public static boolean isDumperX(long version, TaskType taskType) {
+        String config = SystemDbConfig.getSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY);
+        if (StringUtils.isBlank(config)) {
+            return false;
+        }
+
+        ClusterSnapshot clusterSnapshot = JSONObject.parseObject(config, ClusterSnapshot.class);
+        return version == clusterSnapshot.getVersion() && taskType.equals(TaskType.DumperX);
+    }
+
+    public static boolean isDumperMasterOrX(long version, TaskType taskType, String taskName) {
+        return isDumperMaster(version, taskName) || isDumperX(version, taskType);
     }
 
     public static boolean isLeader(String name) {

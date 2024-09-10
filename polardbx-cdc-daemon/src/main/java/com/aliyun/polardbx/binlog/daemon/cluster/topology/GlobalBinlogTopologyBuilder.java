@@ -109,6 +109,7 @@ public class GlobalBinlogTopologyBuilder {
 
             Container container = containerList.get(i);
             container.deductMem(memPerDumper);
+            tc.setReservedMemMb(container.getCapability().getReservedMemMb());
 
             BinlogTaskConfig dumperConfig =
                 makeTask((long) (i + 1), TaskType.Dumper, container, JSONObject.toJSONString(tc), newVersion);
@@ -151,6 +152,7 @@ public class GlobalBinlogTopologyBuilder {
         config.setTso(expectedStorageTso);
         config.setRuntimeVersion(newVersion);
         config.setServerId(serverId);
+        config.setReservedMemMb(finalContainer.getCapability().getReservedMemMb());
         BinlogTaskConfig finalConfig = makeTask(0L, TaskType.Final, finalContainer,
             JSONObject.toJSONString(config), newVersion);
         finalConfig.setClusterId(clusterId);
@@ -200,6 +202,7 @@ public class GlobalBinlogTopologyBuilder {
             storageInfoList.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toList()));
         config.setTso(expectedStorageTso);
         config.setServerId(serverId);
+        config.setReservedMemMb(container.getCapability().getReservedMemMb());
 
         BinlogTaskConfig relayTaskConfig =
             makeTask(index.incrementAndGet(), TaskType.Relay, container, JSONObject.toJSONString(config), newVersion);

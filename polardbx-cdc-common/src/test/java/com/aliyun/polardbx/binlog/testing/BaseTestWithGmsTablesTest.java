@@ -50,7 +50,7 @@ public class BaseTestWithGmsTablesTest extends BaseTestWithGmsTables {
         int count = 0;
         try (Connection connection = getGmsDataSource().getConnection()) {
             try (Statement stmt = connection.createStatement()) {
-                ResultSet rs = stmt.executeQuery("show tables from `polardbx_meta_db`");
+                ResultSet rs = stmt.executeQuery("show tables");
                 while (rs.next()) {
                     count++;
                     if (log.isDebugEnabled()) {
@@ -66,6 +66,8 @@ public class BaseTestWithGmsTablesTest extends BaseTestWithGmsTables {
     public void testMappers_1() {
         // check mybatis mappers is working
         SystemConfigInfoMapper mapper = SpringContextHolder.getObject(SystemConfigInfoMapper.class);
+        List<SystemConfigInfo> list = mapper.select(s -> s);
+        Assert.assertEquals(0, list.size());
         SystemConfigInfo systemConfigInfo = new SystemConfigInfo();
         systemConfigInfo.setId(1L);
         systemConfigInfo.setConfigKey("key");
@@ -82,13 +84,6 @@ public class BaseTestWithGmsTablesTest extends BaseTestWithGmsTables {
     @Test
     public void testMappers_3() throws Exception {
         truncateGmsTables();
-    }
-
-    @Test
-    public void testMappers_4() {
-        SystemConfigInfoMapper mapper = SpringContextHolder.getObject(SystemConfigInfoMapper.class);
-        List<SystemConfigInfo> list = mapper.select(s -> s);
-        Assert.assertEquals(0, list.size());
     }
 
     private void commonCheck() {

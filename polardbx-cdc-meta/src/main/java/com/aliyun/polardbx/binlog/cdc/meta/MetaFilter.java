@@ -52,8 +52,13 @@ public class MetaFilter {
     }
 
     public static boolean isSupportApply(DDLRecord record) {
-        if (record.getExtInfo() != null && record.getExtInfo().isGsi()) {
-            return false;
+        if (record.getExtInfo() != null) {
+            if (record.getExtInfo().isGsi()) {
+                return false;
+            }
+            if (record.getExtInfo().isCci()) {
+                return false;
+            }
         }
         return !"DROP_SEQUENCE".equals(record.getSqlKind())
             && !"CREATE_SEQUENCE".equals(record.getSqlKind())

@@ -15,7 +15,7 @@
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
-import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
 import org.junit.Assert;
 import org.junit.Test;
@@ -27,7 +27,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_DDL_HINT_BLACK
  * author: ziyang.lb
  * create: 2023-09-13 19:12
  **/
-public class SQLHintsFilterTest extends BaseTest {
+public class SQLHintsFilterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testFilter() {

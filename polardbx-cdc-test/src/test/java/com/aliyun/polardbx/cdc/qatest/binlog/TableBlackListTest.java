@@ -134,8 +134,8 @@ public class TableBlackListTest extends RplBaseTestCase {
             CheckParameter.builder()
                 .dbName(BLACK_DB)
                 .tbName(NORMAL_TABLE)
-                .directCompareDetail(true)
-                .compareDetailOneByOne(false)
+                .directCompareDetail(false)
+                .compareDetailOneByOne(true)
                 .loopWaitTimeoutMs(TimeUnit.MINUTES.toMillis(5)).build();
         waitAndCheck(checkParameter);
         checkBlackTable();

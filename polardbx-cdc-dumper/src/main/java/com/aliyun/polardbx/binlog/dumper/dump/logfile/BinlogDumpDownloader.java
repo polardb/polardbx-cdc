@@ -213,8 +213,8 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
             long maxWaitSeconds =
                 DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DUMP_DOWNLOAD_MAX_WAIT_TIME_SECONDS);
             Timer waitTimeoutTimer = new Timer(maxWaitSeconds * 1000);
-            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000);
-            long sleepTime = Math.min(1000, masterHeartbeatPeriod / 1000);
+            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000000);
+            long sleepTime = Math.min(1000, masterHeartbeatPeriod / 1000000);
             long start = System.currentTimeMillis();
             while (!observer.isCancelled() && !f.exists()) {
                 if (fileDownLoadErrorMap.containsKey(fileName)) {
@@ -311,6 +311,8 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
                 .collect(Collectors.toList());
 
         downloadList.clear();
+        left = 0;
+        right = 0;
         log.info("download file list:{}", filesToDownload);
         downloadList.addAll(filesToDownload);
     }

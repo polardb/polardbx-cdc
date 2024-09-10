@@ -135,7 +135,9 @@ public abstract class AbstractBinlogBootstrapService implements ClusterBootstrap
     }
 
     protected void stopCommon() {
-        jobList.forEach(IScheduleJob::stop);
+        if (jobList != null) {
+            jobList.forEach(IScheduleJob::stop);
+        }
     }
 
     protected void afterStopCommon() {

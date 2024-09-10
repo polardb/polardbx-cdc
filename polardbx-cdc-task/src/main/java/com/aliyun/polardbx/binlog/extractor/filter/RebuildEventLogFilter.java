@@ -52,6 +52,7 @@ import com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat.QueryEventRe
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat.RowEventReformator;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat.TableMapEventReformator;
 import com.aliyun.polardbx.binlog.extractor.log.DDLEvent;
+import com.aliyun.polardbx.binlog.extractor.log.DDLEventBuilder;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.extractor.log.TransactionGroup;
 import com.aliyun.polardbx.binlog.extractor.log.VirtualTSO;
@@ -62,6 +63,7 @@ import com.aliyun.polardbx.binlog.storage.IteratorBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.util.DirectByteOutput;
 import com.aliyun.polardbx.binlog.util.LabEventType;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.BooleanUtils;
 import org.apache.commons.lang.math.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -74,10 +76,13 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.IS_LAB_ENV;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST;
 import static com.aliyun.polardbx.binlog.cdc.meta.CreateDropTableWithExistFilter.shouldIgnore;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.processDdlSqlCharacters;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.tryRemoveAutoShardKey;
@@ -292,6 +297,21 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         // prepare parameters
         DDLEvent ddlEvent = transaction.getDdlEvent();
         DDLRecord ddlRecord = ddlEvent.getDdlRecord();
+
+        boolean useCdcDdlRecordFirst = DynamicApplicationConfig.getBoolean(META_BUILD_APPLY_FROM_RECORD_FIRST);
+        boolean isLabEnv = DynamicApplicationConfig.getBoolean(IS_LAB_ENV);
+
+        if (useCdcDdlRecordFirst || isLabEnv) {
+            logger.warn("begin to rebuild ddlRecord from __cdc_ddl_record__ with id {} db {}, and tso{} ",
+                ddlRecord.getId(),
+                ddlRecord.getSchemaName(),
+                ddlEvent.getPosition().getRtso());
+            ddlEvent = replaceLogicSqlFromCdcDdlRecord(ddlEvent);
+            ddlRecord = ddlEvent.getDdlRecord();
+            transaction.setDdlEvent(ddlEvent);
+
+        }
+
         RuntimeContext runtimeContext = context.getRuntimeContext();
         ServerCharactorSet serverCharactorSet = runtimeContext.getServerCharactorSet();
         Integer clientCharsetId = CharsetConversion.getCharsetId(serverCharactorSet.getCharacterSetClient());
@@ -324,7 +344,6 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                 logger.warn("ddl sql is not existed in history table.");
             }
         }
-
         // try rewrite for move database sql, parse ddl 出错，会尝试重写一次ddl
         tryRewriteMoveDataBaseSql(ddlEvent, ddlRecord);
 
@@ -358,7 +377,8 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
 
         // apply logic ddl sql
         String ddlSql4Apply = ddlRecord.getDdlSql().trim();
-        logger.info("begin to apply logic ddl : " + ddlSql4Apply + ", tso : " + transaction.getVirtualTsoStr());
+        logger.info("begin to apply logic ddl : " + ddlSql4Apply + ", tso : " + transaction.getVirtualTsoStr()
+            + " ddl_record_id : " + ddlRecord.getId());
         ddlSql4Apply = processDdlSqlCharacters(ddlRecord.getTableName(), ddlSql4Apply, dbCharset, tbCollation);
         ddlRecord.setDdlSql(ddlSql4Apply);
 
@@ -372,11 +392,16 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                 ddlRecord.setMetaInfo(null);
             }
         }
+        boolean isCCI = ddlExtInfo != null && ddlRecord.getExtInfo().isCci();
+        if (isCCI) {
+            ddlEvent.setVisibleToMysql(false);
+            logger.info("invisible cci for mysql : " + ddlRecord.getDdlSql());
+        }
         logger.info("real apply logic ddl is : " + ddlSql4Apply + ", tso :"
             + transaction.getVirtualTsoStr() + " isGSI : " + isGSI);
         processCharactersForOriginalSql(ddlRecord, dbCharset, tbCollation);
         tableMetaManager.applyLogic(ddlEvent.getPosition(), ddlRecord, transaction.getInstructionId());
-        if (!isGSI) {
+        if (!isGSI && !isCCI) {
             acceptFilter.rebuild();
         }
 
@@ -405,7 +430,9 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                 tbCollation,
                 transaction.getVirtualTsoStr(),
                 ddlEvent.isVisibleToMysql() ? outputBinlogSql4Mysql : null,
-                ddlRecord.getDdlSql());
+                ddlRecord.getDdlSql(),
+                isCCI,
+                ddlExtInfo.getPolarxVariables());
             int ddlCostTime = ddlCostTime(ddlRecord);
 
             long flags2Value = 0;
@@ -490,6 +517,69 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         return list.isEmpty() ? null : list.get(0);
     }
 
+    private DDLEvent replaceLogicSqlFromCdcDdlRecord(DDLEvent ddlEvent) {
+        DDLRecord record = ddlEvent.getDdlRecord();
+        JdbcTemplate polarxJdbcTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+        boolean isLabEnv = DynamicApplicationConfig.getBoolean(IS_LAB_ENV);
+        List<Map<String, Object>> searchRecordList;
+        long start = System.currentTimeMillis();
+        do {
+            searchRecordList = polarxJdbcTemplate.queryForList(
+                "select sql_kind, schema_name, table_name, meta_info, ddl_sql,visibility, ext from __cdc_ddl_record__ where id = "
+                    + record.getId());
+
+            if (CollectionUtils.isNotEmpty(searchRecordList)) {
+                break;
+            }
+            // 此处报错原因是commit 动作是异步的，部分commit较快的dn 到此位置去查 __cdc_ddl_record__时 ，
+            // 可能会因为没有全部提交导致查不到数据
+            logger.warn("can not find ddl record from __cdc_ddl_record__, id : " + record.getId() + " will retry ");
+            // 重试10s
+            if (System.currentTimeMillis() - start > 10000) {
+                throw new PolardbxException(
+                    "can not find ddl record from __cdc_ddl_record__ after 10s , id : " + record.getId());
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                throw new PolardbxException("can not find ddl record from __cdc_ddl_record__, id : " + record.getId(),
+                    e);
+            }
+        } while (true);
+        if (searchRecordList.size() != 1) {
+            throw new PolardbxException("too many ddl records found from __cdc_ddl_record__, id : " + record.getId());
+        }
+        Map<String, Object> searchRecord = searchRecordList.get(0);
+        String newDdlSql = (String) searchRecord.get("ddl_sql");
+        String ext = (String) searchRecord.get("ext");
+        String sqlKind = (String) searchRecord.get("sql_kind");
+        String schemaName = (String) searchRecord.get("schema_name");
+        String tableName = (String) searchRecord.get("table_name");
+        String metaInfo = (String) searchRecord.get("meta_info");
+        int visibility = ((Long) searchRecord.get("visibility")).intValue();
+
+        DDLEvent newDDLEvent =
+            DDLEventBuilder.build(record.getId() + "", record.getJobId() == null ? "" : record.getJobId() + "",
+                schemaName,
+                tableName, sqlKind,
+                newDdlSql, visibility, ext, metaInfo);
+        newDDLEvent.setPosition(ddlEvent.getPosition());
+        // DDLEvent以及内部对象，都实现了@EqualsAndHashCode注解，所以直接比较即可
+        if (!Objects.equals(newDDLEvent, ddlEvent)) {
+            logger.info("replace ddl record from __cdc_ddl_record__ for id {}, db_name {} table_name {}",
+                record.getId(),
+                record.getSchemaName(), record.getTableName());
+            if (isLabEnv) {
+                throw new PolardbxException(
+                    String.format("check ddl event consistency failed! , id %s, db_name %s table_name %s ",
+                        record.getId() + "",
+                        record.getSchemaName(), record.getTableName()));
+            }
+            return newDDLEvent;
+        }
+        return ddlEvent;
+    }
+
     String tryRewriteDropTableSql(String schema, String tableName, String ddl) {
         try {
             SQLStatement stmt = parseSQLStatement(ddl);
@@ -500,8 +590,9 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                 if (dropTableStatement.getTableSources().size() > 1) {
                     Optional<SQLExprTableSource> optional = dropTableStatement.getTableSources().stream()
                         .filter(ts ->
-                            tableName.equalsIgnoreCase(ts.getTableName(true)) && (StringUtils.isBlank(ts.getSchema())
-                                || schema.equalsIgnoreCase(SQLUtils.normalize(ts.getSchema())))
+                            tableName.equalsIgnoreCase(SQLUtils.normalizeNoTrim(ts.getTableName())) && (
+                                StringUtils.isBlank(ts.getSchema())
+                                    || schema.equalsIgnoreCase(SQLUtils.normalize(ts.getSchema())))
                         ).findFirst();
                     if (!optional.isPresent()) {
                         throw new PolardbxException(String.format("can`t find table %s in sql %s", tableName, ddl));
@@ -530,7 +621,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             SQLTruncateStatement sqlTruncateStatement = (SQLTruncateStatement) sqlStatement;
             if (sqlTruncateStatement.getTableSources().size() == 1) {
                 SQLExprTableSource source = sqlTruncateStatement.getTableSources().get(0);
-                String sqlTable = source.getTableName(true);
+                String sqlTable = SQLUtils.normalizeNoTrim(source.getTableName());
                 if (StringUtils.equalsIgnoreCase("__test_" + sqlTable, tableName)) {
                     source.setSimpleName(tableName);
                     return sqlTruncateStatement.toUnformattedString();

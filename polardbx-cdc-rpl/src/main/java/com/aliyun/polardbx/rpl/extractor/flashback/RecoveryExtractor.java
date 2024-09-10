@@ -128,7 +128,8 @@ public class RecoveryExtractor extends BaseExtractor {
         try {
             BinlogPosition startPosition = findStartPosition();
             log.info("startPosition: " + startPosition);
-            LogEventConvert logEventConvert = new LogEventConvert(srcHostInfo, filter, startPosition, HostType.POLARX2);
+            LogEventConvert logEventConvert = new LogEventConvert(srcHostInfo, filter, startPosition, HostType.POLARX2,
+                true);
             logEventConvert.init();
             BinlogEventSink binlogEventSink = new RecoveryEventSink();
             parser = new MysqlEventParser(extractorConfig.getEventBufferSize(),

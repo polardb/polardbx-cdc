@@ -220,8 +220,8 @@ public class RowChangeBuilder {
             rowChange.setOptionValue(option.getName(), option.getValue());
         }
         // 填充插件信息
-        ((DefaultRowChange) rowChange).setDynamicPluginMap(dynamicPluginMap);
-        ((DefaultRowChange) rowChange).setSeparatorMap(separatorMap);
+        rowChange.setDynamicPluginMap(dynamicPluginMap);
+        rowChange.setSeparatorMap(separatorMap);
         return rowChange;
     }
 

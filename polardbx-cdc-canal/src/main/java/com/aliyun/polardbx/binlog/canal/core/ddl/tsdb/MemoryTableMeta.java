@@ -74,6 +74,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalize;
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
@@ -250,7 +251,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
             SQLStatement statement = SQLUtils.parseSQLStatement(ddl);
             if (statement instanceof SQLCreateTableStatement) {
                 SQLCreateTableStatement sqlCreateTableStatement = (SQLCreateTableStatement) statement;
-                String tableName = normalize(sqlCreateTableStatement.getTableName());
+                String tableName = normalizeNoTrim(sqlCreateTableStatement.getTableName());
                 if (sqlCreateTableStatement.isIfNotExists()) {
                     return forceReplace || find(schemaName, tableName) == null;
                 }
@@ -359,8 +360,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 fieldMeta.setDefaultValue(null);
             } else {
                 // 处理一下default value中特殊的引号
-                fieldMeta.setDefaultValue(
-                    normalize(getSqlName(column.getDefaultExpr())));
+                fieldMeta.setDefaultValue(normalize(getSqlName(column.getDefaultExpr())));
             }
             if (dataType instanceof SQLCharacterDataType) {
                 final String charSetName = ((SQLCharacterDataType) dataType).getCharSetName();
@@ -533,14 +533,14 @@ public class MemoryTableMeta implements TableMetaTSDB {
 
         if (sqlName instanceof SQLPropertyExpr) {
             SQLIdentifierExpr owner = (SQLIdentifierExpr) ((SQLPropertyExpr) sqlName).getOwner();
-            return normalize(owner.getName()) + "."
-                + normalize(((SQLPropertyExpr) sqlName).getName());
+            return normalizeNoTrim(owner.getName()) + "."
+                + normalizeNoTrim(((SQLPropertyExpr) sqlName).getName());
         } else if (sqlName instanceof SQLIdentifierExpr) {
-            return normalize(((SQLIdentifierExpr) sqlName).getName());
+            return normalizeNoTrim(((SQLIdentifierExpr) sqlName).getName());
         } else if (sqlName instanceof SQLCharExpr) {
             return ((SQLCharExpr) sqlName).getText();
         } else if (sqlName instanceof SQLMethodInvokeExpr) {
-            return normalize(((SQLMethodInvokeExpr) sqlName).getMethodName());
+            return normalizeNoTrim(((SQLMethodInvokeExpr) sqlName).getMethodName());
         } else if (sqlName instanceof MySqlOrderingExpr) {
             return getSqlName(((MySqlOrderingExpr) sqlName).getExpr());
         } else {

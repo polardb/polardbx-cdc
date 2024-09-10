@@ -14,11 +14,11 @@
 -- Current Database: `polardbx_meta_db`
 --
 
-CREATE
-DATABASE /*!32312 IF NOT EXISTS */ `polardbx_meta_db` /*!40100 DEFAULT CHARACTER SET utf8 */;
+-- CREATE
+-- DATABASE /*!32312 IF NOT EXISTS */ `polardbx_meta_db` /*!40100 DEFAULT CHARACTER SET utf8 */;
 
-USE
-`polardbx_meta_db`;
+-- USE
+-- `polardbx_meta_db`;
 
 --
 -- Table structure for table `__test_sequence`

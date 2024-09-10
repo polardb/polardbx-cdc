@@ -59,14 +59,14 @@ public class CdcFile implements Comparable<CdcFile> {
     }
 
     public long size() {
-        if (record != null) {
+        if (record != null && record.getLogSize() != 0) {
             return record.getLogSize();
         }
         return fileSystem.size(name);
     }
 
     public String getCreatedTime() {
-        if (record != null) {
+        if (record != null && record.getGmtCreated() != null) {
             return dataFormat.format(record.getGmtCreated());
         }
 
@@ -74,7 +74,7 @@ public class CdcFile implements Comparable<CdcFile> {
     }
 
     public String getLastModifyTime() {
-        if (record != null) {
+        if (record != null && record.getGmtModified() != null) {
             return dataFormat.format(record.getGmtModified());
         }
 
@@ -83,7 +83,7 @@ public class CdcFile implements Comparable<CdcFile> {
 
     // TODO: add binlogReader to get first event
     public String getFirstEventTime() {
-        if (record != null) {
+        if (record != null && record.getLogBegin() != null) {
             return dataFormat.format(record.getLogBegin());
         }
 
@@ -92,7 +92,7 @@ public class CdcFile implements Comparable<CdcFile> {
 
     // TODO: add binlogReader to get last event
     public String getLastEventTime() {
-        if (record != null) {
+        if (record != null && record.getLogEnd() != null) {
             return dataFormat.format(record.getLogEnd());
         }
 
@@ -101,7 +101,7 @@ public class CdcFile implements Comparable<CdcFile> {
 
     // TODO: add binlogReader to get last tso
     public String getLastTso() {
-        if (record != null) {
+        if (record != null && record.getLastTso() != null) {
             return record.getLastTso();
         }
 

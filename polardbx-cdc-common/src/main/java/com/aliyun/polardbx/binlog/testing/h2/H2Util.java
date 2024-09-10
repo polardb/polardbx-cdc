@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.testing.h2;
 
+import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLDataType;
 import com.alibaba.polardbx.druid.sql.ast.SQLDataTypeImpl;
 import com.alibaba.polardbx.druid.sql.ast.SQLIndexDefinition;
@@ -23,8 +24,10 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableElement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLUseStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlUnique;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlLockTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlTableIndex;
@@ -154,9 +157,17 @@ public class H2Util {
         }
 
         SQLStatement sqlStatement = parseSQLStatement(sql);
+        if (sqlStatement instanceof SQLUseStatement) {
+            return "";
+        }
         if (sqlStatement instanceof SQLCreateDatabaseStatement || sqlStatement instanceof SQLDropDatabaseStatement) {
+            if (sqlStatement instanceof SQLCreateDatabaseStatement) {
+                SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) sqlStatement;
+                createDatabaseStatement.setIfNotExists(true);
+                sql = createDatabaseStatement.toString();
+            }
             //h2 不支持 database key word
-            return StringUtils.replaceIgnoreCase(sql, "DATABASE", "SCHEMA");
+            return "";
         } else if (sqlStatement instanceof MySqlCreateTableStatement) {
             MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) sqlStatement;
             createTableStatement.setPartitioning(null);
@@ -164,6 +175,7 @@ public class H2Util {
             createTableStatement.setTablePartitionBy(null);
             createTableStatement.getTableOptions().clear();
             createTableStatement.setAutoSplit(null);
+            String tableName = SQLUtils.normalize(createTableStatement.getTableName());
             Iterator<SQLTableElement> it = createTableStatement.getTableElementList().iterator();
             while (it.hasNext()) {
                 SQLTableElement el = it.next();
@@ -172,7 +184,12 @@ public class H2Util {
                     it.remove();
                 } else if (el instanceof MySqlKey) {
                     if (!(el instanceof MySqlPrimaryKey)) {
-                        it.remove();
+                        if (el instanceof MySqlUnique) {
+                            ((MySqlKey) el).setName(
+                                tableName + "_" + SQLUtils.normalize(((MySqlKey) el).getName().getSimpleName()));
+                        } else {
+                            it.remove();
+                        }
                     } else {
                         //h2 not support USING BTREE
                         SQLIndexDefinition indexDefinition = ((MySqlPrimaryKey) el).getIndexDefinition();

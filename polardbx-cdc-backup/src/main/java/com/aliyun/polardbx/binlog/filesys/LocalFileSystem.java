@@ -17,6 +17,7 @@ package com.aliyun.polardbx.binlog.filesys;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 
@@ -33,7 +34,9 @@ import java.util.List;
 @Slf4j
 public class LocalFileSystem implements IFileSystem {
     private final String fullPath;
+    @Getter
     private final String group;
+    @Getter
     private final String stream;
 
     public LocalFileSystem(String rootPath, String group, String stream) {

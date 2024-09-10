@@ -97,6 +97,11 @@ public class BinlogDumpTest extends BaseTestCase {
             res.add(Pair.of(allFiles.get(start), allFiles.get(end)));
         }
 
+        // 测试dump请求的filename为空的情况
+        if (!usingBinlogX) { // filename为空请求单流的第一个文件
+            res.add(Pair.of("", allFiles.get(1)));
+        }
+
         log.info("all dump jobs:{}", res);
 
         return res;

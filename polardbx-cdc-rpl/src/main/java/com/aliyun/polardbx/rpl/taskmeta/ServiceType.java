@@ -46,6 +46,6 @@ public enum ServiceType {
     // 关闭full_copy的check，防止超大表count超时
     public static boolean supportRunningCheck(ServiceType type) {
         return type != REPLICA_FULL && type != REPLICA_INC &&
-            type != FULL_COPY;
+            type != FULL_COPY && type != FULL_VALIDATION && type != REPLICA_FULL_VALIDATION;
     }
 }

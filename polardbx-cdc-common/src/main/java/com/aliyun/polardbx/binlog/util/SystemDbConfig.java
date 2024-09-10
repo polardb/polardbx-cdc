@@ -46,7 +46,7 @@ public class SystemDbConfig {
     private static final Logger logger = LoggerFactory.getLogger(SystemDbConfig.class);
 
     private static final String UPSERT_SQL =
-        "replace into `binlog_system_config`(`config_key`, `config_value`) values(?, ?)";
+        "insert into `binlog_system_config`(`config_key`, `config_value`) values(?, ?) ON DUPLICATE KEY UPDATE `config_value`=VALUES(`config_value`)";
     private static final String UPDATE_SQL =
         "update `binlog_system_config` set `config_value`=? where config_key=?";
 

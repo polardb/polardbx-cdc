@@ -214,7 +214,7 @@ public class ImportLogEventConvert extends LogEventConvert {
 
             // 根据 filter 的 rewriteDbs 重写 DbName
             String rewriteDbName = filter.getRewriteDb(table.getDbName(), action);
-            String rewriteTableName = filter.getRewriteTable(table.getTableName());
+            String rewriteTableName = filter.getRewriteTable(table.getDbName(), table.getTableName());
 
             // 过滤条件
             // 为有效逻辑server id
@@ -276,7 +276,9 @@ public class ImportLogEventConvert extends LogEventConvert {
                     fieldMeta.isUnsigned(),
                     fieldMeta.isNullable(),
                     fieldMeta.isKey(),
-                    fieldMeta.isUnique());
+                    fieldMeta.isUnique(),
+                    fieldMeta.isGenerated(),
+                    fieldMeta.isImplicitPk());
                 dbmsColumns.add(column);
             }
 

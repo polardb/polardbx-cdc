@@ -33,6 +33,22 @@ import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.DependencyCh
 public class ParallelSchemaApplierTest extends BaseTest {
 
     @Test
+    public void testIsSyncPoint() {
+        ParallelSchemaApplier applier = new ParallelSchemaApplier() {
+            @Override
+            protected void initMaxDdlTsoCheckPoint() {
+            }
+        };
+
+        String syncPointOriginalDdl = "CALL trigger_sync_point_trx()";
+        Assert.assertTrue(applier.isSyncPoint(syncPointOriginalDdl, "polardbx"));
+        Assert.assertFalse(applier.isSyncPoint(syncPointOriginalDdl, "d1"));
+
+        String otherProcedure = "CALL some_procedure()";
+        Assert.assertFalse(applier.isSyncPoint(otherProcedure, "polardbx"));
+    }
+
+    @Test
     public void testIsCrossDatabase() {
         ParallelSchemaApplier applier = new ParallelSchemaApplier() {
             @Override

@@ -43,6 +43,7 @@ public class TransEntity implements Serializable {
     public long stopLogPos;
     public boolean isCdcSingle;
     public boolean heartbeat = false;
+    public boolean syncPoint = false;
     public String sourceCdcSchema;
     public String groupId;
 
@@ -75,6 +76,9 @@ public class TransEntity implements Serializable {
 
     // persist flag
     public boolean shouldPersist;
+
+    // 如果为true，sync point 进行assert时忽略
+    public boolean syncPointCheckIgnoreFlag = false;
 
     @SneakyThrows
     public byte[] serialize() {

@@ -19,6 +19,7 @@ import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.ConfigPropMap;
 import com.aliyun.polardbx.binlog.util.EnvPropMap;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
+import com.aliyun.polardbx.binlog.util.SQLUtils;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -214,14 +215,22 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
         }
     }
 
-    private boolean isLeaderAndAvailable() {
-        try (Connection conn = metaDbDataSource.getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute("CREATE TEMPORARY TABLE IF NOT EXISTS binlog_leader_test(id int)");
-            stmt.execute("DROP TEMPORARY TABLE IF EXISTS binlog_leader_test");
-            return true;
-        } catch (Throwable e) {
-            log.info("this is not leader or leader not available, url:{}", metaDbDataSource.getUrl(), e);
-            return false;
+    public boolean isLeaderAndAvailable() {
+        if (Boolean.parseBoolean(
+            ConfigPropMap.getPropertyValue(ConfigKeys.BINLOG_META_LEADER_DETECT_BY_DDL_MODE_ENABLE))) {
+            try {
+                return SQLUtils.isLeaderByDdl(metaDbDataSource);
+            } catch (Throwable e) {
+                log.info("this is not leader or leader not available, url:{}", metaDbDataSource.getUrl(), e);
+                return false;
+            }
+        } else {
+            try {
+                return SQLUtils.isLeaderBySqlQuery(metaDbDataSource);
+            } catch (Throwable e) {
+                log.info("this is not leader or leader not available, url:{}", metaDbDataSource.getUrl(), e);
+                return false;
+            }
         }
     }
 

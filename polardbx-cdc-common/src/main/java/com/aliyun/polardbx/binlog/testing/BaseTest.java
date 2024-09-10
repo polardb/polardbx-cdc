@@ -73,7 +73,6 @@ public class BaseTest {
 
     private void initConfig() {
         configProvider = new ConfigProvider();
-        DynamicApplicationConfig.setConfigDataProvider(configProvider);
     }
 
     public static class ConfigProvider implements IConfigDataProvider {
@@ -81,15 +80,11 @@ public class BaseTest {
 
         @Override
         public String getValue(String key) {
-            if (CONFIG_MAP.containsKey(key)) {
-                return CONFIG_MAP.get(key);
-            } else {
-                return SpringContextHolder.getPropertiesValue(key);
-            }
+            return DynamicApplicationConfig.getValue(key);
         }
 
         public void setValue(String key, String value) {
-            CONFIG_MAP.put(key, value);
+            DynamicApplicationConfig.setValue(key, value);
         }
     }
 }

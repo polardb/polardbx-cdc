@@ -204,11 +204,11 @@ public class LogFileReader {
             int timeout = 10, noData = 0;
             int checkFileStatusInterval = getInt(BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND);
             Timer checkFileStatusTimer = new Timer(checkFileStatusInterval * 1000L);
-            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000);
+            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000000);
             long backPressureSleepTime = getLong(BINLOG_DUMP_BACK_PRESSURE_SLEEP_TIME_US);
             while (true) {
                 if (serverCallStreamObserver.isCancelled()) {
-                    log.warn("remote close...");
+                    log.warn("remote close by cancel...");
                     break;
                 }
 
@@ -217,12 +217,12 @@ public class LogFileReader {
                 if (checkFileStatusTimer.isTimeout() && !dumpReader.checkFileStatus()) {
                     log.warn("binlog file {} has been deleted, dump thread will exit.", dumpReader.fileName);
                     LabEventManager.logEvent(LabEventType.DUMPER_DUMP_LOCAL_FILE_IS_DELETED);
-                    break;
+                    throw new NoSuchFieldException("file has been deleted");
                 }
 
                 if (serverCallStreamObserver.isReady()) {
                     if (dumpReader.hasNext()) {
-                        ByteString pack = dumpReader.nextDumpPacks();
+                        ByteString pack = dumpReader.nextDumpPacks(serverCallStreamObserver);
                         metrics.incrementTotalDumpBytes(pack.size());
                         if (log.isDebugEnabled()) {
                             DEBUG_INFO("BinlogDump", pack);
@@ -247,11 +247,11 @@ public class LogFileReader {
                 }
             }
         } catch (InterruptedException e) {
-            log.info("remote closed.");
+            log.error("remote closed by interrupted.");
         } catch (Throwable th) {
             log.error("BinlogDump fail {},{} {}", fileName, startPosition, th.getMessage(), th);
             //如果是明确error_code的异常信息，可以以json的形式onError出去，否则show slave status可能不显示
-            Map map = Maps.newHashMap();
+            Map<String, Object> map = Maps.newHashMap();
             map.put("error_code", 1236);
             map.put("error_message", "binlog dump error!");
             final String s = JSON.toJSONString(map);
@@ -291,7 +291,7 @@ public class LogFileReader {
                     if (!binlogSyncReader.checkFileStatus()) {
                         LabEventManager.logEvent(LabEventType.DUMPER_SYNC_LOCAL_FILE_IS_DELETED);
                         log.warn("binlog file {} has been deleted, sync thread will exit.", binlogSyncReader.fileName);
-                        break;
+                        throw new NoSuchFieldException("file has been deleted");
                     } else {
                         lastCheckTime = System.currentTimeMillis();
                     }

@@ -92,6 +92,9 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
             } else if (token.getType() == TxnType.FLUSH_LOG) {
                 logger.info("receive a flush_log token with tso {}", token.getTso());
                 processFlushLogToken(event, token);
+            } else if (token.getType() == TxnType.SYNC_POINT) {
+                logger.info("receive a sync point token with tso {}", token.getTso());
+                processSyncPointToken(event, token);
             } else {
                 throw new PolardbxException("invalid txn token type: " + token.getType());
             }
@@ -130,6 +133,14 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
             event.setMerged(true);
         } else {
             throw new PolardbxException("FlushLog TxnToken must be XaTxn and with tso transaction policy.");
+        }
+    }
+
+    private void processSyncPointToken(MessageEvent event, TxnToken token) {
+        if (token.getXaTxn() && token.getTsoTransaction()) {
+            event.setMerged(true);
+        } else {
+            throw new PolardbxException("SyncPoint TxnToken must be XaTxn and with tso transaction policy.");
         }
     }
 

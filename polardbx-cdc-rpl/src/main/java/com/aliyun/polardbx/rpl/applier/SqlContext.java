@@ -35,6 +35,9 @@ public class SqlContext {
     protected boolean asyncDdl;
     protected String ddlEventSchema;
     protected int ddlParallelSeq = 0;
+    protected boolean syncPoint = false;
+    protected String fpOverrideNow;
+    protected Throwable exception;
 
     public SqlContext(String sql, String dstSchema, String dstTable, List<Serializable> params) {
         this.sql = sql;
@@ -64,6 +67,7 @@ public class SqlContext {
             ", sqlMode='" + sqlMode + '\'' +
             ", asyncDdl=" + asyncDdl +
             ", ddlEventSchema='" + ddlEventSchema + '\'' +
+            ", syncPoint=" + syncPoint + '\'' +
             '}';
     }
 }

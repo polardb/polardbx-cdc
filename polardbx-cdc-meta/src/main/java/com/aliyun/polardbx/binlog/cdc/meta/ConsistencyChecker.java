@@ -82,7 +82,7 @@ public class ConsistencyChecker {
                 MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) stmt;
                 for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
                     //CN只支持一次Rename一张表，直接返回即可
-                    return SQLUtils.normalize(item.getTo().getSimpleName());
+                    return SQLUtils.normalizeNoTrim(item.getTo().getSimpleName());
                 }
             }
         }

@@ -32,7 +32,11 @@ public enum LabEventType {
     TEST_IS_METADB_LEADER("测试是否是leader节点"),
     TASK_TRANSACTION_PERSIST_ERROR("Transaction对象发生持久化异常"),
     EXCEPTION_RE_WRITE_DDL("异常重写DDL"),
-    SQL_STATMENT_DB_TYPE_NOT_MYSQL("FastSql.dbType设置为非MySQL");
+    SQL_STATMENT_DB_TYPE_NOT_MYSQL("FastSql.dbType设置为非MySQL"),
+    SYNC_POINT_COMMIT_WITHOUT_SEQ("开启xa tso事务策略后检测到无TSO的事务"),
+    SYNC_POINT_UNEXPECTED_LOCAL_SEQ("sync point事务后的单机事务tso小于sync point事务tso"),
+    HIDDEN_PK_ENABLE_SWITCH("隐藏主键开关记录"),
+    UPLOAD_UNLOCK_FAIL("上传文件后解锁失败");
 
     private final String desc;
 

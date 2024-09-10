@@ -269,38 +269,43 @@ public class TestModeTwo extends RplBaseTestCase {
         return new Thread(() -> {
 
             while (running.get()) {
-                if (Thread.currentThread().isInterrupted()) {
-                    break;
-                }
+                try {
+                    if (Thread.currentThread().isInterrupted()) {
+                        log.error("dml thread is interrupted!");
+                        break;
+                    }
 
-                int index = new Random().nextInt(dmlTypes.size());
-                DmlType dmlType = dmlTypes.get(index);
+                    int index = new Random().nextInt(dmlTypes.size());
+                    DmlType dmlType = dmlTypes.get(index);
 
-                switch (dmlType) {
-                case INSERT:
-                    insertSingle();
-                    break;
-                case UPDATE:
-                    updateSingle();
-                    break;
-                case DELETE:
-                    deleteSingle();
-                    break;
-                case INSERT_BATCH:
-                    insertBatch();
-                    break;
-                case UPDATE_BATCH:
-                    updateBatch();
-                    break;
-                case DELETE_BATCH:
-                    deleteBatch();
-                    break;
-                default:
-                    throw new PolardbxException("invalid dml type " + dmlType);
-                }
+                    switch (dmlType) {
+                    case INSERT:
+                        insertSingle();
+                        break;
+                    case UPDATE:
+                        updateSingle();
+                        break;
+                    case DELETE:
+                        deleteSingle();
+                        break;
+                    case INSERT_BATCH:
+                        insertBatch();
+                        break;
+                    case UPDATE_BATCH:
+                        updateBatch();
+                        break;
+                    case DELETE_BATCH:
+                        deleteBatch();
+                        break;
+                    default:
+                        throw new PolardbxException("invalid dml type " + dmlType);
+                    }
 
-                if (!isDdlExecuting.get()) {
-                    sleep(dmlIntervalMs);
+                    if (!isDdlExecuting.get()) {
+                        sleep(dmlIntervalMs);
+                    }
+                } catch (Throwable t) {
+                    log.error("execute dml failed!, go to next execute.", t);
                 }
             }
             log.info("dml thread finished!");

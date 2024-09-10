@@ -28,6 +28,7 @@ import com.aliyun.polardbx.binlog.error.TimeoutException;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.merge.MergeSource;
 import com.aliyun.polardbx.binlog.metadata.DdlScope;
+import com.aliyun.polardbx.binlog.protocol.TxnFlag;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.storage.Storage;
@@ -116,12 +117,16 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             .setType(TxnType.DML)
             .setSchema("")
             .setTsoTransaction(transaction.isTsoTransaction())
-            .setXaTxn(transaction.isXa());
+            .setXaTxn(transaction.isXa())
+            .setTxnFlag(transaction.isArchive() ? TxnFlag.ARCHIVE : TxnFlag.NORMAL);
 
         if (transaction.isDescriptionEvent()) {
             process4FormatDescription(txnTokenBuilder, transaction);
         } else if (transaction.isHeartbeat()) {
             txnTokenBuilder.setType(TxnType.META_HEARTBEAT);
+        } else if (transaction.isSyncPoint()) {
+            log.info("set txn type to sync point");
+            txnTokenBuilder.setType(TxnType.SYNC_POINT);
         } else if (transaction.isDDL()) {
             process4Ddl(txnTokenBuilder, transaction);
         } else if (transaction.isStorageChangeCommand()) {

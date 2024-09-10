@@ -29,6 +29,7 @@ import org.springframework.util.CollectionUtils;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 1、优先从binlog_system_config表获取数据。 <br>
@@ -41,6 +42,8 @@ public class DynamicApplicationConfig {
     private static final Map<String, String> propBeforeImageMap = Maps.newHashMap();
     private static final List<String> watchPropList = Lists.newArrayList();
     private static IConfigDataProvider provider = new DbConfigDataProvider();
+
+    private static AtomicBoolean started = new AtomicBoolean(false);
 
     public static String getValue(String key) {
         return provider.getValue(key);
@@ -140,10 +143,25 @@ public class DynamicApplicationConfig {
             propertyChangeListenerList.add(listener);
             watchPropList.add(prop);
         }
+        propBeforeImageMap.put(prop, getValue(prop));
+    }
+
+    public static void removePropListener(String prop, PropertyChangeListener listener) {
+        synchronized (changeListenerMap) {
+            List<PropertyChangeListener> propertyChangeListenerList =
+                changeListenerMap.get(prop);
+            if (!CollectionUtils.isEmpty(propertyChangeListenerList)) {
+                propertyChangeListenerList.remove(listener);
+            }
+            if (CollectionUtils.isEmpty(propertyChangeListenerList)) {
+                watchPropList.remove(prop);
+            }
+        }
 
     }
 
     public static void afterPropSet() {
+        started.set(true);
         for (String prop : watchPropList) {
             propBeforeImageMap.put(prop, getValue(prop));
         }
@@ -176,21 +194,22 @@ public class DynamicApplicationConfig {
                 final String prop = propEntry.getKey();
                 final String oldValue = propEntry.getValue();
                 final String newValue = getValue(prop);
-                if (!StringUtils.equals(newValue, oldValue)) {
-                    List<PropertyChangeListener> listeners = changeListenerMap.get(prop);
-                    if (!CollectionUtils.isEmpty(listeners)) {
-                        listeners.stream().forEach(l -> {
-                            try {
-                                l.onPropertyChange(prop, oldValue, newValue);
-                            } catch (Throwable e) {
-                                log.error(
-                                    "execute prop change listener error [" + prop + ": (" + oldValue + "->" + newValue
-                                        + ")", e);
-                            }
-                        });
-                    }
-                    propBeforeImageMap.put(prop, newValue);
+                if (StringUtils.equals(oldValue, newValue)) {
+                    continue;
                 }
+                List<PropertyChangeListener> listeners = changeListenerMap.get(prop);
+                if (!CollectionUtils.isEmpty(listeners)) {
+                    listeners.stream().forEach(l -> {
+                        try {
+                            l.onPropertyChange(prop, oldValue, newValue);
+                        } catch (Throwable e) {
+                            log.error(
+                                "execute prop change listener error [" + prop + ": (" + oldValue + "->" + newValue
+                                    + ")", e);
+                        }
+                    });
+                }
+                propBeforeImageMap.put(prop, newValue);
             }
         }
     }

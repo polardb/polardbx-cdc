@@ -342,7 +342,7 @@ public class BaseTestCase implements BaseTestMode {
     }
 
     public synchronized Connection getCdcSyncDbConnectionFirst() {
-        return getCdcSyncDbConnectionFirst("mysql");
+        return getCdcSyncDbConnectionFirst(null);
     }
 
     public synchronized Connection getCdcSyncDbConnectionFirst(String db) {
@@ -351,7 +351,9 @@ public class BaseTestCase implements BaseTestMode {
             Connection connection = ConnectionManager.getInstance().getDruidCdcSyncDbConnectionFirst();
             ConnectionWrap connectionWrap = new ConnectionWrap(connection);
             this.cdcSyncDbConnectionsFirst.add(connectionWrap);
-            useDb(connectionWrap, db);
+            if (StringUtils.isNotBlank(db)) {
+                useDb(connectionWrap, db);
+            }
             return connectionWrap;
         } catch (SQLException t) {
             log.error("get MysqlConnectionSecond error!", t);
@@ -360,7 +362,7 @@ public class BaseTestCase implements BaseTestMode {
     }
 
     public synchronized Connection getCdcSyncDbConnectionSecond() {
-        return getCdcSyncDbConnectionSecond("mysql");
+        return getCdcSyncDbConnectionSecond(null);
     }
 
     public synchronized Connection getCdcSyncDbConnectionSecond(String db) {
@@ -369,7 +371,9 @@ public class BaseTestCase implements BaseTestMode {
             Connection connection = ConnectionManager.getInstance().getDruidCdcSyncDbConnectionSecond();
             ConnectionWrap connectionWrap = new ConnectionWrap(connection);
             this.cdcSyncDbConnectionsSecond.add(connectionWrap);
-            useDb(connectionWrap, db);
+            if (StringUtils.isNotBlank(db)) {
+                useDb(connectionWrap, db);
+            }
             return connectionWrap;
         } catch (SQLException t) {
             log.error("get MysqlConnectionSecond error!", t);
@@ -378,7 +382,7 @@ public class BaseTestCase implements BaseTestMode {
     }
 
     public synchronized Connection getCdcSyncDbConnectionThird() {
-        return getCdcSyncDbConnectionThird("mysql");
+        return getCdcSyncDbConnectionThird(null);
     }
 
     public synchronized Connection getCdcSyncDbConnectionThird(String db) {
@@ -387,7 +391,9 @@ public class BaseTestCase implements BaseTestMode {
             Connection connection = ConnectionManager.getInstance().getDruidCdcSyncDbConnectionThird();
             ConnectionWrap connectionWrap = new ConnectionWrap(connection);
             this.cdcSyncDbConnectionsThird.add(connectionWrap);
-            useDb(connectionWrap, db);
+            if (StringUtils.isNotBlank(db)) {
+                useDb(connectionWrap, db);
+            }
             return connectionWrap;
         } catch (SQLException t) {
             log.error("get MysqlConnectionSecond error!", t);

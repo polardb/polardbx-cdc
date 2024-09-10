@@ -15,6 +15,8 @@
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat;
 
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLTruncateStatement;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -33,6 +35,7 @@ import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ReformatContext;
 import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.util.RegexUtil;
+import com.aliyun.polardbx.binlog.util.SQLUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
@@ -141,7 +144,24 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
         if (StringUtils.isBlank(query)) {
             return true;
         }
-        return RegexUtil.match(
-            DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX), query.trim());
+        if (RegexUtil.match(
+            DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX), query.trim())) {
+            return true;
+        }
+
+        try {
+            SQLStatement st = SQLUtils.parseSQLStatement(query);
+            if (st instanceof SQLTruncateStatement) {
+                return true;
+            }
+        } catch (Throwable t) {
+            logger.error("parser physical ddl errory for " + query, t);
+            if (DynamicApplicationConfig.getBoolean(
+                ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_FILTER_IGNORE_PARSE_ERROR)) {
+                return false;
+            }
+            throw t;
+        }
+        return false;
     }
 }

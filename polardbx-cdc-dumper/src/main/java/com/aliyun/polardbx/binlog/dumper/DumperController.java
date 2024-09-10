@@ -81,6 +81,7 @@ public class DumperController {
     private static final Logger logger = LoggerFactory.getLogger(DumperController.class);
 
     private final TaskRuntimeConfig taskRuntimeConfig;
+    private final ExecutionConfig executionConfig;
     private LogFileManagerCollection logFileManagerCollection;
     private CdcServer cdcServer;
     private MetricsManager metricsManager;
@@ -93,6 +94,8 @@ public class DumperController {
 
     public DumperController(TaskConfigProvider taskConfigProvider) {
         this.taskRuntimeConfig = taskConfigProvider.getTaskRuntimeConfig();
+        this.executionConfig =
+            JSONObject.parseObject(taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
         MonitorManager.getInstance().startup();
         this.build();
     }
@@ -137,8 +140,6 @@ public class DumperController {
             break;
         case DumperX:
             groupName = getString(BINLOGX_STREAM_GROUP_NAME);
-            ExecutionConfig executionConfig = JSONObject.parseObject(
-                taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
             streamList = new ArrayList<>(executionConfig.getStreamNameSet());
             break;
         default:
@@ -154,9 +155,12 @@ public class DumperController {
         streamList.forEach(streamId -> metrics.put(streamId, StreamMetrics.getStreamMetrics(streamId)));
         this.backupManager = new BinlogBackupManager(buildStreamContext(), metrics);
         this.cleanManager = new BinlogCleanManager(buildStreamContext());
-        this.metricsManager = new MetricsManager(taskRuntimeConfig.getName(), taskRuntimeConfig.getType());
-        this.cdcServer = new CdcServer(taskRuntimeConfig.getName(), logFileManagerCollection,
-            taskRuntimeConfig.getServerPort(), taskRuntimeConfig.getBinlogTaskConfig(), metricsManager);
+        this.metricsManager = new MetricsManager(executionConfig.getRuntimeVersion(), taskRuntimeConfig.getName(),
+            taskRuntimeConfig.getType());
+        this.cdcServer =
+            new CdcServer(executionConfig.getRuntimeVersion(), taskRuntimeConfig.getType(), taskRuntimeConfig.getName(),
+                logFileManagerCollection, taskRuntimeConfig.getServerPort(), taskRuntimeConfig.getBinlogTaskConfig(),
+                metricsManager);
         this.updateDumperInfo(taskRuntimeConfig);
     }
 
@@ -193,7 +197,8 @@ public class DumperController {
 
     private void buildRole() {
         if (taskRuntimeConfig.getType() == TaskType.Dumper) {
-            boolean dumperLeader = RuntimeLeaderElector.isDumperLeader(taskRuntimeConfig.getName());
+            boolean dumperLeader =
+                RuntimeLeaderElector.isDumperMaster(executionConfig.getRuntimeVersion(), taskRuntimeConfig.getName());
             role = dumperLeader ? DumperType.MASTER.getName() : DumperType.SLAVE.getName();
         } else if (taskRuntimeConfig.getType() == TaskType.DumperX) {
             role = DumperType.XSTREAM.getName();

@@ -176,7 +176,7 @@ public enum MessageType
   }
   public static final com.google.protobuf.Descriptors.EnumDescriptor
       getDescriptor() {
-    return com.aliyun.polardbx.binlog.protocol.TxnStream.getDescriptor().getEnumTypes().get(1);
+    return com.aliyun.polardbx.binlog.protocol.TxnStream.getDescriptor().getEnumTypes().get(2);
   }
 
   private static final MessageType[] VALUES = values();

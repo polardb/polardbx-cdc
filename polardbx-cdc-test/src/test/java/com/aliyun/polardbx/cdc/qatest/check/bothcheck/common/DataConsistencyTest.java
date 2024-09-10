@@ -110,7 +110,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
             }
         }
         Assert.assertEquals(0, testSummary.getFailedTableCount());
-        log.info("forward data check test is finished!");
+        log.info("forward data check test is finished! total table count is " + testSummary.getTotalTableCount());
     }
 
     @Test
@@ -140,7 +140,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
             }
         }
         Assert.assertEquals(0, testSummary.getFailedTableCount());
-        log.info("backward data check test is finished!");
+        log.info("backward data check test is finished! total table count is " + testSummary.getTotalTableCount());
     }
 
     @Test
@@ -161,7 +161,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
             final Function<String, Boolean> databaseFilter = s -> !filterDbs.contains(s);
             final Function<String, Boolean> tableFilter = s -> !filterTables.contains(s);
-            final Function<String, Boolean> tableGroupFilter = s -> !StringUtils.startsWith(s, "oss_");
+            final Function<String, Boolean> tableGroupFilter =
+                s -> !StringUtils.startsWith(s, "oss_") && !StringUtils.startsWith(s, "columnar_");
 
             TableGroupUtils.TableGroupConfig sourceTgs = TableGroupUtils.getAllTableGroupConfig(
                 getDruidConnection(0), databaseFilter, tableFilter, tableGroupFilter);
@@ -198,6 +199,10 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
                         Set<String> diffSet = new HashSet<>();
                         for (String table : tables) {
+                            if (filterTables.contains(d + "." + table)) {
+                                continue;
+                            }
+
                             String createSql = JdbcUtil.executeQueryAndGetStringResult(
                                 "/!+TDDL:cmd_extra(SHOW_IMPLICIT_TABLE_GROUP=true)*/show create table "
                                     + "`" + escape(d) + "`.`" + escape(table) + "`", getDruidConnection(0), 2);
@@ -327,15 +332,16 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
     private Set<String> getIgnoreTableSet() throws SQLException {
         Set<String> sets = new HashSet<>();
-        Connection metaConn = getMetaConnection();
-        ResultSet rs =
-            JdbcUtil.executeQuery("select table_schema, table_name from tables where engine != 'InnoDB'", metaConn);
-        while (rs.next()) {
-            String schema = rs.getString("table_schema");
-            String tableName = rs.getString("table_name");
-            sets.add(schema.toLowerCase() + "." + tableName.toLowerCase());
+        try (Connection metaConn = getMetaConnection()) {
+            ResultSet rs =
+                JdbcUtil.executeQuery("select table_schema, table_name from tables where engine != 'InnoDB'", metaConn);
+            while (rs.next()) {
+                String schema = rs.getString("table_schema");
+                String tableName = rs.getString("table_name");
+                sets.add(schema.toLowerCase() + "." + tableName.toLowerCase());
+            }
+            return sets;
         }
-        return sets;
     }
 
     /**
@@ -493,8 +499,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
      * @return 数据是否一致
      */
     private boolean checkRows(String db, String table) throws Exception {
-        List<String> srcCheckSum = calculateSrcCheckSum(db, table, false, false);
-        List<String> dstCheckSum = calculateDstCheckSum(db, table, false, false);
+        List<String> srcCheckSum = calculateSrcCheckSum(db, table, true, false);
+        List<String> dstCheckSum = calculateDstCheckSum(db, table, true, false);
         DetailReport report = threadLocalReport.get();
         report.setSrcChecksum(srcCheckSum);
         report.setDstChecksum(dstCheckSum);
@@ -504,6 +510,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
             // polardbx无法保证不同物理库的主键不重复，那么，按主键排序时具有相同主键的数据，排序顺序可能不一样，所以需要进行二次校验
             srcCheckSum = calculateSrcCheckSum(db, table, false, true);
             dstCheckSum = calculateDstCheckSum(db, table, false, true);
+            report.setSrcChecksum(srcCheckSum);
+            report.setDstChecksum(dstCheckSum);
             checkResult = ListUtils.isEqualList(srcCheckSum, dstCheckSum);
         }
         return checkResult;
@@ -898,7 +906,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
         return Math.abs(Arrays.hashCode(bytes) % STREAM_NUM);
     }
 
-    private String buildCheckSumSql(String db, String table, List<Pair<String, String>> columnPairs) {
+    public String buildCheckSumSql(String db, String table, List<Pair<String, String>> columnPairs) {
         List<String> columns = columnPairs.stream().map(Pair::getLeft).collect(Collectors.toList());
         String concatStr = buildConcatString(columns);
         String concatHexStr = buildHexString(columnPairs);
@@ -1033,8 +1041,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
         return false;
     }
 
-    private String buildCheckSumWithInSql(String db, String table, List<String> pks,
-                                          List<Pair<String, String>> columnPairs, String in) {
+    public String buildCheckSumWithInSql(String db, String table, List<String> pks,
+                                         List<Pair<String, String>> columnPairs, String in) {
         String pksStr = getEscapedColumns(pks);
         List<String> columns = columnPairs.stream().map(c -> c.getLeft()).collect(Collectors.toList());
         String concatStr = buildConcatString(columns);

@@ -14,7 +14,10 @@
  */
 package com.aliyun.polardbx.rpl.taskmeta;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import lombok.Data;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PERSIST_ENABLED;
 
 /**
  * created by ziyang.lb
@@ -23,7 +26,7 @@ import lombok.Data;
 public class PersistConfig {
     //持久化相关
     private boolean forcePersist = false;
-    private boolean supportPersist = true;
+    private boolean supportPersist = DynamicApplicationConfig.getBoolean(RPL_PERSIST_ENABLED);
     private long transPersistCheckIntervalMs = 1000;
     private double transPersistMemoryThreshold = 0.85;
     private long transPersistRangeMaxItemSize = 10000;

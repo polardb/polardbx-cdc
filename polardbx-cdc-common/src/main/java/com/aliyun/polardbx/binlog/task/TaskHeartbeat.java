@@ -30,7 +30,6 @@ import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.DumperType;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
-import com.aliyun.polardbx.binlog.domain.po.ColumnarTaskConfig;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
@@ -79,7 +78,7 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
         if (role.equals(TaskType.Dumper.name())) {
             BinlogDumperInfoMapper binlogDumperInfoMapper = SpringContextHolder.getObject(BinlogDumperInfoMapper.class);
             BinlogCursor cursor = cursorProviderMap.get(STREAM_NAME_GLOBAL).getLatestFileCursor();
-            final boolean dumperLeader = RuntimeLeaderElector.isDumperLeader(name);
+            final boolean dumperLeader = RuntimeLeaderElector.isDumperMaster(version, name);
 
             // 更新心跳
             int result = binlogDumperInfoMapper.updateDumperHeartbeat(name,

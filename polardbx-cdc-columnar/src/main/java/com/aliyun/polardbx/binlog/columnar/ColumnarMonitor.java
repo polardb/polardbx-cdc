@@ -14,9 +14,11 @@
  */
 package com.aliyun.polardbx.binlog.columnar;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.ColumnarCheckpointsMapper;
 import com.aliyun.polardbx.binlog.dao.ColumnarCheckpointsDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.ColumnarInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.ColumnarCheckpoints;
@@ -33,6 +35,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
@@ -50,6 +53,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS;
+
 /**
  * @author wenki
  */
@@ -62,8 +68,11 @@ public class ColumnarMonitor {
     private final ScheduledExecutorService scheduledExecutorService;
     private volatile boolean running;
 
+    @Getter
     private final AtomicLong lastUpdateTime = new AtomicLong(System.currentTimeMillis());
+    @Getter
     private String lastFile;
+    @Getter
     private long lastPos;
 
     public ColumnarMonitor() {
@@ -116,10 +125,18 @@ public class ColumnarMonitor {
 
         long latency = cdcMs - columnarMs;
 
-        // latency > 10分钟
+        log.info("cdc offset tso:{}, columnar offset tso:{}, latency:{} ms", cdcMs, columnarMs, latency);
+
+        // latency > 阈值
         boolean excessiveLatency = false;
-        if (latency > 60 * 10 * 1000) {
-            MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_EXCESSIVE_LATENCY_WARNING);
+
+        ColumnarInfoMapper columnarInfoMapper = SpringContextHolder.getObject(ColumnarInfoMapper.class);
+        boolean columnarIndexExist = columnarInfoMapper.getColumnarIndexExist();
+
+        if (columnarIndexExist && latency > DynamicApplicationConfig.getInt(
+            COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS)) {
+            log.warn("columnar offset 大于 {} 秒", latency / 1000);
+            MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_COLUMNAR_LATENCY_WARNING, latency / 1000);
             excessiveLatency = true;
         }
 
@@ -127,26 +144,34 @@ public class ColumnarMonitor {
         long currentPos = sourceInfo.pos;
 
         // 如果file和pos都没有改变
-        if (currentFile.equals(lastFile) && currentPos == lastPos) {
+        checkFilePos(columnarIndexExist, currentFile, currentPos, excessiveLatency);
+    }
+
+    public void checkFilePos(boolean columnarIndexExist, String currentFile, long currentPos,
+                             boolean excessiveLatency) {
+        if (columnarIndexExist && currentFile.equals(getLastFile()) && currentPos == getLastPos()) {
             // 检查是否已经过了10分钟
-            if ((System.currentTimeMillis() - lastUpdateTime.get()) >= 10 * 60 * 1000) {
-                // 已经10分钟了，发出警报
-                MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_BINLOG_POSITION_WARNING);
+            long hang = System.currentTimeMillis() - getLastUpdateTime().get();
+            if (hang >= DynamicApplicationConfig.getInt(
+                COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS)) {
+                // 已经超过阈值，发出警报
+                log.warn("columnar binlog 位点已经 {} 秒没有变化", hang / 1000);
+                MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_BINLOG_POSITION_WARNING, hang / 1000);
                 // 同时延迟超过10分钟，上升为严重警报
                 if (excessiveLatency) {
                     MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_FATAL_ERROR,
-                        "Columnar offset延迟和binlog消费位点都已经超过10分钟阈值！");
+                        "Columnar offset延迟和binlog消费位点都已经超过{}秒阈值！", DynamicApplicationConfig.getInt(
+                            COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS));
                 }
                 // 重置更新时间
-                lastUpdateTime.set(System.currentTimeMillis());
+//                lastUpdateTime.set(System.currentTimeMillis());
             }
         } else {
             // 如果file或pos有变化，更新缓存的值和时间戳
             lastFile = currentFile;
             lastPos = currentPos;
-            lastUpdateTime.set(System.currentTimeMillis());
+            getLastUpdateTime().set(System.currentTimeMillis());
         }
-
     }
 
     public long getCdcOffset() throws Throwable {
@@ -165,28 +190,14 @@ public class ColumnarMonitor {
         ManagedChannel channel = ManagedChannelBuilder.forAddress(info.getIp(), info.getPort()).usePlaintext()
             .maxInboundMessageSize(0xFFFFFF + 0xFF).build();
 
-        CdcServiceGrpc.CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
-        CountDownLatch countDownLatch = new CountDownLatch(1);
-        final AtomicLong cdcTso = new AtomicLong();
-        cdcServiceStub.showFullMasterStatus(Request.newBuilder().build(), new StreamObserver<FullMasterStatus>() {
-            @Override
-            public void onNext(FullMasterStatus value) {
-                cdcTso.set(getTsoTimestamp(value.getLastTso()));
-                countDownLatch.countDown();
-            }
+        return getCdcTso(channel);
+    }
 
-            @Override
-            public void onError(Throwable t) {
-                countDownLatch.countDown();
-                throw new PolardbxException(t);
-            }
-
-            @Override
-            public void onCompleted() {
-            }
-        });
-
-        return cdcTso.get();
+    public long getCdcTso(ManagedChannel channel) {
+        CdcServiceGrpc.CdcServiceBlockingStub cdcServiceStub = CdcServiceGrpc.newBlockingStub(channel);
+        FullMasterStatus fullMasterStatus =
+            cdcServiceStub.showFullMasterStatus(Request.newBuilder().setStreamName("").build());
+        return getTsoTimestamp(fullMasterStatus.getLastTso());
     }
 
     public enum CheckPointType {

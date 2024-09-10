@@ -75,7 +75,9 @@ public class GlobalBinlogBootstrapService extends AbstractBinlogBootstrapService
 
     @Override
     protected void afterStopCommon() {
-        binlogConsumerMonitor.stop();
+        if (binlogConsumerMonitor != null) {
+            binlogConsumerMonitor.stop();
+        }
         if (rplLeaderJob != null) {
             rplLeaderJob.stop();
         }

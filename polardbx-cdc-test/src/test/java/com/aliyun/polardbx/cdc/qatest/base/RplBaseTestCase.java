@@ -14,9 +14,24 @@
  */
 package com.aliyun.polardbx.cdc.qatest.base;
 
+import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
+import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
+import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
+import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.DirectLogFetcher;
+import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.relay.HashLevel;
+import com.aliyun.polardbx.binlog.util.LabEventType;
+import com.github.rholder.retry.Retryer;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -26,6 +41,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.lang.reflect.Field;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -38,6 +54,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -52,6 +69,8 @@ import static com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil.usingBinlogX;
 @Slf4j
 public class RplBaseTestCase extends BaseTestCase {
     protected static final String TOKEN_DB = "cdc_token_db";
+
+    protected static final String CDC_COMMON_TEST_DB = "cdc_common_test_db";
 
     protected static final String TOKEN_DB_CREATE_SQL = "CREATE DATABASE IF NOT EXISTS `" + TOKEN_DB + "`";
 
@@ -213,7 +232,18 @@ public class RplBaseTestCase extends BaseTestCase {
         if (compareOneByOne) {
             compareDetailOneByOne(dbName, tableName, dstJdbcTemplate, contextSupplier);
         } else {
-            compareDetailBatch(dbName, tableName, dstJdbcTemplate);
+            Retryer retryer = RetryerBuilder.newBuilder().retryIfException()
+                .withWaitStrategy(WaitStrategies.fixedWait(10, TimeUnit.SECONDS)).withStopStrategy(
+                    StopStrategies.stopAfterAttempt(6)).build();
+            try {
+                retryer.call(() -> {
+                    compareDetailBatch(dbName, tableName, dstJdbcTemplate);
+                    return null;
+                });
+            } catch (Exception e) {
+                throw new PolardbxException("compare detail failed", e);
+            }
+
         }
     }
 
@@ -234,12 +264,17 @@ public class RplBaseTestCase extends BaseTestCase {
         log.info("prepare to compare detail one by one, total record size for check is " + ids.size());
 
         List<Future<?>> futures = new ArrayList<>();
+        Retryer<Pair<List<Map<String, Object>>, List<Map<String, Object>>>> retryer =
+            RetryerBuilder.<Pair<List<Map<String, Object>>, List<Map<String, Object>>>>newBuilder().retryIfException()
+                .withWaitStrategy(WaitStrategies.fixedWait(10, TimeUnit.SECONDS)).withStopStrategy(
+                    StopStrategies.stopAfterAttempt(6)).build();
         for (Map<String, Object> map : ids) {
             Future<?> future = compareDetailExecutorService.submit(() -> {
                 Object id = map.get("id");
                 try {
                     Pair<List<Map<String, Object>>, List<Map<String, Object>>> pair =
-                        getTableDetail(dbName, tableName, dstJdbcTemplate, id);
+                        retryer.call(() -> getTableDetail(dbName, tableName, dstJdbcTemplate, id));
+
                     ResultSetComparator comparator = new ResultSetComparator();
                     int result = comparator.compare(pair.getLeft(), pair.getRight());
                     Assert.assertEquals("id <" + id + ">, diff data is " + comparator.getDiffColumns() +
@@ -265,7 +300,7 @@ public class RplBaseTestCase extends BaseTestCase {
         });
 
         if (!failIds.isEmpty()) {
-            log.error("failed ids set is " + failIds.keys());
+            log.error("failed ids set is " + JSON.toJSONString(failIds.keys()));
         }
         Assert.assertEquals("success ids size : " + successIds.size() + ", fail ids size : " + failIds.size(),
             ids.size(), successIds.size());
@@ -357,5 +392,99 @@ public class RplBaseTestCase extends BaseTestCase {
     protected static String randomTableName(String prefix, int suffixLength) {
         String suffix = RandomStringUtils.randomAlphanumeric(suffixLength).toLowerCase();
         return String.format("%s_%s", prefix, suffix);
+    }
+
+    private void waitFlagActivate(boolean flag) throws SQLException {
+        long now = System.currentTimeMillis();
+        String sql = String.format("select * from binlog_lab_event where event_type=%s order by id desc limit 1",
+            LabEventType.HIDDEN_PK_ENABLE_SWITCH.ordinal() + "");
+        long timeout = TimeUnit.MINUTES.toMillis(5);
+        try (Connection conn = getMetaConnection()) {
+            while (System.currentTimeMillis() - now < timeout) {
+                ResultSet rs = JdbcUtil.executeQuery(sql, conn);
+                while (rs.next()) {
+                    String params = rs.getString("params");
+                    if (params.equalsIgnoreCase(String.valueOf(flag))) {
+                        return;
+                    }
+                }
+            }
+        }
+        throw new PolardbxException(String.format("wait flag %s test timeout! ", flag + ""));
+    }
+
+    public void enableCdcConfig(String key, String value) throws SQLException {
+        JdbcUtil.executeSuccess(polardbxConnection, String.format("set cdc global %s = %s", key, value));
+        try {
+            Thread.sleep(TimeUnit.SECONDS.toMillis(5));
+        } catch (InterruptedException e) {
+        }
+        if (key.equalsIgnoreCase(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED)) {
+            waitFlagActivate(Boolean.parseBoolean(value));
+        }
+    }
+
+    public BinlogPosition getMasterBinlogPosition() throws SQLException {
+        ResultSet rs = JdbcUtil.executeQuery("show master status", polardbxConnection);
+        Assert.assertTrue(rs.next());
+        return new BinlogPosition(rs.getString(1), rs.getLong(2), -1, -1);
+    }
+
+    /**
+     * 同步使用callback 来遍历 start 位置到 当前binlog的所有event
+     *
+     * @param start 起始位置
+     * @param callback 回调方法
+     */
+    public void checkBinlogCallback(BinlogPosition start, CheckCallback callback) throws Exception {
+        BinlogPosition endPos = getMasterBinlogPosition();
+        checkBinlogCallback(start, endPos, callback);
+    }
+
+    /**
+     * 同步使用callback 来遍历 start 位置到 end 的所有event
+     *
+     * @param start 起始位置
+     * @param end 结束位置
+     * @param callback 回调方法
+     */
+    public void checkBinlogCallback(BinlogPosition start, BinlogPosition end, CheckCallback callback)
+        throws Exception {
+        LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
+        log.info("search binlog between [{}:{}] to [{}:{}]", start.getFileName(), start.getPosition(),
+            end.getFileName(), end.getPosition());
+        Connection conn = getPolardbxDirectConnection();
+        DirectLogFetcher fetcher = new DirectLogFetcher();
+        try {
+            JdbcUtil.executeSuccess(conn, "set @master_binlog_checksum=1");
+            LogContext lc = new LogContext();
+            lc.setServerCharactorSet(new ServerCharactorSet());
+            lc.setLogPosition(new LogPosition(start.getFileName(), start.getPosition()));
+            Field targetField = ConnectionWrap.class.getDeclaredField("connection");
+            targetField.setAccessible(true);
+            Connection target = (Connection) targetField.get(conn);
+            fetcher.open(target, start.getFileName(), start.getPosition(), -1);
+            while (fetcher.fetch()) {
+                LogBuffer buffer = fetcher.buffer();
+                LogEvent event = decoder.decode(buffer, lc);
+                if (event == null) {
+                    continue;
+                }
+                callback.doCheck(event, lc);
+                int cmp =
+                    org.apache.commons.lang3.StringUtils.compare(lc.getLogPosition().getFileName(), end.getFileName());
+                if (cmp == 0
+                    && event.getLogPos() >= end.getPosition() || cmp > 0) {
+                    break;
+                }
+            }
+        } finally {
+            conn.close();
+            fetcher.close();
+        }
+    }
+
+    public interface CheckCallback {
+        void doCheck(LogEvent event, LogContext context);
     }
 }

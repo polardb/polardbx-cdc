@@ -52,6 +52,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_IGNORE_APPLY_ERROR;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES;
@@ -288,22 +289,22 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
             SQLStatement sqlStatement = parseSQLStatement(ddl);
             if (sqlStatement instanceof SQLCreateTableStatement) {
                 SQLCreateTableStatement sqlCreateTableStatement = (SQLCreateTableStatement) sqlStatement;
-                return SQLUtils.normalize(sqlCreateTableStatement.getTableName());
+                return SQLUtils.normalizeNoTrim(sqlCreateTableStatement.getTableName());
             } else if (sqlStatement instanceof SQLDropTableStatement) {
                 SQLDropTableStatement sqlDropTableStatement = (SQLDropTableStatement) sqlStatement;
                 for (SQLExprTableSource tableSource : sqlDropTableStatement.getTableSources()) {
                     //CN只支持一次drop一张表，直接返回即可
-                    return tableSource.getTableName(true);
+                    return normalizeNoTrim(tableSource.getTableName());
                 }
             } else if (sqlStatement instanceof MySqlRenameTableStatement) {
                 MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) sqlStatement;
                 for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
                     //CN只支持一次Rename一张表，直接返回即可
-                    return SQLUtils.normalize(item.getName().getSimpleName());
+                    return SQLUtils.normalizeNoTrim(item.getName().getSimpleName());
                 }
             } else if (sqlStatement instanceof SQLAlterTableStatement) {
                 SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
-                return SQLUtils.normalize(sqlAlterTableStatement.getTableName());
+                return SQLUtils.normalizeNoTrim(sqlAlterTableStatement.getTableName());
             }
         } catch (Throwable t) {
             logger.error("parse table from ddl sql failed.", t);

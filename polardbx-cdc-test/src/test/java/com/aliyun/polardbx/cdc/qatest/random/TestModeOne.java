@@ -733,6 +733,8 @@ public class TestModeOne extends RplBaseTestCase {
                     insertSingle(false);
                 }
             }
+        } catch (Throwable t) {
+            log.error("truncate error!!", t);
         }
     }
 

@@ -15,14 +15,14 @@
 package com.aliyun.polardbx.binlog.extractor.filter;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import com.aliyun.polardbx.binlog.util.RegexUtil;
 import org.junit.Assert;
 import org.junit.Test;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX;
 
-public class RegexUtilTest extends BaseTest {
+public class RegexUtilTest extends BaseTestWithGmsTables {
 
     private static final String REGEX_PATTERNS = "pattern";
     private static final String REGEX_STRING = "regex_string";
@@ -87,6 +87,7 @@ public class RegexUtilTest extends BaseTest {
         Assert.assertFalse(RegexUtil.match(regexString, drds14));
         Assert.assertFalse(RegexUtil.match(regexString, drds15));
         Assert.assertFalse(RegexUtil.match(regexString, drds16));
+
     }
 
     @Test

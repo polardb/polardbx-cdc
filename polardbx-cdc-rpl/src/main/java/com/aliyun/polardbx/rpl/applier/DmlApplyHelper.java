@@ -23,7 +23,6 @@ import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.common.DataCompareUtil;
-import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.DbMetaCache;
@@ -35,10 +34,8 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
-import javax.sql.DataSource;
 import java.io.Serializable;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
@@ -50,7 +47,6 @@ import java.util.Random;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 import static com.aliyun.polardbx.rpl.applier.SqlContextExecutor.execUpdate;
-import static com.aliyun.polardbx.rpl.applier.SqlContextExecutor.logExecUpdateDebug;
 import static com.aliyun.polardbx.rpl.taskmeta.ConflictType.DUPLICATED;
 import static com.aliyun.polardbx.rpl.taskmeta.ConflictType.UPDATE_MISSED;
 
@@ -223,39 +219,35 @@ public class DmlApplyHelper {
             }
             paramsList.add(params);
         }
-        if (StringUtils.isBlank(dstTbInfo.getSqlTemplate().get(insertMode))) {
-            StringBuilder nameSqlSb = new StringBuilder();
-            StringBuilder valueSqlSb = new StringBuilder();
-            valueSqlSb.append("(");
-            Iterator<? extends DBMSColumn> it = columns.iterator();
-            while (it.hasNext()) {
-                DBMSColumn column = it.next();
-                nameSqlSb.append(repairDMLName(column.getName()));
-                valueSqlSb.append("?");
-                if (it.hasNext()) {
-                    nameSqlSb.append(',');
-                    valueSqlSb.append(',');
-                }
+        StringBuilder nameSqlSb = new StringBuilder();
+        StringBuilder valueSqlSb = new StringBuilder();
+        valueSqlSb.append("(");
+        Iterator<? extends DBMSColumn> it = columns.iterator();
+        while (it.hasNext()) {
+            DBMSColumn column = it.next();
+            nameSqlSb.append(repairDMLName(column.getName()));
+            valueSqlSb.append("?");
+            if (it.hasNext()) {
+                nameSqlSb.append(',');
+                valueSqlSb.append(',');
             }
-            valueSqlSb.append(")");
-            String sql;
-            switch (insertMode) {
-            case RplConstants.INSERT_MODE_INSERT_IGNORE:
-                sql = INSERT_IGNORE_SQL;
-                break;
-            case RplConstants.INSERT_MODE_REPLACE:
-                sql = REPLACE_SQL;
-                break;
-            default:
-                sql = SIMPLE_INSERT_SQL;
-                break;
-            }
-            dstTbInfo.getSqlTemplate().put(insertMode,
-                String.format(sql, CommonUtils.escape(dstTbInfo.getSchema()),
-                    CommonUtils.escape(dstTbInfo.getName()), nameSqlSb, valueSqlSb));
         }
-        return new SqlContextV2(dstTbInfo.getSqlTemplate().get(insertMode),
-            dstTbInfo.getSchema(), dstTbInfo.getName(), paramsList);
+        valueSqlSb.append(")");
+        String sql;
+        switch (insertMode) {
+        case RplConstants.INSERT_MODE_INSERT_IGNORE:
+            sql = INSERT_IGNORE_SQL;
+            break;
+        case RplConstants.INSERT_MODE_REPLACE:
+            sql = REPLACE_SQL;
+            break;
+        default:
+            sql = SIMPLE_INSERT_SQL;
+            break;
+        }
+        return new SqlContextV2(String.format(sql, CommonUtils.escape(dstTbInfo.getSchema()),
+            CommonUtils.escape(dstTbInfo.getName()), nameSqlSb, valueSqlSb), dstTbInfo.getSchema(), dstTbInfo.getName(),
+            paramsList);
     }
 
     public static SqlContext getDeleteSqlExecContext(DefaultRowChange rowChange, TableInfo dstTbInfo) {
@@ -381,11 +373,6 @@ public class DmlApplyHelper {
             if (i < whereColumns.size() - 1) {
                 whereSqlSb.append(" AND ");
             }
-
-//            // fill in where column values
-//            if (whereColumnValue != null) {
-//                whereColumnValues.add(whereColumnValue);
-//            }
         }
     }
 
@@ -637,6 +624,23 @@ public class DmlApplyHelper {
         return identifyColumnsIndex;
     }
 
+    public static List<Integer> getPkColumnsIndex(Map<String, List<Integer>> allTbPkColumns,
+                                                        String fullTbName,
+                                                        DefaultRowChange rowChange) throws Exception {
+        if (allTbPkColumns.containsKey(fullTbName)) {
+            return allTbPkColumns.get(fullTbName);
+        }
+
+        TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
+        List<String> pkColumnNames = tbInfo.getPks();
+        List<Integer> pkColumnsIndex = new ArrayList<>();
+        for (String columnName : pkColumnNames) {
+            pkColumnsIndex.add(rowChange.getColumnIndex(columnName));
+        }
+        allTbPkColumns.put(fullTbName, pkColumnsIndex);
+        return pkColumnsIndex;
+    }
+
     public static boolean shouldSerialExecute(DefaultRowChange rowChange) throws Exception {
         TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
         // no pk && not only insert in this batch
@@ -646,7 +650,8 @@ public class DmlApplyHelper {
                 tbInfo.getSchema() + "." + tbInfo.getName(), rowChange.getAction());
             return true;
         }
-        if (rowChange.getAction() == DBMSAction.DELETE) {
+        // may exist uk exchange, so delete must be executed in serial mode.
+        if (rowChange.getAction() == DBMSAction.DELETE && (tbInfo.getUks() != null && !tbInfo.getUks().isEmpty())) {
             return true;
         }
         // has gsi && start with omc_with
@@ -673,5 +678,10 @@ public class DmlApplyHelper {
         }
         allTbWhereColumns.put(fullTbName, whereColumns);
         return whereColumns;
+    }
+
+    public static boolean isNoPkTable(DefaultRowChange rowChange) throws Exception {
+        TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
+        return tbInfo.isNoPkTable();
     }
 }

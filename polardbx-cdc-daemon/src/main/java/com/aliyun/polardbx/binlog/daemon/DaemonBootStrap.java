@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.binlog.daemon;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.RuntimeMode;
@@ -28,9 +29,15 @@ import com.aliyun.polardbx.binlog.daemon.schedule.ColumnarNodeReporter;
 import com.aliyun.polardbx.binlog.daemon.schedule.NodeReporter;
 import com.aliyun.polardbx.binlog.dumper.DumperBootStrap;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
+import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
+import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.concurrent.TimeUnit;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.COMMON_PORTS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_HEARTBEAT_INTERVAL_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
@@ -102,6 +109,7 @@ public class DaemonBootStrap {
 
             RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
             if (runtimeMode == RuntimeMode.LOCAL_SINGLE) {
+                waitForTopologyReady();
                 TaskBootStrap taskBootStrap = new TaskBootStrap();
                 taskBootStrap.setTaskConfigProvider(new TaskConfigProvider("Final"));
                 taskBootStrap.boot(new String[] {TASK_NAME + "=Final"});
@@ -116,4 +124,20 @@ public class DaemonBootStrap {
         }
     }
 
+    public static void waitForTopologyReady() throws InterruptedException {
+        long endTimestamp = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+        while (System.currentTimeMillis() < endTimestamp) {
+            // wait for cluster config create success
+            String preClusterSnapshotStr = SystemDbConfig.getSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY);
+            ClusterSnapshot preClusterSnapshot =
+                JSONObject.parseObject(preClusterSnapshotStr, ClusterSnapshot.class);
+            if (preClusterSnapshot != null && preClusterSnapshot.getVersion() > 1) {
+                // default version is 1,  when topology rebuild success , snapshot version will increment, so we can start task here
+                return;
+            }
+            //topology rebuild need 5 seconds, so we need wait 5 seconds
+            Thread.sleep(5000);
+        }
+        throw new PolardbxException("wait for topology first build failed!");
+    }
 }

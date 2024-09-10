@@ -28,13 +28,16 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -52,17 +55,20 @@ public class DbMetaManager {
     private static final String SHOW_CREATE_TABLE = "SHOW CREATE TABLE `%s`.`%s`";
     private static final String SHOW_TABLES = "SHOW TABLES";
     private static final String PRIMARY = "PRIMARY";
+    private static final boolean enableUk =
+        !DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
 
     private static final boolean isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
 
     public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
                                          HostType hostType) throws SQLException {
-        return getTableInfo(dataSource, schema, tbName, hostType, true);
+        return getTableInfo(dataSource, schema, tbName, hostType, enableUk);
     }
 
     public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
                                          HostType hostType, boolean needUkAndGsi) throws SQLException {
         TableInfo tableInfo = new TableInfo(schema, tbName);
+        buildTableBasicInfo(dataSource, schema, tbName, tableInfo);
         List<ColumnInfo> columns = getTableColumnInfos(dataSource, schema, tbName);
         List<String> pks = getTablePks(dataSource, schema, tbName);
         tableInfo.setColumns(columns);
@@ -159,9 +165,27 @@ public class DbMetaManager {
         }
     }
 
-    /**
-     *
-     */
+    static void buildTableBasicInfo(DataSource dataSource, String schema, String tbName, TableInfo tableInfo)
+        throws SQLException {
+        try (Connection connection = dataSource.getConnection()) {
+            try (ResultSet resultSet = connection.createStatement().executeQuery(String.format(
+                "SELECT * FROM information_schema.TABLES WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'",
+                schema, tbName))) {
+                if (resultSet.next()) {
+                    ResultSetMetaData metaData = resultSet.getMetaData();
+                    for (int i = 1; i <= metaData.getColumnCount(); i++) {
+                        String columnName = metaData.getColumnName(i);
+                        if (columnName.equalsIgnoreCase("ENGINE")) {
+                            String engine = resultSet.getString(i);
+                            tableInfo.setEngine(engine);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private static List<ColumnInfo> getTableColumnInfos(DataSource dataSource, String schema,
                                                         String tbName) throws SQLException {
         List<ColumnInfo> columnList = new ArrayList<>();
@@ -268,26 +292,15 @@ public class DbMetaManager {
         return pks;
     }
 
-    private static List<String> getTableUks(DataSource dataSource, String schema, String tbName) throws SQLException {
-        List<String> uks = new ArrayList<>();
+    public static List<String> getTableUks(DataSource dataSource, String schema, String tbName) throws SQLException {
+        Set<String> ukSet = new HashSet<>();
         Map<String, List<KeyColumnInfo>> ukGroups = getTableUkGroups(dataSource, schema, tbName);
-        int minGroupSize = Integer.MAX_VALUE;
-        String minGroupKey = "";
-        for (String groupKey : ukGroups.keySet()) {
-            int groupSize = ukGroups.get(groupKey).size();
-            if (groupSize < minGroupSize) {
-                minGroupSize = groupSize;
-                minGroupKey = groupKey;
+        for (Iterable<KeyColumnInfo> group : ukGroups.values()) {
+            for (KeyColumnInfo column : group) {
+                ukSet.add(column.getColumnName().toLowerCase());
             }
         }
-
-        if (StringUtils.isNotBlank(minGroupKey)) {
-            for (KeyColumnInfo column : ukGroups.get(minGroupKey)) {
-                uks.add(column.getColumnName().toLowerCase());
-            }
-        }
-
-        return uks;
+        return new ArrayList<>(ukSet);
     }
 
     private static List<String> getTableShardKeys(DataSource dataSource, String tbName) throws SQLException {
@@ -327,8 +340,8 @@ public class DbMetaManager {
     /**
      *
      */
-    private static Map<String, List<KeyColumnInfo>> getTableUkGroups(DataSource dataSource, String schema,
-                                                                     String tbName) throws SQLException {
+    public static Map<String, List<KeyColumnInfo>> getTableUkGroups(DataSource dataSource, String schema,
+                                                                    String tbName) throws SQLException {
         HashMap<String, List<KeyColumnInfo>> ukGroups = new HashMap<>();
 
         Connection conn = null;

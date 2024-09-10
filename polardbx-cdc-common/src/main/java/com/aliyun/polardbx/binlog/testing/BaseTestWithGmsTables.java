@@ -35,7 +35,6 @@ import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 public class BaseTestWithGmsTables extends BaseTest {
 
     protected static final AtomicBoolean GMS_TABLE_INITED = new AtomicBoolean();
-    protected static final String GMS_DB_NAME = "polardbx_meta_db";
 
     @SneakyThrows
     public BaseTestWithGmsTables() {
@@ -68,9 +67,9 @@ public class BaseTestWithGmsTables extends BaseTest {
     protected void truncateGmsTables() throws Exception {
         long start = System.currentTimeMillis();
         try (Connection connection = getGmsDataSource().getConnection()) {
-            List<String> tables = H2Util.showTables(connection, GMS_DB_NAME);
+            List<String> tables = H2Util.showTables(connection, null);
             tables.forEach(
-                t -> executeUpdate(connection, String.format("truncate table `%s`.`%s`", GMS_DB_NAME, escape(t))));
+                t -> executeUpdate(connection, String.format("truncate table `%s`", escape(t))));
         }
         log.warn("successfully truncate gms tables , cost time {} (ms)", System.currentTimeMillis() - start);
     }

@@ -32,6 +32,11 @@
         </encoder>
     </appender>
 
+    <logger name="com.alibaba.otter.canal.parse.index.MetaLogPositionManager" level="ERROR" additivity="false">
+        <appender-ref ref="consoleAppender"/>
+        <appender-ref ref="fileAppender"/>
+    </logger>
+
     <root level="INFO">
         <appender-ref ref="consoleAppender"/>
         <appender-ref ref="fileAppender"/>

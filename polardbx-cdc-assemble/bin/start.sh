@@ -73,7 +73,7 @@ fi
 JAVA_OPTS="${JAVA_OPTS} -XX:+HeapDumpOnOutOfMemoryError"
 JAVA_OPTS="${JAVA_OPTS} -XX:HeapDumpPath=${HOME}/logs"
 JAVA_OPTS="${JAVA_OPTS} -XX:+CrashOnOutOfMemoryError"
-JAVA_OPTS="${JAVA_OPTS} -XX:ErrorFile=${HOME}/hs_err_pid%p.log"
+JAVA_OPTS="${JAVA_OPTS} -XX:ErrorFile=${HOME}/logs/polardbx-binlog/$TASK_NAME/hs_err_pid%p.log"
 
 JAVA_OPTS="${JAVA_OPTS} ${JVM_PARAMS}"
 

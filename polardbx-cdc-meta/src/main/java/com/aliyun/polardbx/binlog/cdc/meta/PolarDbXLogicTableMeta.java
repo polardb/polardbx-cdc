@@ -58,6 +58,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_IGNORE_APPLY_ERROR;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_RECORD_SQL_WITH_EXISTS_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES;
@@ -362,7 +363,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
             if (stmt instanceof MySqlRenameTableStatement) {
                 String renameTo = ((MySqlRenameTableStatement) stmt).getItems().get(0).getTo().getSimpleName();
                 if (r.getLogicTableMeta() != null) {
-                    renameTo = SQLUtils.normalize(renameTo);
+                    renameTo = SQLUtils.normalizeNoTrim(renameTo);
                     r.getLogicTableMeta().setTableName(renameTo);
                     record.setMetaInfo(JSONObject.toJSONString(r));
                 }
@@ -385,7 +386,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         }
         if (stmt instanceof SQLDropTableStatement) {
             for (SQLExprTableSource tableSource : ((SQLDropTableStatement) stmt).getTableSources()) {
-                String tn = tableSource.getTableName(true);
+                String tn = normalizeNoTrim(tableSource.getTableName());
                 Preconditions.checkArgument(StringUtils.equalsIgnoreCase(tn, tableName),
                     "drop table record should be coincident DDL(" + tn + "), History(" + tableName + ")");
                 topologyManager.removeTopology(tso, schema.toLowerCase(), tableName.toLowerCase());

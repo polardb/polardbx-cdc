@@ -87,9 +87,11 @@ public class DefaultCdcExtractHandler implements EventHandle {
         try {
             MySQLDBMSEvent sqldbmsEvent = binlogParser.parse(logEvent, false);
             long now = System.currentTimeMillis();
-            StatMetrics.getInstance().setReceiveDelay(now - logEvent.getWhen() * 1000);
-            StatMetrics.getInstance().addInMessageCount(1);
-            StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
+            if (logEvent.getHeader().getType() != LogEvent.HEARTBEAT_LOG_EVENT) {
+                StatMetrics.getInstance().setReceiveDelay(now - logEvent.getWhen() * 1000);
+                StatMetrics.getInstance().addInMessageCount(1);
+                StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
+            }
             if (sqldbmsEvent == null) {
                 return;
             }

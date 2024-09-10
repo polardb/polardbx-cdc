@@ -27,7 +27,6 @@ import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import com.aliyun.polardbx.rpl.taskmeta.RplServiceManager;
 import com.aliyun.polardbx.rpl.validation.fullvalid.task.ReplicaFullValidTaskManager;
-import com.aliyun.polardbx.rpl.validation.fullvalid.task.ReplicaFullValidType;
 import com.sun.jersey.spi.resource.Singleton;
 import lombok.NonNull;
 import org.slf4j.Logger;
@@ -278,10 +277,10 @@ public class ReplicaApiResource {
     @POST
     @Path("/fullValidation/create")
     public ResultCode<?> createFullValidTask(Map<String, String> params) {
-        // todo by yudong 如果想要检查所有的表呢
         fullValidLogger.info("create full validation task, params:{}", params);
         return ReplicaFullValidTaskManager.createTask(params.get(RplConstants.CHANNEL),
-            params.get(RplConstants.RPL_FULL_VALID_DB), params.get(RplConstants.RPL_FULL_VALID_TB));
+            params.get(RplConstants.RPL_FULL_VALID_DB), params.get(RplConstants.RPL_FULL_VALID_TB),
+            params.get(RplConstants.RPL_FULL_VALID_MODE));
     }
 
     @POST

@@ -33,7 +33,6 @@ public class ColumnarTopologyBuilder {
     private static final Gson GSON = new GsonBuilder().create();
 
     private final String clusterId;
-    public static int totalMem;
 
     public ColumnarTopologyBuilder(String clusterId) {
         this.clusterId = clusterId;
@@ -44,8 +43,6 @@ public class ColumnarTopologyBuilder {
 
         int vcpu = containerList.get(0).getCapability().getVirCpu();
         int mem = containerList.get(0).getCapability().getFreeMemMbWithoutRatio();
-
-        totalMem = calculateHeapMemory(mem);
 
         // Columnar
         int leaderCnt = 0;
@@ -68,7 +65,7 @@ public class ColumnarTopologyBuilder {
         return result;
     }
 
-    private static int calculateHeapMemory(int freeMem) {
+    public static int calculateHeapMemory(Long freeMem) {
         int heapMemory;
         if (freeMem < 2048) {
             heapMemory = 1024;

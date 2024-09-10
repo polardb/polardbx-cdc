@@ -51,6 +51,12 @@ public class LogEventUtil {
      */
     private static final String BEGIN = "BEGIN";
     private static final String COMMIT = "COMMIT";
+    public static final String SYNC_POINT_PROCEDURE_NAME = "trigger_sync_point_trx";
+    public static final String SYNC_POINT_PRIVATE_DDL_SQL =
+        "CALL " + SYNC_POINT_PROCEDURE_NAME + "()";
+
+    private static final String XID_FLAG_NORMAL = "1";
+    private static final String XID_FLAG_ARCHIVE = "3";
 
     public static boolean isTransactionEvent(QueryLogEvent event) {
         String query = event.getQuery();
@@ -80,7 +86,12 @@ public class LogEventUtil {
 
     public static boolean isValidXid(String xid) {
         String flag = StringUtils.substringAfterLast(xid, ",");
-        return "1".equals(flag);
+        return XID_FLAG_NORMAL.equals(flag) || XID_FLAG_ARCHIVE.equals(flag);
+    }
+
+    public static boolean isArchiveXid(String xid) {
+        String flag = StringUtils.substringAfterLast(xid, ",");
+        return XID_FLAG_ARCHIVE.equals(flag);
     }
 
     public static Long getTranIdFromXid(String xid, String encoding) throws Exception {

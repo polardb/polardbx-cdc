@@ -24,7 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.rpl.validation.common.ValidationUtil.escape;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 
 /**
  * Validation SQL generator per table
@@ -80,7 +80,9 @@ public class ValSQLGenerator {
             SqlContextBuilder.buildRangeQueryContext(sqlBeforeWhere, null, srcTableInfo.getPks(), lowerBounds,
                 upperBounds);
 
-        log.info("batch check sql:{}, params:{}", result.sql, result.params);
+        if (log.isDebugEnabled()) {
+            log.debug("batch check sql:{}, params:{}", result.sql, result.params);
+        }
 
         return result;
     }
@@ -111,7 +113,9 @@ public class ValSQLGenerator {
             SqlContextBuilder.buildRangeQueryContext(sqlBeforeWhere, sqlAfterWhere, srcTableInfo.getPks(), lowerBounds,
                 upperBounds);
 
-        log.info("row check sql:{}, params:{}", result.sql, result.params);
+        if (log.isDebugEnabled()) {
+            log.debug("row check sql:{}, params:{}", result.sql, result.params);
+        }
 
         return result;
     }
@@ -130,7 +134,9 @@ public class ValSQLGenerator {
         SqlContextBuilder.SqlContext result =
             SqlContextBuilder.buildPointQueryContext(sqlBeforeWhere, tableInfo.getKeyList(), keyVal);
 
-        log.info("point select sql:{}, params:{}", result.sql, result.params);
+        if (log.isDebugEnabled()) {
+            log.debug("point select sql:{}, params:{}", result.sql, result.params);
+        }
 
         return result;
     }
@@ -155,7 +161,9 @@ public class ValSQLGenerator {
         String sql =
             String.format(REPLACE_INTO_TEMPLATE, CommonUtils.tableName(dbName, tableName), columnNamesStr, valuesSb);
 
-        log.info("replace into sql:{}", sql);
+        if (log.isDebugEnabled()) {
+            log.debug("replace into sql:{}", sql);
+        }
 
         return new SqlContextBuilder.SqlContext(sql, row);
     }
@@ -168,7 +176,9 @@ public class ValSQLGenerator {
         SqlContextBuilder.SqlContext sqlContext =
             SqlContextBuilder.buildPointQueryContext(sqlBeforeWhere, tableInfo.getKeyList(), keyVal);
 
-        log.info("point delete sql:{}", sqlContext.getSql());
+        if (log.isDebugEnabled()) {
+            log.debug("point delete sql:{}", sqlContext.getSql());
+        }
 
         return sqlContext;
     }

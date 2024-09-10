@@ -17,7 +17,7 @@ package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.format.field.Field;
 import com.aliyun.polardbx.binlog.format.field.MakeFieldFactory;
-import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -27,7 +27,7 @@ import java.math.BigDecimal;
 /**
  *
  */
-public class RowDataRebuildLoggerTest extends BaseTest {
+public class RowDataRebuildLoggerTest extends BaseTestWithGmsTables {
 
     @Test
     public void testEnum() {

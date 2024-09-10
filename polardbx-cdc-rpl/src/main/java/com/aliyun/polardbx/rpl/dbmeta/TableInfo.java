@@ -15,8 +15,8 @@
 package com.aliyun.polardbx.rpl.dbmeta;
 
 import lombok.Data;
-import org.springframework.util.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.util.CollectionUtils;
 
 import java.sql.Types;
 import java.util.ArrayList;
@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
  */
 @Data
 public class TableInfo {
+    public static final String ENGINE_TYPE_MYISAM = "MyISAM";
+    public static final String ENGINE_TYPE_INNODB = "InnoDB";
 
     private String schema;
     private String name;
@@ -47,6 +49,7 @@ public class TableInfo {
     private Map<Integer, String> sqlTemplate = new HashMap<>(4);
     private boolean hasGeneratedUk;
     private int gsiNum;
+    private String engine;
 
     public TableInfo(String schema, String name) {
         this.schema = schema;
@@ -136,5 +139,9 @@ public class TableInfo {
             }
         }
         return Types.NULL;
+    }
+
+    public boolean isNoPkTable() {
+        return CollectionUtils.isEmpty(pks);
     }
 }

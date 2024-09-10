@@ -97,8 +97,8 @@ public class RemoteFileSystem implements IFileSystem {
         List<CdcFile> result = new ArrayList<>();
         List<BinlogOssRecord> records = recordService.getRecordsOfExistingFiles(group, stream, clusterId);
         int preserveDays = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_FILE_PRESERVE_DAYS);
-        // fix #52758531 避免正在dump的文件被清理掉
-        Date expireTime = new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(preserveDays - 1));
+        // 返回未过期的文件。虽然过期文件仍然可能存在oss上没被清理，但这里认为其已经对外不可见。
+        Date expireTime = new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(preserveDays));
         for (BinlogOssRecord r : records) {
             if (r.getGmtModified().before(expireTime)) {
                 continue;

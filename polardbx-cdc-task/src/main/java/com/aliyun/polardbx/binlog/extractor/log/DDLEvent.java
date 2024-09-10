@@ -20,11 +20,15 @@ import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
+import lombok.EqualsAndHashCode;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.math.NumberUtils;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DDL_ALTER_IMPLICIT_TABLE_GROUP_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DDL_ALTER_MANUALLY_TABLE_GROUP_ENABLED;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 
+@EqualsAndHashCode
 public class DDLEvent implements HandlerEvent {
 
     private DDLRecord ddlRecord;
@@ -150,4 +154,14 @@ public class DDLEvent implements HandlerEvent {
     public void setData(byte[] data) {
         this.data = data;
     }
+
+    public Long getServerId() {
+        DDLExtInfo ddlExtInfo = getDdlRecord().getExtInfo();
+        if (ddlExtInfo != null && StringUtils.isNotBlank(ddlExtInfo.getServerId()) && NumberUtils.isCreatable(
+            ddlExtInfo.getServerId())) {
+            return NumberUtils.createLong(ddlExtInfo.getServerId());
+        }
+        return null;
+    }
+
 }

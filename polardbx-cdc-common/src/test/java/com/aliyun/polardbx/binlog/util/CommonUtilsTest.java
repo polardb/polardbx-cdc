@@ -97,4 +97,15 @@ public class CommonUtilsTest {
             }
         }
     }
+
+    @Test
+    public void testFilterSensitiveInfo() {
+        String logMessage = "create druid datasource occur exception, with url : "
+            + "jdbc:mysql://172.0.0.1:3306?allowPublicKeyRetrieval=true&useSSL=false, "
+            + "user : polardbx, passwd : 111";
+        String filteredLogMessage = CommonUtils.filterSensitiveInfo(logMessage);
+        Assert.assertEquals(filteredLogMessage, "create druid datasource occur exception, with url : "
+            + "jdbc:mysql://172.0.0.1:3306?allowPublicKeyRetrieval=true&useSSL=false,"
+            + " user : polardbx, passwd : *****");
+    }
 }

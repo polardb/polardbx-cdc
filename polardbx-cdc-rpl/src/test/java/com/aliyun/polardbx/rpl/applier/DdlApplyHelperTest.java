@@ -29,7 +29,9 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.Map;
 import java.util.UUID;
 
 import static com.aliyun.polardbx.rpl.applier.DdlApplyHelper.getDdlRouteMode;
@@ -331,4 +333,50 @@ public class DdlApplyHelperTest extends RplWithGmsTablesBaseTest {
         String result = tryAttachAsyncDdlHints(sql, Long.MAX_VALUE);
         Assert.assertEquals(sql, result);
     }
+
+    @Test
+    public void testCciCheck() {
+        String ddl =
+            "# POLARX_ORIGIN_SQL=ALTER TABLEGROUP tg2241 SPLIT PARTITION pd INTO (PARTITION p3 VALUES IN (1003) SUBPARTITIONS 2, PARTITION `pd` VALUES IN (DEFAULT) ( SUBPARTITION `pdsp1`, SUBPARTITION `pdsp2`, SUBPARTITION `pdsp3`, SUBPARTITION `pdsp4` )) \n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=0\n";
+        Assert.assertFalse(DdlApplyHelper.isCciDdl(ddl));
+        String ddl2 =
+            "# POLARX_ORIGIN_SQL=/*+TDDL({'extra':{'FORBID_DDL_WITH_CCI':'FALSE'}})*/ ALTER TABLE tT1.cci_tT1 SPLIT PARTITION p2  WITH TABLEGROUP=columnar_tg1489 IMPLICIT\n"
+                + "# POLARX_TSO=723009401408140089617611592296342528000000000000000000\n"
+                + "# POLARX_DDL_ID=7230094005076230208\n"
+                + "# POLARX_DDL_TYPES=CCI";
+
+        Assert.assertTrue(DdlApplyHelper.isCciDdl(ddl2));
+        DefaultQueryLog defaultQueryLog =
+            new DefaultQueryLog("altercciaddpartition", ddl2, new Timestamp(System.currentTimeMillis()), 0, 1);
+        SqlContext context = DdlApplyHelper.getDdlSqlContext(defaultQueryLog, "7230094005076230208",
+            "723009401408140089617611592296342528000000000000000000");
+
+        Assert.assertNull(context);
+    }
+
+    @Test
+    public void testGetVariables() {
+        String ddl =
+            "# POLARX_ORIGIN_SQL=/*+TDDL({'extra':{'FORBID_DDL_WITH_CCI':'FALSE'}})*/ ALTER TABLE tT1.cci_tT1 SPLIT PARTITION p2  WITH TABLEGROUP=columnar_tg1505 IMPLICIT\n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=0\n"
+                + "# POLARX_DDL_TYPES=CCI\n"
+                + "# POLARX_VARIABLES={\"FP_OVERRIDE_NOW\":\"2024-08-18 10:10:10\"}\n";
+        Map<String, Object> variables = DdlApplyHelper.getPolarxVariables(ddl);
+        Assert.assertNotNull(variables);
+        Assert.assertEquals("2024-08-18 10:10:10", variables.get("FP_OVERRIDE_NOW"));
+    }
+
+    @Test
+    public void testIsLocalParitionMissError() {
+        Assert.assertTrue(DdlApplyHelper.isMissLocalPartitionError(new SQLException(
+            "[1879cc30ccc02000][10.1.34.106:3306][cp1_ddl1_1057607069_new]ERR-CODE: [TDDL-4700][ERR_SERVER] server error by local partition p20230922 doesn't exist")));
+
+        Assert.assertFalse(DdlApplyHelper.isMissLocalPartitionError(new SQLException(
+            "[1879cc30ccc02000][10.1.34.106:3306][cp1_ddl1_1057607069_new]ERR-CODE: [TDDL-4700][ERR_SERVER] server error by local partition p2023 0922 doesn't exist")));
+
+    }
+
 }

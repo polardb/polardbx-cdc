@@ -42,7 +42,7 @@ public class BaseFilter {
         return schema;
     }
 
-    public String getRewriteTable(String table) {
+    public String getRewriteTable(String db, String table) {
         return table;
     }
 

@@ -63,6 +63,8 @@ public class DefaultRowChange extends DBMSRowChange {
      */
     protected Map<String, String> separatorMap = new HashMap<>();
 
+    protected boolean hasHiddenPk = false;
+
     public DefaultRowChange() {
     }
 
@@ -133,6 +135,14 @@ public class DefaultRowChange extends DBMSRowChange {
                 changeDataSet = new ArrayList<DBMSRowData>();
             }
         }
+    }
+
+    public boolean isHasHiddenPk() {
+        return hasHiddenPk;
+    }
+
+    public void setHasHiddenPk(boolean hasHiddenPk) {
+        this.hasHiddenPk = hasHiddenPk;
     }
 
     public Map<String, String> getDynamicPluginMap() {

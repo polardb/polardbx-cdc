@@ -108,7 +108,10 @@ public class CdcClient {
         });
 
         context = new LogContext();
-        memoryTableMeta = new ReadonlyTableMeta(metaDbHelper);
+        if (needTableMeta()) {
+            //binary data no need table meta
+            memoryTableMeta = new ReadonlyTableMeta(metaDbHelper);
+        }
         context.setServerCharactorSet(serverCharset);
         FormatDescriptionLogEvent fdl = FormatDescriptionLogEvent.FORMAT_DESCRIPTION_EVENT_5_x;
         fdl.getHeader().setChecksumAlg(LogEvent.BINLOG_CHECKSUM_ALG_CRC32);
@@ -274,7 +277,10 @@ public class CdcClient {
     }
 
     public TableMeta getTableMeta(String schema, String table) {
-        return memoryTableMeta.find(schema, table);
+        if (needTableMeta()) {
+            return memoryTableMeta.find(schema, table);
+        }
+        throw new UnsupportedOperationException();
     }
 
     public void startAsync(String binlogFileName, Long filePosition, IEventHandler handle)
@@ -285,7 +291,9 @@ public class CdcClient {
         this.handle = handle;
         innerInit();
         searchPosition(binlogFileName, filePosition);
-        memoryTableMeta.rollback(startPosition.getRtso());
+        if (needTableMeta()) {
+            memoryTableMeta.rollback(startPosition.getRtso());
+        }
         dataSource.reConnect();
         dataSource.dump(startPosition, logFetcher);
         parseThread = new Thread(this::doParser, "parser-thread");
@@ -294,10 +302,17 @@ public class CdcClient {
         logger.info("start cdc client success");
     }
 
+    private boolean needTableMeta() {
+        return !parser.isBinaryLog();
+    }
+
     private DefaultRowChange processRowsLogEvent(RowsLogEvent rowsLogEvent) throws UnsupportedEncodingException {
-        TableMapLogEvent tableMapLogEvent = rowsLogEvent.getTable();
-        TableMeta tableMeta =
-            memoryTableMeta.find(tableMapLogEvent.getDbName(), tableMapLogEvent.getTableName());
+        TableMeta tableMeta = null;
+        if (needTableMeta()) {
+            TableMapLogEvent tableMapLogEvent = rowsLogEvent.getTable();
+            tableMeta =
+                memoryTableMeta.find(tableMapLogEvent.getDbName(), tableMapLogEvent.getTableName());
+        }
         return parser.parse(tableMeta,
             rowsLogEvent,
             serverCharset.getCharacterSetDatabase());
@@ -331,8 +346,9 @@ public class CdcClient {
                     newDdlBuilder.append(line).append("\n");
                 }
             }
-
-            memoryTableMeta.apply(null, queryLogEvent.getDbName(), queryData, null);
+            if (needTableMeta()) {
+                memoryTableMeta.apply(null, queryLogEvent.getDbName(), queryData, null);
+            }
             eventData = new DefaultQueryLog(queryLogEvent.getDbName(), newDdlBuilder.toString(),
                 new Timestamp(queryLogEvent.getExecTime()), queryLogEvent.getErrorCode(), queryLogEvent.getExecTime());
 
@@ -344,14 +360,25 @@ public class CdcClient {
         String rowsQuery = rowsQueryLogEvent.getRowsQuery();
         String[] parameters = rowsQuery.split("::");
         DBMSEvent eventData = null;
+
         if (StringUtils.contains(parameters[0], "CTS")) {
             String tso = parameters[1];
+            boolean isArchive = false;
+            if (parameters.length > 2) {
+                for (int i = 2; i < parameters.length; i++) {
+                    if (StringUtils.equals(parameters[i], "ARCHIVE")) {
+                        isArchive = true;
+                        break;
+                    }
+                }
+            }
             if (commitEvent != null) {
                 commitEvent.setTso(tso);
                 eventData = commitEvent;
                 commitEvent = null;
             } else if (beginEvent != null) {
                 beginEvent.setTso(tso);
+                beginEvent.setArchive(isArchive);
                 eventData = beginEvent;
                 beginEvent = null;
             } else {
@@ -434,7 +461,10 @@ public class CdcClient {
     }
 
     public boolean isTableMetaInit() {
-        return memoryTableMeta.isInit();
+        if (needTableMeta()) {
+            return memoryTableMeta.isInit();
+        }
+        throw new UnsupportedOperationException();
     }
 
     private void printLog(LogPosition logPosition) {

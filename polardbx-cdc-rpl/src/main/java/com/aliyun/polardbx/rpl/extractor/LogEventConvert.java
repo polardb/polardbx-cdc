@@ -127,6 +127,7 @@ public class LogEventConvert {
     protected FieldMeta rdsImplicitIDFieldMeta;
     protected TableMeta rdsHeartBeatTableMeta;
     protected String nowTso;
+    protected boolean enableSrcLogicalMetaSnapshot;
 
     public LogEventConvert(HostInfo metaHostInfo, BaseFilter filter, BinlogPosition startBinlogPosition,
                            HostType srcHostType) {
@@ -134,6 +135,16 @@ public class LogEventConvert {
         this.filter = filter;
         this.binlogFileName = startBinlogPosition.getFileName();
         this.srcHostType = srcHostType;
+        this.enableSrcLogicalMetaSnapshot = false;
+    }
+
+    public LogEventConvert(HostInfo metaHostInfo, BaseFilter filter, BinlogPosition startBinlogPosition,
+                           HostType srcHostType, boolean enableSrcLogicalMetaSnapshot) {
+        this.metaHostInfo = metaHostInfo;
+        this.filter = filter;
+        this.binlogFileName = startBinlogPosition.getFileName();
+        this.srcHostType = srcHostType;
+        this.enableSrcLogicalMetaSnapshot = enableSrcLogicalMetaSnapshot;
     }
 
     public static DBMSTransactionBegin createTransactionBegin(long threadId) {
@@ -163,9 +174,11 @@ public class LogEventConvert {
             "",
             1,
             2,
+            true,
             null,
             null);
-        this.tableMetaCache = new TableMetaCache(dataSource, srcHostType == HostType.POLARX2);
+        this.tableMetaCache = new TableMetaCache(dataSource,
+            srcHostType == HostType.POLARX2 && enableSrcLogicalMetaSnapshot);
         initMeta();
     }
 
@@ -764,8 +777,10 @@ public class LogEventConvert {
             TableMeta tableMeta = tableMetaCache.getTableMeta(dbName, tbName);
             if (tableMeta.getPrimaryFields().isEmpty() && !tableMeta.getUseImplicitPk()) {
                 if (srcHostType == HostType.RDS) {
-                    // 添加 polarx 隐藏主键
-                    log.info("Add implicit id {} for table {}.{}", RplConstants.RDS_IMPLICIT_ID, dbName, tbName);
+                    // 添加隐藏主键
+                    if (log.isDebugEnabled()) {
+                        log.info("Add implicit id {} for table {}.{}", RplConstants.RDS_IMPLICIT_ID, dbName, tbName);
+                    }
                     tableMeta.addFieldMeta(rdsImplicitIDFieldMeta);
                     tableMeta.setUseImplicitPk(true);
                 }

@@ -296,7 +296,7 @@ public enum MonitorType {
         false
     ),
     COLUMNAR_FATAL_ERROR(
-        "polarx_cdc_binlog_fatal_error",
+        "polarx_columnar_binlog_fatal_error",
         true,
         "Columnar链路异常，已升级为电话报警，请尽快排查, 原报警信息： %s",
         1,
@@ -340,11 +340,11 @@ public enum MonitorType {
         false,
         true
     ),
-    COLUMNAR_EXCESSIVE_LATENCY_WARNING(
-        "polarx_excessive_latency_warning",
+    COLUMNAR_COLUMNAR_LATENCY_WARNING(
+        "polarx_columnar_latency_warning",
         true,
-        "Columnar offset延迟已经超过10分钟，请及时关注",
-        4,
+        "Columnar offset延迟已经超过%s秒，请及时关注",
+        1,
         5,
         false,
         true
@@ -352,8 +352,8 @@ public enum MonitorType {
     COLUMNAR_BINLOG_POSITION_WARNING(
         "polarx_columnar_binlog_position_warning",
         true,
-        "Columnar 消费的binlog position已经10分钟没有变化，请及时关注",
-        4,
+        "Columnar 消费的binlog position已经%s秒没有变化，请及时关注",
+        1,
         5,
         false,
         true

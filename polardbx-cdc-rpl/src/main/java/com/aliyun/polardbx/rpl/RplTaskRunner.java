@@ -239,8 +239,10 @@ public class RplTaskRunner {
             ExtractorConfig extractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(),
                 ExtractorConfig.class);
             boolean isPolarDBX2 = extractorConfig.getHostInfo().getType() == HostType.POLARX2;
+            boolean enableSrcLogicalMetaSnapshot = extractorConfig.isEnableSrcLogicalMetaSnapshot() && isPolarDBX2;
             extractor = new MysqlBinlogExtractor(extractorConfig, extractorConfig.getHostInfo(),
-                isPolarDBX2 ? extractorConfig.getHostInfo() : applierConfig.getHostInfo(), binlogPosition, filter);
+                enableSrcLogicalMetaSnapshot ? extractorConfig.getHostInfo() : applierConfig.getHostInfo(),
+                binlogPosition, filter);
             break;
         case DATA_IMPORT_INC:
             RdsExtractorConfig rdsExtractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(),

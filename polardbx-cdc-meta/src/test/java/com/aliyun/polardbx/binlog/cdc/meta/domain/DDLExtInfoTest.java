@@ -72,4 +72,22 @@ public class DDLExtInfoTest extends BaseTest {
         extInfo = gson.fromJson(extStr, DDLExtInfo.class);
         Assert.assertTrue(extInfo.isGsi());
     }
+
+    @Test
+    public void testVariables() {
+        // fastjson 对gsi 和 isGsi是完全兼容的
+        String extStr =
+            "{\"cci\":false,\"createSql4PhyTable\":\"\",\"ddlScope\":0,\"enableImplicitTableGroup\":true,\"foreignKeysDdl\":false,\"gsi\":false,\"originalDdl\":\"\",\"polarxVariables\":{\"FP_OVERRIDE_NOW\":\"2024-09-20\"},\"sqlMode\":\"STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION\",\"taskId\":1762551824537092096}";
+        DDLExtInfo extInfo = DDLExtInfo.parseExtInfo(extStr);
+        Assert.assertFalse(extInfo.isGsi());
+
+        Assert.assertFalse(extInfo.isCci());
+
+        Assert.assertNotNull(extInfo.getPolarxVariables());
+
+        Assert.assertEquals(1, extInfo.getPolarxVariables().size());
+
+        Assert.assertEquals("2024-09-20", extInfo.getPolarxVariables().get("FP_OVERRIDE_NOW"));
+    }
+
 }

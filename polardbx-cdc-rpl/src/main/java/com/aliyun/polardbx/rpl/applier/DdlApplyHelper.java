@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.rpl.applier;
 
+import com.alibaba.fastjson.JSON;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsExtractHotKey;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsMergePartition;
@@ -28,6 +29,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropPartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableReorgPartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCallStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
@@ -58,6 +60,8 @@ import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.utils.SqlModeUtil;
 import com.aliyun.polardbx.binlog.relay.DdlRouteMode;
+import com.aliyun.polardbx.binlog.service.RplSyncPointService;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.LogUtil;
@@ -66,6 +70,7 @@ import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.dbmeta.DbMetaCache;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.DdlState;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -74,6 +79,7 @@ import lombok.SneakyThrows;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.time.DateFormatUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -88,6 +94,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -102,8 +109,10 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_APPLY_COLUMNAR_ENABL
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_RETRY_INTERVAL_MILLS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_RETRY_MAX_COUNT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_WAIT_ALIGN_INTERVAL_MILLS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_INC_DDL_SKIP_MISS_LOCAL_PARTITION_ERROR;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.canal.LogEventUtil.SYNC_POINT_PROCEDURE_NAME;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.PRIVATE_DDL_DDL_ROUTE_PREFIX;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.PRIVATE_DDL_TSO_PREFIX;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql;
@@ -179,6 +188,10 @@ public class DdlApplyHelper {
                     log.info("ddl sql contains columnar index and will be ignored, sql: {}", sql);
                     return null;
                 }
+            }
+            if (isCciDdl(queryLog.getQuery())) {
+                log.info("ddl sql is cci and will be ignored, sql: {}", queryLog.getQuery());
+                return null;
             }
         }
 
@@ -352,6 +365,11 @@ public class DdlApplyHelper {
                     && !result.getHasIfExistsOrNotExists()) {
                     sqlContext.setSql(sqlContext.getSql().replaceAll("(?i)create role",
                         "create role if not exists"));
+                } else if (result.getSqlStatement() instanceof SQLCallStatement) {
+                    SQLCallStatement stmt = (SQLCallStatement) result.getSqlStatement();
+                    if (SYNC_POINT_PROCEDURE_NAME.equals(stmt.getProcedureName().getSimpleName())) {
+                        sqlContext.setSyncPoint(true);
+                    }
                 }
             default:
                 break;
@@ -411,6 +429,17 @@ public class DdlApplyHelper {
         }
 
         return createTable.toString();
+    }
+
+    public static Map<String, Object> getPolarxVariables(String sql) {
+        Scanner scanner = new Scanner(sql);
+        while (scanner.hasNextLine()) {
+            String line = scanner.nextLine();
+            if (line.startsWith(CommonUtils.PRIVATE_DDL_POLARX_VARIABLES_PREFIX)) {
+                return JSON.parseObject(line.substring(CommonUtils.PRIVATE_DDL_POLARX_VARIABLES_PREFIX.length()));
+            }
+        }
+        return Maps.newHashMap();
     }
 
     public static DdlRouteMode getDdlRouteMode(String sql) {
@@ -580,6 +609,13 @@ public class DdlApplyHelper {
             if (Thread.interrupted()) {
                 throw new InterruptedException();
             }
+
+            if (sqlContext.isSyncPoint()) {
+                processSyncPoint(dbMetaCache.getDataSource("__cdc__"), tso);
+                markDdlSucceed(tso, false);
+                return;
+            }
+
             boolean res;
             if (asyncDdl) {
                 res = executeDdlInternalAsync(dataSource, sqlContext, firstDdl, tso, rplDdl, needAlign, retry);
@@ -592,6 +628,15 @@ public class DdlApplyHelper {
             if (res) {
                 return;
             }
+
+            if (DynamicApplicationConfig.getBoolean(RPL_INC_DDL_SKIP_MISS_LOCAL_PARTITION_ERROR)) {
+                if (isMissLocalPartitionError(sqlContext.getException())) {
+                    log.warn("skip miss local partition error for  : {}, tso : {}", sqlContext.getSql(), tso);
+                    markDdlSucceed(tso, asyncDdl);
+                    return;
+                }
+            }
+
             if (count < retryMaxCount) {
                 retry = true;
                 Thread.sleep(DynamicApplicationConfig.getInt(RPL_DDL_RETRY_INTERVAL_MILLS));
@@ -600,6 +645,10 @@ public class DdlApplyHelper {
                 throw new PolardbxException("ddl execution exceeds max retry times");
             }
         }
+    }
+
+    public static boolean isMissLocalPartitionError(Throwable e) {
+        return e != null && e.getMessage().matches(".*server error by local partition \\w+ doesn't exist.*");
     }
 
     private static boolean executeDdlInternalAsync(DataSource dataSource, SqlContext sqlContext,
@@ -621,6 +670,7 @@ public class DdlApplyHelper {
                     execUpdate(conn, sqlContext);
                 } catch (Exception e) {
                     log.error("ddl execute runs into exception: ", e);
+                    sqlContext.exception = e;
                     return false;
                 }
             }
@@ -630,6 +680,43 @@ public class DdlApplyHelper {
             AsyncDdlMonitor.getInstance().submitNewDdl(rplDdl);
         }
         return true;
+    }
+
+    @SneakyThrows
+    private static void processSyncPoint(DataSource dataSource, String primary_tso) {
+        log.info("prepare to process sync point. primary tso:{}", primary_tso);
+
+        // 等待心跳将DN上的tso推高
+        pushDNLocalSeq(dataSource);
+
+        String secondary_tso = null;
+        try (Connection conn = dataSource.getConnection();
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery("select tso_timestamp()")) {
+            if (rs.next()) {
+                secondary_tso = rs.getString(1);
+            }
+            log.info("success to get tso from gms, secondary tso:{}", secondary_tso);
+        }
+
+        if (secondary_tso != null) {
+            final RplSyncPointService service = getObject(RplSyncPointService.class);
+            service.insert(primary_tso.substring(0, secondary_tso.length()), secondary_tso);
+        }
+    }
+
+    @SneakyThrows
+    private static void pushDNLocalSeq(DataSource dataSource) {
+        long now = System.currentTimeMillis();
+        String nowFormat = DateFormatUtils.format(now, "yyyy-MM-dd HH:mm:ss.SSS");
+        final String sql = String.format(
+            "replace into `__cdc__`.`__cdc_heartbeat__`(id, sname, gmt_modified) values(1, 'heartbeat', '%s')",
+            nowFormat);
+        try (Connection conn = dataSource.getConnection();
+            Statement stmt = conn.createStatement()) {
+            stmt.execute("SET TRANSACTION_POLICY = TSO");
+            stmt.execute(sql);
+        }
     }
 
     @SneakyThrows
@@ -676,6 +763,7 @@ public class DdlApplyHelper {
                 res = true;
             } catch (Exception e) {
                 log.error("ddl execute runs into exception: ", e);
+                sqlContext.exception = e;
             }
         }
         log.info("ddlApply end, result: {}, schema: {}, sql: {}, tso: {}", res, sqlContext.getDstSchema(),
@@ -769,6 +857,17 @@ public class DdlApplyHelper {
         }
 
         return Pair.of(false, true);
+    }
+
+    public static boolean isCciDdl(String ddl) {
+        Scanner scanner = new Scanner(ddl);
+        while (scanner.hasNextLine()) {
+            String next = scanner.nextLine();
+            if (next.startsWith(CommonUtils.PRIVATE_DDL_DDL_TYPES_PREFIX) && next.contains("CCI")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Pair<Boolean, Boolean> tryRemoveColumnarIndexForAlterTable(

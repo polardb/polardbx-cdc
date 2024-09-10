@@ -80,6 +80,14 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
     protected ScheduledExecutorService scheduledExecutorService;
     protected String dnPasswordKey;
     protected boolean useEncryptedPassword;
+    /**
+     * connect to cn node max wait time
+     */
+    protected int maxConnTime;
+    /**
+     * get this datasource connection wait time
+     */
+    protected int maxWaitTime;
 
     public CnDataSource(String dnPasswordKey, boolean useEncryptedPassword) {
         this(dnPasswordKey, useEncryptedPassword, new PoolProperties());
@@ -95,10 +103,14 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
         this.poolProperties = poolProperties;
         this.readWriteLock = new ReentrantReadWriteLock();
         this.seed = new AtomicLong();
-        this.serverAddressFlushInterval =
-            Integer.parseInt(ConfigPropMap.getPropertyValue(ConfigKeys.LATEST_SERVER_ADDRESS_FLUSH_INTERVAL));
-        this.flushAddressSwitch =
-            Boolean.parseBoolean(ConfigPropMap.getPropertyValue(ConfigKeys.METADB_SCAN_SWITCH));
+        this.serverAddressFlushInterval = Integer.parseInt(
+            ConfigPropMap.getPropertyValue(ConfigKeys.LATEST_SERVER_ADDRESS_FLUSH_INTERVAL));
+        this.flushAddressSwitch = Boolean.parseBoolean(
+            ConfigPropMap.getPropertyValue(ConfigKeys.METADB_SCAN_SWITCH));
+        this.maxConnTime = (int) TimeUnit.SECONDS.toMillis(Integer.parseInt(
+            ConfigPropMap.getPropertyValue(ConfigKeys.DATASOURCE_CN_CONNECT_TIMEOUT_IN_SECOND)));
+        this.maxWaitTime = (int) TimeUnit.SECONDS.toMillis(Integer.parseInt(
+            ConfigPropMap.getPropertyValue(ConfigKeys.DATASOURCE_CN_GET_TIMEOUT_IN_SECOND)));
         this.nestedAddresses = new ArrayList<>();
         this.nestedDataSources = CacheBuilder.newBuilder()
             .removalListener(
@@ -117,7 +129,7 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
                 public DataSource load(String address) {
                     PoolProperties newPoolProperties = new PoolProperties();
                     BeanUtils.copyProperties(poolProperties, newPoolProperties);
-                    newPoolProperties.setUrl(String.format(urlTemplate, address));
+                    newPoolProperties.setUrl(String.format(urlTemplate, address, maxConnTime));
                     return new DataSource(newPoolProperties);
                 }
             });
@@ -149,7 +161,7 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
                 return thread;
             });
             scheduledExecutorService
-                .scheduleAtFixedRate(this::scan, SERVER_CHECK_INTERVAL, SERVER_CHECK_INTERVAL, TimeUnit.MILLISECONDS);
+                .scheduleAtFixedRate(this::scan, 10, SERVER_CHECK_INTERVAL, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -214,10 +226,16 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
 
     private void onServerNodeAdd(Set<String> toBeAddedServers) {
         int timeout = DynamicApplicationConfig.getInt(DATASOURCE_CHECK_VALID_TIMEOUT_SEC);
-        Set<String> validServers = toBeAddedServers.stream().filter(s -> {
+        toBeAddedServers.forEach(s -> {
             try (Connection conn = nestedDataSources.getUnchecked(s).getConnection()) {
                 if (conn.isValid(timeout)) {
-                    return true;
+                    try {
+                        readWriteLock.writeLock().lock();
+                        nestedAddresses.add(s);
+                    } finally {
+                        readWriteLock.writeLock().unlock();
+                    }
+                    return;
                 } else {
                     logger.warn("Server node {} is not ready yet, will retry later.", s);
                 }
@@ -225,17 +243,7 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
                 logger.warn("Server node {} is not ready yet, will retry later.", s, t);
             }
             nestedDataSources.invalidate(s);
-            return false;
-        }).collect(Collectors.toSet());
-
-        if (!validServers.isEmpty()) {
-            try {
-                readWriteLock.writeLock().lock();
-                nestedAddresses.addAll(validServers);
-            } finally {
-                readWriteLock.writeLock().unlock();
-            }
-        }
+        });
     }
 
     private void onServerNodeRemove(Set<String> toBeRemovedServerInfoList) {
@@ -276,11 +284,30 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
         return getConnectionInternal(null, null);
     }
 
+    public void waitNestedAddressReady() {
+        long now = System.currentTimeMillis();
+        while (nestedAddresses.isEmpty()) {
+            if (System.currentTimeMillis() - now > maxWaitTime) {
+                throw new PolardbxException(
+                    "wait for server node ready timeout , no server node is ready, please retry later.");
+            }
+            // wait for server node ready
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                throw new PolardbxException("wait for server node ready failed!", e);
+            }
+        }
+    }
+
     private Connection getConnectionInternal(String username, String password) throws SQLException {
         if (proxyDataSource != null) {
             return username == null ? proxyDataSource.getConnection() :
                 proxyDataSource.getConnection(username, password);
         } else {
+
+            waitNestedAddressReady();
+
             try {
                 readWriteLock.readLock().lock();
 
