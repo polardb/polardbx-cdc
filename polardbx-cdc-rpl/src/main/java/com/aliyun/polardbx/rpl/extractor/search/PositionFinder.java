@@ -51,8 +51,7 @@ public class PositionFinder implements SinkFunction {
     private SearchContext context = new SearchContext();
     private BinlogPosition searchPosition;
     private boolean running = true;
-    private boolean isPolarx;
-    private Exception e;
+    private boolean polarx = false;
 
     public PositionFinder(BinlogPosition endPosition,
                           LogEventConvert binlogParser,
@@ -64,14 +63,15 @@ public class PositionFinder implements SinkFunction {
         this.searchHandler = searchHandler;
     }
 
-    public void setPolarx() {
-        this.isPolarx = true;
+    public void setPolarx(boolean polarx) {
+        this.polarx = polarx;
     }
 
     public BinlogPosition findPos() throws IOException {
         String searchFile = endPosition.getFileName();
         context = new SearchContext();
         context.setCurrentSearchFile(searchFile);
+        context.setPolarx(polarx);
         //resetHandlerList 查找到目标后会被删除，没被删除的一定是还没有找到目标位点
         while (searchFile != null) {
             mysqlConnection.reconnect();
@@ -114,7 +114,7 @@ public class PositionFinder implements SinkFunction {
         if (searchPosition == null) {
             throw new PositionNotFoundException();
         }
-        if (isPolarx && StringUtils.isBlank(searchPosition.getRtso())) {
+        if (polarx && StringUtils.isBlank(searchPosition.getRtso())) {
             return false;
         }
         return true;
@@ -136,7 +136,7 @@ public class PositionFinder implements SinkFunction {
         return binlogParser.parse(event, true);
     }
 
-    private void extractorTSO(LogEvent event) {
+    private void extractTSO(LogEvent event) {
         context.setCurrentTSO(null);
         if (event instanceof QueryLogEvent) {
             QueryLogEvent queryLog = (QueryLogEvent) event;
@@ -180,7 +180,9 @@ public class PositionFinder implements SinkFunction {
     public boolean sink(LogEvent event, LogPosition logPosition) throws CanalParseException, TableIdNotFoundException {
         try {
 
-            extractorTSO(event);
+            if (polarx) {
+                extractTSO(event);
+            }
 
             if (searchHandler.isEnd(event, context) || endOfFile(event)) {
                 searchPosition = context.getResultPosition();

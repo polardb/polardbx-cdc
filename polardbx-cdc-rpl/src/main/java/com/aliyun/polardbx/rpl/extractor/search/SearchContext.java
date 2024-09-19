@@ -24,6 +24,8 @@ public class SearchContext {
     private boolean lockPosition = false;
     private long fileSize;
 
+    private boolean polarx = false;
+
     private int processEventCount;
 
     public long getFileSize() {
@@ -85,5 +87,12 @@ public class SearchContext {
 
     public void setLastPosition(BinlogPosition lastPosition) {
         this.lastPosition = lastPosition;
+    }
+
+    public void setPolarx(boolean polarx) {
+        this.polarx = polarx;
+    }
+    public boolean isPolarx() {
+        return polarx;
     }
 }

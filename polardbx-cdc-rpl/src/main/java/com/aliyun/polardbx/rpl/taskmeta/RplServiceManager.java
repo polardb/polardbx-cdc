@@ -501,7 +501,7 @@ public class RplServiceManager {
             response.put("Replicate_Wild_Do_Table", replicaMeta.getWildDoTable());
             response.put("Replicate_Wild_Ignore_Table", replicaMeta.getWildIgnoreTable());
             response.put("Last_Error", task.getLastError());
-            response.put("Exec_Master_Log_Pos", binlogPosition.getFileName());
+            response.put("Exec_Master_Log_Pos", String.valueOf(binlogPosition.getPosition()));
             response.put("Exec_Master_Log_Tso", StringUtils.isNotEmpty(binlogPosition.getRtso()) ?
                 binlogPosition.getRtso().substring(0, Math.min(19, binlogPosition.getRtso().length())) : "NULL");
 

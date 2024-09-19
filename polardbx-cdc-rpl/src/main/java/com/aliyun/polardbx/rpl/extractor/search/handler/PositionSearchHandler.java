@@ -58,16 +58,24 @@ public class PositionSearchHandler implements ISearchHandler {
                     "search entry pos not found when first event is not available , was reset to start entry pos ");
 
                 // 比endPosition小的begin/end或者ddl都是满足的位点，如果没找到search pos ，说明没有搜索到 transaction和ddl，
-                //说明pos前都是cts，可以作为位点直接返回
+                // 说明pos前都是cts，可以作为位点直接返回
                 context.setResultPosition(entryPosition);
                 context.setLockPosition(true);
             }
 
             BinlogPosition resultPosition = context.getResultPosition();
 
-            if (resultPosition != null && StringUtils.isBlank(resultPosition.getRtso())) {
-                // 有位点，但是没有tso，可以在继续搜索
-                resultPosition.setRtso(context.getCurrentTSO());
+
+
+            if (resultPosition != null) {
+                if (!context.isPolarx()) {
+                    // 非polarx场景找到位点，无需tso，可以直接返回
+                    return true;
+                }
+                if (StringUtils.isBlank(resultPosition.getRtso())) {
+                    // 有位点，但是没有tso，可以在继续搜索
+                    resultPosition.setRtso(context.getCurrentTSO());
+                }
             }
             if (context.getResultPosition() != null && StringUtils.isBlank(resultPosition.getRtso())) {
                 // 经过一些列操作，还是没有找到tso

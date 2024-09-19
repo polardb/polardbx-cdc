@@ -14,6 +14,7 @@
  */
 package com.aliyun.polardbx.rpl.pipeline;
 
+import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
@@ -38,7 +39,10 @@ import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
 import com.aliyun.polardbx.rpl.extractor.full.MysqlFullExtractor;
 import com.aliyun.polardbx.rpl.storage.RplStorage;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
+import com.aliyun.polardbx.rpl.taskmeta.ExtractorType;
+import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
+import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import com.lmax.disruptor.BatchEventProcessor;
 import com.lmax.disruptor.BlockingWaitStrategy;
 import com.lmax.disruptor.EventHandler;
@@ -82,17 +86,25 @@ public class SerialPipeline extends BasePipeline {
     private String position;
     private static final boolean isLabEnv = getBoolean(ConfigKeys.IS_LAB_ENV);
 
+    private static boolean srcIsPolarx = true;
+
     public SerialPipeline(PipelineConfig pipeLineConfig, BaseExtractor extractor, BaseApplier applier) {
         this.pipeLineConfig = pipeLineConfig;
         this.extractor = extractor;
         this.applier = applier;
+        if (extractor.getExtractorConfig().getExtractorType() == ExtractorType.RPL_INC) {
+            ReplicaMeta replicaMeta = JSON.parseObject(extractor.getExtractorConfig().getPrivateMeta(),
+                ReplicaMeta.class);
+            srcIsPolarx = replicaMeta.getMasterType() == HostType.POLARX2;
+        }
     }
 
     public static boolean shouldSkip(DBMSEvent dbmsEvent, String maxDdlTsoCheckpoint) {
         String eventTso = dbmsEvent.getRtso();
         if (StringUtils.isBlank(eventTso)) {
             // 只在实验室环境下校验tso存在性
-            if (isLabEnv && (dbmsEvent instanceof DefaultQueryLog || dbmsEvent instanceof DefaultRowChange)) {
+            if (isLabEnv && srcIsPolarx &&  (dbmsEvent instanceof DefaultQueryLog ||
+                dbmsEvent instanceof DefaultRowChange)) {
                 log.error("dbms event tso should not be null！ position {}, event content {}",
                     dbmsEvent.getPosition(), dbmsEvent);
                 throw new PolardbxException("dbms event tso should not be null！");

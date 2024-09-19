@@ -349,7 +349,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                 new PositionSearchHandler(entryPosition),
                 mysqlConnection);
         if (isPolarx()) {
-            finder.setPolarx();
+            finder.setPolarx(true);
         }
         return finder.findPos();
     }

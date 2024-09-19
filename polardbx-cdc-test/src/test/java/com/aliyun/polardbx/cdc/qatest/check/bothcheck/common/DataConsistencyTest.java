@@ -226,7 +226,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
         ResultSet resultSet = JdbcUtil.executeQuery("select version()", getCdcSyncDbConnection());
         if (resultSet.next()) {
             String version = resultSet.getString(1);
-            return StringUtils.contains(version, "TDDL");
+            return StringUtils.contains(version, "TDDL") ||
+                StringUtils.contains(version, "PXC");
         }
         return false;
     }
