@@ -1,4 +1,3 @@
-[![LICENSE](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://github.com/polardb/polardbx-sql/blob/main/LICENSE)
 [![Language](https://img.shields.io/badge/Language-Java-blue.svg)](https://www.java.com/)
 
 [中文文档](docs/zh_CN/README.md)
@@ -52,7 +51,7 @@ See [more docs](https://github.com/polardb/polardbx-sql#quick-start) about Polar
 
 ## License
 
-PolarDB-X CDC is under Apache License 2.0, see the [license](LICENSE) for details.
+PolarDB-X CDC is under Server Side Public License v1 (SSPLv1), see the [license](LICENSE) for details.
 
 ## Contributing
 

@@ -1,19 +1,13 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.pipeline;
 
+import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
@@ -34,10 +28,14 @@ import com.aliyun.polardbx.rpl.applier.TransactionApplier;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
+import com.aliyun.polardbx.rpl.extractor.MysqlBinlogExtractor;
 import com.aliyun.polardbx.rpl.extractor.full.MysqlFullExtractor;
 import com.aliyun.polardbx.rpl.storage.RplStorage;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
+import com.aliyun.polardbx.rpl.taskmeta.ExtractorType;
+import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
+import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import com.lmax.disruptor.BatchEventProcessor;
 import com.lmax.disruptor.BlockingWaitStrategy;
 import com.lmax.disruptor.EventHandler;
@@ -60,6 +58,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DELAY_ALARM_THRESHOLD_SECOND;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PARALLEL_SCHEMA_APPLY_BATCH_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PARALLEL_SCHEMA_APPLY_ENABLED;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 
 /**
  * @author shicai.xsc 2020/11/30 14:59
@@ -78,17 +77,27 @@ public class SerialPipeline extends BasePipeline {
     private ExecutorService offerExecutor;
     private BatchEventProcessor<MessageEvent> offerProcessor;
     private String position;
+    private static final boolean isLabEnv = getBoolean(ConfigKeys.IS_LAB_ENV);
+
+    private static boolean srcIsPolarx = true;
 
     public SerialPipeline(PipelineConfig pipeLineConfig, BaseExtractor extractor, BaseApplier applier) {
         this.pipeLineConfig = pipeLineConfig;
         this.extractor = extractor;
         this.applier = applier;
+        if (extractor.getExtractorConfig().getExtractorType() == ExtractorType.RPL_INC) {
+            ReplicaMeta replicaMeta = JSON.parseObject(extractor.getExtractorConfig().getPrivateMeta(),
+                ReplicaMeta.class);
+            srcIsPolarx = replicaMeta.getMasterType() == HostType.POLARX2;
+        }
     }
 
     public static boolean shouldSkip(DBMSEvent dbmsEvent, String maxDdlTsoCheckpoint) {
         String eventTso = dbmsEvent.getRtso();
         if (StringUtils.isBlank(eventTso)) {
-            if (dbmsEvent instanceof DefaultQueryLog || dbmsEvent instanceof DefaultRowChange) {
+            // 只在实验室环境下校验tso存在性
+            if (isLabEnv && srcIsPolarx &&  (dbmsEvent instanceof DefaultQueryLog ||
+                dbmsEvent instanceof DefaultRowChange)) {
                 log.error("dbms event tso should not be null！ position {}, event content {}",
                     dbmsEvent.getPosition(), dbmsEvent);
                 throw new PolardbxException("dbms event tso should not be null！");
@@ -528,13 +537,6 @@ public class SerialPipeline extends BasePipeline {
                     }
                     transactionMap.get(messageEvent.getXaTransaction().getXid()).appendRowChange(dbmsEvent);
                 }
-            } else if (DdlApplyHelper.isDdl(dbmsEvent)) {
-                log.error("receive ddl event which will not be processed, position: {}， event: {} "
-                    , dbmsEvent.getPosition(), dbmsEvent);
-                // 没有未结束的xa事务，则位点直接推进为常规事务end position
-                if (transactionPositionMap.isEmpty()) {
-                    nextRecordPosition = dbmsEvent.getPosition();
-                }
             } else if (dbmsEvent instanceof DBMSTransactionEnd) {
                 Transaction transaction = getTransactionToApply();
                 transaction.setFinished(true);
@@ -586,6 +588,10 @@ public class SerialPipeline extends BasePipeline {
                 default:
                     break;
                 }
+            } else if (DdlApplyHelper.isDdl(dbmsEvent)) {
+                // 先进行xa transaction判断，再进行ddl判断，因为 xa start 也是 query log event
+                log.error("receive ddl event which will not be processed, position: {}， event: {} "
+                    , dbmsEvent.getPosition(), dbmsEvent);
             } else {
                 // 可能会有其他queryLogEvent，甚至是事务中的event
                 // 与非xa处理器不同，因为xa rollback的存在，保守起见，这里不推进位点

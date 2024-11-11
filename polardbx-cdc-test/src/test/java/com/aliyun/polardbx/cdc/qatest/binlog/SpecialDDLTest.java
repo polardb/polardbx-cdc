@@ -1,21 +1,14 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.binlog;
 
 import com.aliyun.polardbx.cdc.qatest.base.JdbcUtil;
 import com.aliyun.polardbx.cdc.qatest.base.RplBaseTestCase;
+import org.apache.commons.lang.RandomStringUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -26,10 +19,12 @@ import java.sql.SQLException;
  **/
 public class SpecialDDLTest extends RplBaseTestCase {
     private static final String DB_NAME = "cdc_special_ddl";
+    private static final String DB_NAME1 = "cdc_special_ddl_1";
 
     @BeforeClass
     public static void bootStrap() throws SQLException {
         prepareTestDatabase(DB_NAME);
+        prepareTestDatabase(DB_NAME1);
     }
 
     @Test
@@ -60,5 +55,52 @@ public class SpecialDDLTest extends RplBaseTestCase {
         JdbcUtil.executeUpdate(polardbxConnection, sql1);
         JdbcUtil.executeUpdate(polardbxConnection, sql2);
         JdbcUtil.executeUpdate(polardbxConnection, sql3);
+    }
+
+    @Test
+    public void testDropShardKey(){
+        String ddl1 = "create table order_refund_manage(a int primary key, b int ,c int , index auto_shard_key_b(`b`)) dbpartition by hash(c)";
+        String ddl2 = "alter table order_refund_manage drop index auto_shard_key_b";
+        String ddl3 = "alter table order_refund_manage change column b b longtext";
+
+        JdbcUtil.executeUpdate(polardbxConnection, ddl1);
+        JdbcUtil.executeUpdate(polardbxConnection, ddl2);
+        JdbcUtil.executeUpdate(polardbxConnection, ddl3);
+    }
+
+    private void testCreateTableLikeAndDropShardKey(String t1, String t2){
+        String sql1 = String.format("create table %s(id bigint primary key , name varchar(20))", t1);
+        String sql2 = String.format("alter table %s dbpartition by hash(name)", t1);
+        String sql3 = String.format("create table %s like %s", t2, t1);
+        String sql4 = String.format("alter table %s drop index auto_shard_key_name", t2);
+        JdbcUtil.executeUpdate(polardbxConnection, sql1);
+        JdbcUtil.executeUpdate(polardbxConnection, sql2);
+        JdbcUtil.executeUpdate(polardbxConnection, sql3);
+        JdbcUtil.executeUpdate(polardbxConnection, sql4);
+    }
+
+    private void testCreateTableLikeAndDropShardKeyV2(String t1, String t2){
+        String sql1 = String.format("create table %s(`id` bigint primary key , `name` varchar(20))", t1);
+        String sql2 = String.format("alter table %s dbpartition by hash(`name`)", t1);
+        String sql3 = String.format("create table %s like %s", t2, t1);
+        String sql4 = String.format("alter table %s drop index auto_shard_key_name", t2);
+        JdbcUtil.executeUpdate(polardbxConnection, sql1);
+        JdbcUtil.executeUpdate(polardbxConnection, sql2);
+        JdbcUtil.executeUpdate(polardbxConnection, sql3);
+        JdbcUtil.executeUpdate(polardbxConnection, sql4);
+    }
+
+    @Test
+    public void testCreateTableLikeAndDropShardKeyWithoutDbName(){
+        JdbcUtil.useDb(polardbxConnection, DB_NAME);
+        testCreateTableLikeAndDropShardKey(String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)), String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)));
+        testCreateTableLikeAndDropShardKeyV2(String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)), String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)));
+    }
+
+    @Test
+    public void testCreateTableLikeAndDropShardKeyWithDbName(){
+        JdbcUtil.useDb(polardbxConnection, DB_NAME);
+        testCreateTableLikeAndDropShardKey(String.format("`%s`.`%s`", DB_NAME, RandomStringUtils.randomAlphanumeric(10)), String.format("`%s`.`%s`", DB_NAME1, RandomStringUtils.randomAlphanumeric(10)));
+        testCreateTableLikeAndDropShardKeyV2(String.format("`%s`.`%s`", DB_NAME, RandomStringUtils.randomAlphanumeric(10)), String.format("`%s`.`%s`", DB_NAME1, RandomStringUtils.randomAlphanumeric(10)));
     }
 }

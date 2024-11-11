@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.dbmeta;
 
@@ -26,11 +18,13 @@ import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalListener;
 import com.google.common.collect.Lists;
 import lombok.Data;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -54,6 +48,8 @@ public class DbMetaCache {
     private final int minPoolSize;
     private final int maxPoolSize;
     private final String sqlMode;
+    private boolean enablePolardbxServerId;
+    private final boolean longSql;
 
     private final LoadingCache<String, DruidDataSource> dataSources = CacheBuilder.newBuilder()
         .expireAfterAccess(120, TimeUnit.SECONDS)
@@ -86,15 +82,13 @@ public class DbMetaCache {
             }
         });
 
-    public DbMetaCache(HostInfo hostInfo, int maxPoolSize) {
-        this(hostInfo, 1, maxPoolSize);
-    }
-
-    public DbMetaCache(HostInfo hostInfo, int minPoolSize, int maxPoolSize) {
+    public DbMetaCache(HostInfo hostInfo, int minPoolSize, int maxPoolSize, boolean longSql) {
         this.hostInfo = hostInfo;
-        this.minPoolSize = minPoolSize;
+        this.minPoolSize = Math.min(minPoolSize, maxPoolSize);
         this.maxPoolSize = maxPoolSize;
         this.sqlMode = DynamicApplicationConfig.getString(ConfigKeys.RPL_DEFAULT_SQL_MODE);
+        this.longSql = longSql;
+        this.enablePolardbxServerId = !DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
     }
 
     public DataSource getDataSource(String schema) {
@@ -112,9 +106,17 @@ public class DbMetaCache {
         }
     }
 
-    private DruidDataSource loadDataSource(String schema) throws Exception {
+    @SneakyThrows
+    public Connection getConnection(String schema) {
+        DataSource dataSource = getDataSource(schema);
+        return dataSource.getConnection();
+    }
+
+    DruidDataSource loadDataSource(String schema) throws Exception {
         log.warn("set server id: {}", Math.abs(new Long(hostInfo.getServerId()).intValue()));
         List<String> connectionInitSqls = prepareConnectionInitSqls();
+
+        int processedMaxPoolSize = StringUtils.equals(schema, POLARX_DEFAULT_SCHEMA) ? maxPoolSize * 4 : maxPoolSize;
 
         // RDS/mysql 可能没有set global 权限，不考虑实现环状复制，因此不需要set server id
         return DataSourceUtil.createDruidMySqlDataSource(hostInfo.isUsePolarxPoolCN(),
@@ -125,7 +127,8 @@ public class DbMetaCache {
             hostInfo.getPassword(),
             "",
             minPoolSize,
-            maxPoolSize,
+            processedMaxPoolSize,
+            longSql,
             null,
             connectionInitSqls);
     }
@@ -135,7 +138,7 @@ public class DbMetaCache {
         connectionInitSqls.add(String.format(SET_SQL_MODE, sqlMode));
 
         if (hostInfo.getType() == HostType.POLARX2 || hostInfo.getType() == HostType.POLARX1) {
-            if (hostInfo.getServerId() != 0) {
+            if (enablePolardbxServerId && hostInfo.getServerId() != 0) {
                 String setServerIdSql = String.format(SET_POLARX_SERVER_ID,
                     Math.abs(Long.valueOf(hostInfo.getServerId()).intValue()));
                 connectionInitSqls.add(setServerIdSql);
@@ -159,7 +162,7 @@ public class DbMetaCache {
 
     public DataSource getBuiltInDefaultDataSource() {
         String defaultSchema = hostInfo.getType() == HostType.POLARX2 ? POLARX_DEFAULT_SCHEMA : "";
-        return getDataSource(defaultSchema);
+        return dataSources.getUnchecked(defaultSchema.toLowerCase());
     }
 
     public List<String> getDatabases() throws Exception {

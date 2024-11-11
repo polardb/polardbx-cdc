@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 
@@ -74,6 +66,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalize;
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
@@ -250,7 +243,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
             SQLStatement statement = SQLUtils.parseSQLStatement(ddl);
             if (statement instanceof SQLCreateTableStatement) {
                 SQLCreateTableStatement sqlCreateTableStatement = (SQLCreateTableStatement) statement;
-                String tableName = normalize(sqlCreateTableStatement.getTableName());
+                String tableName = normalizeNoTrim(sqlCreateTableStatement.getTableName());
                 if (sqlCreateTableStatement.isIfNotExists()) {
                     return forceReplace || find(schemaName, tableName) == null;
                 }
@@ -359,8 +352,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 fieldMeta.setDefaultValue(null);
             } else {
                 // 处理一下default value中特殊的引号
-                fieldMeta.setDefaultValue(
-                    normalize(getSqlName(column.getDefaultExpr())));
+                fieldMeta.setDefaultValue(normalize(getSqlName(column.getDefaultExpr())));
             }
             if (dataType instanceof SQLCharacterDataType) {
                 final String charSetName = ((SQLCharacterDataType) dataType).getCharSetName();
@@ -408,6 +400,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 }
             }
             fieldMeta.setGenerated(column.getGeneratedAlawsAs() != null);
+            fieldMeta.setIsOnUpdate(column.getOnUpdate() != null);
             tableMeta.addFieldMeta(fieldMeta);
         } else if (element instanceof MySqlPrimaryKey) {
             MySqlPrimaryKey column = (MySqlPrimaryKey) element;
@@ -533,14 +526,14 @@ public class MemoryTableMeta implements TableMetaTSDB {
 
         if (sqlName instanceof SQLPropertyExpr) {
             SQLIdentifierExpr owner = (SQLIdentifierExpr) ((SQLPropertyExpr) sqlName).getOwner();
-            return normalize(owner.getName()) + "."
-                + normalize(((SQLPropertyExpr) sqlName).getName());
+            return normalizeNoTrim(owner.getName()) + "."
+                + normalizeNoTrim(((SQLPropertyExpr) sqlName).getName());
         } else if (sqlName instanceof SQLIdentifierExpr) {
-            return normalize(((SQLIdentifierExpr) sqlName).getName());
+            return normalizeNoTrim(((SQLIdentifierExpr) sqlName).getName());
         } else if (sqlName instanceof SQLCharExpr) {
             return ((SQLCharExpr) sqlName).getText();
         } else if (sqlName instanceof SQLMethodInvokeExpr) {
-            return normalize(((SQLMethodInvokeExpr) sqlName).getMethodName());
+            return normalizeNoTrim(((SQLMethodInvokeExpr) sqlName).getMethodName());
         } else if (sqlName instanceof MySqlOrderingExpr) {
             return getSqlName(((MySqlOrderingExpr) sqlName).getExpr());
         } else {
@@ -680,6 +673,9 @@ public class MemoryTableMeta implements TableMetaTSDB {
             return "char";
         } else if (StringUtils.equalsIgnoreCase(dataTypeStr, "nvarchar")) {
             return "varchar";
+        } else if (StringUtils.equalsIgnoreCase(dataTypeStr, "real")) {
+            // If the REAL_AS_FLOAT SQL mode is enabled, REAL is a synonym for FLOAT rather than DOUBLE. this feature support @RebuildEventLogFilter
+            return "double";
         } else {
             return dataTypeStr;
         }

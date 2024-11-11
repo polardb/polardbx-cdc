@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.rest.resources.check;
 
@@ -20,7 +12,6 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.rest.entities.ServerInfo;
 import com.aliyun.polardbx.binlog.dao.BinlogDumperInfoMapper;
-import com.aliyun.polardbx.binlog.dao.BinlogNodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
@@ -43,6 +34,7 @@ import com.aliyun.polardbx.binlog.enums.NodeStatus;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.service.NodeInfoService;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -328,36 +320,32 @@ public class ClusterStatusChecker {
     }
 
     private void checkDumperCursorAligned() throws Throwable {
-        String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
-        String instId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
-        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS);
-        NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
-        BinlogNodeInfoMapper binlogNodeInfoMapper = SpringContextHolder.getObject(BinlogNodeInfoMapper.class);
-        RetryTemplate template = RetryTemplate.builder().maxAttempts(15).fixedBackoff(1000)
+        final String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+        final String instId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
+        final NodeInfoService nodeInfoService = SpringContextHolder.getObject(NodeInfoService.class);
+        final RetryTemplate template = RetryTemplate.builder().maxAttempts(15).fixedBackoff(1000)
             .retryOn(RetryableException.class).build();
 
-        final Set<BinlogCursor> allCursors =
-            template.execute((RetryCallback<Set<BinlogCursor>, Throwable>) retryContext -> {
-                List<NodeInfo> nodeInfoList = binlogNodeInfoMapper.getAliveNodes(clusterId, timeoutThresholdMs);
-                if (!nodeInfoList.stream().allMatch(s -> StringUtils.isNotBlank(s.getLatestCursor()))) {
+        final List<NodeInfo> aliveNodeInfoList =
+            template.execute((RetryCallback<List<NodeInfo>, Throwable>) retryContext -> {
+                List<NodeInfo> list = nodeInfoService.getAliveNodes(clusterId);
+                if (!list.stream().allMatch(s -> StringUtils.isNotBlank(s.getLatestCursor()))) {
                     log.warn("wait for log cursor ready failed, ready dumpers are {}",
-                        nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toList()));
+                        list.stream().map(NodeInfo::getContainerId).collect(Collectors.toList()));
                     throw new RetryableException("wait for all dumpers ready failed.");
                 }
-
-                return nodeInfoList.stream()
-                    .map(NodeInfo::getLatestCursor)
-                    .map(i -> JSONObject.parseObject(i, BinlogCursor.class))
-                    .collect(Collectors.toSet());
+                return list;
             });
 
+        final Set<BinlogCursor> allCursors = aliveNodeInfoList.stream()
+            .map(NodeInfo::getLatestCursor)
+            .map(i -> JSONObject.parseObject(i, BinlogCursor.class))
+            .collect(Collectors.toSet());
+
         template.execute((RetryCallback<Boolean, Throwable>) retryContext -> {
+            NodeInfo currentNodeInfo = nodeInfoService.getOneNode(clusterId, instId);
             BinlogCursor lastMaxCursor = allCursors.stream().max(Comparator.comparing(s -> s)).get();
-            BinlogCursor thisCursor = nodeInfoMapper
-                .select(s -> s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                    .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isEqualTo(instId)))
-                .stream().map(NodeInfo::getLatestCursor).map(i -> JSONObject.parseObject(i, BinlogCursor.class))
-                .findFirst().get();
+            BinlogCursor thisCursor = JSONObject.parseObject(currentNodeInfo.getLatestCursor(), BinlogCursor.class);
 
             if (thisCursor.compareTo(lastMaxCursor) >= 0) {
                 return true;

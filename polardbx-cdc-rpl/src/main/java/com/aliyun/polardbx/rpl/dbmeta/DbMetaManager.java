@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.dbmeta;
 
@@ -22,19 +14,24 @@ import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.jdbc.support.JdbcUtils;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -52,17 +49,21 @@ public class DbMetaManager {
     private static final String SHOW_CREATE_TABLE = "SHOW CREATE TABLE `%s`.`%s`";
     private static final String SHOW_TABLES = "SHOW TABLES";
     private static final String PRIMARY = "PRIMARY";
+    private static final String DESC = "DESC %s.%s";
+    private static final boolean enableUk =
+        !DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
 
     private static final boolean isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
 
     public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
                                          HostType hostType) throws SQLException {
-        return getTableInfo(dataSource, schema, tbName, hostType, true);
+        return getTableInfo(dataSource, schema, tbName, hostType, enableUk);
     }
 
     public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
                                          HostType hostType, boolean needUkAndGsi) throws SQLException {
         TableInfo tableInfo = new TableInfo(schema, tbName);
+        buildTableBasicInfo(dataSource, schema, tbName, tableInfo);
         List<ColumnInfo> columns = getTableColumnInfos(dataSource, schema, tbName);
         List<String> pks = getTablePks(dataSource, schema, tbName);
         tableInfo.setColumns(columns);
@@ -159,21 +160,47 @@ public class DbMetaManager {
         }
     }
 
-    /**
-     *
-     */
+    static void buildTableBasicInfo(DataSource dataSource, String schema, String tbName, TableInfo tableInfo)
+        throws SQLException {
+        try (Connection connection = dataSource.getConnection()) {
+            try (ResultSet resultSet = connection.createStatement().executeQuery(String.format(
+                "SELECT * FROM information_schema.TABLES WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'",
+                schema, tbName))) {
+                if (resultSet.next()) {
+                    ResultSetMetaData metaData = resultSet.getMetaData();
+                    for (int i = 1; i <= metaData.getColumnCount(); i++) {
+                        String columnName = metaData.getColumnName(i);
+                        if (columnName.equalsIgnoreCase("ENGINE")) {
+                            String engine = resultSet.getString(i);
+                            tableInfo.setEngine(engine);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private static List<ColumnInfo> getTableColumnInfos(DataSource dataSource, String schema,
                                                         String tbName) throws SQLException {
         List<ColumnInfo> columnList = new ArrayList<>();
 
         Connection conn = null;
         ResultSet rs = null;
+        ResultSet descRs = null;
+        Statement stmt = null;
         try {
             conn = dataSource.getConnection();
+            stmt = conn.createStatement();
             DatabaseMetaData metaData = conn.getMetaData();
             schema = getIdentifierName(schema, metaData);
             tbName = getIdentifierName(tbName, metaData);
+            // 这里获取的列信息里面没有on update信息，因此通过desc单独获取
             rs = metaData.getColumns("", wrapEscape(schema), wrapEscape(tbName), null);
+            if (!"H2".equalsIgnoreCase(metaData.getDatabaseProductName())) {
+                // H2 数据库不支持desc操作
+                descRs = stmt.executeQuery(String.format(DESC, wrapEscape(schema), wrapEscape(tbName)));
+            }
 
             while (rs.next()) {
                 String columnName = rs.getString("COLUMN_NAME");
@@ -227,15 +254,24 @@ public class DbMetaManager {
                     StringUtils.equalsIgnoreCase(RplConstants.RDS_IMPLICIT_ID, columnName)) {
                     continue;
                 }
-                columnList.add(new ColumnInfo(columnName.toLowerCase(), columnType, "",
+
+                ColumnInfo columnInfo = new ColumnInfo(columnName.toLowerCase(), columnType, "",
                     (nullable != DatabaseMetaData.columnNoNulls), StringUtils.equals(isGeneratedColumn, "YES"),
-                    typeName, size));
+                    typeName, size);
+
+                if (descRs != null && descRs.next()) {
+                    boolean onUpdate = descRs.getString("Extra").toLowerCase().contains("on update");
+                    columnInfo.setOnUpdate(onUpdate);
+                }
+
+                columnList.add(columnInfo);
             }
         } catch (Throwable e) {
             log.error("failed in getTableColumnInfos, schema:{}, tbName:{}", schema, tbName);
             throw e;
         } finally {
-            DataSourceUtil.closeQuery(rs, null, conn);
+            JdbcUtils.closeResultSet(descRs);
+            DataSourceUtil.closeQuery(rs, stmt, conn);
         }
 
         return columnList;
@@ -268,26 +304,15 @@ public class DbMetaManager {
         return pks;
     }
 
-    private static List<String> getTableUks(DataSource dataSource, String schema, String tbName) throws SQLException {
-        List<String> uks = new ArrayList<>();
+    public static List<String> getTableUks(DataSource dataSource, String schema, String tbName) throws SQLException {
+        Set<String> ukSet = new HashSet<>();
         Map<String, List<KeyColumnInfo>> ukGroups = getTableUkGroups(dataSource, schema, tbName);
-        int minGroupSize = Integer.MAX_VALUE;
-        String minGroupKey = "";
-        for (String groupKey : ukGroups.keySet()) {
-            int groupSize = ukGroups.get(groupKey).size();
-            if (groupSize < minGroupSize) {
-                minGroupSize = groupSize;
-                minGroupKey = groupKey;
+        for (Iterable<KeyColumnInfo> group : ukGroups.values()) {
+            for (KeyColumnInfo column : group) {
+                ukSet.add(column.getColumnName().toLowerCase());
             }
         }
-
-        if (StringUtils.isNotBlank(minGroupKey)) {
-            for (KeyColumnInfo column : ukGroups.get(minGroupKey)) {
-                uks.add(column.getColumnName().toLowerCase());
-            }
-        }
-
-        return uks;
+        return new ArrayList<>(ukSet);
     }
 
     private static List<String> getTableShardKeys(DataSource dataSource, String tbName) throws SQLException {
@@ -327,8 +352,8 @@ public class DbMetaManager {
     /**
      *
      */
-    private static Map<String, List<KeyColumnInfo>> getTableUkGroups(DataSource dataSource, String schema,
-                                                                     String tbName) throws SQLException {
+    public static Map<String, List<KeyColumnInfo>> getTableUkGroups(DataSource dataSource, String schema,
+                                                                    String tbName) throws SQLException {
         HashMap<String, List<KeyColumnInfo>> ukGroups = new HashMap<>();
 
         Connection conn = null;

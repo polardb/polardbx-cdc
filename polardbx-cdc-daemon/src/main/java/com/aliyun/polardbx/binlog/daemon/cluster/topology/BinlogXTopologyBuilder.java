@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
 
@@ -161,6 +153,7 @@ public class BinlogXTopologyBuilder {
             exeConfig.setStreamNameSet(v);
             exeConfig.setRuntimeVersion(newVersion);
             exeConfig.setServerId(serverId);
+            exeConfig.setReservedMemMb(container.getCapability().getReservedMemMb());
 
             BinlogTaskConfig taskConfig = createTask(container.getContainerId().hashCode(), TaskType.DumperX,
                 container, JSONObject.toJSONString(exeConfig), newVersion);
@@ -234,7 +227,7 @@ public class BinlogXTopologyBuilder {
             }
         }
 
-        Map<Integer, BinlogTaskConfig> assignedTaskMap = new HashMap<>();
+        Map<Integer, Pair<BinlogTaskConfig, Container>> assignedTaskMap = new HashMap<>();
         int taskSequence = 0;
         for (Container container : containerList) {
             if (!assignedCountMap.containsKey(container)) {
@@ -254,7 +247,7 @@ public class BinlogXTopologyBuilder {
                 taskConfig.setVcpu(cpu);
                 taskConfig.setStatus(BinlogTaskConfigStatus.ENABLE_AUTO_SCHEDULE);
                 container.deductMem(mem);
-                assignedTaskMap.put(taskSequence, taskConfig);
+                assignedTaskMap.put(taskSequence, Pair.of(taskConfig, container));
             }
         }
 
@@ -276,9 +269,10 @@ public class BinlogXTopologyBuilder {
 
         List<BinlogTaskConfig> result = new ArrayList<>();
         assignedExeConfigMap.forEach((k, v) -> {
-            BinlogTaskConfig taskConfig = assignedTaskMap.get(k + 1);
-            taskConfig.setConfig(JSONObject.toJSONString(v));
-            result.add(taskConfig);
+            Pair<BinlogTaskConfig, Container> pair = assignedTaskMap.get(k + 1);
+            v.setReservedMemMb(pair.getValue().getCapability().getReservedMemMb());
+            pair.getKey().setConfig(JSONObject.toJSONString(v));
+            result.add(pair.getKey());
         });
         return result;
     }

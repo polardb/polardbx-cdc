@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
 
@@ -46,6 +38,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalize;
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 
 /**
@@ -94,7 +87,13 @@ public class TableGroupUtils {
                     Set<String> tableSet = Sets.newTreeSet(Lists.newArrayList(
                         StringUtils.split(tables.toLowerCase(), ",")));
                     if (tableFilter != null) {
-                        tableSet.removeIf(t -> !tableFilter.apply(dbName + "." + t));
+                        tableSet.removeIf(t -> {
+                            String key = t;
+                            if (StringUtils.contains(t, ".")) {
+                                key = StringUtils.split(t, ".")[0];
+                            }
+                            return !tableFilter.apply(dbName + "." + key);
+                        });
                     }
 
                     tableGroupItem.getAllTableGroups().put(tgName, tableSet);
@@ -137,7 +136,7 @@ public class TableGroupUtils {
                 while (rs.next()) {
                     String database = rs.getString(1);
                     if (!StringUtils.equalsAnyIgnoreCase(database, "polardbx", "information_schema", "__cdc__")) {
-                        databases.add(database);
+                        databases.add(database.toLowerCase());
                     }
                 }
             }
@@ -173,7 +172,7 @@ public class TableGroupUtils {
         Map<String, String> result = new HashMap<>();
 
         MySqlCreateTableStatement createTableStatement = SQLUtils.parseSQLStatement(createSql);
-        String tableName = normalize(createTableStatement.getTableName()).toLowerCase();
+        String tableName = normalizeNoTrim(createTableStatement.getTableName()).toLowerCase();
 
         // parse implicit tableGroup from main table
         if (createTableStatement.isWithImplicitTablegroup()) {

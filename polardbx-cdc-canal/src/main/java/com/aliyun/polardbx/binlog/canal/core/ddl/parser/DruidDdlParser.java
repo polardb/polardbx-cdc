@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.parser;
 
@@ -26,6 +18,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropKey;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableRename;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCallStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateIndexStatement;
@@ -45,6 +38,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 
 import java.util.List;
 
+import static com.aliyun.polardbx.binlog.canal.LogEventUtil.SYNC_POINT_PROCEDURE_NAME;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatementList;
 
 /**
@@ -166,6 +160,12 @@ public class DruidDdlParser {
                 MySqlCreateRoleStatement createRole = (MySqlCreateRoleStatement) statement;
                 ddlResult.setType(DBMSAction.OTHER);
                 ddlResult.setHasIfExistsOrNotExists(createRole.isIfNotExists());
+            } else if (statement instanceof SQLCallStatement) {
+                SQLCallStatement stmt = (SQLCallStatement) statement;
+                if (SYNC_POINT_PROCEDURE_NAME.equals(stmt.getProcedureName().getSimpleName())) {
+                    ddlResult = new DdlResult();
+                    ddlResult.setType(DBMSAction.OTHER);
+                }
             }
 
             if (ddlResult != null) {
@@ -189,10 +189,10 @@ public class DruidDdlParser {
                 owner = ((SQLPropertyExpr) owner).getOwner();
             }
 
-            schema = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLIdentifierExpr) owner).getName());
-            table = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLPropertyExpr) sqlName).getName());
+            schema = com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim(((SQLIdentifierExpr) owner).getName());
+            table = com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim(((SQLPropertyExpr) sqlName).getName());
         } else if (sqlName instanceof SQLIdentifierExpr) {
-            table = com.alibaba.polardbx.druid.sql.SQLUtils.normalize(((SQLIdentifierExpr) sqlName).getName());
+            table = com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim(((SQLIdentifierExpr) sqlName).getName());
         }
 
         ddlResult.setSchemaName(schema);

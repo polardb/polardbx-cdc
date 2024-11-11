@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
@@ -35,7 +27,9 @@ import com.aliyun.polardbx.binlog.domain.po.ColumnarTaskConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.scheduler.ColumnarResourceManager;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -55,6 +49,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HE
  * @author wenki
  */
 @Slf4j
+@Getter
 public class ColumnarWatcher extends AbstractBinlogTimerTask {
     private final CommandPipeline commander = new CommandPipeline();
     private final String instId;
@@ -66,6 +61,8 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
         SpringContextHolder.getObject(ColumnarTaskConfigMapper.class);
     private final ColumnarTaskMapper columnarTaskMapper =
         SpringContextHolder.getObject(ColumnarTaskMapper.class);
+    private final ColumnarInfoMapper columnarInfoMapper =
+        SpringContextHolder.getObject(ColumnarInfoMapper.class);
 
     public ColumnarWatcher(String cluster, String clusterType, String name, int interval) {
         super(cluster, clusterType, name, interval);
@@ -101,11 +98,12 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
             .map(s -> new ColumnarInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(),
                 s.getVersion(), s.getRole()));
 
+        updateTimeAlarm();
+
         if (infoOptional.isPresent()) {
             if (log.isDebugEnabled()) {
                 log.debug("task info is " + infoOptional.get() + ", now is " + System.currentTimeMillis());
             }
-            ColumnarInfoMapper columnarInfoMapper = SpringContextHolder.getObject(ColumnarInfoMapper.class);
             ColumnarInfo info = infoOptional.get();
             int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
             long heartbeatInterval =
@@ -114,8 +112,10 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
 
                 // JVM心跳超时，但进程还在，一个典型的场景：大数据量场景下GC很频繁，导致cpu使用率很高，Task进程的心跳会出现超时
                 if (!isColumnarLauncherAlive()) {
-                    MonitorManager.getInstance()
-                        .triggerAlarm(MonitorType.COLUMNAR_JVM_HEARTBEAT_TIMEOUT_ERROR);
+                    if (columnarInfoMapper.getColumnarIndexExist()) {
+                        MonitorManager.getInstance()
+                            .triggerAlarm(MonitorType.COLUMNAR_JVM_HEARTBEAT_TIMEOUT_ERROR);
+                    }
                     log.info("detected heartbeat timeout, and task is already down, prepare to restart, task name {}.",
                         config.getTaskName());
                     restartColumnar(config, config.getTaskName(), config.getMem());
@@ -127,20 +127,24 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
                 }
 
             }
-            long updateTimeInterval = columnarInfoMapper.getUpdateTimeInterval();
-            if (updateTimeInterval > DynamicApplicationConfig.getInt(
-                COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_MS)) {
-                // 列存进程超时，报警
-                log.warn("columnar update_time not update for {} seconds", updateTimeInterval / 1000);
-                MonitorManager.getInstance()
-                    .triggerAlarm(MonitorType.COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_WARNING, updateTimeInterval / 1000);
-            }
             if (info.version < config.getVersion()) {
                 restartColumnar(config, config.getTaskName(), config.getMem());
             }
         } else {
             log.info("columnar task {} not present, will start", config.getTaskName());
             startColumnar(config.getTaskName(), config.getMem(), false);
+        }
+    }
+
+    public void updateTimeAlarm() {
+        long updateTimeInterval = getColumnarInfoMapper().getUpdateTimeInterval();
+        boolean columnarIndexExist = getColumnarInfoMapper().getColumnarIndexExist();
+        if (columnarIndexExist && updateTimeInterval > DynamicApplicationConfig.getInt(
+            COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_MS)) {
+            // 列存进程超时，报警
+            log.warn("columnar update_time not update for {} seconds", updateTimeInterval / 1000);
+            MonitorManager.getInstance()
+                .triggerAlarm(MonitorType.COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_WARNING, updateTimeInterval / 1000);
         }
     }
 
@@ -182,6 +186,8 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
     }
 
     private void startColumnar(String taskName, int mem, boolean restart) throws Exception {
+        build(taskName);
+
         //improve 这里可以用flock控制
         log.warn("prepare to start task {}.", taskName);
         CommandResult launcherResult = commander.execCommand(
@@ -238,7 +244,6 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
     }
 
     public void startColumnar(String taskName, int mem) throws Exception {
-        build(taskName);
         commander.execCommand(new String[] {"bash", "-c", "sh " + startScript + " -m " + mem}, 3000);
     }
 
@@ -294,24 +299,29 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private void watchMemory() {
+    public void watchMemory() {
         try {
             int memoryUsage = 0;
 
-            CommandResult processResult = commander.execCommand(
+            CommandResult processResult = getCommander().execCommand(
                 new String[] {"bash", "-c", "ps -ef | grep 'ColumnarLauncher' | grep -v 'grep' | awk '{print $2}'"},
                 1000);
             if (processResult.getCode() == 0) {
                 int processId = Integer.parseInt(StringUtils.getDigits(processResult.getMsg()));
                 String memoryUsageCommand = "pmap -x " + processId + " | tail -n 1 | awk '{print $4}'";
-                CommandResult memResult = commander.execCommand(
-                    new String[] {"bash", "-c", memoryUsageCommand}, 1000);
+                CommandResult memResult = getCommander().execCommand(
+                    new String[] {"bash", "-c", memoryUsageCommand}, 10000);
                 if (memResult.getCode() == 0) {
                     memoryUsage = Integer.parseInt(StringUtils.getDigits(memResult.getMsg()));
                 }
             }
 
-            if (memoryUsage > 0.95 * ColumnarTopologyBuilder.totalMem * 1024) {
+            int totalMemory =
+                ColumnarTopologyBuilder.calculateHeapMemory(getColumnarInfoMapper().getContainerMemory(getInstId()));
+            double memoryThreshold = 0.95 * totalMemory * 1024;
+            if (memoryUsage > memoryThreshold) {
+                log.warn("columnar process memory usage is too high, memoryUsage={}, totalMem={}", memoryUsage,
+                    memoryThreshold);
                 MonitorManager.getInstance()
                     .triggerAlarm(MonitorType.COLUMNAR_PROCESS_OOM_WARNING);
             }

@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
 
@@ -19,6 +11,7 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
+import com.aliyun.polardbx.binlog.error.TimeoutException;
 import com.aliyun.polardbx.binlog.relay.DdlRouteMode;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
 import com.aliyun.polardbx.rpl.RplWithGmsTablesBaseTest;
@@ -28,13 +21,21 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Assert;
 import org.junit.Test;
+import org.mockito.Mockito;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Timestamp;
+import java.util.Map;
 import java.util.UUID;
 
 import static com.aliyun.polardbx.rpl.applier.DdlApplyHelper.getDdlRouteMode;
 import static com.aliyun.polardbx.rpl.applier.DdlApplyHelper.tryAttachAsyncDdlHints;
 import static com.aliyun.polardbx.rpl.applier.DdlApplyHelper.tryRemoveColumnarIndex;
+import static org.mockito.Mockito.when;
 
 /**
  * @author shicai.xsc 2021/4/19 11:18
@@ -330,5 +331,77 @@ public class DdlApplyHelperTest extends RplWithGmsTablesBaseTest {
     private void tryAttacheAndCheck2(String sql) {
         String result = tryAttachAsyncDdlHints(sql, Long.MAX_VALUE);
         Assert.assertEquals(sql, result);
+    }
+
+    @Test
+    public void testCciCheck() {
+        String ddl =
+            "# POLARX_ORIGIN_SQL=ALTER TABLEGROUP tg2241 SPLIT PARTITION pd INTO (PARTITION p3 VALUES IN (1003) SUBPARTITIONS 2, PARTITION `pd` VALUES IN (DEFAULT) ( SUBPARTITION `pdsp1`, SUBPARTITION `pdsp2`, SUBPARTITION `pdsp3`, SUBPARTITION `pdsp4` )) \n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=0\n";
+        Assert.assertFalse(DdlApplyHelper.isCciDdl(ddl));
+        String ddl2 =
+            "# POLARX_ORIGIN_SQL=/*+TDDL({'extra':{'FORBID_DDL_WITH_CCI':'FALSE'}})*/ ALTER TABLE tT1.cci_tT1 SPLIT PARTITION p2  WITH TABLEGROUP=columnar_tg1489 IMPLICIT\n"
+                + "# POLARX_TSO=723009401408140089617611592296342528000000000000000000\n"
+                + "# POLARX_DDL_ID=7230094005076230208\n"
+                + "# POLARX_DDL_TYPES=CCI";
+
+        Assert.assertTrue(DdlApplyHelper.isCciDdl(ddl2));
+        DefaultQueryLog defaultQueryLog =
+            new DefaultQueryLog("altercciaddpartition", ddl2, new Timestamp(System.currentTimeMillis()), 0, 1);
+        SqlContext context = DdlApplyHelper.getDdlSqlContext(defaultQueryLog, "7230094005076230208",
+            "723009401408140089617611592296342528000000000000000000");
+
+        Assert.assertNull(context);
+    }
+
+    @Test
+    public void testGetVariables() {
+        String ddl =
+            "# POLARX_ORIGIN_SQL=/*+TDDL({'extra':{'FORBID_DDL_WITH_CCI':'FALSE'}})*/ ALTER TABLE tT1.cci_tT1 SPLIT PARTITION p2  WITH TABLEGROUP=columnar_tg1505 IMPLICIT\n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=0\n"
+                + "# POLARX_DDL_TYPES=CCI\n"
+                + "# POLARX_VARIABLES={\"FP_OVERRIDE_NOW\":\"2024-08-18 10:10:10\"}\n";
+        Map<String, Object> variables = DdlApplyHelper.getPolarxVariables(ddl);
+        Assert.assertNotNull(variables);
+        Assert.assertEquals("2024-08-18 10:10:10", variables.get("FP_OVERRIDE_NOW"));
+    }
+
+    @Test
+    public void testIsLocalParitionMissError() {
+        Assert.assertTrue(DdlApplyHelper.isMissLocalPartitionError(new SQLException(
+            "[1879cc30ccc02000][10.1.34.106:3306][cp1_ddl1_1057607069_new]ERR-CODE: [TDDL-4700][ERR_SERVER] server error by local partition p20230922 doesn't exist")));
+
+        Assert.assertFalse(DdlApplyHelper.isMissLocalPartitionError(new SQLException(
+            "[1879cc30ccc02000][10.1.34.106:3306][cp1_ddl1_1057607069_new]ERR-CODE: [TDDL-4700][ERR_SERVER] server error by local partition p2023 0922 doesn't exist")));
+
+    }
+
+    @Test
+    public void testTryWaitCreateOrDropDatabase() throws SQLException, InterruptedException {
+        DataSource dataSource = Mockito.mock(DataSource.class);
+        Connection connection = Mockito.mock(Connection.class);
+        Statement statement = Mockito.mock(Statement.class);
+        ResultSet resultSet1 = Mockito.mock(ResultSet.class);
+        ResultSet resultSet2 = Mockito.mock(ResultSet.class);
+
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.executeQuery(
+            "show full processlist where info like '%token1%' and info not like 'show full processlist%'")).thenReturn(
+            resultSet1);
+        when(statement.executeQuery(
+            "show full processlist where info like '%token2%' and info not like 'show full processlist%'")).thenReturn(
+            resultSet2);
+        when(resultSet1.next()).thenReturn(true);
+        when(resultSet2.next()).thenReturn(false);
+
+        try {
+            DdlApplyHelper.tryWaitCreateOrDropDatabase(dataSource, "token1", 5);
+            Assert.fail();
+        } catch (TimeoutException ignored) {
+        }
+        DdlApplyHelper.tryWaitCreateOrDropDatabase(dataSource, "token2", 5);
     }
 }

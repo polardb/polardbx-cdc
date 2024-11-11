@@ -49,6 +49,7 @@
         <table schema="polardbx_meta_db_polardbx" tableName="server_info" domainObjectName="ServerInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="node_info" domainObjectName="PolarxCNodeInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="user_priv" domainObjectName="UserPriv"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="cdc_sync_point_meta" domainObjectName="CdcSyncPointMeta"/>
         -->
 
         <!-- Binlog相关表 -->
@@ -62,9 +63,13 @@
         <table schema="polardbx_meta_db_polardbx" tableName="binlog_task_info"
                domainObjectName="BinlogTaskInfo"/>
         <table schema="polardbx_meta_db_polardbx" tableName="binlog_logic_meta_history"
-               domainObjectName="BinlogLogicMetaHistory"/>
+               domainObjectName="BinlogLogicMetaHistory">
+            <property name="trimStrings" value="false"/>
+        </table>
         <table schema="polardbx_meta_db_polardbx" tableName="binlog_phy_ddl_history"
-               domainObjectName="BinlogPhyDdlHistory"/>
+               domainObjectName="BinlogPhyDdlHistory">
+            <property name="trimStrings" value="false"/>
+        </table>
         <table schema="polardbx_meta_db_polardbx" tableName="binlog_polarx_command"
                domainObjectName="BinlogPolarxCommand"/>
         <table schema="polardbx_meta_db_polardbx" tableName="binlog_oss_record"
@@ -126,6 +131,7 @@
         <table schema="polardbx_meta_db_polardbx" tableName="rpl_full_valid_sub_task"
                domainObjectName="RplFullValidSubTask"/>
         <table schema="polardbx_meta_db_polardbx" tableName="rpl_full_valid_diff" domainObjectName="RplFullValidDiff"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="rpl_sync_point" domainObjectName="RplSyncPoint"/>
         -->
 
         <!-- Columnar 相关表 -->
@@ -135,6 +141,6 @@
         <table schema="polardbx_meta_db_polardbx" tableName="columnar_task_config" domainObjectName="ColumnarTaskConfig"/>
         <table schema="polardbx_meta_db_polardbx" tableName="columnar_checkpoints" domainObjectName="ColumnarCheckpoints"/>
         -->
-        
+
     </context>
 </generatorConfiguration>

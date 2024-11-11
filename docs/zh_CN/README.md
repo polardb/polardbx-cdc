@@ -40,7 +40,7 @@ PolarDB-X 直接作为 MySQL
 
 ## License
 
-PolarDB-X CDC 采用 Apache License 2.0 协议，协议详情参看 [License](../../LICENSE) 文件。
+PolarDB-X CDC 采用 Server Side Public License v1 (SSPLv1) 协议，协议详情参看 [License](../../LICENSE) 文件。
 
 ## Contributing
 

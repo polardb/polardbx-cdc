@@ -1,21 +1,14 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.validation.common.ValidationUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.CollectionUtils;
@@ -37,7 +30,7 @@ import java.util.List;
 public class ValidationSampler {
 
     private static final String SAMPLE_SQL_FORMAT =
-        "/*+TDDL:cmd_extra(sample_percentage=%f,enable_push_sort=false,merge_union_size=1,enable_post_planner=false,enable_direct_plan=false)*/ SELECT %s FROM %s ORDER BY %s";
+        "/*+TDDL:cmd_extra(sample_percentage=%f,enable_push_sort=false,merge_union=false,enable_index_selection=false,enable_post_planner=false,enable_direct_plan=false)*/ SELECT %s FROM %s ORDER BY %s";
 
     /**
      * 对逻辑表进行采样，采样结果按主键有序
@@ -50,7 +43,7 @@ public class ValidationSampler {
         List<List<Object>> result = new ArrayList<>();
 
         if (CollectionUtils.isEmpty(primaryKeys)) {
-            throw new UnsupportedOperationException("Not Support Check Table without Primary Key!");
+            throw new NoPrimaryKeyException("Not Support Check Table without Primary Key!");
         }
 
         try (Connection conn = dataSource.getConnection()) {
@@ -87,7 +80,8 @@ public class ValidationSampler {
             totalCount = ValidationUtil.getTableRowsCount(conn, dbName, tbName);
         } catch (SQLException e) {
             log.warn("will do count manually!");
-            String sql = String.format("SELECT COUNT(1) FROM `%s`.`%s`", dbName, tbName);
+            String sql =
+                String.format("SELECT COUNT(1) FROM `%s`.`%s`", CommonUtils.escape(dbName), CommonUtils.escape(tbName));
             try (Statement stmt = conn.createStatement();
                 ResultSet rs = stmt.executeQuery(sql)) {
                 if (rs.next()) {
@@ -135,19 +129,11 @@ public class ValidationSampler {
 
     private static boolean noNeedBatch(Connection conn, String dbName, String tableName) throws SQLException {
         long tableRows = ValidationUtil.getTableRowsCount(conn, dbName, tableName);
-        long avgSize = ValidationUtil.getTableAvgRowSize(conn, dbName, tableName);
         long minBatchRowsCount = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_MIN_BATCH_ROWS_COUNT);
         if (tableRows < minBatchRowsCount) {
             log.info("table rows:{} is smaller than min batch:{}", tableRows, minBatchRowsCount);
             return true;
         }
-        long minBatchByteSize = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_MIN_BATCH_BYTE_SIZE);
-        long totalSize = tableRows * avgSize;
-        if (totalSize < minBatchByteSize) {
-            log.info("total size:{} is smaller than min batch size:{}", totalSize, minBatchByteSize);
-            return true;
-        }
-
         return false;
     }
 

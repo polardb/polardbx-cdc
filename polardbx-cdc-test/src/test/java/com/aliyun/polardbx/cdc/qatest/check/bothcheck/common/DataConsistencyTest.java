@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.check.bothcheck.common;
 
@@ -80,6 +72,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
     private static final String SELECT_WITH_IN_FORMAT =
         "SELECT %s FROM (SELECT * FROM( SELECT %s FROM `%s`.`%s`)t1 WHERE (%s) IN (%s))t2 ORDER BY %s";
     private static final String SELECT_FORMAT = "SELECT %s FROM `%s`.`%s` ORDER BY %s";
+    private static final String SHOW_CREATE_TABLE = "SHOW FULL CREATE TABLE `%s`.`%s`";
 
     private static final int STREAM_NUM = 3;
     private static final int SOURCE_DS = 0;
@@ -110,7 +103,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
             }
         }
         Assert.assertEquals(0, testSummary.getFailedTableCount());
-        log.info("forward data check test is finished!");
+        log.info("forward data check test is finished! total table count is " + testSummary.getTotalTableCount());
     }
 
     @Test
@@ -140,7 +133,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
             }
         }
         Assert.assertEquals(0, testSummary.getFailedTableCount());
-        log.info("backward data check test is finished!");
+        log.info("backward data check test is finished! total table count is " + testSummary.getTotalTableCount());
     }
 
     @Test
@@ -161,7 +154,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
             final Function<String, Boolean> databaseFilter = s -> !filterDbs.contains(s);
             final Function<String, Boolean> tableFilter = s -> !filterTables.contains(s);
-            final Function<String, Boolean> tableGroupFilter = s -> !StringUtils.startsWith(s, "oss_");
+            final Function<String, Boolean> tableGroupFilter =
+                s -> !StringUtils.startsWith(s, "oss_") && !StringUtils.startsWith(s, "columnar_");
 
             TableGroupUtils.TableGroupConfig sourceTgs = TableGroupUtils.getAllTableGroupConfig(
                 getDruidConnection(0), databaseFilter, tableFilter, tableGroupFilter);
@@ -198,6 +192,10 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
                         Set<String> diffSet = new HashSet<>();
                         for (String table : tables) {
+                            if (filterTables.contains(d + "." + table)) {
+                                continue;
+                            }
+
                             String createSql = JdbcUtil.executeQueryAndGetStringResult(
                                 "/!+TDDL:cmd_extra(SHOW_IMPLICIT_TABLE_GROUP=true)*/show create table "
                                     + "`" + escape(d) + "`.`" + escape(table) + "`", getDruidConnection(0), 2);
@@ -221,7 +219,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
         ResultSet resultSet = JdbcUtil.executeQuery("select version()", getCdcSyncDbConnection());
         if (resultSet.next()) {
             String version = resultSet.getString(1);
-            return StringUtils.contains(version, "TDDL");
+            return StringUtils.contains(version, "TDDL") ||
+                StringUtils.contains(version, "PXC");
         }
         return false;
     }
@@ -267,18 +266,21 @@ public class DataConsistencyTest extends RplBaseTestCase {
     public void check(int srcDs) throws SQLException {
         List<Pair<String, String>> testTables = getTestTables(srcDs);
         testSummary.setTotalTableCount(testTables.size());
-        List<Future<?>> futures = new ArrayList<>();
+        Map<Future<?>, String> futures = new HashMap<>();
         ExecutorService executorService = Executors.newFixedThreadPool(10);
         ExecutorCompletionService<DetailReport> completionService =
             new ExecutorCompletionService<>(executorService);
         for (Pair<String, String> tablePair : testTables) {
-            futures.add(completionService.submit(
-                () -> checkTable(tablePair.getKey(), tablePair.getValue())));
+            futures.put(completionService.submit(
+                () -> checkTable(tablePair.getKey(), tablePair.getValue())),
+                tablePair.getKey()+"."+tablePair.getValue());
         }
 
+        Future<DetailReport> future = null;
         for (int i = 0; i < futures.size(); i++) {
             try {
-                DetailReport report = completionService.take().get();
+                future = completionService.take();
+                DetailReport report = future.get();
                 if (!report.isSuccess()) {
                     log.info("table check failed, report:{}", report);
                     testSummary.addFailedTableCount();
@@ -287,8 +289,47 @@ public class DataConsistencyTest extends RplBaseTestCase {
                 }
             } catch (Throwable e) {
                 testSummary.addFailedTableCount();
+                if (future == null){
+                    log.error("check failed exception and future is null ", e);
+                }else {
+                    testSummary.addFailedTables(futures.get(future));
+                }
                 log.error("check failed exception ", e);
             }
+        }
+    }
+
+    public boolean allExistsOrNot(String db, String table) throws SQLException {
+        if (!checkSrcTableExists(db, table)){
+            // 原不存在，检查下目标是否也不存在
+            log.warn("check src {}.{} does not exists!", db, table);
+            sendTokenAndWait(CheckParameter.builder().build());
+            if (checkDstTableExists(db, table)){
+                log.warn("check dst {}.{} exists!", db, table);
+                return false;
+            }
+            log.warn("check dst {}.{} does not exists too!", db, table);
+        }
+        return true;
+    }
+
+    public boolean checkSrcTableExists(String db, String table) throws SQLException {
+        return checkTableExists(db, table, polardbxConnection);
+    }
+
+    public boolean checkTableExists(String db, String table, Connection conn) throws SQLException {
+        try(ResultSet resultSet = JdbcUtil.executeQuery( String.format("show tables from `%s` like '%s'", db, table), conn)){
+            return resultSet.next();
+        }
+    }
+
+    public boolean checkDstTableExists(String db, String table) throws SQLException {
+        if (usingBinlogX) {
+            return checkTableExists(db, table, cdcSyncDbConnectionFirst) &&
+                checkTableExists(db, table, cdcSyncDbConnectionSecond) &&
+                checkTableExists(db, table, cdcSyncDbConnectionThird);
+        } else {
+            return checkTableExists(db, table, cdcSyncDbConnection);
         }
     }
 
@@ -300,6 +341,15 @@ public class DataConsistencyTest extends RplBaseTestCase {
             DetailReport report = new DetailReport();
             threadLocalReport.set(report);
             report.setTable(db + "." + table);
+
+            if (!allExistsOrNot(db, table)) {
+                // 原或目标一个存在一个不存在
+                log.error("failed to check table exists, table:{}.{}", db, table);
+                report.setSuccess(false);
+                report.setReason("check table exists failed");
+                return report;
+            }
+
             if (!checkColumns(db, table)) {
                 log.error("failed to check columns, table:{}.{}", db, table);
                 report.setSuccess(false);
@@ -327,15 +377,16 @@ public class DataConsistencyTest extends RplBaseTestCase {
 
     private Set<String> getIgnoreTableSet() throws SQLException {
         Set<String> sets = new HashSet<>();
-        Connection metaConn = getMetaConnection();
-        ResultSet rs =
-            JdbcUtil.executeQuery("select table_schema, table_name from tables where engine != 'InnoDB'", metaConn);
-        while (rs.next()) {
-            String schema = rs.getString("table_schema");
-            String tableName = rs.getString("table_name");
-            sets.add(schema.toLowerCase() + "." + tableName.toLowerCase());
+        try (Connection metaConn = getMetaConnection()) {
+            ResultSet rs =
+                JdbcUtil.executeQuery("select table_schema, table_name from tables where engine != 'InnoDB'", metaConn);
+            while (rs.next()) {
+                String schema = rs.getString("table_schema");
+                String tableName = rs.getString("table_name");
+                sets.add(schema.toLowerCase() + "." + tableName.toLowerCase());
+            }
+            return sets;
         }
-        return sets;
     }
 
     /**
@@ -493,8 +544,11 @@ public class DataConsistencyTest extends RplBaseTestCase {
      * @return 数据是否一致
      */
     private boolean checkRows(String db, String table) throws Exception {
-        List<String> srcCheckSum = calculateSrcCheckSum(db, table, false, false);
-        List<String> dstCheckSum = calculateDstCheckSum(db, table, false, false);
+        List<String> srcCheckSum = calculateSrcCheckSum(db, table, true, false);
+        if (srcCheckSum == null) {
+            return true;
+        }
+        List<String> dstCheckSum = calculateDstCheckSum(db, table, true, false);
         DetailReport report = threadLocalReport.get();
         report.setSrcChecksum(srcCheckSum);
         report.setDstChecksum(dstCheckSum);
@@ -504,6 +558,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
             // polardbx无法保证不同物理库的主键不重复，那么，按主键排序时具有相同主键的数据，排序顺序可能不一样，所以需要进行二次校验
             srcCheckSum = calculateSrcCheckSum(db, table, false, true);
             dstCheckSum = calculateDstCheckSum(db, table, false, true);
+            report.setSrcChecksum(srcCheckSum);
+            report.setDstChecksum(dstCheckSum);
             checkResult = ListUtils.isEqualList(srcCheckSum, dstCheckSum);
         }
         return checkResult;
@@ -530,8 +586,21 @@ public class DataConsistencyTest extends RplBaseTestCase {
         if (usingBinlogX && StreamHashUtil.getHashLevel(db, table) == HashLevel.RECORD) {
             List<String> hashKeys = getSrcPrimaryKeys(db, table);
             if (hashKeys.isEmpty()) {
-                // 无主键表使用隐藏主键进行hash
-                hashKeys.add("_drds_implicit_id_");
+                // 无主键表如果有隐藏主键，则使用隐藏主键进行hash
+                try (Connection conn = getPolardbxConnection()) {
+                    ResultSet rs = conn.createStatement().executeQuery(String.format(SHOW_CREATE_TABLE, escape(db), escape(table)));
+                    if (rs.next()) {
+                        String createTableSql = rs.getString(2);
+                        if (createTableSql.contains("_drds_implicit_id_")) {
+                            hashKeys.add("_drds_implicit_id_");
+                        } else {
+                            // 无主键表且无隐藏主键，不进行校验
+                            return null;
+                        }
+                    } else {
+                        throw new PolardbxException("show full create table failed in" + db + "." + table);
+                    }
+                }
             }
             List<String> inList = splitTable(db, table, hashKeys);
             List<Pair<String, String>> columnPairs = getSrcColumnList(db, table);
@@ -735,7 +804,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
      *
      * @param db 待校验表所在的库
      * @param table 待校验表
-     * @return 三个字符串，每个字符串对应一个流，字符串中是该流中所有行的主键
+     * @return 三个字符串，每个字符串对应一个流，字符串中是该流中所有行的主键的值
      */
     private List<String> splitTable(String db, String table, List<String> hashKeys) throws Exception {
         List<String> result = new ArrayList<>();
@@ -898,7 +967,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
         return Math.abs(Arrays.hashCode(bytes) % STREAM_NUM);
     }
 
-    private String buildCheckSumSql(String db, String table, List<Pair<String, String>> columnPairs) {
+    public String buildCheckSumSql(String db, String table, List<Pair<String, String>> columnPairs) {
         List<String> columns = columnPairs.stream().map(Pair::getLeft).collect(Collectors.toList());
         String concatStr = buildConcatString(columns);
         String concatHexStr = buildHexString(columnPairs);
@@ -1033,8 +1102,8 @@ public class DataConsistencyTest extends RplBaseTestCase {
         return false;
     }
 
-    private String buildCheckSumWithInSql(String db, String table, List<String> pks,
-                                          List<Pair<String, String>> columnPairs, String in) {
+    public String buildCheckSumWithInSql(String db, String table, List<String> pks,
+                                         List<Pair<String, String>> columnPairs, String in) {
         String pksStr = getEscapedColumns(pks);
         List<String> columns = columnPairs.stream().map(c -> c.getLeft()).collect(Collectors.toList());
         String concatStr = buildConcatString(columns);

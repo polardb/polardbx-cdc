@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.system;
 
@@ -63,6 +55,13 @@ public class DynamicSystemDBProvider extends AbstractSystemDBProvider {
             .endsWith(SINGLE_KEY_WORLD);
     }
 
+    @Override
+    public boolean isSyncPoint(String db, String phyTable) {
+        checkState();
+        return db.startsWith(LOGIC_SCHEMA) && StringUtils.equalsIgnoreCase(phyTable, POLARX_SYNC_POINT) && !db
+            .endsWith(SINGLE_KEY_WORLD);
+    }
+
     private void initTableMeta(String table) {
         template.query(String.format(SHOW_CREATE_TABLE, table), rs -> {
             String ddlSql = rs.getString("Create Table");
@@ -83,6 +82,7 @@ public class DynamicSystemDBProvider extends AbstractSystemDBProvider {
     private void postInit() {
         memoryTableMeta = new MemoryTableMeta(null, false);
         memoryTableMeta.apply(TableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_DRDS_GLOBAL_TX_LOG, null);
+        memoryTableMeta.apply(TableMetaTSDB.INIT_POSITION, LOGIC_SCHEMA, CREATE_POLARX_SYNC_POINT, null);
         initTableMeta(DRDS_CDC_DDL_RECORD);
         initTableMeta(DRDS_CDC_INSTRUCTION);
         initTableMeta(DRDS_CDC_HEARTBEAT);
@@ -117,6 +117,12 @@ public class DynamicSystemDBProvider extends AbstractSystemDBProvider {
     public TableMeta getInstructionTableMeta() {
         checkState();
         return memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_INSTRUCTION);
+    }
+
+    @Override
+    public TableMeta getSyncPointTableMeta() {
+        checkState();
+        return memoryTableMeta.find(LOGIC_SCHEMA, POLARX_SYNC_POINT);
     }
 
     @Override

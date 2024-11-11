@@ -1,32 +1,28 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
+import com.alibaba.fastjson.JSON;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLIndexDefinition;
 import com.alibaba.polardbx.druid.sql.ast.SQLIndexOptions;
+import com.alibaba.polardbx.druid.sql.ast.SQLPartition;
 import com.alibaba.polardbx.druid.sql.ast.SQLPartitionBy;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.expr.SQLBinaryOpExpr;
 import com.alibaba.polardbx.druid.sql.ast.expr.SQLIdentifierExpr;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsMovePartition;
+import com.alibaba.polardbx.druid.sql.ast.statement.DrdsSplitPartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddColumn;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddIndex;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropColumnItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropIndex;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableGroupStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableSetOption;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
@@ -47,6 +43,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableElement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlUnique;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.DrdsAlterTableModifyTtlOptions;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.DrdsAlterTableSingle;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableOption;
@@ -67,6 +64,7 @@ import java.util.Base64;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -145,29 +143,32 @@ public class DDLConverter {
     }
 
     public static String buildDdlEventSql(String polarxDDL, String dbCharset, String tbCollation, String tso) {
-        return buildDdlEventSql(null, polarxDDL, dbCharset, tbCollation, tso, null, null);
+        return buildDdlEventSql(null, polarxDDL, dbCharset, tbCollation, tso, null, null, false, null);
     }
 
     public static String buildDdlEventSql(String tableName, String polarxDDL, String dbCharset, String tbCollation,
                                           String tso) {
-        return buildDdlEventSql(tableName, polarxDDL, dbCharset, tbCollation, tso, null, null);
+        return buildDdlEventSql(tableName, polarxDDL, dbCharset, tbCollation, tso, null, null, false, null);
     }
 
     public static String buildDdlEventSql(String tableName, String ddlSqlForPolar, String dbCharset, String tbCollation,
                                           String tso, String ddlSqlForMysql) {
-        return buildDdlEventSql(tableName, ddlSqlForPolar, dbCharset, tbCollation, tso, ddlSqlForMysql, null);
+        return buildDdlEventSql(tableName, ddlSqlForPolar, dbCharset, tbCollation, tso, ddlSqlForMysql, null, false,
+            null);
     }
 
     public static String buildDdlEventSql(String tableName, String ddlSqlForPolar, String dbCharset, String tbCollation,
-                                          String tso, String ddlSqlForMysql, String ddlRecordSql) {
+                                          String tso, String ddlSqlForMysql, String ddlRecordSql, boolean isCci,
+                                          Map<String, Object> polarxVariables) {
         StringBuilder sqlBuilder = new StringBuilder();
-        buildDdlEventSqlForPolarPart(sqlBuilder, ddlSqlForPolar, dbCharset, tbCollation, tso);
+        buildDdlEventSqlForPolarPart(sqlBuilder, ddlSqlForPolar, dbCharset, tbCollation, tso, isCci, polarxVariables);
         buildDdlEventSqlForMysqlPart(sqlBuilder, tableName, dbCharset, tbCollation, ddlSqlForMysql, ddlRecordSql);
         return sqlBuilder.toString();
     }
 
     static void buildDdlEventSqlForPolarPart(StringBuilder sqlBuilder, String ddlSqlForPolar, String dbCharset,
-                                             String tbCollation, String tso) {
+                                             String tbCollation, String tso, boolean isCci,
+                                             Map<String, Object> polarxVariables) {
         if (StringUtils.isBlank(ddlSqlForPolar) || !getBoolean(ConfigKeys.TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED)) {
             return;
         }
@@ -239,6 +240,17 @@ public class DDLConverter {
             if (createIndexStatement.getPartitioning() != null) {
                 createIndexStatement.getPartitioning().getPartitions().forEach(p -> p.setLocality(null));
             }
+        } else if (sqlStatement instanceof SQLAlterTableGroupStatement) {
+            SQLAlterTableGroupStatement alterTableGroupStatement = (SQLAlterTableGroupStatement) sqlStatement;
+            if (alterTableGroupStatement.getItem() != null
+                && alterTableGroupStatement.getItem() instanceof DrdsSplitPartition) {
+                DrdsSplitPartition splitPartition = (DrdsSplitPartition) alterTableGroupStatement.getItem();
+                splitPartition.getPartitions().forEach(p -> {
+                    if (p instanceof SQLPartition) {
+                        ((SQLPartition) p).setLocality(null);
+                    }
+                });
+            }
         }
 
         SQLHintsFilter.filter(sqlStatement);
@@ -255,9 +267,21 @@ public class DDLConverter {
         if (StringUtils.isBlank(ddlId)) {
             ddlId = "0";
         }
+        String ddlTypes = "";
+        if (isCci) {
+            ddlTypes = ddlTypes + "CCI";
+        }
         sqlBuilder.append(CommonUtils.PRIVATE_DDL_DDL_PREFIX).append(privateDdlSql).append("\n");
         sqlBuilder.append(CommonUtils.PRIVATE_DDL_TSO_PREFIX).append(tso).append("\n");
         sqlBuilder.append(CommonUtils.PRIVATE_DDL_ID_PREFIX).append(ddlId).append("\n");
+        if (StringUtils.isNotBlank(ddlTypes)) {
+            sqlBuilder.append(CommonUtils.PRIVATE_DDL_DDL_TYPES_PREFIX).append(ddlTypes).append("\n");
+        }
+        if (polarxVariables != null && !polarxVariables.isEmpty()) {
+            sqlBuilder.append(CommonUtils.PRIVATE_DDL_POLARX_VARIABLES_PREFIX)
+                .append(JSON.toJSONString(polarxVariables))
+                .append("\n");
+        }
 
     }
 
@@ -404,6 +428,7 @@ public class DDLConverter {
         }
         tryAddAutoShardIndex(createTableStatement, ddlRecordSql, keySet);
         hack4RepairTableName(tableName, createTableStatement);
+        removeTtlOption(createTableStatement);
     }
 
     private static boolean isColumnDefContainsUnique(SQLColumnDefinition columnDefinition) {
@@ -474,6 +499,10 @@ public class DDLConverter {
                         sqlIndexOptions.setIndexType(null);
                     }
                 }
+            }
+
+            if (item instanceof DrdsAlterTableModifyTtlOptions) {
+                iterator.remove();
             }
 
             if (item instanceof SQLAlterTableAddConstraint) {
@@ -740,12 +769,17 @@ public class DDLConverter {
         }
 
         String tableNameInSql = createTableStatement.getTableName();
-        String tableNameInSqlNormal = SQLUtils.normalize(tableNameInSql);
+        String tableNameInSqlNormal = SQLUtils.normalizeNoTrim(tableNameInSql);
 
         if (!StringUtils.equals(tableName, tableNameInSqlNormal)) {
             createTableStatement.setTableName("`" + escape(tableName) + "`");
             log.warn("repair table name in create sql, before : {}, after :{}", tableNameInSql, tableName);
         }
+    }
+
+    private static void removeTtlOption(SQLCreateTableStatement createTableStatement) {
+        createTableStatement.getTableOptions().removeIf(
+            item -> item.getTarget() != null && StringUtils.equalsIgnoreCase(item.getTarget().toString(), "TTL"));
     }
 
     private static Set<String> getAlgorithmBlacklist() {

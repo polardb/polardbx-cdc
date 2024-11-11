@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal;
 
@@ -73,7 +65,7 @@ public class LogEventUtilTest {
     @Test
     public void testGetGroupId() throws Exception {
         String xid1 =
-            "X'647264732d313639633461343764303031    303030304033663966626466653165633638323563',X'5149454b4a5f50415944425f3030303031355f47524f55504030303030',1";
+            "X'647264732d313639633461343764303031303030304033663966626466653165633638323563',X'5149454b4a5f50415944425f3030303031355f47524f55504030303030',1";
         String xid2 =
             "X'647264732d313464343866633434313030313030304035633337666238343537303130653631',X'544553545f445244535f3030303030345f47524f55504030303033',1";
         String group1 = LogEventUtil.getGroupFromXid(xid1, "UTF-8");

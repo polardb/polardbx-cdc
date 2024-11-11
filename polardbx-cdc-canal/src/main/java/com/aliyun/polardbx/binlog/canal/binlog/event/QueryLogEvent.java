@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.event;
 
@@ -368,6 +360,28 @@ public class QueryLogEvent extends LogEvent {
     public static final int Q_SQL_REQUIRE_PRIMARY_KEY = 19;
 
     /**
+     * Replicate default_table_encryption.
+     */
+    public static final int Q_DEFAULT_TABLE_ENCRYPTION = 20;
+
+    /**
+     * @since percona 8.0.31 Replicate ddl_skip_rewrite.
+     * rds8.0 no need this variables
+     */
+    @Deprecated
+    public static final int Q_DDL_SKIP_REWRITE = 21;
+
+    /**
+     * rds8.0 Replicate opt_flashback_area.
+     */
+    public static final int Q_OPT_FLASHBACK_AREA = 21;
+
+    /**
+     * rds8.0 Replicate opt_index_format_gpp_enabled.
+     */
+    public static final int Q_OPT_INDEX_FORMAT_GPP_ENABLED = 22;
+
+    /**
      * From AliSQL 8.0, used for storing snapshot tso or commit tso
      * snapshot tso is stored in XA End Event with Query_log
      * commit tso is stored in XA Commit Event with Query_log
@@ -375,6 +389,14 @@ public class QueryLogEvent extends LogEvent {
     public static final int Q_LIZARD_COMMIT_GCN = 200;
     public static final int Q_LIZARD_PREPARE_GCN = 201;
 
+    /**
+     * Support MariaDB 10.10.1
+     */
+    public static final int Q_XID = 129;
+
+    public static final int Q_GTID_FLAGS3 = 130;
+
+    public static final int Q_CHARACTER_SET_COLLATIONS = 131;
     /**
      * FROM MariaDB 5.5.34
      */
@@ -553,6 +575,20 @@ public class QueryLogEvent extends LogEvent {
             return "Q_UPDATED_DB_NAMES";
         case Q_MICROSECONDS:
             return "Q_MICROSECONDS";
+        case Q_DEFAULT_TABLE_ENCRYPTION:
+            return "Q_DEFAULT_TABLE_ENCRYPTION";
+        case Q_HRNOW:
+            return "Q_HRNOW";
+        case Q_XID:
+            return "Q_XID";
+        case Q_GTID_FLAGS3:
+            return "Q_GTID_FLAGS3";
+        case Q_CHARACTER_SET_COLLATIONS:
+            return "Q_CHARACTER_SET_COLLATIONS";
+        case Q_OPT_FLASHBACK_AREA:
+            return "Q_OPT_FLASHBACK_AREA";
+        case Q_OPT_INDEX_FORMAT_GPP_ENABLED:
+            return "Q_OPT_INDEX_FORMAT_GPP_ENABLED";
         }
         return "CODE#" + code;
     }
@@ -653,9 +689,43 @@ public class QueryLogEvent extends LogEvent {
                     // *start++ = thd->variables.sql_require_primary_key;
                     buffer.forward(1);
                     break;
+                case Q_DEFAULT_TABLE_ENCRYPTION:
+                    // *start++ = thd->variables.default_table_encryption;
+                    buffer.forward(1);
+                    break;
+                case Q_OPT_FLASHBACK_AREA:
+                    buffer.forward(1);
+                    break;
+                case Q_OPT_INDEX_FORMAT_GPP_ENABLED:
+                    buffer.forward(1);
+                    break;
                 case Q_HRNOW:
                     // int when_sec_part = buffer.getUint24();
                     buffer.forward(3);
+                    break;
+                case Q_XID:
+                    // xid= uint8korr(pos);
+                    buffer.forward(8);
+                    break;
+                case Q_GTID_FLAGS3:
+                    // gtid_flags_extra= *pos++;
+                    // if (gtid_flags_extra & (Gtid_log_event::FL_COMMIT_ALTER_E1 |
+                    // Gtid_log_event::FL_ROLLBACK_ALTER_E1)) {
+                    // sa_seq_no = uint8korr(pos);
+                    // pos+= 8;
+                    // }
+                    int gtid_flags_extra = buffer.getUint8();
+                    final int FL_COMMIT_ALTER_E1 = 4;
+                    final int FL_ROLLBACK_ALTER_E1 = 8;
+                    if ((gtid_flags_extra & (FL_COMMIT_ALTER_E1 | FL_ROLLBACK_ALTER_E1)) > 0) {
+                        buffer.forward(8);
+                    }
+                    break;
+                case Q_CHARACTER_SET_COLLATIONS:
+                    // mariadb
+                    int count = buffer.getUint8();
+                    // character_set_collations= Lex_cstring((const char *) pos0 , (const char *) pos);
+                    buffer.forward(count * 4);
                     break;
                 case Q_LIZARD_COMMIT_GCN:
                     commitGCN = buffer.getLong64();

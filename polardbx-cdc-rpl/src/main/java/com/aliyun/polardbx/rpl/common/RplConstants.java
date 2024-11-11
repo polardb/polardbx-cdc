@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.common;
 
@@ -93,11 +85,6 @@ public class RplConstants {
 
     public static final String CHECK_CHANNEL_RUNNING = "checkChannelRunning";
 
-    /**
-     * Server-id
-     */
-    public static final long MY_POLARX_SERVER_ID = Long.valueOf(ServerConfigUtil.getGlobalVar("SERVER_ID").toString());
-
     public static final long SERVER_ID_NULL = 0;
 
     /**
@@ -116,6 +103,8 @@ public class RplConstants {
     public static final String MASTER_LOG_FILE = "MASTER_LOG_FILE";
 
     public static final String MASTER_LOG_POS = "MASTER_LOG_POS";
+
+    public static final String MASTER_LOG_TIME_SECOND = "MASTER_LOG_TIME_SECOND";
 
     public static final String IGNORE_SERVER_IDS = "IGNORE_SERVER_IDS";
 
@@ -150,7 +139,7 @@ public class RplConstants {
 
     public static final String ENABLE_DYNAMIC_MASTER_HOST = "ENABLE_DYNAMIC_MASTER_HOST";
 
-    public static final String ENABLE_AUTO_POSITION = "ENABLE_AUTO_POSITION";
+    public static final String ENABLE_SRC_LOGICAL_META_SNAPSHOT = "ENABLE_SRC_LOGICAL_META_SNAPSHOT";
 
     public static final String TRIGGER_DYNAMIC_MASTER_HOST = "TRIGGER_DYNAMIC_MASTER_HOST";
 
@@ -239,4 +228,6 @@ public class RplConstants {
     public static final String RPL_FULL_VALID_DB = "dbName";
 
     public static final String RPL_FULL_VALID_TB = "tbName";
+
+    public static final String RPL_FULL_VALID_MODE = "mode";
 }

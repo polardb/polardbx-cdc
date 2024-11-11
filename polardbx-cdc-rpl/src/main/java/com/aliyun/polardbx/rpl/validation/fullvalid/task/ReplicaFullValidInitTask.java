@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation.fullvalid.task;
 
@@ -21,7 +13,7 @@ import com.aliyun.polardbx.binlog.dao.RplFullValidSubTaskDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RplFullValidSubTaskMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplFullValidSubTask;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
-import com.aliyun.polardbx.rpl.validation.fullvalid.ReplicaFullValidSampler;
+import com.aliyun.polardbx.rpl.validation.ValidationSampler;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -82,7 +74,7 @@ public class ReplicaFullValidInitTask extends ReplicaFullValidSubTask {
 
                 // do sample
                 List<List<Object>> sampleResult =
-                    ReplicaFullValidSampler.sample(dstDataSource, config.getDstDb(), config.getDstTb(),
+                    ValidationSampler.sample(dstDataSource, config.getDstDb(), config.getDstTb(),
                         dstTableInfo.getPks());
 
                 // build sub tasks
@@ -121,7 +113,7 @@ public class ReplicaFullValidInitTask extends ReplicaFullValidSubTask {
     private RplFullValidSubTask createCheckTaskMetaHelper(List<Object> lowerBound, List<Object> upperBound) {
         ReplicaFullValidCheckTask.TaskConfig taskConfig =
             new ReplicaFullValidCheckTask.TaskConfig(config.getSrcDb(), config.getSrcTb(), config.getDstDb(),
-                config.getDstTb(), lowerBound, upperBound);
+                config.getDstTb(), lowerBound, upperBound, config.mode);
         return ReplicaFullValidCheckTask.generateTaskMeta(context.getFsmId(), context.getFullValidTaskId(), taskConfig);
     }
 
@@ -143,6 +135,7 @@ public class ReplicaFullValidInitTask extends ReplicaFullValidSubTask {
         String srcTb;
         String dstDb;
         String dstTb;
+        String mode;
     }
 
 }

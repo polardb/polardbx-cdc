@@ -1,21 +1,15 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
 
+import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.LogEventFilter;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
@@ -34,6 +28,7 @@ import com.aliyun.polardbx.binlog.extractor.log.processor.EventFilter;
 import com.aliyun.polardbx.binlog.extractor.log.processor.FilterBlacklistTableFilter;
 import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
 import com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil;
+import com.aliyun.polardbx.binlog.util.LabEventType;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -57,6 +52,10 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
      * 对于这两种方式，它们的Snapshot Tso都是记录到XA Start之后的，所以处理模式类似
      */
     private long lastCommitSequenceNum = -1L;
+    private long lastSyncPointSequenceNum = -1L;
+
+    private final boolean checkSyncPoint =
+        DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_CHECK_SYNC_POINT_ENABLED);
 
     public TransactionBufferEventFilter() {
         String blacklist = DynamicApplicationConfig.getString(ConfigKeys.TASK_EXTRACT_FILTER_PHYSICAL_TABLE_BLACKLIST);
@@ -194,8 +193,50 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
                 commitTran.setTsoTransaction(true);
                 commitTran.setRealTSO(lastCommitSequenceNum);
             }
+
+            if (commitTran != null && commitTran.isSyncPoint()) {
+                lastSyncPointSequenceNum = lastCommitSequenceNum;
+            }
         } else {
+            RuntimeContext rc = context.getRuntimeContext();
+            if (rc.inSyncPointTxn()) {
+                if (lastCommitSequenceNum <= rc.getHoldingTso()) {
+                    currentTran.setRealTSO(rc.getHoldingTso());
+                } else {
+                    currentTran.setRealTSO(lastCommitSequenceNum);
+                }
+            }
             commitTran = currentTran;
+        }
+
+        if (checkSyncPoint) {
+            // getEventCount > 0 保证处理的是常规事务
+            // DN binlog中可能存在下面这种事务：
+            // BEGIN
+            // SEQUENCE purge SEQUENCE NUMBER: xxx
+            // COMMIT
+            // processSequence的时候会忽略除了commit sequence以外的其他类型的sequence
+            if (commitTran != null && !commitTran.isSyncPointCheckIgnored() && commitTran.getEventCount() > 0) {
+                // 说明开启了xa tso事务策略
+                if (lastSyncPointSequenceNum > 0) {
+                    // 验证：开启xa tso之后所有的事务commit都带tso
+                    if (lastCommitSequenceNum < 0) {
+                        log.warn("commit without sequence! commit trans:{}", commitTran);
+                        LabEventManager.logEvent(LabEventType.SYNC_POINT_COMMIT_WITHOUT_SEQ,
+                            "transaction:" + commitTran);
+                    } else {
+                        // 验证：sync point事务后的单机事务的tso都不小于sync point事务的tso
+                        if (StringUtils.isBlank(xid) && lastCommitSequenceNum < lastSyncPointSequenceNum) {
+                            log.warn(
+                                "local txn's tso is less than sync point txn's tso! local txn's tso:{}, sync point txn's tso:{}",
+                                lastCommitSequenceNum, commitTran);
+                            LabEventManager.logEvent(LabEventType.SYNC_POINT_UNEXPECTED_LOCAL_SEQ,
+                                "local txn tso: " + lastCommitSequenceNum + ", sync point tso: "
+                                    + lastSyncPointSequenceNum);
+                        }
+                    }
+                }
+            }
         }
 
         // reset some variables
@@ -266,6 +307,21 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
                 return;
             }
         }
-        currentTran.processEvent(event, context.getRuntimeContext());
+        if (event.getHeader().getType() == LogEvent.QUERY_EVENT) {
+            // 事务中出现了DDL
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_SKIP_DDL_IN_TRANSACTION)) {
+                log.warn("transaction contains ddl, skip it! {}",
+                    currentTran.getXid() + ", " + currentTran.getBinlogFileName() + ":" + currentTran.getStartLogPos()
+                        + JSON.toJSONString(event));
+                return;
+            }
+        }
+        try {
+            currentTran.processEvent(event, context.getRuntimeContext());
+        } catch (Exception e) {
+            log.error("process event error!" + currentTran.getXid() + "   ,  " + currentTran.getBinlogFileName() + ":"
+                + currentTran.getStartLogPos() + JSON.toJSONString(event), e);
+            throw e;
+        }
     }
 }

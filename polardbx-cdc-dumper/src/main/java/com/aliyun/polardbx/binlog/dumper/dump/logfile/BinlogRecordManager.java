@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
@@ -26,7 +18,6 @@ import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.LabEventType;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -58,6 +49,7 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 public class BinlogRecordManager implements IBinlogListener, Runnable {
     private static final Logger logger = LoggerFactory.getLogger(BinlogRecordManager.class);
     private final String binlogFullPath;
+    private final long version;
     private final String taskName;
     private final TaskType taskType;
     private final String group;
@@ -69,10 +61,12 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
     private final BinlogOssRecordMapper recordMapper;
     private final BinlogOssRecordService recordService;
 
-    public BinlogRecordManager(String group, String stream, String taskName, TaskType taskType, String rootPath) {
+    public BinlogRecordManager(long version, String group, String stream, String taskName, TaskType taskType,
+                               String rootPath) {
         this.recordMapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
         this.recordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
         this.binlogFullPath = BinlogFileUtil.getFullPath(rootPath, group, stream);
+        this.version = version;
         this.taskName = taskName;
         this.taskType = taskType;
         this.group = group;
@@ -97,7 +91,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
     public void run() {
         try {
             MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_BACKUP);
-            if (isDumperFollower()) {
+            if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
                 executor.shutdown();
                 return;
             }
@@ -177,7 +171,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
 
     @Override
     public void onCreateFile(File file) {
-        if (isDumperFollower()) {
+        if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
             return;
         }
 
@@ -198,7 +192,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
 
     @Override
     public void onFinishFile(File file, BinlogEndInfo binlogEndInfo) {
-        if (isDumperFollower()) {
+        if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
             return;
         }
 
@@ -224,10 +218,6 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
 
     @Override
     public void onDeleteFile(File file) {
-    }
-
-    private boolean isDumperFollower() {
-        return CommonUtils.isGlobalBinlog(group, stream) && !RuntimeLeaderElector.isDumperLeader(taskName);
     }
 
     interface RecordTask {

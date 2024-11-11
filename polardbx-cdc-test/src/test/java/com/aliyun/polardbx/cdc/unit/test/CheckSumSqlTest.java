@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.unit.test;
 
@@ -20,11 +12,7 @@ import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Assert;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.modules.junit4.PowerMockRunner;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,13 +20,12 @@ import java.util.List;
  * @author yudong
  * @since 2023/2/14 15:55
  **/
-@RunWith(PowerMockRunner.class)
-public class CheckSumSqlTest {
 
+public class CheckSumSqlTest {
     // ==================  test DataConsistencyTest::buildCheckSumSql ============= //
 
     @Test
-    public void testNameWithEscapeCharacter() throws Exception {
+    public void testNameWithEscapeCharacter() {
         DataConsistencyTest test = new DataConsistencyTest();
         String db = "`testDB`";
         String table = "`testTable`";
@@ -46,10 +33,7 @@ public class CheckSumSqlTest {
         columnPairs.add(new ImmutablePair<>("`id`", "bigint"));
         columnPairs.add(new ImmutablePair<>("`name`", "varchar(20)"));
 
-        Method buildCheckSumSql =
-            PowerMockito.method(DataConsistencyTest.class, "buildCheckSumSql", String.class, String.class,
-                List.class);
-        String checkSumSql = (String) buildCheckSumSql.invoke(test, db, table, columnPairs);
+        String checkSumSql = test.buildCheckSumSql(db, table, columnPairs);
         String expected =
             "SELECT BIT_XOR( CAST( CRC32( CONCAT_WS( ',', ```id```, ```name```, ISNULL(```id```), ISNULL(```name```) ) ) AS UNSIGNED )) AS checksum FROM ( SELECT HEX(```id```) as ```id```, HEX(```name```) as ```name``` FROM ```testDB```.```testTable``` )t";
         Assert.assertEquals(expected, checkSumSql);
@@ -64,10 +48,7 @@ public class CheckSumSqlTest {
         columnPairs.add(new ImmutablePair<>("id", "bigint"));
         columnPairs.add(new ImmutablePair<>("name", "varchar(20)"));
 
-        Method buildCheckSumSql =
-            PowerMockito.method(DataConsistencyTest.class, "buildCheckSumSql", String.class, String.class,
-                List.class);
-        String checkSumSql = (String) buildCheckSumSql.invoke(test, db, table, columnPairs);
+        String checkSumSql = test.buildCheckSumSql(db, table, columnPairs);
         String expected =
             "SELECT BIT_XOR( CAST( CRC32( CONCAT_WS( ',', `id`, `name`, ISNULL(`id`), ISNULL(`name`) ) ) AS UNSIGNED )) AS checksum FROM ( SELECT HEX(`id`) as `id`, HEX(`name`) as `name` FROM `testDB`.`testTable` )t";
         Assert.assertEquals(expected, checkSumSql);
@@ -88,10 +69,7 @@ public class CheckSumSqlTest {
 
         String in = "'1','2'";
 
-        Method buildCheckSumWithInSql =
-            PowerMockito.method(DataConsistencyTest.class, "buildCheckSumWithInSql", String.class, String.class,
-                List.class, List.class, String.class);
-        String checkSumSql = (String) buildCheckSumWithInSql.invoke(test, db, table, pks, columnPairs, in);
+        String checkSumSql = test.buildCheckSumWithInSql(db, table, pks, columnPairs, in);
         String expected =
             "SELECT BIT_XOR( CAST( CRC32( CONCAT_WS( ',', ```id```, ```name```, ISNULL(```id```), ISNULL(```name```) ) ) AS UNSIGNED ) ) AS checksum FROM ( SELECT HEX(```id```) as ```id```, HEX(```name```) as ```name``` FROM ```testDB```.```testTable``` WHERE (```id```) IN ('1','2') ORDER BY ```id``` )t";
         Assert.assertEquals(expected, checkSumSql);
@@ -110,10 +88,7 @@ public class CheckSumSqlTest {
         columnPairs.add(new ImmutablePair<>("name", "varchar(20)"));
         String in = "'1','2'";
 
-        Method buildCheckSumWithInSql =
-            PowerMockito.method(DataConsistencyTest.class, "buildCheckSumWithInSql", String.class, String.class,
-                List.class, List.class, String.class);
-        String checkSumSql = (String) buildCheckSumWithInSql.invoke(test, db, table, pks, columnPairs, in);
+        String checkSumSql = test.buildCheckSumWithInSql(db, table, pks, columnPairs, in);
         String expected =
             "SELECT BIT_XOR( CAST( CRC32( CONCAT_WS( ',', `id`, `name`, ISNULL(`id`), ISNULL(`name`) ) ) AS UNSIGNED ) ) AS checksum FROM ( SELECT HEX(`id`) as `id`, HEX(`name`) as `name` FROM `testDB`.`testTable` WHERE (`id`) IN ('1','2') ORDER BY `id` )t";
         Assert.assertEquals(expected, checkSumSql);

@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
 
@@ -32,7 +24,12 @@ public enum LabEventType {
     TEST_IS_METADB_LEADER("测试是否是leader节点"),
     TASK_TRANSACTION_PERSIST_ERROR("Transaction对象发生持久化异常"),
     EXCEPTION_RE_WRITE_DDL("异常重写DDL"),
-    SQL_STATMENT_DB_TYPE_NOT_MYSQL("FastSql.dbType设置为非MySQL");
+    SQL_STATMENT_DB_TYPE_NOT_MYSQL("FastSql.dbType设置为非MySQL"),
+    SYNC_POINT_COMMIT_WITHOUT_SEQ("开启xa tso事务策略后检测到无TSO的事务"),
+    SYNC_POINT_UNEXPECTED_LOCAL_SEQ("sync point事务后的单机事务tso小于sync point事务tso"),
+    HIDDEN_PK_ENABLE_SWITCH("隐藏主键开关记录"),
+    UPLOAD_UNLOCK_FAIL("上传文件后解锁失败"),
+    UPDATE_QUERY_INFO("从binlog解析的update sql变更列");
 
     private final String desc;
 

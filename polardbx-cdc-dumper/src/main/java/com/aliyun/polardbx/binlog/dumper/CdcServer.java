@@ -1,21 +1,19 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.InstructionType;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.TimelineEnvConfig;
 import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
@@ -65,6 +63,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.MDC;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -76,9 +76,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL_WITH_DUMP;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_KEY;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_VALUE_BINLOG_SYNC;
+import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.MAX_TSO;
 import static io.grpc.internal.GrpcUtil.getThreadFactory;
 
 /**
@@ -88,19 +90,23 @@ import static io.grpc.internal.GrpcUtil.getThreadFactory;
 public class CdcServer {
     private static final Logger metaLogger = LogUtil.getMetaLogger();
     private final String taskName;
+    private final TaskType taskType;
+    private final long version;
     private final LogFileManagerCollection logFileManagerCollection;
     private final int port;
     private final ExecutorService executor;
     private final BinlogTaskConfig taskConfig;
     private Server server;
-    private boolean localMode;
 
     private final MetricsManager metricsManager;
 
     public static final Context.Key<DumpClientMetric> KEY_CLIENT_METRICS = Context.key("KEY_CLIENT_METRICS");
 
-    public CdcServer(String taskName, LogFileManagerCollection logFileManagerCollection, int port,
+    public CdcServer(long version, TaskType taskType, String taskName,
+                     LogFileManagerCollection logFileManagerCollection, int port,
                      BinlogTaskConfig taskConfig, MetricsManager metricsManager) {
+        this.version = version;
+        this.taskType = taskType;
         this.taskName = taskName;
         this.logFileManagerCollection = logFileManagerCollection;
         this.port = port;
@@ -110,13 +116,10 @@ public class CdcServer {
     }
 
     public void start() {
-        if (!localMode) {
-            //多流模式没有dumper leader
-            if (TaskType.Dumper.name().equals(taskConfig.getRole())
-                && !RuntimeLeaderElector.isDumperLeader(taskName)) {
-                return;
-            }
+        if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
+            return;
         }
+
         CdcServiceGrpc.CdcServiceImplBase svc = new CdcServiceGrpc.CdcServiceImplBase() {
             @Override
             public void showBinaryLogs(Request request, StreamObserver<BinaryLog> responseObserver) {
@@ -291,6 +294,8 @@ public class CdcServer {
                     log.info("CDC Server receive a dump request, with stream name: {}, file name: {}, position: {}, "
                             + "registered: {}, ext: {}.", request.getStreamName(), request.getFileName(),
                         request.getPosition(), request.getRegistered(), request.getExt());
+
+                    tryAdjustCdcHeartbeatWriteInterval();
                     final ServerCallStreamObserver<DumpStream> serverCallStreamObserver =
                         (ServerCallStreamObserver<DumpStream>) responseObserver;
                     LogFileManager logFileManager = getLogFileManager(request.getStreamName());
@@ -301,6 +306,8 @@ public class CdcServer {
                         request = DumpRequest.newBuilder()
                             .setFileName(searchFile)
                             .setPosition(request.getPosition())
+                            .setRegistered(request.getRegistered())
+                            .setExt(request.getExt())
                             .build();
                     }
 
@@ -462,8 +469,40 @@ public class CdcServer {
         }
     }
 
-    public void setLocalMode(boolean localMode) {
-        this.localMode = localMode;
+    // 只要发生binlog dump，则调大cdc heartbeat记录到binlog file中的频率，覆盖默认配置，即使后续不再有dump
+    private void tryAdjustCdcHeartbeatWriteInterval() {
+        try {
+            int newInterval = DynamicApplicationConfig.getInt(BINLOG_WRITE_HEARTBEAT_INTERVAL_WITH_DUMP);
+            if (newInterval <= 0) {
+                return;
+            }
+
+            TimelineEnvConfig timelineEnvConfig = new TimelineEnvConfig();
+            timelineEnvConfig.initConfigByTso(MAX_TSO);
+            int currentInterval = timelineEnvConfig.getInt(ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL);
+            if (currentInterval <= newInterval) {
+                return;
+            }
+
+            final String name = ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL;
+            final String value = newInterval + "";
+            final String TRANSACTION_POLICY = "set drds_transaction_policy='TSO'";
+            final String SEND_CONFIG_UPDATE_COMMAND =
+                "insert ignore into __cdc_instruction__(INSTRUCTION_TYPE, INSTRUCTION_CONTENT, INSTRUCTION_ID) values(?,?,?)";
+
+            JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
+            TransactionTemplate transactionTemplate = SpringContextHolder.getObject("polarxTransactionTemplate");
+            transactionTemplate.execute((o) -> transactionTemplate.execute(transactionStatus -> {
+                template.execute(TRANSACTION_POLICY);
+                JSONObject newObject = new JSONObject();
+                newObject.put(name, value);
+                template.update(SEND_CONFIG_UPDATE_COMMAND, InstructionType.CdcEnvConfigChange.name(),
+                    newObject.toJSONString(), "binlog_dump_auto_adjust_heartbeat_interval");
+                return null;
+            }));
+        } catch (Throwable t) {
+            log.error("try adjust cdc heartbeat write interval error!!", t);
+        }
     }
 
 }

@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper;
 
@@ -45,6 +37,7 @@ import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.SneakyThrows;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,6 +74,7 @@ public class DumperController {
     private static final Logger logger = LoggerFactory.getLogger(DumperController.class);
 
     private final TaskRuntimeConfig taskRuntimeConfig;
+    private final ExecutionConfig executionConfig;
     private LogFileManagerCollection logFileManagerCollection;
     private CdcServer cdcServer;
     private MetricsManager metricsManager;
@@ -93,6 +87,7 @@ public class DumperController {
 
     public DumperController(TaskConfigProvider taskConfigProvider) {
         this.taskRuntimeConfig = taskConfigProvider.getTaskRuntimeConfig();
+        this.executionConfig = buildExecutionConfig(taskRuntimeConfig);
         MonitorManager.getInstance().startup();
         this.build();
     }
@@ -137,8 +132,6 @@ public class DumperController {
             break;
         case DumperX:
             groupName = getString(BINLOGX_STREAM_GROUP_NAME);
-            ExecutionConfig executionConfig = JSONObject.parseObject(
-                taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
             streamList = new ArrayList<>(executionConfig.getStreamNameSet());
             break;
         default:
@@ -154,9 +147,12 @@ public class DumperController {
         streamList.forEach(streamId -> metrics.put(streamId, StreamMetrics.getStreamMetrics(streamId)));
         this.backupManager = new BinlogBackupManager(buildStreamContext(), metrics);
         this.cleanManager = new BinlogCleanManager(buildStreamContext());
-        this.metricsManager = new MetricsManager(taskRuntimeConfig.getName(), taskRuntimeConfig.getType());
-        this.cdcServer = new CdcServer(taskRuntimeConfig.getName(), logFileManagerCollection,
-            taskRuntimeConfig.getServerPort(), taskRuntimeConfig.getBinlogTaskConfig(), metricsManager);
+        this.metricsManager = new MetricsManager(executionConfig.getRuntimeVersion(), taskRuntimeConfig.getName(),
+            taskRuntimeConfig.getType());
+        this.cdcServer =
+            new CdcServer(executionConfig.getRuntimeVersion(), taskRuntimeConfig.getType(), taskRuntimeConfig.getName(),
+                logFileManagerCollection, taskRuntimeConfig.getServerPort(), taskRuntimeConfig.getBinlogTaskConfig(),
+                metricsManager);
         this.updateDumperInfo(taskRuntimeConfig);
     }
 
@@ -165,8 +161,7 @@ public class DumperController {
      * LogFileManagerCollection保存当前Dumper的所有LogFileManager
      */
     private void buildLogFileManagerCollection() {
-        ExecutionConfig config = JSONObject.parseObject(
-            taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
+        ExecutionConfig config = buildExecutionConfig(taskRuntimeConfig);
         this.logFileManagerCollection = new LogFileManagerCollection();
         streamList.forEach(streamName -> {
             logFileManagerCollection.add(streamName, buildLogFileManager(config, streamName));
@@ -193,7 +188,8 @@ public class DumperController {
 
     private void buildRole() {
         if (taskRuntimeConfig.getType() == TaskType.Dumper) {
-            boolean dumperLeader = RuntimeLeaderElector.isDumperLeader(taskRuntimeConfig.getName());
+            boolean dumperLeader =
+                RuntimeLeaderElector.isDumperMaster(executionConfig.getRuntimeVersion(), taskRuntimeConfig.getName());
             role = dumperLeader ? DumperType.MASTER.getName() : DumperType.SLAVE.getName();
         } else if (taskRuntimeConfig.getType() == TaskType.DumperX) {
             role = DumperType.XSTREAM.getName();
@@ -204,8 +200,7 @@ public class DumperController {
 
     private void updateDumperInfo(TaskRuntimeConfig taskRuntimeConfig) {
         this.buildRole();
-        ExecutionConfig executionConfig =
-            JSONObject.parseObject(taskRuntimeConfig.getBinlogTaskConfig().getConfig(), ExecutionConfig.class);
+        ExecutionConfig executionConfig = buildExecutionConfig(taskRuntimeConfig);
 
         TransactionTemplate transactionTemplate = SpringContextHolder.getObject("metaTransactionTemplate");
         DumperInfoMapper dumperInfoMapper = SpringContextHolder.getObject(DumperInfoMapper.class);
@@ -287,5 +282,20 @@ public class DumperController {
     private StreamContext buildStreamContext() {
         return new StreamContext(groupName, streamList, getString(CLUSTER_ID), taskRuntimeConfig.getName(),
             taskRuntimeConfig.getType(), taskRuntimeConfig.getBinlogTaskConfig().getVersion());
+    }
+
+    /**
+     * 对runtimeVersion进行特殊处理，兼容老版本
+     *
+     * @return {@link ExecutionConfig }
+     */
+    private ExecutionConfig buildExecutionConfig(TaskRuntimeConfig taskRuntimeConfig) {
+        String taskConfigJson = taskRuntimeConfig.getBinlogTaskConfig().getConfig();
+        ExecutionConfig config =
+            JSONObject.parseObject(taskConfigJson, ExecutionConfig.class);
+        if (!StringUtils.contains(taskConfigJson, "runtimeVersion")) {
+            config.setRuntimeVersion(taskRuntimeConfig.getBinlogTaskConfig().getVersion());
+        }
+        return config;
     }
 }

@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor;
 
@@ -127,6 +119,7 @@ public class LogEventConvert {
     protected FieldMeta rdsImplicitIDFieldMeta;
     protected TableMeta rdsHeartBeatTableMeta;
     protected String nowTso;
+    protected boolean enableSrcLogicalMetaSnapshot;
 
     public LogEventConvert(HostInfo metaHostInfo, BaseFilter filter, BinlogPosition startBinlogPosition,
                            HostType srcHostType) {
@@ -134,6 +127,16 @@ public class LogEventConvert {
         this.filter = filter;
         this.binlogFileName = startBinlogPosition.getFileName();
         this.srcHostType = srcHostType;
+        this.enableSrcLogicalMetaSnapshot = false;
+    }
+
+    public LogEventConvert(HostInfo metaHostInfo, BaseFilter filter, BinlogPosition startBinlogPosition,
+                           HostType srcHostType, boolean enableSrcLogicalMetaSnapshot) {
+        this.metaHostInfo = metaHostInfo;
+        this.filter = filter;
+        this.binlogFileName = startBinlogPosition.getFileName();
+        this.srcHostType = srcHostType;
+        this.enableSrcLogicalMetaSnapshot = enableSrcLogicalMetaSnapshot;
     }
 
     public static DBMSTransactionBegin createTransactionBegin(long threadId) {
@@ -163,9 +166,11 @@ public class LogEventConvert {
             "",
             1,
             2,
+            true,
             null,
             null);
-        this.tableMetaCache = new TableMetaCache(dataSource, srcHostType == HostType.POLARX2);
+        this.tableMetaCache = new TableMetaCache(dataSource,
+            srcHostType == HostType.POLARX2 && enableSrcLogicalMetaSnapshot);
         initMeta();
     }
 
@@ -519,7 +524,9 @@ public class LogEventConvert {
                     fieldMeta.isKey(),
                     fieldMeta.isUnique(),
                     fieldMeta.isGenerated(),
-                    fieldMeta.isImplicitPk());
+                    fieldMeta.isImplicitPk(),
+                    fieldMeta.isOnUpdate()
+                );
                 dbmsColumns.add(column);
             }
 
@@ -764,8 +771,10 @@ public class LogEventConvert {
             TableMeta tableMeta = tableMetaCache.getTableMeta(dbName, tbName);
             if (tableMeta.getPrimaryFields().isEmpty() && !tableMeta.getUseImplicitPk()) {
                 if (srcHostType == HostType.RDS) {
-                    // 添加 polarx 隐藏主键
-                    log.info("Add implicit id {} for table {}.{}", RplConstants.RDS_IMPLICIT_ID, dbName, tbName);
+                    // 添加隐藏主键
+                    if (log.isDebugEnabled()) {
+                        log.info("Add implicit id {} for table {}.{}", RplConstants.RDS_IMPLICIT_ID, dbName, tbName);
+                    }
                     tableMeta.addFieldMeta(rdsImplicitIDFieldMeta);
                     tableMeta.setUseImplicitPk(true);
                 }

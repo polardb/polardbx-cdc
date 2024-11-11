@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.base;
 
@@ -342,7 +334,7 @@ public class BaseTestCase implements BaseTestMode {
     }
 
     public synchronized Connection getCdcSyncDbConnectionFirst() {
-        return getCdcSyncDbConnectionFirst("mysql");
+        return getCdcSyncDbConnectionFirst(null);
     }
 
     public synchronized Connection getCdcSyncDbConnectionFirst(String db) {
@@ -351,7 +343,9 @@ public class BaseTestCase implements BaseTestMode {
             Connection connection = ConnectionManager.getInstance().getDruidCdcSyncDbConnectionFirst();
             ConnectionWrap connectionWrap = new ConnectionWrap(connection);
             this.cdcSyncDbConnectionsFirst.add(connectionWrap);
-            useDb(connectionWrap, db);
+            if (StringUtils.isNotBlank(db)) {
+                useDb(connectionWrap, db);
+            }
             return connectionWrap;
         } catch (SQLException t) {
             log.error("get MysqlConnectionSecond error!", t);
@@ -360,7 +354,7 @@ public class BaseTestCase implements BaseTestMode {
     }
 
     public synchronized Connection getCdcSyncDbConnectionSecond() {
-        return getCdcSyncDbConnectionSecond("mysql");
+        return getCdcSyncDbConnectionSecond(null);
     }
 
     public synchronized Connection getCdcSyncDbConnectionSecond(String db) {
@@ -369,7 +363,9 @@ public class BaseTestCase implements BaseTestMode {
             Connection connection = ConnectionManager.getInstance().getDruidCdcSyncDbConnectionSecond();
             ConnectionWrap connectionWrap = new ConnectionWrap(connection);
             this.cdcSyncDbConnectionsSecond.add(connectionWrap);
-            useDb(connectionWrap, db);
+            if (StringUtils.isNotBlank(db)) {
+                useDb(connectionWrap, db);
+            }
             return connectionWrap;
         } catch (SQLException t) {
             log.error("get MysqlConnectionSecond error!", t);
@@ -378,7 +374,7 @@ public class BaseTestCase implements BaseTestMode {
     }
 
     public synchronized Connection getCdcSyncDbConnectionThird() {
-        return getCdcSyncDbConnectionThird("mysql");
+        return getCdcSyncDbConnectionThird(null);
     }
 
     public synchronized Connection getCdcSyncDbConnectionThird(String db) {
@@ -387,7 +383,9 @@ public class BaseTestCase implements BaseTestMode {
             Connection connection = ConnectionManager.getInstance().getDruidCdcSyncDbConnectionThird();
             ConnectionWrap connectionWrap = new ConnectionWrap(connection);
             this.cdcSyncDbConnectionsThird.add(connectionWrap);
-            useDb(connectionWrap, db);
+            if (StringUtils.isNotBlank(db)) {
+                useDb(connectionWrap, db);
+            }
             return connectionWrap;
         } catch (SQLException t) {
             log.error("get MysqlConnectionSecond error!", t);

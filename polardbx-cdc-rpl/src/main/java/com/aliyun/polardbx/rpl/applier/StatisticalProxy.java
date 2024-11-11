@@ -1,20 +1,15 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
 
 import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.CommonMetrics;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
@@ -29,7 +24,11 @@ import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
+import com.aliyun.polardbx.binlog.proc.ProcUtils;
+import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
+import com.aliyun.polardbx.binlog.util.MetricsReporter;
 import com.aliyun.polardbx.rpl.common.LogUtil;
 import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
 import com.aliyun.polardbx.rpl.common.RplConstants;
@@ -45,10 +44,13 @@ import com.github.rholder.retry.Retryer;
 import com.github.rholder.retry.RetryerBuilder;
 import com.github.rholder.retry.StopStrategies;
 import com.github.rholder.retry.WaitStrategies;
+import com.google.common.collect.Lists;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
+import org.springframework.util.CollectionUtils;
 
 import java.util.Collections;
 import java.util.Date;
@@ -59,6 +61,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_APPLY_DRY_RUN_ENABLED;
 
 /**
  * @author shicai.xsc 2021/2/20 15:15
@@ -135,10 +139,20 @@ public class StatisticalProxy implements FlowLimiter {
     }
 
     public void apply(List<DBMSEvent> events) throws Exception {
+        boolean dryRun = DynamicApplicationConfig.getBoolean(RPL_APPLY_DRY_RUN_ENABLED);
+        if (dryRun) {
+            return;
+        }
+
         limiter.runTask(events);
     }
 
     public void tranApply(List<Transaction> transactions) throws Exception {
+        boolean dryRun = DynamicApplicationConfig.getBoolean(RPL_APPLY_DRY_RUN_ENABLED);
+        if (dryRun) {
+            return;
+        }
+
         limiter.runTranTask(transactions);
     }
 
@@ -224,13 +238,6 @@ public class StatisticalProxy implements FlowLimiter {
                 }
             }
         }
-
-        for (Transaction trans : transactions) {
-            StatMetrics.getInstance().doStatOut(
-                trans.getInsertCount(), trans.getUpdateCount(), trans.getDeleteCount(),
-                trans.getByteSize(), trans.peekLast());
-            StatMetrics.getInstance().addCommitCount(trans.getEventCount());
-        }
     }
 
     @Override
@@ -261,6 +268,8 @@ public class StatisticalProxy implements FlowLimiter {
         if (StringUtils.isBlank(error)) {
             return;
         }
+        error = CommonUtils.filterSensitiveInfo(error);
+
         // 只记录关闭状态前的error
         // 开始关闭后由于连接池关闭等会导致新增报错，会干扰错误判断
         RplTask task = DbTaskMetaManager.getTask(TaskContext.getInstance().getTaskId());
@@ -299,10 +308,7 @@ public class StatisticalProxy implements FlowLimiter {
     }
 
     public BinlogPosition getLatestPosition() {
-        if (StringUtils.isNotBlank(position)) {
-            return BinlogPosition.parseFromString(position);
-        }
-        return null;
+        return BinlogPosition.parseFromString(position);
     }
 
     public void checkRunningLock() {
@@ -365,6 +371,15 @@ public class StatisticalProxy implements FlowLimiter {
             if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.RUNNING) {
                 DbTaskMetaManager.updateTask(TaskContext.getInstance().getTaskId(),
                     null, null, position, null, gmtHeartBeat);
+                // compare with stop time
+                BinlogPosition binlogPosition = BinlogPosition.parseFromString(position);
+                long finishedTimestamp = DynamicApplicationConfig.getLong(ConfigKeys.RPL_INC_STOP_TIME_SECONDS,
+                    0L);
+                if (binlogPosition != null && finishedTimestamp > 0L &&
+                    binlogPosition.getTimestamp() > finishedTimestamp) {
+                    DbTaskMetaManager.updateTask(TaskContext.getInstance().getTaskId(),
+                        TaskStatus.FINISHED, null, position, null, gmtHeartBeat);
+                }
             } else {
                 log.error("task is not in running status");
                 TaskContext.getInstance().getPipeline().stop();
@@ -374,9 +389,8 @@ public class StatisticalProxy implements FlowLimiter {
         }
     }
 
-    public void fill(RplStatMetrics rplStatMetrics) {
-        StatMetrics statMetrics = StatMetrics.getInstance();
-        JvmSnapshot jvmSnapshot = JvmUtils.buildJvmSnapshot();
+    public void fill(RplStatMetrics rplStatMetrics, StatMetrics statMetrics, JvmSnapshot jvmSnapshot,
+                     ProcSnapshot procSnapshot) {
         int userRatio = (int) (JvmUtils.getTotalUsedRatio() * 100);
         long applyTotalCount = statMetrics.getApplyCount().getTotalCount();
         if (applyTotalCount == 0) {
@@ -395,20 +409,29 @@ public class StatisticalProxy implements FlowLimiter {
             statMetrics.getMergeBatchSize().getTotalCount() / applyTotalCount);
         rplStatMetrics.setMsgCacheSize(statMetrics.getTotalInCache().get());
         rplStatMetrics.setPersistMsgCounter(statMetrics.getPersistentMessageCounter().get());
-        rplStatMetrics.setProcessDelay(statMetrics.getProcessDelay().get());
-        rplStatMetrics.setReceiveDelay(statMetrics.getReceiveDelay().get());
+        rplStatMetrics.setProcessDelay(statMetrics.getProcessDelay());
+        rplStatMetrics.setReceiveDelay(statMetrics.getReceiveDelay());
         rplStatMetrics.setRt(statMetrics.getRt().getTotalCount() / applyTotalCount);
         rplStatMetrics.setSkipCounter(statMetrics.getSkipCounter().get());
         rplStatMetrics.setSkipExceptionCounter(statMetrics.getSkipExceptionCounter().get());
         rplStatMetrics.setTaskId(TaskContext.getInstance().getTaskId());
         rplStatMetrics.setFsmId(TaskContext.getInstance().getStateMachineId());
         rplStatMetrics.setWorkerIp(CommonUtils.getHostIp());
-        rplStatMetrics.setCpuUseRatio((int) (statMetrics.getCpuRatio() * 100));
+        rplStatMetrics.setCpuUseRatio(procSnapshot == null ? -99 : (int) (procSnapshot.getCpuPercent() * 100));
         rplStatMetrics.setMemUseRatio(userRatio);
-        rplStatMetrics.setFullGcCount(jvmSnapshot.getOldCollectionCount());
+        rplStatMetrics.setFullGcCount(jvmSnapshot == null ? -99 : jvmSnapshot.getOldCollectionCount());
         rplStatMetrics.setTotalCommitCount(
             statMetrics.getPeriodCommitCount() + (rplStatMetrics.getTotalCommitCount() == null ? 0 :
                 rplStatMetrics.getTotalCommitCount()));
+        // receive delay 为 0 说明过去一段时间内未收到event，此时以 pos 与 当前时间的差值作为延迟
+        // 否则以 receive delay + process delay 作为延迟
+        if (rplStatMetrics.getReceiveDelay() != null && rplStatMetrics.getReceiveDelay() == 0L) {
+            BinlogPosition pos = getLatestPosition();
+            long timeStamp = pos == null ? 0 : pos.getTimestamp();
+            rplStatMetrics.setTrueDelayMills(System.currentTimeMillis() - timeStamp * 1000);
+        } else {
+            rplStatMetrics.setTrueDelayMills(rplStatMetrics.getReceiveDelay() + rplStatMetrics.getProcessDelay());
+        }
         statisticLogger.info(LogUtil.generateStatisticLogV2(rplStatMetrics));
     }
 
@@ -422,14 +445,16 @@ public class StatisticalProxy implements FlowLimiter {
         Optional<RplStatMetrics> rplStatMetricsOptional =
             mapper.selectOne(s -> s.where(RplStatMetricsDynamicSqlSupport.taskId,
                 SqlBuilder.isEqualTo(taskId)));
-        RplStatMetrics rplStatMetrics;
+        RplStatMetrics rplStatMetrics = new RplStatMetrics();
+        StatMetrics statMetrics = StatMetrics.getInstance();
+        JvmSnapshot jvmSnapshot = JvmUtils.buildJvmSnapshot();
+        ProcSnapshot procSnapshot = ProcUtils.buildProcSnapshot();
+        fill(rplStatMetrics, statMetrics, jvmSnapshot, procSnapshot);
+        sendMetrics(rplStatMetrics, jvmSnapshot, procSnapshot);
         if (rplStatMetricsOptional.isPresent()) {
-            rplStatMetrics = rplStatMetricsOptional.get();
-            fill(rplStatMetrics);
+            rplStatMetrics.setId(rplStatMetricsOptional.get().getId());
             mapper.updateByPrimaryKey(rplStatMetrics);
         } else {
-            rplStatMetrics = new RplStatMetrics();
-            fill(rplStatMetrics);
             mapper.insert(rplStatMetrics);
         }
 
@@ -452,6 +477,22 @@ public class StatisticalProxy implements FlowLimiter {
         } else {
             log.error("task is not in running status");
             TaskContext.getInstance().getPipeline().stop();
+        }
+    }
+
+    @SneakyThrows
+    private void sendMetrics(RplStatMetrics rplSnapshot, JvmSnapshot jvmSnapshot, ProcSnapshot procSnapshot) {
+        String prefix = "replica_" + TaskContext.getInstance().getTask().getType() + "_";
+        List<CommonMetrics> commonMetrics = Lists.newArrayList();
+        CommonMetricsHelper.addReplicaMetrics(commonMetrics, rplSnapshot, prefix);
+        if (jvmSnapshot != null) {
+            CommonMetricsHelper.addJvmMetrics(commonMetrics, jvmSnapshot, prefix);
+        }
+        if (procSnapshot != null) {
+            CommonMetricsHelper.addProcMetrics(commonMetrics, procSnapshot, prefix);
+        }
+        if (!CollectionUtils.isEmpty(commonMetrics)) {
+            MetricsReporter.report(commonMetrics);
         }
     }
 }

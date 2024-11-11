@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
@@ -52,6 +44,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_IGNORE_APPLY_ERROR;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES;
@@ -288,22 +281,22 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
             SQLStatement sqlStatement = parseSQLStatement(ddl);
             if (sqlStatement instanceof SQLCreateTableStatement) {
                 SQLCreateTableStatement sqlCreateTableStatement = (SQLCreateTableStatement) sqlStatement;
-                return SQLUtils.normalize(sqlCreateTableStatement.getTableName());
+                return SQLUtils.normalizeNoTrim(sqlCreateTableStatement.getTableName());
             } else if (sqlStatement instanceof SQLDropTableStatement) {
                 SQLDropTableStatement sqlDropTableStatement = (SQLDropTableStatement) sqlStatement;
                 for (SQLExprTableSource tableSource : sqlDropTableStatement.getTableSources()) {
                     //CN只支持一次drop一张表，直接返回即可
-                    return tableSource.getTableName(true);
+                    return normalizeNoTrim(tableSource.getTableName());
                 }
             } else if (sqlStatement instanceof MySqlRenameTableStatement) {
                 MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) sqlStatement;
                 for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
                     //CN只支持一次Rename一张表，直接返回即可
-                    return SQLUtils.normalize(item.getName().getSimpleName());
+                    return SQLUtils.normalizeNoTrim(item.getName().getSimpleName());
                 }
             } else if (sqlStatement instanceof SQLAlterTableStatement) {
                 SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
-                return SQLUtils.normalize(sqlAlterTableStatement.getTableName());
+                return SQLUtils.normalizeNoTrim(sqlAlterTableStatement.getTableName());
             }
         } catch (Throwable t) {
             logger.error("parse table from ddl sql failed.", t);

@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.common;
 
@@ -66,31 +58,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
     public static Map<String, String> DEFAULT_MYSQL_CONNECTION_PROPERTIES = Maps.newHashMap();
 
     static {
-
-        // 开启多语句能力
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowMultiQueries", "true");
-        // 全量目标数据源加上这个批量的参数
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("rewriteBatchedStatements", "true");
-        // 关闭每次读取read-only状态,提升batch性能
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("readOnlyPropagatesToServer", "false");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("connectTimeout", "1000");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("socketTimeout", "60000");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("autoReconnect", "true");
-        // 将0000-00-00的时间类型返回null
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("zeroDateTimeBehavior", "convertToNull");
-        // 直接返回字符串，不做year转换date处理
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("yearIsDateType", "false");
-        // 返回时间类型的字符串,不做时区处理
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("noDatetimeStringSync", "true");
-        // 不处理tinyint转为bit
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("tinyInt1isBit", "false");
-        // 16MB，兼容一下ADS不支持mysql，5.1.38+的server变量查询为大写的问题，人肉指定一下最大包大小
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("maxAllowedPacket", "1073741824");
-        // net_write_timeout
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("netTimeoutForStreamingResults", "72000");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useServerPrepStmts", "false");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useInformationSchema", "false");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("pedantic", "true");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.putAll(DataSourceUtil.DEFAULT_MYSQL_CONNECTION_PROPERTIES);
     }
 
     protected ReentrantReadWriteLock readWriteLock;
@@ -100,6 +68,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
     protected LoadingCache<String, DruidDataSource> nestedDataSources;
     protected volatile DruidDataSource proxyDataSource;
     protected ScheduledExecutorService scheduledExecutorService;
+    protected int maxWaitTimeMills = 30000;
 
     public DruidDataSourceWrapper(String dbName, String user,
                                   String passwd, String encoding, int minPoolSize,
@@ -137,7 +106,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
         setTimeBetweenEvictionRunsMillis(60 * 1000);
         setMinEvictableIdleTimeMillis(50 * 1000);
         setUseUnfairLock(true);
-        if (newConnectionSQLs != null && newConnectionSQLs.size() > 0) {
+        if (newConnectionSQLs != null && !newConnectionSQLs.isEmpty()) {
             setConnectionInitSqls(newConnectionSQLs);
         }
         setConnectProperties(prop);
@@ -276,10 +245,15 @@ public class DruidDataSourceWrapper extends DruidDataSource
     }
 
     private void onServerNodeAdd(Set<String> toBeAddedServers) {
-        Set<String> validServers = toBeAddedServers.stream().filter(s -> {
+        toBeAddedServers.forEach(s -> {
             try (Connection conn = nestedDataSources.getUnchecked(s).getConnection()) {
                 if (conn.isValid(1)) {
-                    return true;
+                    try {
+                        readWriteLock.writeLock().lock();
+                        nestedAddresses.add(s);
+                    } finally {
+                        readWriteLock.writeLock().unlock();
+                    }
                 } else {
                     logger.warn("Server node {} is not ready yet, will retry later.", s);
                 }
@@ -287,17 +261,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
                 logger.warn("Server node {} is not ready yet, will retry later.", s, t);
             }
             nestedDataSources.invalidate(s);
-            return false;
-        }).collect(Collectors.toSet());
-
-        if (!validServers.isEmpty()) {
-            try {
-                readWriteLock.writeLock().lock();
-                nestedAddresses.addAll(validServers);
-            } finally {
-                readWriteLock.writeLock().unlock();
-            }
-        }
+        });
     }
 
     private void onServerNodeRemove(Set<String> toBeRemovedServerInfoList) {
@@ -341,6 +305,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
             return username == null ? proxyDataSource.getConnection() :
                 proxyDataSource.getConnection(username, password);
         } else {
+            waitNestedAddressReady();
             try {
                 readWriteLock.readLock().lock();
 
@@ -354,6 +319,22 @@ public class DruidDataSourceWrapper extends DruidDataSource
                     nestedDataSources.getUnchecked(key).getConnection(username, password);
             } finally {
                 readWriteLock.readLock().unlock();
+            }
+        }
+    }
+
+    public void waitNestedAddressReady() {
+        long now = System.currentTimeMillis();
+        while (nestedAddresses.isEmpty()) {
+            if (System.currentTimeMillis() - now > maxWaitTimeMills) {
+                throw new PolardbxException(
+                    "wait for server node ready timeout , no server node is ready, please retry later.");
+            }
+            // wait for server node ready
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                throw new PolardbxException("wait for server node ready failed!", e);
             }
         }
     }

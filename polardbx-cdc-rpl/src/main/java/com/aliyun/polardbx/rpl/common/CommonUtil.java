@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.common;
 
@@ -55,7 +47,7 @@ public class CommonUtil {
 
     public static String createInitialBinlogPosition() {
         String timeStr = new SimpleDateFormat(RplConstants.DEFAULT_DATE_FORMAT).format(System.currentTimeMillis());
-        return CommonUtil.getRollBackBinlogPositon(timeStr);
+        return CommonUtil.getRollBackBinlogPosition(timeStr);
     }
 
     public static boolean isMeaninglessBinlogFileName(BinlogPosition binlogPosition) {
@@ -70,7 +62,6 @@ public class CommonUtil {
         if (res != 0) {
             return res;
         }
-
         return StringUtils.compare(detailsA.get(1), detailsB.get(1));
     }
 
@@ -148,13 +139,13 @@ public class CommonUtil {
     /**
      * 传入2015-04-16 08:00:00格式的时间字符串，返回这个时间对应的binlog位点
      */
-    private static String getRollBackBinlogPositon(String timeStr) {
+    private static String getRollBackBinlogPosition(String timeStr) {
         Date date = CalendarUtil.toDate(timeStr, CalendarUtil.TIME_PATTERN);
         if (date == null) {
             return null;
         }
-        long postionTime = date.getTime() / 1000;
-        return "0:0#" + RplConstants.ROLLBACK_STRING + "." + postionTime;
+        long positionTime = date.getTime() / 1000;
+        return "0:0#" + RplConstants.ROLLBACK_STRING + "." + positionTime;
     }
 
     /**

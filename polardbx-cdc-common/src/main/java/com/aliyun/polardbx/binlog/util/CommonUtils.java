@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
 
@@ -55,6 +47,8 @@ public class CommonUtils {
     public static final Pattern PRIVATE_DDL_SQL_PATTERN = Pattern.compile(PRIVATE_DDL_DDL_PREFIX + "([\\W\\w]+)");
     public static final String PRIVATE_DDL_ID_PREFIX = "# POLARX_DDL_ID=";
     public static final String PRIVATE_DDL_DDL_ROUTE_PREFIX = "# POLARX_DDL_ROUTE_MODE=";
+    public static final String PRIVATE_DDL_DDL_TYPES_PREFIX = "# POLARX_DDL_TYPES=";
+    public static final String PRIVATE_DDL_POLARX_VARIABLES_PREFIX = "# POLARX_VARIABLES=";
     private static final Logger logger = LoggerFactory.getLogger(CommonUtils.class);
     private static final long TWEPOCH = 1303895660503L;
     private static final String LOCALHOST_IP = "127.0.0.1";
@@ -388,5 +382,14 @@ public class CommonUtils {
 
     public static String tableName(String schemaName, String tableName) {
         return String.format("`%s`.`%s`", escape(schemaName), escape(tableName));
+    }
+
+    public static String filterSensitiveInfo(String logMessage) {
+        // 正则表达式匹配敏感信息，假设敏感信息的格式为 key : value
+        String regex = "(passwd|password)\\s*:\\s*[^,\\s]+";
+        Pattern pattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(logMessage);
+        // 进行替换，替换成 passwd : *****
+        return matcher.replaceAll("$1 : *****");
     }
 }

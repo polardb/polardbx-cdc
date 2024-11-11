@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
@@ -20,6 +12,7 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
+import com.google.common.annotations.VisibleForTesting;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -32,6 +25,7 @@ import java.util.Map;
 @Slf4j
 public class BinlogConsumerMonitor extends AbstractBinlogTimerTask {
     private final JdbcTemplate polarxJdbcTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+    private final JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
 
     public BinlogConsumerMonitor(String cluster, String clusterType, String name, int interval) {
         super(cluster, clusterType, name, interval);
@@ -52,13 +46,21 @@ public class BinlogConsumerMonitor extends AbstractBinlogTimerTask {
         }
     }
 
-    private void checkIfExistsConsumer() {
-        List<Map<String, Object>> list =
+    String checkIfExistsConsumer() {
+        // 普通消费
+        List<Map<String, Object>> list1 =
             polarxJdbcTemplate.queryForList("show processlist where Command='Binlog Dump'");
-        if (!list.isEmpty()) {
+        // 列存消费
+        boolean tableExists = metaTemplate.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE "
+            + "table_schema = 'polardbx_meta_db' AND table_name = 'columnar_table_mapping'", Integer.class) > 0;
+        int list2Num = tableExists ?
+            metaTemplate.queryForObject("select count(*) from columnar_table_mapping", Integer.class) : 0;
+        if (!list1.isEmpty() || list2Num > 0) {
             String time = Long.valueOf(System.currentTimeMillis()).toString();
             log.info("checkIfExistsConsumer: latest consume time : {}", time);
             DynamicApplicationConfig.setValue(ConfigKeys.ALARM_LATEST_CONSUME_TIME_MS, time);
+            return time;
         }
+        return null;
     }
 }

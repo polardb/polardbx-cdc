@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.dbms;
 
@@ -36,6 +28,7 @@ public class DefaultColumn extends DBMSColumn {
     protected boolean uniqueKey;
     protected boolean generated;
     protected boolean rdsImplicitPk;
+    protected boolean onUpdate;
 
     /**
      * Create a new <code>SimpleColumn</code> object.
@@ -69,11 +62,13 @@ public class DefaultColumn extends DBMSColumn {
     }
 
     public DefaultColumn(String name, int ordinalIndex, int sqlType, boolean signed, boolean nullable,
-                         boolean primaryKey, boolean uniqueKey, boolean generated, boolean rdsImplicitPk) {
+                         boolean primaryKey, boolean uniqueKey, boolean generated, boolean rdsImplicitPk,
+                         boolean onUpdate) {
         this(name, ordinalIndex, sqlType, signed, nullable, primaryKey);
         this.uniqueKey = uniqueKey;
         this.generated = generated;
         this.rdsImplicitPk = rdsImplicitPk;
+        this.onUpdate = onUpdate;
     }
 
     /**
@@ -157,12 +152,17 @@ public class DefaultColumn extends DBMSColumn {
     /**
      * Change the column is a part of primary key or not.
      *
-     * @param nullable - The column is a part of primary key or not.
+     * @param primaryKey - The column is a part of primary key or not.
      */
     public void setPrimaryKey(boolean primaryKey) {
         this.primaryKey = primaryKey;
     }
 
+    public void setIsOnUpdate(boolean onUpdate) {
+        this.onUpdate = onUpdate;
+    }
+
+    @Override
     public boolean isUniqueKey() {
         return uniqueKey;
     }
@@ -179,5 +179,10 @@ public class DefaultColumn extends DBMSColumn {
     @Override
     public boolean isRdsImplicitPk() {
         return rdsImplicitPk;
+    }
+
+    @Override
+    public boolean isOnUpdate() {
+        return onUpdate;
     }
 }

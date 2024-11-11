@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor.search.handler;
 
@@ -58,17 +50,30 @@ public class PositionSearchHandler implements ISearchHandler {
                     "search entry pos not found when first event is not available , was reset to start entry pos ");
 
                 // 比endPosition小的begin/end或者ddl都是满足的位点，如果没找到search pos ，说明没有搜索到 transaction和ddl，
-                //说明pos前都是cts，可以作为位点直接返回
+                // 说明pos前都是cts，可以作为位点直接返回
                 context.setResultPosition(entryPosition);
                 context.setLockPosition(true);
             }
 
             BinlogPosition resultPosition = context.getResultPosition();
 
-            if (resultPosition != null && StringUtils.isBlank(resultPosition.getRtso())) {
-                // 有位点，但是没有tso，可以在继续搜索
-                resultPosition.setRtso(context.getCurrentTSO());
+
+
+            if (resultPosition != null) {
+                if (!context.isPolarx()) {
+                    // 非polarx场景找到位点，无需tso，可以直接返回
+                    return true;
+                }
+                if (StringUtils.isBlank(resultPosition.getRtso())) {
+                    // 有位点，但是没有tso，可以在继续搜索
+                    resultPosition.setRtso(context.getCurrentTSO());
+                }
             }
+
+//            if (resultPosition != null && StringUtils.isBlank(resultPosition.getRtso())) {
+//                // 有位点，但是没有tso，可以在继续搜索
+//                resultPosition.setRtso(context.getCurrentTSO());
+//            }
             if (context.getResultPosition() != null && StringUtils.isBlank(resultPosition.getRtso())) {
                 // 经过一些列操作，还是没有找到tso
                 return false;

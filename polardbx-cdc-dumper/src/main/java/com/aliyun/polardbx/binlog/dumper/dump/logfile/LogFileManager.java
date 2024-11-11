@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
@@ -77,9 +69,10 @@ public class LogFileManager implements ICursorProvider {
             cdcFileSystem = new CdcFileSystem(binlogRootPath, groupName, streamName);
             binlogListeners = new BinlogListenerWrapper();
             binlogListeners.addListener(
-                new BinlogRecordManager(groupName, streamName, taskName, taskType, binlogRootPath));
+                new BinlogRecordManager(executionConfig.getRuntimeVersion(), groupName, streamName, taskName, taskType,
+                    binlogRootPath));
 
-            if (taskType == TaskType.DumperX || RuntimeLeaderElector.isDumperLeader(taskName)) {
+            if (RuntimeLeaderElector.isDumperMasterOrX(executionConfig.getRuntimeVersion(), taskType, taskName)) {
                 if (isForceRecover(executionConfig)) {
                     BinlogFileUtil.deleteBinlogFiles(BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName));
                 } else {
@@ -124,7 +117,7 @@ public class LogFileManager implements ICursorProvider {
                     restoreManager.start();
                 }
                 logFileCopier = new LogFileCopier(this, writeBufferSize,
-                    DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE));
+                    DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE), executionConfig);
                 logFileCopier.start();
             }
         } catch (Throwable t) {

@@ -1,21 +1,23 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.filesys;
 
-import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
+import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
+import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
+import com.aliyun.polardbx.binlog.enums.BinlogUploadStatus;
+import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import lombok.Setter;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.ListUtils;
 import org.apache.commons.io.FileUtils;
 import org.junit.After;
@@ -28,28 +30,37 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 /**
  * @author yudong
  * @since 2022/8/18
  **/
-@Ignore
-public class CdcFileSystemTest extends BaseTest {
+@Slf4j
+public class CdcFileSystemTest extends BaseTestWithGmsTables {
     private final String rootPath = "cdc-file-system-test";
     private final String group = "group_global";
     private final String stream = "stream_global";
+    private String cluster_id;
     private static final String binlogFilePrefix = "binlog.";
     CdcFileSystem fileSystem = new CdcFileSystem(rootPath, group, stream);
+    BinlogOssRecordService binlogOssRecordService;
+    BinlogOssRecordMapper binlogOssRecordMapper;
 
     @SneakyThrows
     @Before
     public void before() {
+        setConfig(ConfigKeys.CLUSTER_ID, "cluster_1");
+        cluster_id = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+        binlogOssRecordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
+        binlogOssRecordMapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
         prepareFiles();
     }
 
     @After
     public void after() throws IOException {
+        log.info("delete directory " + rootPath);
         FileUtils.deleteDirectory(new File("cdc-file-system-test"));
     }
 
@@ -58,14 +69,21 @@ public class CdcFileSystemTest extends BaseTest {
         int n = 15;
         // generate some local files
         File dir = new File(rootPath);
-        dir.createNewFile();
-        for (int i = 1; i < n; i++) {
-            String localName = fileSystem.getLocalFullName(binlogFilePrefix + String.format("%06d", i));
-            File f = new File(localName);
-            f.createNewFile();
-            PrintWriter writer = new PrintWriter(f);
-            writer.print(content);
-            writer.close();
+        try {
+            dir.createNewFile();
+            for (int i = 1; i < n; i++) {
+                String localName = fileSystem.getLocalFullName(binlogFilePrefix + String.format("%06d", i));
+                File f = new File(localName);
+                f.createNewFile();
+                PrintWriter writer = new PrintWriter(f);
+                writer.print(content);
+                writer.close();
+                BinlogOssRecord record = buildRecord(f.getName());
+                binlogOssRecordMapper.insertSelective(record);
+            }
+        } catch (Exception e) {
+            log.warn("failed in prepare files: ", e);
+            throw e;
         }
     }
 
@@ -75,6 +93,7 @@ public class CdcFileSystemTest extends BaseTest {
         List<String> actualFileList = new ArrayList<>();
         for (CdcFile file : localFiles) {
             actualFileList.add(file.getName());
+
         }
         List<String> expectFileList = new ArrayList<>();
         int n = 15;
@@ -91,6 +110,8 @@ public class CdcFileSystemTest extends BaseTest {
         List<String> actual = new ArrayList<>();
         for (CdcFile file : files) {
             actual.add(file.getName());
+            // 列出的文件应该都有扩展信息
+            Assert.assertNotNull(file.getRecord());
         }
         List<String> expect = new ArrayList<>();
         int n = 15;
@@ -106,5 +127,18 @@ public class CdcFileSystemTest extends BaseTest {
         }
         expectTrue = ListUtils.isEqualList(expect, actual);
         Assert.assertTrue(expectTrue);
+    }
+
+    public BinlogOssRecord buildRecord(String name) {
+        BinlogOssRecord record = new BinlogOssRecord();
+        record.setBinlogFile(name);
+        record.setUploadStatus(BinlogUploadStatus.CREATE.getValue());
+        record.setPurgeStatus(BinlogPurgeStatus.UN_COMPLETE.getValue());
+        record.setLogBegin(new Date());
+        record.setLogSize(0L);
+        record.setGroupId(group);
+        record.setStreamId(stream);
+        record.setClusterId(cluster_id);
+        return record;
     }
 }

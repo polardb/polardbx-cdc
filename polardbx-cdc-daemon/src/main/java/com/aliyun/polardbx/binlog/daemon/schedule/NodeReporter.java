@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
@@ -19,9 +11,9 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.dao.BinlogNodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
+import com.aliyun.polardbx.binlog.dao.NodeInfoMapperExt;
 import com.aliyun.polardbx.binlog.domain.NodeRole;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
@@ -60,7 +52,7 @@ public class NodeReporter extends AbstractBinlogTimerTask {
         String clusterRole = DynamicApplicationConfig.getClusterRole();
 
         NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
-        BinlogNodeInfoMapper binlogNodeInfoMapper = SpringContextHolder.getObject(BinlogNodeInfoMapper.class);
+        NodeInfoMapperExt binlogNodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapperExt.class);
         NodeInfo nodeInfo = new NodeInfo();
         Optional<NodeInfo> node = nodeInfoMapper.selectOne(
             s -> s.where(NodeInfoDynamicSqlSupport.containerId,
