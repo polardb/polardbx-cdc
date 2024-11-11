@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor.flashback;
 
@@ -29,9 +21,14 @@ import com.aliyun.polardbx.binlog.canal.core.BinlogEventSink;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
+import com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
 import com.aliyun.polardbx.binlog.dao.ServerInfoMapper;
+import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
 import com.aliyun.polardbx.binlog.error.RetryableException;
+import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
 import com.aliyun.polardbx.rpl.extractor.LogEventConvert;
@@ -45,6 +42,7 @@ import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryExtractorConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.mybatis.dynamic.sql.SqlBuilder;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
 
@@ -52,6 +50,7 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
+import java.util.Optional;
 
 import static com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport.instType;
 import static com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport.status;
@@ -128,13 +127,15 @@ public class RecoveryExtractor extends BaseExtractor {
         try {
             BinlogPosition startPosition = findStartPosition();
             log.info("startPosition: " + startPosition);
-            LogEventConvert logEventConvert = new LogEventConvert(srcHostInfo, filter, startPosition, HostType.POLARX2);
+            LogEventConvert logEventConvert = new LogEventConvert(srcHostInfo, filter, startPosition, HostType.POLARX2,
+                true);
             logEventConvert.init();
             BinlogEventSink binlogEventSink = new RecoveryEventSink();
             parser = new MysqlEventParser(extractorConfig.getEventBufferSize(),
                 new RplEventRepository(pipeline.getPipeLineConfig().getPersistConfig()));
             ((MysqlEventParser) parser).setBinlogParser(logEventConvert);
             ((MysqlEventParser) parser).setAutoRetry(false);
+            ((MysqlEventParser) parser).setPolarx(true);
             parser.start(srcAuthInfo, startPosition, binlogEventSink);
         } catch (Exception e) {
             log.error("extractor start error: ", e);
@@ -147,8 +148,46 @@ public class RecoveryExtractor extends BaseExtractor {
      * binlogList中保存的是还没有消费的binlog，且有序
      * 从当前没有消费的binlog中编号最小的那个文件的0位置处开始消费
      */
-    private BinlogPosition findStartPosition() {
-        return new BinlogPosition(binlogList.get(0), 0, -1, -1);
+    public BinlogPosition findStartPosition() {
+        String fileName = binlogList.get(0);
+        String preFileName = preFileName(fileName);
+        BinlogOssRecordMapper recordMapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
+        String rtso = null;
+        if (preFileName != null){
+            Optional<BinlogOssRecord> preRecord = recordMapper.selectOne(s ->s.where(
+                BinlogOssRecordDynamicSqlSupport.binlogFile, SqlBuilder.isEqualTo(preFileName)));
+            if (preRecord.isPresent()){
+                rtso = preRecord.get().getLastTso();
+            }
+        }else {
+            rtso = ExecutionConfig.ORIGIN_TSO;
+        }
+        if (StringUtils.isBlank(rtso)){
+            Optional<BinlogOssRecord> curRecord = recordMapper.selectOne(s ->s.where(
+                BinlogOssRecordDynamicSqlSupport.binlogFile, SqlBuilder.isEqualTo(fileName)));
+            if (curRecord.isPresent()){
+                long logBegin = curRecord.get().getLogBegin().getTime();
+                rtso = CommonUtils.generateTSO(logBegin, StringUtils.leftPad("0", 29, "0"), null);
+                log.info("generate tso "+rtso+" from log begin : "+logBegin + " by file : "+fileName);
+            }
+        }
+        BinlogPosition position = new BinlogPosition(binlogList.get(0), 0, -1, -1);
+        if (StringUtils.isNotBlank(rtso)){
+            position.setRtso(rtso);
+        }
+        return position;
+    }
+
+    public String preFileName(String curFileName){
+        int dotIdx = curFileName.indexOf(".");
+        String prefix = curFileName.substring(0, dotIdx);
+        String suffix = curFileName.substring(dotIdx + 1);
+        int suffixLength = suffix.length();
+        int seq = Integer.parseInt(suffix);
+        if (seq == 1) {
+            return null;
+        }
+        return prefix + "." + StringUtils.leftPad(String.valueOf(seq - 1), suffixLength, "0");
     }
 
     @Override

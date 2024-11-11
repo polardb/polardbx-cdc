@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog;
 
@@ -25,9 +17,13 @@ import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
+import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.CollectionUtils;
+
+import java.util.List;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
@@ -90,6 +86,10 @@ public class TableCompatibilityProcessor {
     }
 
     private static void processBinlogOssRecordTable() {
+        if (!needProcessBinlogOssRecordTable()) {
+            return;
+        }
+
         TransactionTemplate template = getObject("metaTransactionTemplate");
         BinlogOssRecordMapper mapper = getObject(BinlogOssRecordMapper.class);
         String clusterId = DynamicApplicationConfig.getString(CLUSTER_ID);
@@ -101,6 +101,14 @@ public class TableCompatibilityProcessor {
                 .and(BinlogOssRecordDynamicSqlSupport.groupId, isEqualTo(CommonUtils.getGroupName())));
             return null;
         });
+    }
+
+    public static boolean needProcessBinlogOssRecordTable() {
+        BinlogOssRecordMapper mapper = getObject(BinlogOssRecordMapper.class);
+        List<BinlogOssRecord> records =
+            mapper.select(s -> s.where(BinlogOssRecordDynamicSqlSupport.clusterId, isEqualTo("0"))
+                .and(BinlogOssRecordDynamicSqlSupport.groupId, isEqualTo(CommonUtils.getGroupName())));
+        return !CollectionUtils.isEmpty(records);
     }
 
     private static void processBinlogNodeInfoTable() {

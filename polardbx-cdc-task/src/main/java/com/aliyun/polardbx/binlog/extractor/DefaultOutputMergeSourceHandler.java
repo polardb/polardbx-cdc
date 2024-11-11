@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor;
 
@@ -28,6 +20,7 @@ import com.aliyun.polardbx.binlog.error.TimeoutException;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.merge.MergeSource;
 import com.aliyun.polardbx.binlog.metadata.DdlScope;
+import com.aliyun.polardbx.binlog.protocol.TxnFlag;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.storage.Storage;
@@ -116,12 +109,16 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             .setType(TxnType.DML)
             .setSchema("")
             .setTsoTransaction(transaction.isTsoTransaction())
-            .setXaTxn(transaction.isXa());
+            .setXaTxn(transaction.isXa())
+            .setTxnFlag(transaction.isArchive() ? TxnFlag.ARCHIVE : TxnFlag.NORMAL);
 
         if (transaction.isDescriptionEvent()) {
             process4FormatDescription(txnTokenBuilder, transaction);
         } else if (transaction.isHeartbeat()) {
             txnTokenBuilder.setType(TxnType.META_HEARTBEAT);
+        } else if (transaction.isSyncPoint()) {
+            log.info("set txn type to sync point");
+            txnTokenBuilder.setType(TxnType.SYNC_POINT);
         } else if (transaction.isDDL()) {
             process4Ddl(txnTokenBuilder, transaction);
         } else if (transaction.isStorageChangeCommand()) {

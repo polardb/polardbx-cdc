@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
@@ -21,6 +13,7 @@ import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg;
+import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumClientType;
 import com.aliyun.polardbx.binlog.dumper.metrics.DumpClientMetric;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
@@ -62,6 +55,7 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getLong;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.dumper.dump.constants.DumpUserVariableName.CLIENT_TYPE;
 import static com.aliyun.polardbx.binlog.dumper.dump.constants.DumpUserVariableName.MASTER_BINLOG_CHECKSUM;
 import static com.aliyun.polardbx.binlog.dumper.dump.constants.DumpUserVariableName.MASTER_HEARTBEAT_PERIOD;
 import static com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg.BINLOG_CHECKSUM_ALG_UNDEF;
@@ -143,6 +137,7 @@ public class LogFileReader {
             // ===============  handle binlog dump related user variables ===================
             EnumBinlogChecksumAlg slaveChecksumAlg = BINLOG_CHECKSUM_ALG_UNDEF;
             long masterHeartbeatPeriod = DynamicApplicationConfig.getLong(BINLOG_DUMP_MASTER_HEARTBEAT_PERIOD);
+            EnumClientType clientType = EnumClientType.DEFAULT;
             for (Map.Entry<String, String> entry : ext.entrySet()) {
                 switch (entry.getKey()) {
                 case MASTER_BINLOG_CHECKSUM:
@@ -150,6 +145,9 @@ public class LogFileReader {
                     break;
                 case MASTER_HEARTBEAT_PERIOD:
                     masterHeartbeatPeriod = Long.parseLong(entry.getValue());
+                    break;
+                case CLIENT_TYPE:
+                    clientType = EnumClientType.valueOf(entry.getValue());
                     break;
                 default:
                     log.warn("unknown binlog dump parameter: {}", entry.getKey());
@@ -170,7 +168,7 @@ public class LogFileReader {
             dumpReader = new BinlogDumpReader(logFileManager, fileName, startPosition, getInt(BINLOG_DUMP_PACKET_SIZE),
                 getInt(BINLOG_DUMP_READ_BUFFER_SIZE), slaveChecksumAlg);
 
-            DumpClientMetric.startDump();
+            DumpClientMetric.startDump(clientType);
             if (useDownloadFirstModeForDump(fileName)) {
                 Integer windowSize = getInt(ConfigKeys.BINLOG_DUMP_DOWNLOAD_WINDOW_SIZE);
                 // 解决多个dump请求并发的问题，防止互相干扰
@@ -204,11 +202,11 @@ public class LogFileReader {
             int timeout = 10, noData = 0;
             int checkFileStatusInterval = getInt(BINLOG_SYNC_CHECK_FILE_STATUS_INTERVAL_SECOND);
             Timer checkFileStatusTimer = new Timer(checkFileStatusInterval * 1000L);
-            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000);
+            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000000);
             long backPressureSleepTime = getLong(BINLOG_DUMP_BACK_PRESSURE_SLEEP_TIME_US);
             while (true) {
                 if (serverCallStreamObserver.isCancelled()) {
-                    log.warn("remote close...");
+                    log.warn("remote close by cancel...");
                     break;
                 }
 
@@ -217,12 +215,12 @@ public class LogFileReader {
                 if (checkFileStatusTimer.isTimeout() && !dumpReader.checkFileStatus()) {
                     log.warn("binlog file {} has been deleted, dump thread will exit.", dumpReader.fileName);
                     LabEventManager.logEvent(LabEventType.DUMPER_DUMP_LOCAL_FILE_IS_DELETED);
-                    break;
+                    throw new NoSuchFieldException("file has been deleted");
                 }
 
                 if (serverCallStreamObserver.isReady()) {
                     if (dumpReader.hasNext()) {
-                        ByteString pack = dumpReader.nextDumpPacks();
+                        ByteString pack = dumpReader.nextDumpPacks(serverCallStreamObserver);
                         metrics.incrementTotalDumpBytes(pack.size());
                         if (log.isDebugEnabled()) {
                             DEBUG_INFO("BinlogDump", pack);
@@ -247,11 +245,11 @@ public class LogFileReader {
                 }
             }
         } catch (InterruptedException e) {
-            log.info("remote closed.");
+            log.error("remote closed by interrupted.");
         } catch (Throwable th) {
             log.error("BinlogDump fail {},{} {}", fileName, startPosition, th.getMessage(), th);
             //如果是明确error_code的异常信息，可以以json的形式onError出去，否则show slave status可能不显示
-            Map map = Maps.newHashMap();
+            Map<String, Object> map = Maps.newHashMap();
             map.put("error_code", 1236);
             map.put("error_message", "binlog dump error!");
             final String s = JSON.toJSONString(map);
@@ -291,7 +289,7 @@ public class LogFileReader {
                     if (!binlogSyncReader.checkFileStatus()) {
                         LabEventManager.logEvent(LabEventType.DUMPER_SYNC_LOCAL_FILE_IS_DELETED);
                         log.warn("binlog file {} has been deleted, sync thread will exit.", binlogSyncReader.fileName);
-                        break;
+                        throw new NoSuchFieldException("file has been deleted");
                     } else {
                         lastCheckTime = System.currentTimeMillis();
                     }

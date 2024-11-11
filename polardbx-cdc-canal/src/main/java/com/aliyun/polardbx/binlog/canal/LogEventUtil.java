@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal;
 
@@ -51,6 +43,12 @@ public class LogEventUtil {
      */
     private static final String BEGIN = "BEGIN";
     private static final String COMMIT = "COMMIT";
+    public static final String SYNC_POINT_PROCEDURE_NAME = "trigger_sync_point_trx";
+    public static final String SYNC_POINT_PRIVATE_DDL_SQL =
+        "CALL " + SYNC_POINT_PROCEDURE_NAME + "()";
+
+    private static final String XID_FLAG_NORMAL = "1";
+    private static final String XID_FLAG_ARCHIVE = "3";
 
     public static boolean isTransactionEvent(QueryLogEvent event) {
         String query = event.getQuery();
@@ -80,7 +78,12 @@ public class LogEventUtil {
 
     public static boolean isValidXid(String xid) {
         String flag = StringUtils.substringAfterLast(xid, ",");
-        return "1".equals(flag);
+        return XID_FLAG_NORMAL.equals(flag) || XID_FLAG_ARCHIVE.equals(flag);
+    }
+
+    public static boolean isArchiveXid(String xid) {
+        String flag = StringUtils.substringAfterLast(xid, ",");
+        return XID_FLAG_ARCHIVE.equals(flag);
     }
 
     public static Long getTranIdFromXid(String xid, String encoding) throws Exception {

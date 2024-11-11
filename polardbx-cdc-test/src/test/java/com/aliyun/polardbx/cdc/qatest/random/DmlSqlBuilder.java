@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.random;
 
@@ -18,8 +10,17 @@ import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.cdc.qatest.base.ConnectionManager;
 import com.aliyun.polardbx.cdc.qatest.base.JdbcUtil;
+import com.github.rholder.retry.Attempt;
+import com.github.rholder.retry.BlockStrategies;
+import com.github.rholder.retry.RetryException;
+import com.github.rholder.retry.RetryListener;
+import com.github.rholder.retry.Retryer;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
 import com.google.common.collect.Maps;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -41,6 +42,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.isBit;
 import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.isBoolean;
@@ -53,6 +57,7 @@ import static com.aliyun.polardbx.cdc.qatest.random.ColumnTypeUtil.parseLength;
 /**
  * created by ziyang.lb
  **/
+@Slf4j
 public class DmlSqlBuilder {
     private final String dbName;
     private final String tableName;
@@ -495,8 +500,7 @@ public class DmlSqlBuilder {
         return Pair.of(RandomUtils.nextInt(minId, maxId), maxId);
     }
 
-    @SneakyThrows
-    private Integer getMinId() {
+    private Integer doGetMinId() throws Exception{
         try (Connection connection = ConnectionManager.getInstance().getDruidPolardbxConnection()) {
             JdbcUtil.executeQuery("use " + dbName, connection);
             Statement stmt = connection.createStatement();
@@ -508,8 +512,29 @@ public class DmlSqlBuilder {
         throw new PolardbxException("get max id failed");
     }
 
+    private Integer retry(Callable<Integer> c) throws ExecutionException, RetryException {
+        Retryer<Integer> retryer = RetryerBuilder.<Integer>newBuilder().
+            retryIfException().
+            withStopStrategy(StopStrategies.stopAfterAttempt(5)).
+            withBlockStrategy(BlockStrategies.threadSleepStrategy()).
+            withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.MILLISECONDS)).
+            withRetryListener(new RetryListener() {
+                @Override
+                public <V> void onRetry(Attempt<V> attempt) {
+                    if (attempt.hasException()){
+                        log.error("random range failed! attempt times : "+attempt.getAttemptNumber(), attempt.getExceptionCause());
+                    }
+                }
+            }).build();
+        return retryer.call(c);
+    }
+
     @SneakyThrows
-    private Integer getMaxId() {
+    private Integer getMinId() {
+        return retry(this::doGetMinId);
+    }
+
+    private Integer doGetMaxId() throws Exception {
         try (Connection connection = ConnectionManager.getInstance().getDruidPolardbxConnection()) {
             JdbcUtil.executeQuery("use " + dbName, connection);
             Statement stmt = connection.createStatement();
@@ -519,6 +544,11 @@ public class DmlSqlBuilder {
             }
         }
         throw new PolardbxException("get max id failed");
+    }
+
+    @SneakyThrows
+    private Integer getMaxId() {
+        return retry(this::doGetMaxId);
     }
 
     @SneakyThrows

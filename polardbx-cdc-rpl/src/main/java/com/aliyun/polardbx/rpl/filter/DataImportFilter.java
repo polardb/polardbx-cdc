@@ -1,21 +1,14 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.filter;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
-import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -37,9 +31,10 @@ public class DataImportFilter extends BaseFilter {
     private Set<String> doDbs;
     private Map<String, Set<String>> doTables;
     private Map<String, String> dstDbMapping;
-    private Map<String, String> tableNameMapping;
+    private Map<String, Map<String, String>> tableNameMapping;
     private Set<Long> ignoreServerIds;
     private Map<String, Boolean> filterCache;
+    private Set<String> logicalFilterTables;
 
     public DataImportFilter(DataImportMeta.PhysicalMeta importMeta) {
         this.importMeta = importMeta;
@@ -54,6 +49,8 @@ public class DataImportFilter extends BaseFilter {
         ignoreServerIds = initIgnoreServerIds(importMeta.getIgnoreServerIds());
         log.warn("ignore server ids: {}", ignoreServerIds);
         filterCache = new HashMap<>(128);
+        logicalFilterTables = initFilterSet(DynamicApplicationConfig.getString(ConfigKeys.RPL_INC_BLACK_TABLE_LIST));
+        log.warn("filter tables: {}", logicalFilterTables);
     }
 
     @Override
@@ -61,17 +58,20 @@ public class DataImportFilter extends BaseFilter {
         if (ignoreServerIds.contains(serverId)) {
             return true;
         }
-        String key = schema + "." + tbName + "." + action.name();
+        String key = schema + "." + tbName;
         if (filterCache.containsKey(key)) {
             return filterCache.get(key);
+        }
+
+        String logicalKey = getRewriteDb(schema, action) + "." + getRewriteTable(schema, tbName);
+        if (logicalFilterTables.contains(logicalKey)) {
+            filterCache.put(key, true);
+            return true;
         }
 
         boolean skip = !dbOk(schema) || !tableOk(schema, tbName);
         filterCache.put(key, skip);
 
-        if (skip) {
-            StatMetrics.getInstance().addSkipCount(1);
-        }
         return skip;
     }
 
@@ -87,10 +87,10 @@ public class DataImportFilter extends BaseFilter {
             return true;
         }
         // 如果doTables没有（源库为空或者广播表）
-        if (doTables.get(db).size() == 0) {
+        if (doTables.get(db).isEmpty()) {
             return false;
         }
-        return doTables.get(db).size() == 0;
+        return doTables.get(db).isEmpty();
     }
 
     /**
@@ -98,16 +98,18 @@ public class DataImportFilter extends BaseFilter {
      * Rpl_filter::db_ok(const char *db, bool need_increase_counter)
      */
     private boolean dbOk(String db) {
-        if (doDbs.size() > 0) {
+        if (!doDbs.isEmpty()) {
             return doDbs.contains(db);
         }
         return true;
     }
 
     @Override
-    public String getRewriteTable(String table) {
-        return (tableNameMapping != null && tableNameMapping.containsKey(table)) ?
-            tableNameMapping.get(table) : table;
+    public String getRewriteTable(String db, String table) {
+        return Optional.ofNullable(tableNameMapping)
+            .map(map -> map.get(db))
+            .map(innerMap -> innerMap.get(table))
+            .orElse(table);
     }
 
     @Override

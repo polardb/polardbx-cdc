@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor.search;
 
@@ -51,8 +43,7 @@ public class PositionFinder implements SinkFunction {
     private SearchContext context = new SearchContext();
     private BinlogPosition searchPosition;
     private boolean running = true;
-    private boolean isPolarx;
-    private Exception e;
+    private boolean polarx = false;
 
     public PositionFinder(BinlogPosition endPosition,
                           LogEventConvert binlogParser,
@@ -64,14 +55,16 @@ public class PositionFinder implements SinkFunction {
         this.searchHandler = searchHandler;
     }
 
-    public void setPolarx() {
-        this.isPolarx = true;
+    public void setPolarx(boolean polarx) {
+        this.polarx = polarx;
+        context.setPolarx(polarx);
     }
 
     public BinlogPosition findPos() throws IOException {
         String searchFile = endPosition.getFileName();
         context = new SearchContext();
         context.setCurrentSearchFile(searchFile);
+        context.setPolarx(polarx);
         //resetHandlerList 查找到目标后会被删除，没被删除的一定是还没有找到目标位点
         while (searchFile != null) {
             mysqlConnection.reconnect();
@@ -114,7 +107,7 @@ public class PositionFinder implements SinkFunction {
         if (searchPosition == null) {
             throw new PositionNotFoundException();
         }
-        if (isPolarx && StringUtils.isBlank(searchPosition.getRtso())) {
+        if (polarx && StringUtils.isBlank(searchPosition.getRtso())) {
             return false;
         }
         return true;
@@ -136,7 +129,7 @@ public class PositionFinder implements SinkFunction {
         return binlogParser.parse(event, true);
     }
 
-    private void extractorTSO(LogEvent event) {
+    private void extractTSO(LogEvent event) {
         context.setCurrentTSO(null);
         if (event instanceof QueryLogEvent) {
             QueryLogEvent queryLog = (QueryLogEvent) event;
@@ -179,8 +172,9 @@ public class PositionFinder implements SinkFunction {
     @Override
     public boolean sink(LogEvent event, LogPosition logPosition) throws CanalParseException, TableIdNotFoundException {
         try {
-
-            extractorTSO(event);
+            if (polarx) {
+                extractTSO(event);
+            }
 
             if (searchHandler.isEnd(event, context) || endOfFile(event)) {
                 searchPosition = context.getResultPosition();

@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.unit;
 
@@ -77,9 +69,7 @@ public class StatMetrics {
             outBytes += event.getEventSize();
             lastEvent = event;
         }
-
         doStatOut(insertCount, updateCount, deleteCount, outBytes, lastEvent);
-
     }
 
     public void doStatOut(long insertCount, long updateCount, long deleteCount, long byteSize, DBMSEvent lastEvent) {
@@ -159,17 +149,16 @@ public class StatMetrics {
         return periodCommitCount.getAndSet(0);
     }
 
-    public void addCommitCount(long addCount) {
-        periodCommitCount.addAndGet(addCount);
+    public long getReceiveDelay() {
+        return receiveDelay.getAndSet(0);
     }
 
-    public double getCpuRatio() {
-        ProcSnapshot snapshot = ProcUtils.buildProcSnapshot();
-        if (snapshot != null) {
-            return snapshot.getCpuPercent();
-        } else {
-            return -1L;
-        }
+    public long getProcessDelay() {
+        return processDelay.getAndSet(0);
+    }
+
+    public void addCommitCount(long addCount) {
+        periodCommitCount.addAndGet(addCount);
     }
 
     @Override

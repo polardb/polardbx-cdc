@@ -1,32 +1,41 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
 
 import com.alibaba.polardbx.druid.DbType;
+import com.alibaba.polardbx.druid.sql.ast.SQLDataType;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.TDDLHint;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddColumn;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateProcedureStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableElement;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableChangeColumn;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserFeature;
 import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.alibaba.polardbx.druid.sql.visitor.VisitorFeature;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.LabEventManager;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -68,7 +77,8 @@ public class SQLUtils {
             SQLStatementParser parser = SQLParserUtils.createSQLStatementParser(sql, DbType.mysql, SQL_FEATURES);
             List<SQLStatement> statementList = parser.parseStatementList();
             try {
-                if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)) {
+                if (SpringContextHolder.isInitialize() && Boolean.parseBoolean(
+                    SpringContextHolder.getPropertiesValue(ConfigKeys.IS_LAB_ENV))) {
                     checkDbType(statementList);
                 }
             } catch (Throwable t) {
@@ -107,6 +117,9 @@ public class SQLUtils {
     }
 
     public static String toSQLStringWithTrueUcase(SQLStatement sqlStatement) {
+        if (sqlStatement instanceof SQLCreateProcedureStatement) {
+            return sqlStatement.toString();
+        }
         if (sqlStatement.hasBeforeComment()) {
             // 对于before comment，只有当prettyFormat为true时，parser才支持打印
             return com.alibaba.polardbx.druid.sql.SQLUtils.toSQLString(sqlStatement, DbType.mysql);
@@ -193,5 +206,71 @@ public class SQLUtils {
             return sb.toString().trim();
         }
         return null;
+    }
+
+    public static boolean isLeaderByDdl(DataSource metaDbDataSource) throws SQLException {
+        try (Connection conn = metaDbDataSource.getConnection(); Statement stmt = conn.createStatement()) {
+            stmt.execute("CREATE TEMPORARY TABLE IF NOT EXISTS binlog_leader_test(id int)");
+            stmt.execute("DROP TEMPORARY TABLE IF EXISTS binlog_leader_test");
+            return true;
+        }
+    }
+
+    public static boolean isLeaderBySqlQuery(DataSource metaDbDataSource) throws SQLException {
+        try (Connection conn = metaDbDataSource.getConnection();
+            Statement stmt = conn.createStatement();
+            // 这个sql 如果当前节点不是leader，不会有任何结果返回；如果是leader，返回结果ROLE = Leader
+            ResultSet resultSet = stmt.executeQuery("select * from information_schema.alisql_cluster_local")) {
+            while (resultSet.next()) {
+                String roleName = resultSet.getString("ROLE");
+                if ("Leader".equalsIgnoreCase(roleName)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    public static boolean reWriteRealTypeBySqlMode(SQLStatement statement){
+        boolean modify = false;
+        List<SQLColumnDefinition> definitionList = new ArrayList<>();
+        if (statement instanceof MySqlCreateTableStatement) {
+            MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) statement;
+            List<SQLTableElement> elements = createTableStatement.getTableElementList();
+            for (SQLTableElement el : elements) {
+                if (el instanceof SQLColumnDefinition) {
+                    definitionList.add((SQLColumnDefinition) el);
+                }
+            }
+        } else if (statement instanceof SQLAlterTableStatement) {
+            SQLAlterTableStatement alterTableModifyColumn = (SQLAlterTableStatement) statement;
+            List<SQLAlterTableItem> itemList = alterTableModifyColumn.getItems();
+            for (SQLAlterTableItem item : itemList) {
+                if (item instanceof SQLAlterTableAddColumn) {
+                    SQLAlterTableAddColumn addColumn = (SQLAlterTableAddColumn) item;
+                    List<SQLColumnDefinition> addDefinitionList = addColumn.getColumns();
+                    if (CollectionUtils.isNotEmpty(addDefinitionList)) {
+                        definitionList.addAll(addDefinitionList);
+                    }
+                } else if (item instanceof MySqlAlterTableChangeColumn) {
+                    MySqlAlterTableChangeColumn changeColumn = (MySqlAlterTableChangeColumn) item;
+                    definitionList.add(changeColumn.getNewColumnDefinition());
+                } else if (item instanceof MySqlAlterTableModifyColumn) {
+                    MySqlAlterTableModifyColumn modifyColumn = (MySqlAlterTableModifyColumn) item;
+                    definitionList.add(modifyColumn.getNewColumnDefinition());
+                }
+            }
+        }
+        for (SQLColumnDefinition definition : definitionList) {
+            if (definition == null){
+                continue;
+            }
+            SQLDataType dataType = definition.getDataType();
+            if (dataType != null && StringUtils.equalsIgnoreCase(dataType.getName(), "real")) {
+                dataType.setName("float");
+                modify = true;
+            }
+        }
+        return modify;
     }
 }

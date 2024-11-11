@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
@@ -23,19 +15,24 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddColumn;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropColumnItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableElement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableChangeColumn;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.system.SystemDB;
 import com.aliyun.polardbx.binlog.cdc.meta.LogicTableMeta.FieldMetaExt;
+import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicBasicInfo;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
@@ -52,16 +49,21 @@ import com.aliyun.polardbx.binlog.domain.po.SemiSnapshotInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.util.DNStorageSqlExecutor;
+import com.aliyun.polardbx.binlog.util.LabEventType;
+import com.aliyun.polardbx.binlog.util.PropertyChangeListener;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
+import org.springframework.beans.BeanUtils;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -73,6 +75,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SEMI_SNAPSHOT_CHECK_DELTA_INTERVAL_SEC;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SEMI_SNAPSHOT_ENABLED;
@@ -94,7 +97,7 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isGreaterThanOrEqualTo;
  * Created by ShuGuang & ziyang.lb
  */
 @Slf4j
-public class PolarDbXTableMetaManager {
+public class PolarDbXTableMetaManager implements PropertyChangeListener {
     private static final String DN_SUPPORT_HIDDEN_PK_QUERY = "show global variables  like 'implicit_primary_key'";
     private static final String DN_VERSION_QUERY = "select version()";
     private final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -158,16 +161,15 @@ public class PolarDbXTableMetaManager {
         if (initialized.compareAndSet(false, true)) {
             this.topologyManager = new TopologyManager();
 
-            this.polarDbXLogicTableMeta = new PolarDbXLogicTableMeta(this.topologyManager, dnVersion);
-            this.polarDbXLogicTableMeta.init(null);
+            this.polarDbXLogicTableMeta = PolarDbXLogicTableMetaFactory.create(topologyManager, dnVersion);
 
-            this.polarDbXStorageTableMeta = new PolarDbXStorageTableMeta(storageInstId,
+            this.polarDbXStorageTableMeta = PolarDbXStorageTableMetaFactory.create(storageInstId,
                 polarDbXLogicTableMeta, topologyManager, dnVersion);
-            this.polarDbXStorageTableMeta.init(null);
 
-            this.consistencyChecker = new ConsistencyChecker(topologyManager, polarDbXLogicTableMeta,
+            this.consistencyChecker = ConsistencyCheckerFactory.create(topologyManager, polarDbXLogicTableMeta,
                 this, storageInstId);
             this.registerToMetaMonitor();
+            DynamicApplicationConfig.addPropListener(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED, this);
         }
     }
 
@@ -175,6 +177,7 @@ public class PolarDbXTableMetaManager {
         this.polarDbXStorageTableMeta.destroy();
         this.polarDbXLogicTableMeta.destroy();
         this.unregisterToCleaner();
+        DynamicApplicationConfig.removePropListener(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED, this);
     }
 
     public void onStart(String defaultDatabaseCharset) {
@@ -342,6 +345,7 @@ public class PolarDbXTableMetaManager {
         if (hiddenPK != null && getBoolean(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED)) {
             final int x = columnNames.indexOf(hiddenPK.getColumnName());
             meta.add(new FieldMetaExt(hiddenPK, logicIndex, x));
+            meta.setHasHiddenPk(true);
         }
 
         if (hasRdsHiddenPK) {
@@ -355,7 +359,10 @@ public class PolarDbXTableMetaManager {
         }
 
         //对于含有隐藏主键的表，不输出日志，避免日志膨胀
-        if (!meta.isCompatible() && !hasRdsHiddenPK && hiddenPK == null) {
+        //实验室需要输出日志
+        if (!meta.isCompatible() &&
+            (!hasRdsHiddenPK && hiddenPK == null ||
+                DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV))) {
             log.warn("meta is not compatible, return meta {}, logic TableMeta {}, phy TableMeta {}", meta, logic, phy);
         }
 
@@ -382,7 +389,30 @@ public class PolarDbXTableMetaManager {
         this.polarDbXStorageTableMeta.applyBase(position);
     }
 
+    /**
+     * clone ddlRecord 并进行apply前的预处理
+     * 注意： 会复用内部ext对象
+     */
+    public static DDLRecord cloneAndProcessBeforeApply(DDLRecord ddlRecord) {
+        DDLRecord cloneObject = new DDLRecord();
+        BeanUtils.copyProperties(ddlRecord, cloneObject);
+        DDLExtInfo extInfo = cloneObject.getExtInfo();
+        String sqlMode = extInfo.getSqlMode();
+        if (StringUtils.isNotBlank(sqlMode) && sqlMode.toUpperCase()
+            .contains("REAL_AS_FLOAT")) {
+            String ddlSql = ddlRecord.getDdlSql();
+            SQLStatement statement = com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement(ddlSql);
+            boolean modify = com.aliyun.polardbx.binlog.util.SQLUtils.reWriteRealTypeBySqlMode(statement);
+            if (modify) {
+                cloneObject.setDdlSql(statement.toString());
+            }
+        }
+        return cloneObject;
+    }
+
+
     public void applyLogic(BinlogPosition position, DDLRecord record, String cmdId) {
+        record = cloneAndProcessBeforeApply(record);
         this.compareCache.clear();
         if (isIgnoreApply(position, record)) {
             if (getBoolean(META_BUILD_RECORD_IGNORED_DDL_ENABLED)) {
@@ -692,7 +722,7 @@ public class PolarDbXTableMetaManager {
         if (sqlStatement instanceof SQLDropTableStatement) {
             SQLDropTableStatement sqlDropTableStatement = (SQLDropTableStatement) sqlStatement;
             for (SQLExprTableSource tableSource : sqlDropTableStatement.getTableSources()) {
-                String phyTableName = tableSource.getTableName(true);
+                String phyTableName = normalizeNoTrim(tableSource.getTableName());
                 recordDeltaChangeByPhysicalChange(tso, phySchema, phyTableName);
             }
         } else if (sqlStatement instanceof SQLDropDatabaseStatement) {
@@ -702,12 +732,12 @@ public class PolarDbXTableMetaManager {
         } else if (sqlStatement instanceof MySqlRenameTableStatement) {
             MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) sqlStatement;
             for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
-                String tableName = SQLUtils.normalize(item.getName().getSimpleName());
+                String tableName = SQLUtils.normalizeNoTrim(item.getName().getSimpleName());
                 recordDeltaChangeByPhysicalChange(tso, phySchema, tableName);
             }
         } else if (sqlStatement instanceof SQLAlterTableStatement) {
             SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
-            String phyTableName = SQLUtils.normalize(sqlAlterTableStatement.getTableName());
+            String phyTableName = SQLUtils.normalizeNoTrim(sqlAlterTableStatement.getTableName());
             for (SQLAlterTableItem item : sqlAlterTableStatement.getItems()) {
                 if (item instanceof SQLAlterTableAddColumn || item instanceof SQLAlterTableDropColumnItem
                     || item instanceof MySqlAlterTableChangeColumn || item instanceof MySqlAlterTableModifyColumn) {
@@ -724,7 +754,7 @@ public class PolarDbXTableMetaManager {
         if (sqlStatement instanceof MySqlRenameTableStatement) {
             MySqlRenameTableStatement renameTableStatement = (MySqlRenameTableStatement) sqlStatement;
             for (MySqlRenameTableStatement.Item item : renameTableStatement.getItems()) {
-                return SQLUtils.normalize(item.getTo().getSimpleName());
+                return SQLUtils.normalizeNoTrim(item.getTo().getSimpleName());
             }
         }
         throw new PolardbxException("not a rename ddl sql :" + ddl);
@@ -993,5 +1023,19 @@ public class PolarDbXTableMetaManager {
 
     Map<String, Set<String>> getDeltaChangeMap() {
         return deltaChangeMap;
+    }
+
+    @Override
+    public void onInit(String propsName, String value) {
+
+    }
+
+    @Override
+    public void onPropertyChange(String propsName, String oldValue, String newValue) {
+        compareCache.clear();
+        if (propsName.equals(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED)) {
+            LabEventManager.logEvent(LabEventType.HIDDEN_PK_ENABLE_SWITCH, newValue);
+        }
+        log.warn(propsName + ", change to " + newValue);
     }
 }

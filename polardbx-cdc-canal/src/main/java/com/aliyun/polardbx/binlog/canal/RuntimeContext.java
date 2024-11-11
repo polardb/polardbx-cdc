@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal;
 
@@ -38,7 +30,8 @@ public class RuntimeContext {
      * 且内部tso都以当前已收到的最大tso为 基准tso，
      * 同时保障txnId 始终大于等于当前最大tso 对应的txnId。
      */
-    private final TsoSegment tsoSegment = new TsoSegment();
+    private final TsoSegment maxTso = new TsoSegment();
+    private TsoSegment holdingTso = null;
     private final Map<Integer, Object> attributeMap = new HashMap<>();
     private AuthenticationInfo authenticationInfo;
 
@@ -128,19 +121,19 @@ public class RuntimeContext {
     }
 
     public int nextMaxTxnIdSequence(long txnId) {
-        return this.tsoSegment.nextSeq(txnId);
+        return this.maxTso.nextSeq(txnId);
     }
 
     public long getMaxTxnId() {
-        return tsoSegment.getTxnId();
+        return maxTso.getTxnId();
     }
 
     public Long getMaxTSO() {
-        return this.tsoSegment.getTso();
+        return this.maxTso.getTso();
     }
 
     public void setMaxTSO(Long newTSO, Long newTxnId) {
-        this.tsoSegment.trySet(newTSO, newTxnId);
+        this.maxTso.trySet(newTSO, newTxnId);
     }
 
     public boolean isRecovery() {
@@ -160,7 +153,7 @@ public class RuntimeContext {
     }
 
     public boolean hasTSO() {
-        return this.tsoSegment.isTsoAvaliable();
+        return this.maxTso.isTsoAvaliable();
     }
 
     public String getBinlogFile() {
@@ -221,5 +214,29 @@ public class RuntimeContext {
 
     public String getStorageHashCode() {
         return storageHashCode;
+    }
+
+    public boolean inSyncPointTxn() {
+        return holdingTso != null;
+    }
+
+    public void setHoldingTso() {
+        this.holdingTso = new TsoSegment(maxTso);
+    }
+
+    public void resetHoldingTso() {
+        this.holdingTso = null;
+    }
+
+    public Long getHoldingTso() {
+        return this.holdingTso.getTso();
+    }
+
+    public long getHoldingTxnId() {
+        return this.holdingTso.getTxnId();
+    }
+
+    public int getNextHoldingTxnIdSeq(long holdingTxnId) {
+        return this.holdingTso.nextSeq(holdingTxnId);
     }
 }

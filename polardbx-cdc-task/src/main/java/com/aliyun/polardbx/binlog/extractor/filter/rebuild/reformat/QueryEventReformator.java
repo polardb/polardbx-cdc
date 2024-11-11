@@ -1,20 +1,14 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat;
 
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLTruncateStatement;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
@@ -30,9 +24,11 @@ import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistory;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.EventReformater;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ReformatContext;
+import com.aliyun.polardbx.binlog.format.utils.SqlModeUtil;
 import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.util.RegexUtil;
+import com.aliyun.polardbx.binlog.util.SQLUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
@@ -88,10 +84,22 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
         map.put(LogEvent.QUERY_EVENT, this);
     }
 
+    public String processQueryDDL(QueryLogEvent event){
+        String query = event.getQuery();
+        long sqlMode = event.getSqlMode();
+        if ((sqlMode & SqlModeUtil.MODE_REAL_AS_FLOAT) == SqlModeUtil.MODE_REAL_AS_FLOAT){
+            SQLStatement statement = SQLUtils.parseSQLStatement(query);
+            if (statement != null && com.aliyun.polardbx.binlog.util.SQLUtils.reWriteRealTypeBySqlMode(statement)){
+                return statement.toString();
+            }
+        }
+        return query;
+    }
+
     @Override
     public boolean reformat(QueryLogEvent event, TxnItemRef txnItemRef, ReformatContext context, EventData eventData)
         throws Exception {
-        String query = event.getQuery();
+        String query = processQueryDDL(event);
 
         if (context.getLowerCaseTableNames() == LowerCaseTableNameVariables.LOWERCASE.getValue()) {
             query = query.toLowerCase();
@@ -141,7 +149,24 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
         if (StringUtils.isBlank(query)) {
             return true;
         }
-        return RegexUtil.match(
-            DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX), query.trim());
+        if (RegexUtil.match(
+            DynamicApplicationConfig.getString(META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_REGEX), query.trim())) {
+            return true;
+        }
+
+        try {
+            SQLStatement st = SQLUtils.parseSQLStatement(query);
+            if (st instanceof SQLTruncateStatement) {
+                return true;
+            }
+        } catch (Throwable t) {
+            logger.error("parser physical ddl errory for " + query, t);
+            if (DynamicApplicationConfig.getBoolean(
+                ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_FILTER_IGNORE_PARSE_ERROR)) {
+                return false;
+            }
+            throw t;
+        }
+        return false;
     }
 }

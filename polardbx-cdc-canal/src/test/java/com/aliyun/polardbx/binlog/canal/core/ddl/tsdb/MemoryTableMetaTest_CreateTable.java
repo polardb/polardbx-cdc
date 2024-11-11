@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 
@@ -667,5 +659,116 @@ public class MemoryTableMetaTest_CreateTable extends MemoryTableMetaBase {
         Assert.assertEquals("tinyint", meta.getFieldMetaByName("b").getColumnType());
         Assert.assertEquals("tinyint", meta.getFieldMetaByName("c").getColumnType());
         Assert.assertEquals("tinyint", meta.getFieldMetaByName("d").getColumnType());
+    }
+
+    @Test
+    public void testCreateExperIndexTable() {
+        String createSql = "CREATE TABLE `t_wide_billing_item_apportion_jsonindex_exs4_00003` (\n"
+            + "  `seq_id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',\n"
+            + "  `id` varchar(128) DEFAULT NULL COMMENT ' ',\n"
+            + "  `order_developer_ids` json DEFAULT NULL COMMENT '订单开发人',\n"
+            + "  PRIMARY KEY (`seq_id`),\n"
+            + "  KEY `ix_billing_apportion_order_developer_ids` ((cast(json_extract(`order_developer_ids`,_utf8mb4'$[*]') as char(64) array)))\n"
+            + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='支付和分摊宽表'";
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
+        memoryTableMeta.setMySql8(true);
+        memoryTableMeta.apply(null, "d1", createSql, null);
+    }
+
+    @Test
+    public void testParserTgGroup() {
+        String createSql = "ALTER TABLE `event_record`\n"
+            + "  ADD COLUMN `notifyId` varchar(32) NOT NULL COMMENT '消息通知ID' AFTER `id`,\n"
+            + "  MODIFY COLUMN `event_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT '' COMMENT '事件类型：order_pay，refund，refund_finish' AFTER `event_no`,\n"
+            + "  MODIFY COLUMN `biz_type` tinyint NOT NULL COMMENT '业务类型：1订单，2履约，3退款' AFTER `event_type`,\n"
+            + "  MODIFY COLUMN `user_id` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '用户id' AFTER `biz_no` WITH TABLEGROUP=tg28 IMPLICIT";
+
+        SQLStatement st = SQLUtils.parseSQLStatement(createSql);
+        String expected = "alter table `event_record`\n"
+            + "\tadd column `notifyId` varchar(32) not null comment '消息通知ID' after `id`,\n"
+            + "\tmodify column `event_type` varchar(32) character set utf8mb4 collate utf8mb4_general_ci not null default '' comment '事件类型：order_pay，refund，refund_finish' after `event_no`,\n"
+            + "\tmodify column `biz_type` tinyint not null comment '业务类型：1订单，2履约，3退款' after `event_type`,\n"
+            + "\tmodify column `user_id` varchar(32) character set utf8mb4 collate utf8mb4_general_ci not null comment '用户id' after `biz_no` with tablegroup=tg28 implicit";
+        Assert.assertEquals(expected, st.toLowerCaseString());
+    }
+
+    @Test
+    public void testParserSpecialIndex() {
+        String createSql = "create table if not exists `expr_create_80_test` (\n"
+            + "  a int PRIMARY KEY,\n"
+            + "  b int,\n"
+            + "  c int,\n"
+            + "  d varchar(64),\n"
+            + "  e varchar(64),\n"
+            + "  INDEX cc((b + c))\n"
+            + ") DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci\n"
+            + "DBPARTITION BY hash(`a`)";
+        SQLStatement st = SQLUtils.parseSQLStatement(createSql);
+        String expected = "create table if not exists `expr_create_80_test` (\n"
+            + "\ta int primary key,\n"
+            + "\tb int,\n"
+            + "\tc int,\n"
+            + "\td varchar(64),\n"
+            + "\te varchar(64),\n"
+            + "\tindex cc((b + c))\n"
+            + ") default character set = utf8mb4 default collate = utf8mb4_general_ci\n"
+            + "dbpartition by hash(`a`)";
+        Assert.assertEquals(expected, st.toLowerCaseString());
+    }
+
+    @Test
+    public void testApplyAndRenameColumnWithIndex() {
+        String createSql =
+            "create table my_alter_test(id bigint primary key auto_increment, name varchar(20) , order_no varchar(20), key mc2(`name`), unique (`name`), index(`name`, order_no), unique(`name`, order_no), unique(order_no,`name`));";
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
+        applySql(memoryTableMeta, "d1", createSql);
+        String alterSql = "alter table my_alter_test rename column `name` to `name2`;";
+        applySql(memoryTableMeta, "d1", alterSql);
+        String alterSql1 = "alter table my_alter_test rename column `id` to `id2`;";
+        applySql(memoryTableMeta, "d1", alterSql1);
+        TableMeta tableMeta = memoryTableMeta.find("d1", "my_alter_test");
+        Assert.assertNotNull(tableMeta);
+        Assert.assertNotNull(tableMeta.getFieldMetaByName("id2"));
+        Assert.assertNotNull(tableMeta.getFieldMetaByName("name2"));
+        Assert.assertNotNull(tableMeta.getFieldMetaByName("order_no"));
+
+    }
+
+    @Test
+    public void testCreateRealColumnWithIndex() {
+        String createSql =
+            "CREATE TABLE tt (\n"
+                + "\tmm real(4,2),\n"
+                + "\tm1 double,\n"
+                + "\tm2 float,\n"
+                + "\t_drds_implicit_id_ bigint AUTO_INCREMENT,\n"
+                + "\tPRIMARY KEY (_drds_implicit_id_)\n"
+                + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci";
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
+        applySql(memoryTableMeta, "d1", createSql);
+
+        TableMeta tableMeta = memoryTableMeta.find("d1", "tt");
+        Assert.assertNotNull(tableMeta);
+        Assert.assertEquals("double(4,2)", tableMeta.getFieldMetaByName("mm").getColumnType());
+
+    }
+
+    @Test
+    public void testCreateTableLikeShardKey(){
+        String sql1 = "create table t1(id bigint primary key , name varchar(20))";
+        String sql2 = "alter table t1 partition by hash(`name`)";
+        String sql3 = "create table t2 like d1.t1";
+        String sql4 = "alter table t2 drop index auto_shard_key_name";
+        SQLStatement st = SQLUtils.parseSQLStatement(sql3);
+        System.out.println(st);
+        MemoryTableMeta memoryTableMeta = newMemoryTableMeta();
+        applySql(memoryTableMeta, "d1", sql1);
+        applySql(memoryTableMeta, "d1", sql2);
+        TableMeta tableMeta1 = memoryTableMeta.find("d1", "t1");
+        System.out.println(tableMeta1);
+        applySql(memoryTableMeta, "d2", sql3);
+        TableMeta tableMeta2 = memoryTableMeta.find("d2", "t2");
+        System.out.println(tableMeta2);
+        applySql(memoryTableMeta, "d2", sql4);
     }
 }

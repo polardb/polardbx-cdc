@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor;
 
@@ -349,7 +341,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                 new PositionSearchHandler(entryPosition),
                 mysqlConnection);
         if (isPolarx()) {
-            finder.setPolarx();
+            finder.setPolarx(true);
         }
         return finder.findPos();
     }
@@ -436,8 +428,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                         }
 
                         // 记录一下上一个事务结束的位置，即下一个事务的position
-                        // position = current +
-                        // data.length，代表该事务的下一条offest，避免多余的事务重复
+                        // position = current + data.length，代表该事务的下一条offset，避免多余的事务重复
                         if (dbmsEvent instanceof DBMSTransactionEnd || dbmsEvent instanceof DBMSTransactionBegin) {
                             entryPosition = new BinlogPosition(logfilename, logfileoffset, masterId, logposTimestamp);
                             if (log.isDebugEnabled()) {
@@ -478,9 +469,12 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
         if (enabled) {
             startTs = now;
         }
-        StatMetrics.getInstance().setReceiveDelay(now - logEvent.getWhen() * 1000);
-        StatMetrics.getInstance().addInMessageCount(1);
-        StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
+        // filter heartbeat event
+        if (logEvent.getHeader().getType() != LogEvent.HEARTBEAT_LOG_EVENT) {
+            StatMetrics.getInstance().setReceiveDelay(now - logEvent.getWhen() * 1000);
+            StatMetrics.getInstance().addInMessageCount(1);
+            StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
+        }
         MySQLDBMSEvent event = binlogParser.parse(logEvent, isSeek);
         if (event != null) {
             DBMSEvent dbmsEvent = event.getDbmsEventPayload();

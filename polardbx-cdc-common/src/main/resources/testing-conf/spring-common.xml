@@ -28,5 +28,9 @@
                                   location="classpath:config.properties,classpath:env.properties"
                                   ignore-resource-not-found="true"/>
 
+    <bean id="customPropertySourcesPlaceholderConfigurer"
+          class="com.aliyun.polardbx.binlog.testing.TestPropertySourcesPlaceholderConfigurer">
+    </bean>
+
     <bean class="com.aliyun.polardbx.binlog.SpringContextHolder"/>
 </beans>

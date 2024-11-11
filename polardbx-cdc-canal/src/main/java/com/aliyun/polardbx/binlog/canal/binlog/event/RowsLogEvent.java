@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.event;
 
@@ -40,6 +32,8 @@ public abstract class RowsLogEvent extends LogEvent {
      * Value of the OPTION_RELAXED_UNIQUE_CHECKS flag in thd->options
      */
     public static final int RELAXED_UNIQUE_CHECKS_F = (1 << 2);
+
+    public static final int HIDDEN_PK_FLAG = (1 << 7);
     /**
      * Indicates that rows in this event are complete, that is contain values for
      * all columns of the table.

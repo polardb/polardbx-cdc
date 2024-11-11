@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation;
 
@@ -20,7 +12,9 @@ import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.dao.ValidationDiffMapper;
+import com.aliyun.polardbx.binlog.dao.ValidationTaskMapper;
 import com.aliyun.polardbx.binlog.domain.po.ValidationDiff;
 import com.aliyun.polardbx.binlog.domain.po.ValidationTask;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
@@ -46,11 +40,13 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.util.CollectionUtils;
 
 import java.math.BigInteger;
+import java.rmi.UnexpectedException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
@@ -83,16 +79,16 @@ public class Validator {
 
     private ExecutorService srcThreadPool;
     private ExecutorService dstThreadPool;
-
-    private static final int parallelism =
-        DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_PARALLELISM);
+    private ExecutorService threadPool;
 
     private static final ValidationDiffMapper diffMapper = SpringContextHolder.getObject(ValidationDiffMapper.class);
+    private static final ValidationTaskMapper valTaskMapper = SpringContextHolder.getObject(ValidationTaskMapper.class);
     private static final String stateMachineId = Long.toString(TaskContext.getInstance().getStateMachineId());
     private static final String serviceId = Long.toString(TaskContext.getInstance().getServiceId());
     private static final String taskId = Long.toString(TaskContext.getInstance().getTaskId());
 
     private static final int rpsLimit = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_RECORDS_PER_SECOND);
+    private static final int parallelism = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_TABLE_PARALLELISM);
 
     private static final boolean skipCollect =
         DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_FULL_VALID_SKIP_COLLECT_STATISTIC);
@@ -120,10 +116,9 @@ public class Validator {
     }
 
     private void initThreadPool() {
-        srcThreadPool = ThreadPoolUtil.createExecutorWithFixedNum(parallelism,
-            "src-calculate-batch-checksum-thread");
-        dstThreadPool = ThreadPoolUtil.createExecutorWithFixedNum(parallelism,
-            "dst-calculate-batch-checksum-thread");
+        threadPool = ThreadPoolUtil.createExecutorWithFixedNum(parallelism, "check-thread");
+        srcThreadPool = ThreadPoolUtil.createExecutorWithFixedNum(parallelism, "src-hash-check-thread");
+        dstThreadPool = ThreadPoolUtil.createExecutorWithFixedNum(parallelism, "dst-hash-check-thread");
     }
 
     private void initDataSource() throws Exception {
@@ -137,8 +132,9 @@ public class Validator {
     }
 
     private DruidDataSource createDataSourceHelper(DataImportMeta.ConnInfo connInfo, String dbName) throws Exception {
-        return DataSourceUtil.createDruidMySqlDataSource(connInfo.getHost(), connInfo.getPort(), dbName,
-            connInfo.getUser(), connInfo.getPassword(), "", parallelism, parallelism, null, null);
+        return DataSourceUtil.createDruidMySqlDataSource(false, connInfo.getHost(), connInfo.getPort(),
+            dbName, connInfo.getUser(), connInfo.getPassword(), "", parallelism, parallelism, true,
+            null, null);
     }
 
     private void collectStatistic() throws SQLException {
@@ -150,7 +146,7 @@ public class Validator {
                 stateMachineContext = new DataImportStateMachineContext();
             }
         }
-        if (skipCollect || stateMachineContext.getHasCollectStatistic()) {
+        if (skipCollect || stateMachineContext.isHasCollectStatistic()) {
             log.info("skip collect statistic");
             return;
         }
@@ -170,41 +166,67 @@ public class Validator {
         DbTaskMetaManager.updateStateMachineContext(TaskContext.getInstance().getStateMachineId(), context);
     }
 
-    private void startCheck() {
+    private void startCheck() throws Exception {
         Set<String> srcDbList = meta.getSrcLogicalDbList();
         Map<String, String> dbMapping = meta.getDbMapping();
         Map<String, Set<String>> srcDbToTables = meta.getSrcDbToTables();
         for (String srcDb : srcDbList) {
+            log.info("start check db:{}", srcDb);
+
             String dstDb = dbMapping.get(srcDb);
             Set<String> tables = srcDbToTables.get(srcDb);
+            List<Future<?>> futures = new ArrayList<>();
             for (String table : tables) {
-                try {
-                    validTable(srcDb, dstDb, table);
-                } catch (Exception e) {
-                    log.error("error while valid table. src db:{}, table:{}", srcDb, table, e);
-                    StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR,
-                        TaskContext.getInstance().getTaskId(), e.getMessage());
+                Future<?> future = threadPool.submit(() -> {
                     try {
-                        updateValTaskState(srcDb, table, type, ValidationStateEnum.ERROR);
-                    } catch (Exception e1) {
-                        log.error("error when update val task to error state. src db:{}, table:{}", srcDb, table,
-                            e1);
+                        validTable(srcDb, dstDb, table);
+                    } catch (Exception e) {
+                        log.error("error while valid table. src db:{}, table:{}", srcDb, table, e);
+                        StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_VALIDATION_ERROR,
+                            TaskContext.getInstance().getTaskId(), e.getMessage());
+
+                        try {
+                            // mark state of no primary key table as done
+                            updateValTaskState(srcDb, table, type, e instanceof NoPrimaryKeyException ?
+                                ValidationStateEnum.DONE : ValidationStateEnum.ERROR);
+                        } catch (Exception e1) {
+                            log.error("error when update val task to error state. src db:{}, table:{}", srcDb,
+                                table, e1);
+                            // make sure that all valid tasks has been inserted into db when startCheck finished
+                            throw e1;
+                        }
                     }
-                }
+                });
+                futures.add(future);
             }
+
+            for (Future<?> future : futures) {
+                future.get();
+            }
+
+            log.info("db {} check finished.", srcDb);
         }
+
+        threadPool.shutdown();
     }
 
     private void validTable(String srcDbName, String dstDbName, String tableName) throws Exception {
+        log.info("start check table:{}.{}", srcDbName, tableName);
+
         Optional<ValidationTask> valTaskRecord = getValTaskRecord(srcDbName, tableName, type);
+        String checkPoint = null;
+
         if (valTaskRecord.isPresent()) {
             ValidationTask task = valTaskRecord.get();
-            if (task.getState() == ValidationStateEnum.DONE.name()) {
+            if (ValidationStateEnum.valueOf(task.getState()) == ValidationStateEnum.DONE) {
                 log.info("table {}.{} already check finished, will not check again", srcDbName, tableName);
                 return;
-            } else {
-                log.info("reset table {}.{} check task", srcDbName, tableName);
+            } else if (ValidationStateEnum.valueOf(task.getState()) == ValidationStateEnum.ERROR) {
+                log.info("check table {}.{} error, will reset.", srcDbName, tableName);
                 resetValTask(task);
+                checkPoint = task.getTaskRange();
+            } else {
+                checkPoint = task.getTaskRange();
             }
         } else {
             createValTask(srcDbName, dstDbName, tableName, type);
@@ -213,11 +235,23 @@ public class Validator {
         srcTableInfo = DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, HostType.POLARX1, false);
 
         List<List<Object>> sampleResult = doSample(srcDbName, dstDbName, tableName);
+        if (checkPoint != null) {
+            List<String> keyNames = srcTableInfo.getKeyList();
+            List<Integer> fieldTypes = new ArrayList<>();
+            for (String keyName : keyNames) {
+                fieldTypes.add(srcTableInfo.getColumnType(keyName));
+            }
+            List<Object> cp = JSON.parseObject(checkPoint, List.class);
+            sampleResult = filterSample(sampleResult, cp, fieldTypes);
+        }
 
         if (CollectionUtils.isEmpty(sampleResult)) {
             check(srcDbName, dstDbName, tableName, null, null);
         } else {
-            check(srcDbName, dstDbName, tableName, null, sampleResult.get(0));
+            // 如果check point不为null，不要重复校验小于check point的数据了
+            if (checkPoint == null) {
+                check(srcDbName, dstDbName, tableName, null, sampleResult.get(0));
+            }
             for (int i = 0; i < sampleResult.size() - 1; i++) {
                 check(srcDbName, dstDbName, tableName, sampleResult.get(i), sampleResult.get(i + 1));
             }
@@ -225,16 +259,66 @@ public class Validator {
         }
 
         updateValTaskState(srcDbName, tableName, type, ValidationStateEnum.DONE);
+
+        log.info("check table:{}.{} finished.", srcDbName, tableName);
     }
 
     private void check(String srcDbName, String dstDbName, String tableName, List<Object> lowerBound,
-                       List<Object> upperBound)
-        throws Exception {
+                       List<Object> upperBound) throws Exception {
         boolean res = batchCheck(srcDbName, dstDbName, tableName, lowerBound, upperBound);
-        if (res) {
-            return;
+        if (!res) {
+            detailCheck(srcDbName, dstDbName, tableName, lowerBound, upperBound);
         }
-        detailCheck(srcDbName, dstDbName, tableName, lowerBound, upperBound);
+
+        // persist check point
+        if (lowerBound != null || upperBound != null) {
+            Optional<ValidationTask> valTaskRecord = getValTaskRecord(srcDbName, tableName, type);
+            if (!valTaskRecord.isPresent()) {
+                throw new UnexpectedException("failed to get task from metadb!");
+            }
+            if (upperBound != null) {
+                persistCheckPoint(valTaskRecord.get(), upperBound);
+            } else {
+                persistCheckPoint(valTaskRecord.get(), lowerBound);
+            }
+        }
+    }
+
+    private void persistCheckPoint(ValidationTask task, List<Object> checkPoint) throws SQLException {
+        String str = JSON.toJSONString(checkPoint);
+        task.setTaskRange(str);
+        int res = valTaskMapper.updateByPrimaryKeySelective(task);
+        if (res != 1) {
+            throw new SQLException("failed to persist check point!");
+        }
+    }
+
+    private List<List<Object>> filterSample(List<List<Object>> sampleResult, List<Object> checkPoint,
+                                            List<Integer> fieldTypes) {
+        List<List<Object>> res = new ArrayList<>();
+        res.add(checkPoint);
+
+        List<String> cpKeyVal = new ArrayList<>();
+        for (Object o : checkPoint) {
+            cpKeyVal.add(o.toString());
+        }
+
+        int idx = 0;
+        while (idx < sampleResult.size()) {
+            List<String> keyVal = new ArrayList<>();
+            for (Object o : sampleResult.get(idx)) {
+                keyVal.add(o.toString());
+            }
+            if (compareKeyVal(cpKeyVal, keyVal, fieldTypes) < 0) {
+                break;
+            }
+            idx++;
+        }
+
+        for (int i = idx; i < sampleResult.size(); i++) {
+            res.add(sampleResult.get(i));
+        }
+        return res;
     }
 
     private List<List<Object>> doSample(String srcDbName, String dstDbName, String tableName) throws Exception {
@@ -259,8 +343,7 @@ public class Validator {
                 execBatchCheck(srcDs.get(srcDbName), srcContext.sql, srcContext.params);
             stopwatch.stop();
             log.info("exec batch check on src cost {} seconds, check cnt:{}, checksum:{}",
-                stopwatch.elapsed(TimeUnit.SECONDS),
-                srcCheckResult.getLeft(), srcCheckResult.getRight());
+                stopwatch.elapsed(TimeUnit.SECONDS), srcCheckResult.getLeft(), srcCheckResult.getRight());
             return srcCheckResult;
         });
 
@@ -279,13 +362,13 @@ public class Validator {
         Pair<Integer, String> dstCheckResult = dstFuture.get();
 
         int cnt = srcCheckResult.getLeft();
+        StatMetrics.getInstance().addOutMessageCount(cnt);
         rateLimiter.acquire(Math.max(cnt, 1));
 
         if (!srcCheckResult.equals(dstCheckResult)) {
-            log.info("batch check failed, will check row one by one.");
+            log.info("table:{}.{} batch check failed, will check row one by one.", srcDbName, tableName);
             return false;
         }
-
         return true;
     }
 
@@ -329,7 +412,9 @@ public class Validator {
             ValSQLGenerator.getRowCheckSql(srcDbName, tableName, tableInfo, lowerBound, upperBound);
         SqlContextBuilder.SqlContext dstContext =
             ValSQLGenerator.getRowCheckSql(dstDbName, tableName, tableInfo, lowerBound, upperBound);
-        log.info("start to check row. check sql:{}", srcContext.sql);
+        if (log.isDebugEnabled()) {
+            log.debug("start to check row. check sql:{}", srcContext.sql);
+        }
 
         final long maxCount = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_MAX_PERSIST_ROWS_COUNT);
 
@@ -365,8 +450,9 @@ public class Validator {
                         srcKeyVal = new ArrayList<>();
                         srcKeyStr = new ArrayList<>();
                         for (String keyName : keyNames) {
-                            srcKeyVal.add(srcRs.getObject(keyName));
                             srcKeyStr.add(srcRs.getString(keyName));
+                            srcKeyVal.add(
+                                ExtractorUtil.getColumnValue(srcRs, keyName, tableInfo.getColumnType(keyName)));
                         }
                     }
 
@@ -375,8 +461,9 @@ public class Validator {
                         dstKeyVal = new ArrayList<>();
                         dstKeyStr = new ArrayList<>();
                         for (String keyName : keyNames) {
-                            dstKeyVal.add(dstRs.getObject(keyName));
                             dstKeyStr.add(dstRs.getString(keyName));
+                            dstKeyVal.add(
+                                ExtractorUtil.getColumnValue(dstRs, keyName, tableInfo.getColumnType(keyName)));
                         }
                     }
 
@@ -384,6 +471,9 @@ public class Validator {
                         break;
                     } else if (lastSrcCheckSum == null) {
                         // don't have source data, so all the target row's data is redundant, should be deleted
+
+                        // todo by jiyue add recheck to confirm diff
+
                         log.info("Found orphan rows, dstKey:{}", dstKeyVal);
                         if (res.size() < maxCount) {
                             res.add(

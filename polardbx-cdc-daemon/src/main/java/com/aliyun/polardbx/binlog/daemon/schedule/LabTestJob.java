@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
@@ -50,7 +42,7 @@ public class LabTestJob extends AbstractBinlogTimerTask {
 
     public LabTestJob(String cluster, String clusterType, String name, int interval) {
         super(cluster, clusterType, name, interval);
-        jobList.add(new RandomFlushJob(TimeUnit.MINUTES.toMillis(5), false));
+        jobList.add(new RandomFlushJob(TimeUnit.MINUTES.toMillis(15), false));
     }
 
     @Override
@@ -88,6 +80,9 @@ public class LabTestJob extends AbstractBinlogTimerTask {
     abstract class AbstractTestJob {
         long jobInterval;
         boolean random;
+        /**
+         * 上次执行时间
+         */
         private long lastExecTimestamp;
 
         /**
@@ -98,6 +93,8 @@ public class LabTestJob extends AbstractBinlogTimerTask {
         public AbstractTestJob(long jobInterval, boolean random) {
             this.jobInterval = jobInterval;
             this.random = random;
+            //初始化为当前时间，避免实验室启动就立即flush，导致mysql8.0 crash
+            this.lastExecTimestamp = System.currentTimeMillis();
         }
 
         final void exec(long now) {

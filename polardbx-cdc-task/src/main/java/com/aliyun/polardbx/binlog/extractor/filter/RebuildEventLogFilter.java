@@ -1,35 +1,22 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
 
-import com.alibaba.fastjson.JSONObject;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTruncateStatement;
-import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.DrdsMoveDataBase;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.LabEventManager;
-import com.aliyun.polardbx.binlog.QueryLogFlags2Enum;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.LogEventFilter;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
-import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
@@ -37,52 +24,35 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
-import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
-import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
-import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
-import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
-import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.dao.DdlEngineArchiveMapper;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.EventReformater;
+import com.aliyun.polardbx.binlog.extractor.filter.rebuild.LogicDDLHandler;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ReformatContext;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat.QueryEventReformator;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat.RowEventReformator;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat.TableMapEventReformator;
-import com.aliyun.polardbx.binlog.extractor.log.DDLEvent;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.extractor.log.TransactionGroup;
 import com.aliyun.polardbx.binlog.extractor.log.VirtualTSO;
-import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
-import com.aliyun.polardbx.binlog.format.utils.SqlModeUtil;
 import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.storage.IteratorBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.util.DirectByteOutput;
-import com.aliyun.polardbx.binlog.util.LabEventType;
-import org.apache.commons.lang.BooleanUtils;
 import org.apache.commons.lang.math.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.rocksdb.RocksDBException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST;
-import static com.aliyun.polardbx.binlog.cdc.meta.CreateDropTableWithExistFilter.shouldIgnore;
-import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.processDdlSqlCharacters;
-import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.tryRemoveAutoShardKey;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
-import static com.aliyun.polardbx.binlog.util.SQLUtils.reWriteWrongDdl;
 
 /**
  * @author chengjin.lyf on 2020/8/7 3:13 下午
@@ -99,8 +69,8 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
     private FormatDescriptionLogEvent fde;
     private VirtualTSO baseVTSO;
     private final Map<Integer, EventReformater> reformaterMap = new HashMap<>();
-    private final DdlEngineArchiveMapper ddlEngineArchiveMapper;
     private long injectErrorTimestamp = -1;
+    private final LogicDDLHandler logicDDLHandler;
 
     public RebuildEventLogFilter(long instanceServerId, EventAcceptFilter acceptFilter, boolean binlogx,
                                  PolarDbXTableMetaManager tableMetaManager) {
@@ -118,10 +88,10 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         logContext = new LogContext();
         logContext.setFormatDescription(fde);
         logContext.setLogPosition(new LogPosition(""));
-        ddlEngineArchiveMapper = SpringContextHolder.getObject(DdlEngineArchiveMapper.class);
         new QueryEventReformator(tableMetaManager).register(reformaterMap);
         new RowEventReformator(binlogx, tableMetaManager).register(reformaterMap);
         new TableMapEventReformator(tableMetaManager).register(reformaterMap);
+        logicDDLHandler = new LogicDDLHandler(instanceServerId, acceptFilter, tableMetaManager);
 
     }
 
@@ -186,7 +156,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
             }
 
             if (transaction.isDDL()) {
-                logicDDLProcess(transaction, context);
+                logicDDLHandler.processDDL(transaction, context);
                 transaction.release();
                 if (!transaction.isVisibleDdl()) {
                     tranIt.remove();
@@ -207,18 +177,6 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
 
         if (injectErrorTimestamp > 0 && injectErrorTimestamp < System.currentTimeMillis()) {
             System.exit(0);
-        }
-    }
-
-    private void logicDDLProcess(Transaction transaction, HandlerContext context) {
-        try {
-            long serverId = instanceServerId;
-            if (transaction.getServerId() != null) {
-                serverId = transaction.getServerId();
-            }
-            rebuildDDL(transaction, context, serverId);
-        } catch (Exception e) {
-            throw new PolardbxException(e);
         }
     }
 
@@ -283,261 +241,6 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         } catch (RocksDBException e) {
             throw new PolardbxException("remove txn item ref failed!", e);
         }
-    }
-
-    private void rebuildDDL(Transaction transaction, HandlerContext context, Long serverId) throws Exception {
-        logger.info("begin to build ddl event, ddl record is  " + transaction.getDdlEvent().getDdlRecord()
-            + " , tso is " + transaction.getVirtualTsoStr());
-
-        // prepare parameters
-        DDLEvent ddlEvent = transaction.getDdlEvent();
-        DDLRecord ddlRecord = ddlEvent.getDdlRecord();
-        RuntimeContext runtimeContext = context.getRuntimeContext();
-        ServerCharactorSet serverCharactorSet = runtimeContext.getServerCharactorSet();
-        Integer clientCharsetId = CharsetConversion.getCharsetId(serverCharactorSet.getCharacterSetClient());
-        Integer connectionCharsetId = CharsetConversion.getCharsetId(serverCharactorSet.getCharacterSetConnection());
-        Integer serverCharsetId = CharsetConversion.getCharsetId(serverCharactorSet.getCharacterSetServer());
-        TopologyRecord topologyRecord = JSONObject.parseObject(ddlRecord.getMetaInfo(), TopologyRecord.class);
-        String dbCharset = null;
-        String tbCollation = null;
-        if (topologyRecord != null) {
-            LogicMetaTopology.LogicTableMetaTopology tableMetas = topologyRecord.getLogicTableMeta();
-            if (tableMetas != null) {
-                tbCollation = tableMetas.getTableCollation();
-            }
-            LogicMetaTopology.LogicDbTopology dbTopology = topologyRecord.getLogicDbMeta();
-            if (dbTopology != null) {
-                dbCharset = dbTopology.getCharset();
-            }
-        }
-
-        // 用来处理一些异常情况，比如打标sql有问题，或cdc识别不了打标sql，都可以通过该方式进行容错处理
-        boolean useHistoryTableFirst = DynamicApplicationConfig.getBoolean(META_BUILD_APPLY_FROM_HISTORY_FIRST);
-        if (useHistoryTableFirst) {
-            logger.warn("begin to get sql from history table with db {}, and tso{} ", ddlRecord.getSchemaName(),
-                ddlEvent.getPosition().getRtso());
-            String sql = getLogicSqlFromHistoryTable(ddlRecord.getSchemaName(), ddlEvent.getPosition().getRtso());
-            if (StringUtils.isNotBlank(sql)) {
-                logger.warn("ddl sql in history table is " + sql);
-                ddlRecord.setDdlSql(sql);
-            } else {
-                logger.warn("ddl sql is not existed in history table.");
-            }
-        }
-
-        // try rewrite for move database sql, parse ddl 出错，会尝试重写一次ddl
-        tryRewriteMoveDataBaseSql(ddlEvent, ddlRecord);
-
-        // try rewrite for drop table sql
-        ddlRecord.setDdlSql(tryRewriteDropTableSql(ddlRecord.getSchemaName(),
-            ddlRecord.getTableName(), ddlRecord.getDdlSql()));
-
-        // try rewrite for truncate table sql
-        ddlRecord.setDdlSql(tryRewriteTruncateSql(ddlRecord.getTableName(), ddlRecord.getDdlSql()));
-
-        // try ignore create table or drop table sql with exists
-        if (shouldIgnore(ddlRecord.getDdlSql(), ddlRecord.getId(), ddlRecord.getJobId(), ddlRecord.getExtInfo())) {
-            ddlEvent.setVisible(false);
-        }
-
-        // prepare output binlog ddl sql
-        DDLExtInfo ddlExtInfo = ddlRecord.getExtInfo();
-        String outputBinlogSql4PolarX = ddlExtInfo != null && StringUtils.isNotBlank(ddlExtInfo.getActualOriginalSql())
-            ? ddlExtInfo.getActualOriginalSql() : ddlRecord.getDdlSql();
-        String outputBinlogSql4Mysql = ddlRecord.getDdlSql();
-
-        // 建表SQL使用用户侧输入的DDL，作为单机MySQL形态的DDL sql，不能用物理执行计划中的sql
-        // 对于以/* //1/ */开头的建表SQL，属于创建影子表的范畴，内核会自动将源表名带上__test前缀，但MySQL并没有这个行为，所以不能用原始sql
-        if (ddlRecord.getExtInfo() != null && ("CREATE_TABLE".equals(ddlRecord.getSqlKind()) ||
-            BooleanUtils.isTrue(ddlRecord.getExtInfo().getForeignKeysDdl()))) {
-            String actualSql = ddlRecord.getExtInfo().getActualOriginalSql();
-            if (StringUtils.isNotBlank(actualSql) && !StringUtils.contains(actualSql, "/* //1/ */")) {
-                outputBinlogSql4Mysql = actualSql;
-            }
-        }
-
-        // apply logic ddl sql
-        String ddlSql4Apply = ddlRecord.getDdlSql().trim();
-        logger.info("begin to apply logic ddl : " + ddlSql4Apply + ", tso : " + transaction.getVirtualTsoStr());
-        ddlSql4Apply = processDdlSqlCharacters(ddlRecord.getTableName(), ddlSql4Apply, dbCharset, tbCollation);
-        ddlRecord.setDdlSql(ddlSql4Apply);
-
-        boolean isGSI = ddlExtInfo != null && ddlRecord.getExtInfo().isGsi();
-        if (isGSI) {
-            ddlEvent.setVisibleToMysql(false);
-            if (ddlExtInfo.isOldVersionOriginalSql()) {
-                //@see https://aone.alibaba-inc.com/v2/project/860366/bug/51253282
-                ddlRecord.setDdlSql("select 1");
-                ddlRecord.getExtInfo().setCreateSql4PhyTable(null);
-                ddlRecord.setMetaInfo(null);
-            }
-        }
-        logger.info("real apply logic ddl is : " + ddlSql4Apply + ", tso :"
-            + transaction.getVirtualTsoStr() + " isGSI : " + isGSI);
-        processCharactersForOriginalSql(ddlRecord, dbCharset, tbCollation);
-        tableMetaManager.applyLogic(ddlEvent.getPosition(), ddlRecord, transaction.getInstructionId());
-        if (!isGSI) {
-            acceptFilter.rebuild();
-        }
-
-        // 构造输出到全局binlog的ddl event
-        if (ddlEvent.isVisible()) {
-            String sqlMode = null;
-            String flags2 = null;
-            if (ddlRecord.getExtInfo() != null) {
-                sqlMode = ddlRecord.getExtInfo().getSqlMode();
-                flags2 = ddlRecord.getExtInfo().getFlags2();
-            }
-            if (sqlMode == null || StringUtils.equalsIgnoreCase(sqlMode, "null")) {
-                sqlMode = runtimeContext.getSqlMode();
-            }
-            long sqlModeCode = SqlModeUtil.modesValue(sqlMode);
-
-            outputBinlogSql4Mysql = tryRemoveAutoShardKey(
-                ddlRecord.getSchemaName(), ddlRecord.getTableName(), outputBinlogSql4Mysql,
-                triple -> tableMetaManager.findIndexes(triple.getLeft(), triple.getMiddle()).stream().anyMatch(
-                    i -> StringUtils.equalsIgnoreCase(triple.getRight(), i)));
-
-            String outputDdlSql = DDLConverter.buildDdlEventSql(
-                ddlRecord.getTableName(),
-                ddlEvent.isVisibleToPolardbX() ? outputBinlogSql4PolarX : null,
-                dbCharset,
-                tbCollation,
-                transaction.getVirtualTsoStr(),
-                ddlEvent.isVisibleToMysql() ? outputBinlogSql4Mysql : null,
-                ddlRecord.getDdlSql());
-            int ddlCostTime = ddlCostTime(ddlRecord);
-
-            long flags2Value = 0;
-
-            if (StringUtils.isNotBlank(flags2)) {
-                flags2Value = QueryLogFlags2Enum.getFlags2Value(flags2);
-            }
-
-            ddlEvent.setQueryEventBuilder(new QueryEventBuilder(ddlRecord.getSchemaName(),
-                outputDdlSql,
-                clientCharsetId,
-                connectionCharsetId,
-                serverCharsetId,
-                true,
-                (int) ddlEvent.getPosition().getTimestamp(),
-                serverId,
-                sqlModeCode,
-                ddlCostTime,
-                flags2Value));
-            ddlEvent.setCommitKey(outputDdlSql);
-            ddlEvent.setData(ReformatContext.toByte(ddlEvent.getQueryEventBuilder()));
-        }
-    }
-
-    private void processCharactersForOriginalSql(DDLRecord ddlRecord, String dbCharset, String tbCollation) {
-        // 为original sql 附加character，保证当按照original sql进行apply时，tablemeta中包含charset信息
-        DDLExtInfo ddlExtInfo = ddlRecord.getExtInfo();
-        if (ddlExtInfo != null && StringUtils.isNotBlank(ddlExtInfo.getActualOriginalSql())) {
-            ddlExtInfo.resetOriginalSql(processDdlSqlCharacters("",
-                ddlExtInfo.getActualOriginalSql(), dbCharset, tbCollation));
-        }
-    }
-
-    private int ddlCostTime(DDLRecord record) {
-        if (record.getJobId() == null) {
-            return 1;
-        }
-        Long costTime;
-        try {
-            costTime = ddlEngineArchiveMapper.selectDdlCost(record.getJobId());
-            if (costTime == null) {
-                costTime = ddlEngineArchiveMapper.selectArchiveDdlCost(record.getJobId());
-            }
-            if (costTime == null) {
-                return 1;
-            }
-        } catch (Throwable e) {
-            logger.error("query ddl cost time error", e);
-            costTime = 1L;
-        }
-
-        return (int) Math.abs(TimeUnit.MILLISECONDS.toSeconds(costTime));
-    }
-
-    protected void tryRewriteMoveDataBaseSql(DDLEvent ddlEvent, DDLRecord ddlRecord) {
-        try {
-            SQLStatement stmt = parseSQLStatement(ddlRecord.getDdlSql());
-            if (stmt instanceof DrdsMoveDataBase) {
-                // don`t know why process like this, maybe some history reason, keep it
-                ddlRecord.setDdlSql("select 1");
-                ddlEvent.setVisible(false);
-            }
-        } catch (Throwable t) {
-            logger.error("try rewrite move database sql error!", t);
-            String newDdl = reWriteWrongDdl(ddlRecord.getDdlSql());
-            if (newDdl != null) {
-                String log = "rewrite sql : " + ddlRecord.getDdlSql() + " to : " + newDdl;
-                logger.warn(log);
-                LabEventManager.logEvent(LabEventType.EXCEPTION_RE_WRITE_DDL, log);
-                ddlRecord.setDdlSql(newDdl);
-                return;
-            }
-            throw t;
-        }
-    }
-
-    private String getLogicSqlFromHistoryTable(String dbName, String tso) {
-        JdbcTemplate metaJdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
-        List<String> list = metaJdbcTemplate.queryForList(
-            "select ddl from binlog_logic_meta_history where tso = '" + tso + "' and db_name = '" + dbName + "'",
-            String.class);
-        return list.isEmpty() ? null : list.get(0);
-    }
-
-    String tryRewriteDropTableSql(String schema, String tableName, String ddl) {
-        try {
-            SQLStatement stmt = parseSQLStatement(ddl);
-
-            //fix https://work.aone.alibaba-inc.com/issue/36762424
-            if (stmt instanceof SQLDropTableStatement) {
-                SQLDropTableStatement dropTableStatement = (SQLDropTableStatement) stmt;
-                if (dropTableStatement.getTableSources().size() > 1) {
-                    Optional<SQLExprTableSource> optional = dropTableStatement.getTableSources().stream()
-                        .filter(ts ->
-                            tableName.equalsIgnoreCase(ts.getTableName(true)) && (StringUtils.isBlank(ts.getSchema())
-                                || schema.equalsIgnoreCase(SQLUtils.normalize(ts.getSchema())))
-                        ).findFirst();
-                    if (!optional.isPresent()) {
-                        throw new PolardbxException(String.format("can`t find table %s in sql %s", tableName, ddl));
-                    } else {
-                        dropTableStatement.getTableSources().clear();
-                        dropTableStatement.addTableSource(optional.get());
-                        String newSql = dropTableStatement.toUnformattedString();
-                        logger.info("rewrite drop table sql from {}, to {}", ddl, newSql);
-                        return newSql;
-                    }
-                }
-            }
-
-            return ddl;
-        } catch (Throwable t) {
-            logger.error("try rewrite drop table sql failed. schema:{}, table:{}, sql:{}", schema, tableName, ddl);
-            throw new PolardbxException("try rewrite drop table sql failed!!", t);
-        }
-    }
-
-    String tryRewriteTruncateSql(String tableName, String ddl) {
-        SQLStatement sqlStatement = parseSQLStatement(ddl);
-
-        //fix https://aone.alibaba-inc.com/issue/46776374
-        if (sqlStatement instanceof SQLTruncateStatement) {
-            SQLTruncateStatement sqlTruncateStatement = (SQLTruncateStatement) sqlStatement;
-            if (sqlTruncateStatement.getTableSources().size() == 1) {
-                SQLExprTableSource source = sqlTruncateStatement.getTableSources().get(0);
-                String sqlTable = source.getTableName(true);
-                if (StringUtils.equalsIgnoreCase("__test_" + sqlTable, tableName)) {
-                    source.setSimpleName(tableName);
-                    return sqlTruncateStatement.toUnformattedString();
-                }
-            }
-        }
-        return ddl;
     }
 
     @Override

@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
@@ -37,11 +29,13 @@ import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import lombok.Setter;
 import lombok.ToString;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -102,12 +96,16 @@ public class LogFileCopier {
     private EventSplitMode splitMode;
     private long lastInjectTroubleTime;
     private TimelineEnvConfig timelineEnvConfig;
+    @Setter
+    private ExecutionConfig executionConfig;
     private volatile boolean running;
 
-    public LogFileCopier(LogFileManager logFileManager, int writeBufferSize, int seekBufferSize) {
+    public LogFileCopier(LogFileManager logFileManager, int writeBufferSize, int seekBufferSize,
+                         ExecutionConfig executionConfig) {
         this.logFileManager = logFileManager;
         this.writeBufferSize = writeBufferSize;
         this.seekBufferSize = seekBufferSize;
+        this.executionConfig = executionConfig;
         this.logDecoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
         this.logContext = new LogContext();
         this.logContext.setFormatDescription(new FormatDescriptionLogEvent(4, LogEvent.BINLOG_CHECKSUM_ALG_CRC32));
@@ -115,7 +113,7 @@ public class LogFileCopier {
         this.dryRun = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_DRY_RUN_ENABLE);
         this.rpcUseAsyncMode = DynamicApplicationConfig.getBoolean(BINLOG_SYNC_CLIENT_ASYNC_ENABLE);
         this.asyncQueueSize = DynamicApplicationConfig.getInt(BINLOG_SYNC_CLIENT_RECEIVE_QUEUE_SIZE);
-        this.flowControlWindowSize = DynamicApplicationConfig.getInt(BINLOG_SYNC_FLOW_CONTROL_WINDOW_SIZE);
+        this.flowControlWindowSize = calcFlowControlWindowSize();
         this.injectTrouble = DynamicApplicationConfig.getBoolean(BINLOG_SYNC_INJECT_TROUBLE);
         this.lastInjectTroubleTime = System.currentTimeMillis();
         this.contactBuffer = ByteBuffer.allocate(65536);
@@ -507,6 +505,12 @@ public class LogFileCopier {
         }
 
         return splitMode;
+    }
+
+    int calcFlowControlWindowSize() {
+        int flowControlWindowSize = DynamicApplicationConfig.getInt(BINLOG_SYNC_FLOW_CONTROL_WINDOW_SIZE);
+        int reserved = Double.valueOf(executionConfig.getReservedMemMb() * 0.8).intValue();
+        return reserved == 0 ? flowControlWindowSize : Math.min(flowControlWindowSize, reserved);
     }
 
     @ToString

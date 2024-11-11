@@ -1,26 +1,22 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta.domain;
 
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.Map;
+
 @ToString
+@EqualsAndHashCode
 public class DDLExtInfo {
     private Long taskId;
     private Long taskSubSeq;
@@ -38,6 +34,11 @@ public class DDLExtInfo {
      * fastjson和gson的处理差异，参见：com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfoTest#testGsi()
      */
     private boolean isGsi = false;
+
+    /**
+     * cci标记
+     */
+    private boolean cci = false;
 
     /**
      * 历史原因，originalDdl，拼写成了orginalDdl @承谨
@@ -58,6 +59,8 @@ public class DDLExtInfo {
 
     @Getter
     private String flags2;
+
+    private Map<String, Object> polarxVariables;
 
     public static DDLExtInfo parseExtInfo(String str) {
         DDLExtInfo extInfo = null;
@@ -198,6 +201,14 @@ public class DDLExtInfo {
         this.enableImplicitTableGroup = enableImplicitTableGroup;
     }
 
+    public boolean isCci() {
+        return cci;
+    }
+
+    public void setCci(boolean cci) {
+        this.cci = cci;
+    }
+
     public void resetOriginalSql(String newSql) {
         if (StringUtils.isBlank(orginalDdl) && StringUtils.isBlank(originalDdl)) {
             throw new PolardbxException("can`t reset original sql , because both orginalDdl and originalDdl is null");
@@ -212,5 +223,13 @@ public class DDLExtInfo {
         } else {
             originalDdl = newSql;
         }
+    }
+
+    public Map<String, Object> getPolarxVariables() {
+        return polarxVariables;
+    }
+
+    public void setPolarxVariables(Map<String, Object> polarxVariables) {
+        this.polarxVariables = polarxVariables;
     }
 }

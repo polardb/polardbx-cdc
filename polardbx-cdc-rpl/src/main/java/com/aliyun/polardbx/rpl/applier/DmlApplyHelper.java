@@ -1,29 +1,23 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSColumn;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
+import com.aliyun.polardbx.binlog.enums.ColsUpdateMode;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
+import com.aliyun.polardbx.binlog.util.LabEventType;
 import com.aliyun.polardbx.rpl.common.DataCompareUtil;
-import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.DbMetaCache;
@@ -35,22 +29,21 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
-import javax.sql.DataSource;
 import java.io.Serializable;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 import static com.aliyun.polardbx.rpl.applier.SqlContextExecutor.execUpdate;
-import static com.aliyun.polardbx.rpl.applier.SqlContextExecutor.logExecUpdateDebug;
 import static com.aliyun.polardbx.rpl.taskmeta.ConflictType.DUPLICATED;
 import static com.aliyun.polardbx.rpl.taskmeta.ConflictType.UPDATE_MISSED;
 
@@ -71,12 +64,13 @@ public class DmlApplyHelper {
     private static final String DELETE_SQL = "DELETE FROM `%s`.`%s` WHERE %s";
     private static final String UPDATE_SQL = "UPDATE `%s`.`%s` SET %s WHERE %s";
     private static final String SELECT_SQL = "SELECT * FROM `%s`.`%s` WHERE %s";
+    private static final String CDC_UPDATE_DB = "cdc_update_db";
 
     /*
      * need initialize by another component
      */
     private static final boolean randomCompareAll = getBoolean(ConfigKeys.RPL_RANDOM_COMPARE_ALL);
-    private static final boolean isLabEnv = getBoolean(ConfigKeys.IS_LAB_ENV);
+    private static boolean isLabEnv = getBoolean(ConfigKeys.IS_LAB_ENV);
     private static boolean compareAll = false;
     private static boolean insertOnUpdateMiss = true;
     private static DbMetaCache dbMetaCache;
@@ -223,39 +217,35 @@ public class DmlApplyHelper {
             }
             paramsList.add(params);
         }
-        if (StringUtils.isBlank(dstTbInfo.getSqlTemplate().get(insertMode))) {
-            StringBuilder nameSqlSb = new StringBuilder();
-            StringBuilder valueSqlSb = new StringBuilder();
-            valueSqlSb.append("(");
-            Iterator<? extends DBMSColumn> it = columns.iterator();
-            while (it.hasNext()) {
-                DBMSColumn column = it.next();
-                nameSqlSb.append(repairDMLName(column.getName()));
-                valueSqlSb.append("?");
-                if (it.hasNext()) {
-                    nameSqlSb.append(',');
-                    valueSqlSb.append(',');
-                }
+        StringBuilder nameSqlSb = new StringBuilder();
+        StringBuilder valueSqlSb = new StringBuilder();
+        valueSqlSb.append("(");
+        Iterator<? extends DBMSColumn> it = columns.iterator();
+        while (it.hasNext()) {
+            DBMSColumn column = it.next();
+            nameSqlSb.append(repairDMLName(column.getName()));
+            valueSqlSb.append("?");
+            if (it.hasNext()) {
+                nameSqlSb.append(',');
+                valueSqlSb.append(',');
             }
-            valueSqlSb.append(")");
-            String sql;
-            switch (insertMode) {
-            case RplConstants.INSERT_MODE_INSERT_IGNORE:
-                sql = INSERT_IGNORE_SQL;
-                break;
-            case RplConstants.INSERT_MODE_REPLACE:
-                sql = REPLACE_SQL;
-                break;
-            default:
-                sql = SIMPLE_INSERT_SQL;
-                break;
-            }
-            dstTbInfo.getSqlTemplate().put(insertMode,
-                String.format(sql, CommonUtils.escape(dstTbInfo.getSchema()),
-                    CommonUtils.escape(dstTbInfo.getName()), nameSqlSb, valueSqlSb));
         }
-        return new SqlContextV2(dstTbInfo.getSqlTemplate().get(insertMode),
-            dstTbInfo.getSchema(), dstTbInfo.getName(), paramsList);
+        valueSqlSb.append(")");
+        String sql;
+        switch (insertMode) {
+        case RplConstants.INSERT_MODE_INSERT_IGNORE:
+            sql = INSERT_IGNORE_SQL;
+            break;
+        case RplConstants.INSERT_MODE_REPLACE:
+            sql = REPLACE_SQL;
+            break;
+        default:
+            sql = SIMPLE_INSERT_SQL;
+            break;
+        }
+        return new SqlContextV2(String.format(sql, CommonUtils.escape(dstTbInfo.getSchema()),
+            CommonUtils.escape(dstTbInfo.getName()), nameSqlSb, valueSqlSb), dstTbInfo.getSchema(), dstTbInfo.getName(),
+            paramsList);
     }
 
     public static SqlContext getDeleteSqlExecContext(DefaultRowChange rowChange, TableInfo dstTbInfo) {
@@ -280,8 +270,10 @@ public class DmlApplyHelper {
     }
 
     public static SqlContext getUpdateSqlExecContext(DefaultRowChange rowChange, TableInfo dstTbInfo) {
-        // List<? extends DBMSColumn> changeColumns = rowChange.getChangeColumns();
-        List<? extends DBMSColumn> changeColumns = rowChange.getColumns();
+        List<DBMSColumn> changeColumns = getUpdateChangeColumns(rowChange, dstTbInfo);
+        if (changeColumns.isEmpty()) {
+            return null;
+        }
         // SET {column1} = {value1}, {column2} = {value2}
         StringBuilder setSqlSb = new StringBuilder();
         List<Serializable> params = new ArrayList<>();
@@ -310,6 +302,7 @@ public class DmlApplyHelper {
         String updateSql = String
             .format(UPDATE_SQL, CommonUtils.escape(dstTbInfo.getSchema()),
                 CommonUtils.escape(dstTbInfo.getName()), setSqlSb, whereSqlSb);
+
         return new SqlContext(updateSql, dstTbInfo.getSchema(), dstTbInfo.getName(), params);
     }
 
@@ -381,11 +374,6 @@ public class DmlApplyHelper {
             if (i < whereColumns.size() - 1) {
                 whereSqlSb.append(" AND ");
             }
-
-//            // fill in where column values
-//            if (whereColumnValue != null) {
-//                whereColumnValues.add(whereColumnValue);
-//            }
         }
     }
 
@@ -444,7 +432,7 @@ public class DmlApplyHelper {
     }
 
     private static void trimLastComma(StringBuilder builder) {
-        if (builder.charAt(builder.length() - 1) == ',') {
+        if (builder.length() > 0 && builder.charAt(builder.length() - 1) == ',') {
             builder.setLength(builder.length() - 1);
         }
     }
@@ -602,7 +590,10 @@ public class DmlApplyHelper {
                         RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE));
                     break;
                 case UPDATE:
-                    sqlContexts.add(DmlApplyHelper.getUpdateSqlExecContext(rowChangeEvent, dstTableInfo));
+                    SqlContext updateSqlContext = DmlApplyHelper.getUpdateSqlExecContext(rowChangeEvent, dstTableInfo);
+                    if (updateSqlContext != null) {
+                        sqlContexts.add(updateSqlContext);
+                    }
                     break;
                 case DELETE:
                     sqlContexts.add(DmlApplyHelper.getDeleteSqlExecContext(rowChangeEvent, dstTableInfo));
@@ -637,6 +628,23 @@ public class DmlApplyHelper {
         return identifyColumnsIndex;
     }
 
+    public static List<Integer> getPkColumnsIndex(Map<String, List<Integer>> allTbPkColumns,
+                                                        String fullTbName,
+                                                        DefaultRowChange rowChange) throws Exception {
+        if (allTbPkColumns.containsKey(fullTbName)) {
+            return allTbPkColumns.get(fullTbName);
+        }
+
+        TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
+        List<String> pkColumnNames = tbInfo.getPks();
+        List<Integer> pkColumnsIndex = new ArrayList<>();
+        for (String columnName : pkColumnNames) {
+            pkColumnsIndex.add(rowChange.getColumnIndex(columnName));
+        }
+        allTbPkColumns.put(fullTbName, pkColumnsIndex);
+        return pkColumnsIndex;
+    }
+
     public static boolean shouldSerialExecute(DefaultRowChange rowChange) throws Exception {
         TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
         // no pk && not only insert in this batch
@@ -646,7 +654,8 @@ public class DmlApplyHelper {
                 tbInfo.getSchema() + "." + tbInfo.getName(), rowChange.getAction());
             return true;
         }
-        if (rowChange.getAction() == DBMSAction.DELETE) {
+        // may exist uk exchange, so delete must be executed in serial mode.
+        if (rowChange.getAction() == DBMSAction.DELETE && (tbInfo.getUks() != null && !tbInfo.getUks().isEmpty())) {
             return true;
         }
         // has gsi && start with omc_with
@@ -673,5 +682,77 @@ public class DmlApplyHelper {
         }
         allTbWhereColumns.put(fullTbName, whereColumns);
         return whereColumns;
+    }
+
+    public static boolean isNoPkTable(DefaultRowChange rowChange) throws Exception {
+        TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
+        return tbInfo.isNoPkTable();
+    }
+
+    public static void recordUpdateInfo(String schema, Set<DBMSColumn> cols) {
+        if (CDC_UPDATE_DB.equalsIgnoreCase(schema)) {
+            StringBuilder stringBuilder = new StringBuilder();
+            for (DBMSColumn col : cols) {
+                String name = col.getName();
+                stringBuilder.append(name).append(",");
+            }
+            stringBuilder.deleteCharAt(stringBuilder.length() - 1);
+            LabEventManager.logEvent(LabEventType.UPDATE_QUERY_INFO, stringBuilder.toString());
+        }
+    }
+
+    public static void setIsLabEnv(boolean isLabEnv) {
+        DmlApplyHelper.isLabEnv = isLabEnv;
+    }
+
+    public static boolean getIsLabEnv() {
+        return isLabEnv;
+    }
+
+    /**
+     * 获取发生更改的列
+     * 根据不同的更新模式(TIMESTAMP, ONUPDATE, ALL)，筛选出需要关注的列
+     * 在实验室环境下，还会记录更新信息
+     *
+     * @param rowChange 待处理的行更改数据
+     * @param dstTbInfo 目标表的信息
+     * @return 发生更改的列列表
+     */
+    public static List<DBMSColumn> getUpdateChangeColumns(DefaultRowChange rowChange, TableInfo dstTbInfo) {
+        Set<DBMSColumn> changeColumns = new HashSet<>(rowChange.getColumnSet().getColumnSize());
+        ColsUpdateMode mode =
+            ColsUpdateMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RPL_COLS_UPDATE_MODE).toUpperCase());
+        switch (mode) {
+        case TIMESTAMP:
+            // TIMESTAMP模式：如果列值发生变化或者列是时间戳类型，则将其添加到更改列列表
+            for (DBMSColumn column : rowChange.getColumns()) {
+                int columnIdx = column.getColumnIndex();
+                if (rowChange.hasChangeColumn(columnIdx) || column.getSqlType() == Types.TIMESTAMP) {
+                    changeColumns.add(column);
+                }
+            }
+            break;
+        case ONUPDATE:
+            // ONUPDATE模式：如果列值发生变化或者列名在ON UPDATE列表中，则将其添加到更改列列表
+            for (ColumnInfo column : dstTbInfo.getColumns()) {
+                if (column.isOnUpdate()) {
+                    changeColumns.add(rowChange.findColumn(column.getName()));
+                }
+            }
+            changeColumns.addAll(rowChange.getChangeColumns());
+            break;
+        case ALL:
+        default:
+            // ALL模式或其他模式：直接添加所有列到更改列列表
+            changeColumns.addAll(rowChange.getColumns());
+            break;
+        }
+
+        // 如果是实验室环境，记录更新信息
+        if (isLabEnv) {
+            recordUpdateInfo(rowChange.getSchema(), changeColumns);
+        }
+
+        return new ArrayList<>(changeColumns);
     }
 }

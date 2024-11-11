@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.system.test;
 
@@ -46,10 +38,12 @@ public class TestDBProvider extends AbstractSystemDBProvider {
     String CREATE_CDC_HEARTBEAT_TABLE = String.format(
         "CREATE TABLE IF NOT EXISTS `%s` (`id` bigint(20) auto_increment primary key , sname varchar(20) ,gmt_modified timestamp) broadcast",
         DRDS_CDC_HEARTBEAT);
+
     private final TableMeta ddlTableMeta;
     private final TableMeta instructionTableMeta;
     private final TableMeta heartbeatTableMeta;
     private final TableMeta globalTxLogTableMeta;
+    private final TableMeta syncPointTableMeta;
 
     public TestDBProvider() {
         MemoryTableMeta memoryTableMeta =
@@ -58,10 +52,12 @@ public class TestDBProvider extends AbstractSystemDBProvider {
         memoryTableMeta.apply(null, LOGIC_SCHEMA, CREATE_CDC_INSTRUCTION_TABLE, null);
         memoryTableMeta.apply(null, LOGIC_SCHEMA, CREATE_DRDS_GLOBAL_TX_LOG, null);
         memoryTableMeta.apply(null, LOGIC_SCHEMA, CREATE_CDC_HEARTBEAT_TABLE, null);
+        memoryTableMeta.apply(null, LOGIC_SCHEMA, CREATE_POLARX_SYNC_POINT, null);
         ddlTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_DDL_RECORD);
         instructionTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_INSTRUCTION);
         heartbeatTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_CDC_HEARTBEAT);
         globalTxLogTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, DRDS_GLOBAL_TX_LOG);
+        syncPointTableMeta = memoryTableMeta.find(LOGIC_SCHEMA, POLARX_SYNC_POINT);
     }
 
     @Override
@@ -77,6 +73,11 @@ public class TestDBProvider extends AbstractSystemDBProvider {
     @Override
     public boolean heartbeatTable(String db, String phyTable) {
         return db.startsWith(LOGIC_SCHEMA) && phyTable.startsWith(DRDS_CDC_HEARTBEAT) && !db.endsWith(SINGLE_KEY_WORLD);
+    }
+
+    @Override
+    public boolean isSyncPoint(String db, String phyTable) {
+        return db.startsWith(LOGIC_SCHEMA) && phyTable.startsWith(POLARX_SYNC_POINT) && !db.endsWith(SINGLE_KEY_WORLD);
     }
 
     @Override
@@ -97,5 +98,10 @@ public class TestDBProvider extends AbstractSystemDBProvider {
     @Override
     public TableMeta getGlobalTxLogTableMeta() {
         return globalTxLogTableMeta;
+    }
+
+    @Override
+    public TableMeta getSyncPointTableMeta() {
+        return syncPointTableMeta;
     }
 }

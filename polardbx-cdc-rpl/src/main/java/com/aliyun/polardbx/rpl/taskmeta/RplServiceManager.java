@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
+ */
 package com.aliyun.polardbx.rpl.taskmeta;
 
 /**
@@ -22,6 +28,7 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.ResultCode;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
@@ -70,7 +77,7 @@ public class RplServiceManager {
     private static final Logger rplLogger = LoggerFactory.getLogger(RplServiceManager.class);
 
     private static final MetaManagerTranProxy TRANSACTION_MANAGER =
-        SpringContextHolder.getObject(MetaManagerTranProxy.class);
+        SpringContextHolder.getObject("metaManagerTranProxy");
 
     private static final List<String> LEGAL_PARAMS_FOR_CHANGE_MASTER = Arrays.asList(
         RplConstants.CHANNEL, RplConstants.MODE, RplConstants.MASTER_HOST, RplConstants.MASTER_PORT,
@@ -79,7 +86,8 @@ public class RplServiceManager {
         RplConstants.STREAM_GROUP, RplConstants.ENABLE_DYNAMIC_MASTER_HOST, RplConstants.WRITE_SERVER_ID,
         RplConstants.CHANNEL, RplConstants.SUB_CHANNEL, RplConstants.TRIGGER_DYNAMIC_MASTER_HOST,
         RplConstants.TRIGGER_AUTO_POSITION, RplConstants.FORCE_CHANGE, RplConstants.WRITE_TYPE,
-        RplConstants.COMPARE_ALL, RplConstants.CONFLICT_STRATEGY, RplConstants.MASTER_INST_ID);
+        RplConstants.COMPARE_ALL, RplConstants.CONFLICT_STRATEGY, RplConstants.MASTER_INST_ID,
+        RplConstants.MASTER_LOG_TIME_SECOND, RplConstants.ENABLE_SRC_LOGICAL_META_SNAPSHOT);
 
     private static final List<String> LEGAL_PARAMS_FOR_CHANGE_FILTER = Arrays.asList(
         RplConstants.REPLICATE_DO_DB, RplConstants.REPLICATE_IGNORE_DB, RplConstants.REPLICATE_DO_TABLE,
@@ -256,14 +264,18 @@ public class RplServiceManager {
                     .data(false).build();
             }
 
+            boolean useMetaPosition = false;
+            if (params.containsKey(RplConstants.MASTER_LOG_FILE) && params.containsKey(RplConstants.MASTER_LOG_POS)
+                || params.containsKey(RplConstants.MASTER_LOG_TIME_SECOND)) {
+                useMetaPosition = true;
+            }
+
             // sub channel单独处理 只允许修改指定的几个参数，详见extractChangeMasterParamsForModify
             if (params.containsKey(RplConstants.SUB_CHANNEL)) {
                 RplTask task = DbTaskMetaManager.getTask(Long.parseLong(params.get(RplConstants.SUB_CHANNEL)));
                 ReplicaMeta replicaMeta = extractMetaFromTaskConfig(task);
                 extractChangeMasterParamsForSubChannelModify(params, replicaMeta);
-                FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta,
-                    params.containsKey(RplConstants.MASTER_LOG_FILE)
-                        && params.containsKey(RplConstants.MASTER_LOG_POS));
+                FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta, useMetaPosition);
                 return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
             }
 
@@ -276,7 +288,8 @@ public class RplServiceManager {
                 // rules:
                 // 1. 如果我们设置MASTER_HOST 或 MASTER_PORT 或 MODE 或 host_type 或 stream_group参数，
                 // 则"无论如何"视为新的master,直接重建 (与mysql行为一致)
-                // 2. 如果我们设置MASTER_LOG_FILE 与 MASTER_LOG_POS参数，则视为新的position
+                // 2. 如果我们设置 MASTER_LOG_FILE 与 MASTER_LOG_POS 或者 MASTER_LOG_TIME_SECOND 参数，则视为新的position
+                // MASTER_LOG_TIME_SECOND 优先
                 // 清除位点上下文并修改fsm/service/task的元数据
                 // 3. 如果创建任务时未指定位点，则默认采用最新位点
                 if (!Boolean.parseBoolean(params.getOrDefault(RplConstants.FORCE_CHANGE, "false"))) {
@@ -291,9 +304,7 @@ public class RplServiceManager {
                 for (RplTask task : tasks) {
                     ReplicaMeta replicaMeta = extractMetaFromTaskConfig(task);
                     extractChangeMasterParams(params, replicaMeta);
-                    FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta,
-                        params.containsKey(RplConstants.MASTER_LOG_FILE)
-                            && params.containsKey(RplConstants.MASTER_LOG_POS));
+                    FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta, useMetaPosition);
                 }
                 // 目前只有更新meta cn的时候需要更新common meta
                 ReplicaMeta commonMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
@@ -471,22 +482,22 @@ public class RplServiceManager {
             RplTaskConfig config = DbTaskMetaManager.getTaskConfig(task.getId());
             ExtractorConfig extractorConfig = JSON.parseObject(config.getExtractorConfig(), ExtractorConfig.class);
             ReplicaMeta replicaMeta = JSON.parseObject(extractorConfig.getPrivateMeta(), ReplicaMeta.class);
-            List<String> positionDetails;
+            BinlogPosition binlogPosition;
             if (StringUtils.isNotBlank(task.getPosition())) {
-                positionDetails = CommonUtil.parsePosition(task.getPosition());
+                binlogPosition = BinlogPosition.parseFromString(task.getPosition());
             } else {
-                positionDetails = CommonUtil.parsePosition(CommonUtil.getRplInitialPosition());
+                binlogPosition = BinlogPosition.parseFromString(CommonUtil.getRplInitialPosition());
             }
             String running = TaskStatus.valueOf(task.getStatus()) == TaskStatus.RUNNING ? "Yes" : "No";
             LinkedHashMap<String, String> response = new LinkedHashMap<>();
             response.put("Master_Host", replicaMeta.getMasterHost());
             response.put("Master_User", replicaMeta.getMasterUser());
             response.put("Master_Port", Integer.toString(replicaMeta.getMasterPort()));
-            response.put("Master_Log_File", positionDetails.get(0));
-            response.put("Read_Master_Log_Pos", positionDetails.get(1));
-            response.put("Relay_Log_File", positionDetails.get(0));
-            response.put("Relay_Log_Pos", positionDetails.get(1));
-            response.put("Relay_Master_Log_File", positionDetails.get(0));
+            response.put("Master_Log_File", binlogPosition.getFileName());
+            response.put("Read_Master_Log_Pos", String.valueOf(binlogPosition.getPosition()));
+            response.put("Relay_Log_File", binlogPosition.getFileName());
+            response.put("Relay_Log_Pos", String.valueOf(binlogPosition.getPosition()));
+            response.put("Relay_Master_Log_File", binlogPosition.getFileName());
             response.put("Slave_IO_Running", running);
             response.put("Slave_SQL_Running", running);
             response.put("Replicate_Do_DB", replicaMeta.getDoDb());
@@ -496,7 +507,10 @@ public class RplServiceManager {
             response.put("Replicate_Wild_Do_Table", replicaMeta.getWildDoTable());
             response.put("Replicate_Wild_Ignore_Table", replicaMeta.getWildIgnoreTable());
             response.put("Last_Error", task.getLastError());
-            response.put("Exec_Master_Log_Pos", positionDetails.get(1));
+            response.put("Exec_Master_Log_Pos", String.valueOf(binlogPosition.getPosition()));
+            response.put("Exec_Master_Log_Tso", StringUtils.isNotEmpty(binlogPosition.getRtso()) ?
+                binlogPosition.getRtso().substring(0, Math.min(19, binlogPosition.getRtso().length())) : "NULL");
+
             response.put("Until_Condition", "None");
             response.put("Master_SSL_Allowed", "No");
             response.put("Seconds_Behind_Master", String.valueOf(FSMMetaManager.computeTaskDelay(task)));
@@ -615,6 +629,10 @@ public class RplServiceManager {
             replicaMeta.setPosition(
                 params.get(RplConstants.MASTER_LOG_FILE) + ":" + params.get(RplConstants.MASTER_LOG_POS));
         }
+        if (params.containsKey(RplConstants.MASTER_LOG_TIME_SECOND)) {
+            replicaMeta.setPosition("0:0#" + RplConstants.ROLLBACK_STRING + "."
+                + params.get(RplConstants.MASTER_LOG_TIME_SECOND));
+        }
         if (params.containsKey(RplConstants.IGNORE_SERVER_IDS)) {
             // origin: (1,2)
             // in db: 1,2
@@ -636,6 +654,10 @@ public class RplServiceManager {
         }
         if (params.containsKey(RplConstants.COMPARE_ALL)) {
             replicaMeta.setCompareAll(Boolean.parseBoolean(params.get(RplConstants.COMPARE_ALL)));
+        }
+        if (params.containsKey(RplConstants.ENABLE_SRC_LOGICAL_META_SNAPSHOT)) {
+            replicaMeta.setEnableSrcLogicalMetaSnapshot(Boolean.parseBoolean(
+                params.get(RplConstants.ENABLE_SRC_LOGICAL_META_SNAPSHOT)));
         }
         replicaMeta.setInsertOnUpdateMiss(true);
         if (params.containsKey(RplConstants.INSERT_ON_UPDATE_MISS)) {
@@ -688,6 +710,10 @@ public class RplServiceManager {
             && params.containsKey(RplConstants.MASTER_LOG_POS)) {
             replicaMeta.setPosition(
                 params.get(RplConstants.MASTER_LOG_FILE) + ":" + params.get(RplConstants.MASTER_LOG_POS));
+        }
+        if (params.containsKey(RplConstants.MASTER_LOG_TIME_SECOND)) {
+            replicaMeta.setPosition("0:0#" + RplConstants.ROLLBACK_STRING + "."
+                + params.get(RplConstants.MASTER_LOG_TIME_SECOND));
         }
     }
 

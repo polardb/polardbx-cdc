@@ -151,6 +151,7 @@ public class DumperDataSource {
         CdcServiceGrpc.CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
         Map<String, String> ext = new HashMap<>();
         ext.put("master_binlog_checksum", "CRC32");
+        ext.put("client_type", "COLUMNAR");
         cdcServiceStub.dump(DumpRequest.newBuilder()
             .setExt(JSON.toJSONString(ext))
             .setRegistered(true)

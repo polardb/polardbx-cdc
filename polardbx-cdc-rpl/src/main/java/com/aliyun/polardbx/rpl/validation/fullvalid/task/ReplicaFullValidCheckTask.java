@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation.fullvalid.task;
 
@@ -24,28 +16,34 @@ import com.aliyun.polardbx.binlog.dao.RplFullValidSubTaskDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RplFullValidSubTaskMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplFullValidDiff;
 import com.aliyun.polardbx.binlog.domain.po.RplFullValidSubTask;
+import com.aliyun.polardbx.binlog.service.RplSyncPointService;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.validation.fullvalid.ReplicaFullValidDiffStatus;
 import com.aliyun.polardbx.rpl.validation.fullvalid.ReplicaFullValidSqlGenerator;
+import com.aliyuncs.utils.StringUtils;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.ToString;
 import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.util.CollectionUtils;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+
+import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 
 /**
  * @author yudong
@@ -59,16 +57,18 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         SpringContextHolder.getObject(RplFullValidSubTaskMapper.class);
     private static final RplFullValidDiffMapper diffMapper =
         SpringContextHolder.getObject(RplFullValidDiffMapper.class);
+    private static final RplSyncPointService syncPointService =
+        SpringContextHolder.getObject(RplSyncPointService.class);
+
     private final ReplicaFullValidSubTaskContext context;
     private final long taskId;
     private DataSource srcDataSource;
     private DataSource dstDataSource;
-    private JdbcTemplate srcJdbcTemplate;
-    private JdbcTemplate dstJdbcTemplate;
     private final TaskConfig config;
     private TableInfo srcTableInfo;
     private TableInfo dstTableInfo;
     private TaskSummary summary;
+    private Pair<String, String> syncPointTso;
 
     public ReplicaFullValidCheckTask(ReplicaFullValidSubTaskContext context) {
         this.context = context;
@@ -123,8 +123,6 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         dstTableInfo = context.getDstDbMetaCache().getTableInfo(config.getDstDb(), config.getDstTb());
         srcDataSource = context.getSrcDbMetaCache().getDataSource(config.getSrcDb());
         dstDataSource = context.getDstDbMetaCache().getDataSource(config.getDstDb());
-        srcJdbcTemplate = new JdbcTemplate(srcDataSource);
-        dstJdbcTemplate = new JdbcTemplate(dstDataSource);
 
         List<String> pks = dstTableInfo.getPks();
         if (CollectionUtils.isEmpty(pks)) {
@@ -146,6 +144,15 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
     }
 
     private boolean checkData() throws Exception {
+        if (config.mode == null || ReplicaFullValidCheckMode.SNAPSHOT.name().equalsIgnoreCase(config.mode)) {
+            syncPointTso = syncPointService.selectLatestSyncPoint();
+            if (!validSyncPointTso()) {
+                syncPointTso = null;
+            }
+        } else {
+            log.info("direct mode, will skip to get sync point");
+        }
+
         if (checkHash()) {
             return true;
         }
@@ -154,109 +161,167 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         return checkDetail();
     }
 
+    public boolean validSyncPointTso() throws SQLException {
+        if (syncPointTso == null) {
+            return false;
+        }
+
+        String primaryTso = syncPointTso.getLeft();
+        String secondaryTso = syncPointTso.getRight();
+        if (StringUtils.isEmpty(primaryTso) || StringUtils.isEmpty(secondaryTso)) {
+            return false;
+        }
+
+        return validSyncPointTsoHelper(srcDataSource, srcTableInfo.getName(), primaryTso) &&
+            validSyncPointTsoHelper(dstDataSource, dstTableInfo.getName(), secondaryTso);
+    }
+
+    public boolean validSyncPointTsoHelper(DataSource ds, String tbName, String snapshotTso) throws SQLException {
+        try (Connection conn = ds.getConnection();
+            Statement stmt = conn.createStatement()) {
+            stmt.execute("SET SNAPSHOT_TS = " + snapshotTso);
+            stmt.execute("SET TRANSACTION_POLICY = TSO");
+            stmt.execute("BEGIN");
+            try {
+                stmt.execute("/*+TDDL:scan()*/ SELECT 1 FROM `" + escape(tbName) + "` LIMIT 1");
+            } catch (SQLException e) {
+                return false;
+            } finally {
+                stmt.execute("ROLLBACK ");
+                stmt.execute("SET SNAPSHOT_TS = -1");
+            }
+            return true;
+        }
+    }
+
+    public void setSyncPointTso(Pair<String, String> syncPointTso) {
+        this.syncPointTso = syncPointTso;
+    }
+
     private boolean checkHash() {
-        List<Object> lowerBound = config.getLowerBound();
-        List<Object> upperBound = config.getUpperBound();
+        try {
+            List<Object> lowerBound = config.getLowerBound();
+            List<Object> upperBound = config.getUpperBound();
 
-        String rplHashCheckSql =
-            ReplicaFullValidSqlGenerator.buildRplHashCheckSql(dstTableInfo, !lowerBound.isEmpty(),
-                !upperBound.isEmpty());
+            String rplHashCheckSql =
+                ReplicaFullValidSqlGenerator.buildRplHashCheckSql(dstTableInfo, !lowerBound.isEmpty(),
+                    !upperBound.isEmpty());
 
-        log.info("start to check hash digest. rpl hash check sql:{}", rplHashCheckSql);
+            log.info("start to check hash digest. rpl hash check sql:{}", rplHashCheckSql);
 
-        long srcDigest = getHashDigest(srcJdbcTemplate, rplHashCheckSql, lowerBound, upperBound);
-        long dstDigest = getHashDigest(dstJdbcTemplate, rplHashCheckSql, lowerBound, upperBound);
-
-        return srcDigest == dstDigest;
+            final String primaryTso = syncPointTso == null ? null : syncPointTso.getLeft();
+            final String secondaryTso = syncPointTso == null ? null : syncPointTso.getRight();
+            long srcDigest = getHashDigest(srcTableInfo.getSchema(), srcTableInfo.getName(), srcDataSource, primaryTso,
+                rplHashCheckSql, lowerBound, upperBound);
+            long dstDigest =
+                getHashDigest(dstTableInfo.getSchema(), dstTableInfo.getName(), dstDataSource, secondaryTso,
+                    rplHashCheckSql, lowerBound, upperBound);
+            boolean res = srcDigest == dstDigest;
+            if (!res) {
+                log.info("hash check failed!, src hash:{}, src snapshot tso:{}, dst hash:{}, dst snapshot tso:{}",
+                    srcDigest, primaryTso, dstDigest, secondaryTso);
+            }
+            return res;
+        } catch (Exception e) {
+            log.error("failed to check hash!", e);
+            return false;
+        }
     }
 
     private boolean checkDetail() throws Exception {
         int fetchSize = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_CHECK_DETAIL_FETCH_SIZE);
         final long maxCount = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_MAX_PERSIST_ROWS_COUNT);
-
         List<Object> lowerBound = config.getLowerBound();
         List<Object> upperBound = config.getUpperBound();
-
-        String checkSumSql =
-            ReplicaFullValidSqlGenerator.buildRowCheckSumSql(dstTableInfo, !lowerBound.isEmpty(),
-                !upperBound.isEmpty());
+        final String primaryTso = syncPointTso == null ? null : syncPointTso.getLeft();
+        final String secondaryTso = syncPointTso == null ? null : syncPointTso.getRight();
+        String checkSumSql = ReplicaFullValidSqlGenerator.buildRowCheckSumSql(dstTableInfo, !lowerBound.isEmpty(),
+            !upperBound.isEmpty());
         log.info("start to check detail info. check sql:{}", checkSumSql);
 
         List<ReplicaFullValidDiffInfo> diffInfos = new ArrayList<>();
         try (Connection srcConn = srcDataSource.getConnection();
-            Connection dstConn = dstDataSource.getConnection();
-            PreparedStatement srcStmt = srcConn.prepareStatement(checkSumSql);
-            PreparedStatement dstStmt = dstConn.prepareStatement(checkSumSql);) {
-            srcStmt.setFetchSize(fetchSize);
-            dstStmt.setFetchSize(fetchSize);
-            Object[] params = ArrayUtils.addAll(lowerBound.toArray(), upperBound.toArray());
-            for (int i = 0; i < params.length; i++) {
-                srcStmt.setObject(i + 1, params[i]);
-                dstStmt.setObject(i + 1, params[i]);
-            }
+            Connection dstConn = dstDataSource.getConnection()) {
+            try {
+                startTxn(srcConn, srcTableInfo.getSchema(), srcTableInfo.getName(), primaryTso);
+                startTxn(dstConn, dstTableInfo.getSchema(), dstTableInfo.getName(), secondaryTso);
 
-            try (ResultSet srcRs = srcStmt.executeQuery();
-                ResultSet dstRs = dstStmt.executeQuery()) {
-                List<String> pkNames = dstTableInfo.getKeyList();
-                // TODO: use object
-                List<String> srcPkVal = null;
-                List<String> dstPkVal = null;
-
-                while (srcRs.next() && dstRs.next()) {
-                    String srcCheckSum = srcRs.getString("checksum");
-                    String dstCheckSum = dstRs.getString("checksum");
-                    if (srcCheckSum.equals(dstCheckSum)) {
-                        continue;
+                try (PreparedStatement srcStmt = srcConn.prepareStatement(checkSumSql);
+                    PreparedStatement dstStmt = dstConn.prepareStatement(checkSumSql)) {
+                    srcStmt.setFetchSize(fetchSize);
+                    dstStmt.setFetchSize(fetchSize);
+                    Object[] params = ArrayUtils.addAll(lowerBound.toArray(), upperBound.toArray());
+                    for (int i = 0; i < params.length; i++) {
+                        srcStmt.setObject(i + 1, params[i]);
+                        dstStmt.setObject(i + 1, params[i]);
                     }
 
-                    srcPkVal = new ArrayList<>();
-                    dstPkVal = new ArrayList<>();
-                    for (String pkName : pkNames) {
-                        srcPkVal.add(srcRs.getString(pkName));
-                        dstPkVal.add(dstRs.getString(pkName));
-                    }
+                    try (ResultSet srcRs = srcStmt.executeQuery();
+                        ResultSet dstRs = dstStmt.executeQuery()) {
+                        List<String> pkNames = dstTableInfo.getKeyList();
+                        List<String> srcPkVal;
+                        List<String> dstPkVal;
 
-                    int cmp = comparePk(srcPkVal, dstPkVal);
-                    ReplicaFullValidDiffInfo diff;
-                    if (cmp == 0) {
-                        summary.diff++;
-                        diff = new ReplicaFullValidDiffInfo(srcPkVal, dstPkVal, "Diff");
-                    } else if (cmp > 0) {
-                        summary.orphan++;
-                        diff = new ReplicaFullValidDiffInfo(null, dstPkVal, "Orphan");
-                        srcRs.previous();
-                    } else {
-                        summary.miss++;
-                        diff = new ReplicaFullValidDiffInfo(srcPkVal, null, "Miss");
-                        dstRs.previous();
-                    }
+                        while (srcRs.next() && dstRs.next()) {
+                            String srcCheckSum = srcRs.getString("checksum");
+                            String dstCheckSum = dstRs.getString("checksum");
+                            if (srcCheckSum.equals(dstCheckSum)) {
+                                continue;
+                            }
 
-                    if (diffInfos.size() < maxCount) {
-                        diffInfos.add(diff);
-                    }
-                }
+                            srcPkVal = new ArrayList<>();
+                            dstPkVal = new ArrayList<>();
+                            for (String pkName : pkNames) {
+                                srcPkVal.add(srcRs.getString(pkName));
+                                dstPkVal.add(dstRs.getString(pkName));
+                            }
 
-                while (srcRs.next()) {
-                    summary.miss++;
-                    if (diffInfos.size() < maxCount) {
-                        srcPkVal = new ArrayList<>();
-                        for (String pkName : pkNames) {
-                            srcPkVal.add(srcRs.getString(pkName));
+                            int cmp = comparePk(srcPkVal, dstPkVal);
+                            ReplicaFullValidDiffInfo diff;
+                            if (cmp == 0) {
+                                summary.diff++;
+                                diff = new ReplicaFullValidDiffInfo(srcPkVal, dstPkVal, "Diff");
+                            } else if (cmp > 0) {
+                                summary.orphan++;
+                                diff = new ReplicaFullValidDiffInfo(null, dstPkVal, "Orphan");
+                                srcRs.previous();
+                            } else {
+                                summary.miss++;
+                                diff = new ReplicaFullValidDiffInfo(srcPkVal, null, "Miss");
+                                dstRs.previous();
+                            }
+
+                            if (diffInfos.size() < maxCount) {
+                                diffInfos.add(diff);
+                            }
                         }
-                        diffInfos.add(new ReplicaFullValidDiffInfo(srcPkVal, null, "Miss"));
-                    }
-                }
 
-                while (dstRs.next()) {
-                    summary.orphan++;
-                    if (diffInfos.size() < maxCount) {
-                        dstPkVal = new ArrayList<>();
-                        for (String pkName : pkNames) {
-                            dstPkVal.add(dstRs.getString(pkName));
+                        while (srcRs.next()) {
+                            summary.miss++;
+                            if (diffInfos.size() < maxCount) {
+                                srcPkVal = new ArrayList<>();
+                                for (String pkName : pkNames) {
+                                    srcPkVal.add(srcRs.getString(pkName));
+                                }
+                                diffInfos.add(new ReplicaFullValidDiffInfo(srcPkVal, null, "Miss"));
+                            }
                         }
-                        diffInfos.add(new ReplicaFullValidDiffInfo(null, dstPkVal, "Orphan"));
+
+                        while (dstRs.next()) {
+                            summary.orphan++;
+                            if (diffInfos.size() < maxCount) {
+                                dstPkVal = new ArrayList<>();
+                                for (String pkName : pkNames) {
+                                    dstPkVal.add(dstRs.getString(pkName));
+                                }
+                                diffInfos.add(new ReplicaFullValidDiffInfo(null, dstPkVal, "Orphan"));
+                            }
+                        }
                     }
                 }
+            } finally {
+                rollbackTxn(srcConn);
+                rollbackTxn(dstConn);
             }
         }
 
@@ -285,11 +350,62 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         return result;
     }
 
-    private long getHashDigest(JdbcTemplate jdbcTemplate, String rplHashCheckSql,
-                               List<Object> lowerBound, List<Object> upperBound) {
-        Object[] params = ArrayUtils.addAll(lowerBound.toArray(), upperBound.toArray());
-        List<Long> res = jdbcTemplate.query(rplHashCheckSql, (rs, rowNum) -> rs.getLong("HASH"), params);
-        return res.get(0);
+    private long getHashDigest(String db, String tb, DataSource dataSource, String snapshotTso, String rplHashCheckSql,
+                               List<Object> lowerBound, List<Object> upperBound) throws Exception {
+        try (Connection conn = dataSource.getConnection()) {
+            try {
+                startTxn(conn, db, tb, snapshotTso);
+
+                try (PreparedStatement stmt = conn.prepareStatement(rplHashCheckSql)) {
+                    Object[] params = ArrayUtils.addAll(lowerBound.toArray(), upperBound.toArray());
+                    for (int i = 0; i < params.length; i++) {
+                        stmt.setObject(i + 1, params[i]);
+                    }
+                    try (ResultSet resultSet = stmt.executeQuery()) {
+                        if (resultSet.next()) {
+                            return resultSet.getLong("HASH");
+                        } else {
+                            throw new SQLException("replica hash check has no result!");
+                        }
+                    }
+                }
+            } finally {
+                rollbackTxn(conn);
+            }
+        }
+    }
+
+    private void startTxn(Connection conn, String db, String tb, String snapshotTso) throws SQLException {
+        try (Statement stmt = conn.createStatement()) {
+            // 可能会抛snapshot too old异常
+            if (!StringUtils.isEmpty(snapshotTso)) {
+                stmt.execute("SET SNAPSHOT_TS = " + snapshotTso);
+            } else {
+                stmt.execute("SET SNAPSHOT_TS = -1");
+            }
+
+            stmt.execute("SET TRANSACTION_POLICY = TSO");
+            stmt.execute("BEGIN");
+            stmt.execute("/*+TDDL:scan()*/ SELECT 1 FROM `" + escape(tb) + "` LIMIT 1");
+        } catch (SQLException e) {
+            log.warn("failed to start txn", e);
+
+            // 如果上面抛snapshot too old异常，这里尝试放弃使用sync point，相当于direct模式
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("SET SNAPSHOT_TS = -1");
+                stmt.execute("SET TRANSACTION_POLICY = TSO");
+                stmt.execute("BEGIN");
+                stmt.execute("/*+TDDL:scan()*/ SELECT 1 FROM `" + escape(tb) + "` LIMIT 1");
+            }
+        }
+    }
+
+    private void rollbackTxn(Connection conn) throws SQLException {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("ROLLBACK");
+        } catch (SQLException e) {
+            throw new SQLException("failed to commit txn");
+        }
     }
 
     private void persistDiffRows(List<ReplicaFullValidDiffInfo> diffInfos) throws Exception {
@@ -360,6 +476,7 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         String dstTb;
         List<Object> lowerBound;
         List<Object> upperBound;
+        String mode;
     }
 
     @Data

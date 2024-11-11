@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.merge;
 
@@ -18,6 +10,7 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.unit.SearchRecorderMetrics;
 import com.aliyun.polardbx.binlog.collect.Collector;
 import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.error.CollectException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.metrics.MergeMetrics;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
@@ -30,6 +23,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -167,8 +161,13 @@ public class LogEventMerger implements Merger {
                     break;
                 } catch (Throwable t) {
                     MonitorManager.getInstance().triggerAlarm(MERGER_STAGE_LOOP_ERROR, ExceptionUtils.getStackTrace(t));
-                    logger.error("fatal error in merger loop, the merger thread will exit", t);
-                    throw t;
+                    if (t instanceof CollectException && t.getCause() instanceof DataAccessException) {
+                        logger.error("meet data access error in merger loop, process will exit.", t);
+                        Runtime.getRuntime().halt(1);
+                    } else {
+                        logger.error("fatal error in merger loop, the merger thread will exit", t);
+                        throw t;
+                    }
                 }
             }
         });

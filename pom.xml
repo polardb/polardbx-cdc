@@ -36,7 +36,7 @@
         <slf4j.version>1.7.26</slf4j.version>
         <jdbc.version>5.1.49</jdbc.version>
         <druid.version>1.0.25.2018030201</druid.version>
-        <polardbx-parser.version>6.9</polardbx-parser.version>
+        <polardbx-parser.version>6.21</polardbx-parser.version>
         <fastjson.version>1.2.50_noneautotype</fastjson.version>
         <lombok.version>1.18.0</lombok.version>
         <spring.version>5.3.20</spring.version>
@@ -57,7 +57,6 @@
         <commons-text.version>1.10.0</commons-text.version>
         <apache-thrift.version>0.14.1</apache-thrift.version>
         <mockito.version>4.4.0</mockito.version>
-        <powermock.version>2.0.9</powermock.version>
         <h2database.version>2.2.220</h2database.version>
         <license.dir>${basedir}</license.dir>
         <sigar.version>1.6.4</sigar.version>
@@ -259,18 +258,6 @@
                 <groupId>org.mockito</groupId>
                 <artifactId>mockito-inline</artifactId>
                 <version>${mockito.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.powermock</groupId>
-                <artifactId>powermock-module-junit4</artifactId>
-                <version>${powermock.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.powermock</groupId>
-                <artifactId>powermock-api-mockito2</artifactId>
-                <version>${powermock.version}</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
@@ -745,7 +732,7 @@
                         <id>install-external</id>
                         <phase>clean</phase>
                         <configuration>
-                            <file>${basedir}/lib/polardbx-parser-6.9.jar</file>
+                            <file>${basedir}/lib/polardbx-parser-6.21.jar</file>
                             <repositoryLayout>default</repositoryLayout>
                             <groupId>com.alibaba.polardbx</groupId>
                             <artifactId>polardbx-parser</artifactId>

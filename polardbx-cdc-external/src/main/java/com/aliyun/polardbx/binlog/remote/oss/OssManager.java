@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote.oss;
 
@@ -25,6 +17,7 @@ import com.aliyun.oss.model.AppendObjectRequest;
 import com.aliyun.oss.model.AppendObjectResult;
 import com.aliyun.oss.model.Bucket;
 import com.aliyun.oss.model.BucketList;
+import com.aliyun.oss.model.BucketVersioningConfiguration;
 import com.aliyun.oss.model.CompleteMultipartUploadRequest;
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
 import com.aliyun.oss.model.DownloadFileRequest;
@@ -53,6 +46,7 @@ import com.aliyun.polardbx.binlog.remote.Appender;
 import com.aliyun.polardbx.binlog.remote.DownloadModeEnum;
 import com.aliyun.polardbx.binlog.remote.IRemoteManager;
 import com.aliyun.polardbx.binlog.util.LoopRetry;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,11 +83,17 @@ public class OssManager implements IRemoteManager {
     private final OssConfig ossConfig;
 
     public OssManager(OssConfig ossConfig) {
-        this.ossConfig = ossConfig;
-        this.config();
+        this(ossConfig, true);
     }
 
-    private void config() {
+    public OssManager(OssConfig ossConfig, boolean init) {
+        this.ossConfig = ossConfig;
+        if (init) {
+            this.config();
+        }
+    }
+
+    void config() {
         ListBucketsRequest request = new ListBucketsRequest(ossConfig.bucketName, null, null);
         OSS oss = getOssClient();
         do {
@@ -303,28 +303,59 @@ public class OssManager implements IRemoteManager {
         ossClient.shutdown();
     }
 
-    private List<OSSVersionSummary> listVersions(String prefix) {
-        String ossFilePrefix = BinlogFileUtil.buildRemoteFileFullName(prefix, ossConfig.polardbxInstance);
+    List<OSSVersionSummary> listVersions(String prefix) {
         List<OSSVersionSummary> result = new ArrayList<>();
-        String nextVersionIdMarker = null;
-        String nextKeyMarker = null;
+        try {
+            if (!getBucketVersioningEnabled()) {
+                return result;
+            }
 
-        OSS ossClient = getOssClient();
-        while (true) {
-            ListVersionsRequest request = new ListVersionsRequest(ossConfig.getBucketName(), ossFilePrefix,
-                nextKeyMarker, nextVersionIdMarker, null, null);
-            VersionListing versionListing = ossClient.listVersions(request);
-            result.addAll(versionListing.getVersionSummaries());
+            String ossFilePrefix = BinlogFileUtil.buildRemoteFileFullName(prefix, ossConfig.polardbxInstance);
+            String nextVersionIdMarker = null;
+            String nextKeyMarker = null;
 
-            if (versionListing.isTruncated()) {
-                nextVersionIdMarker = versionListing.getNextVersionIdMarker();
-                nextKeyMarker = versionListing.getNextKeyMarker();
+            OSS ossClient = getOssClient();
+            while (true) {
+                ListVersionsRequest request = new ListVersionsRequest(ossConfig.getBucketName(), ossFilePrefix,
+                    nextKeyMarker, nextVersionIdMarker, null, null);
+                VersionListing versionListing = ossClient.listVersions(request);
+                result.addAll(versionListing.getVersionSummaries());
+
+                if (versionListing.isTruncated()) {
+                    nextVersionIdMarker = versionListing.getNextVersionIdMarker();
+                    nextKeyMarker = versionListing.getNextKeyMarker();
+                } else {
+                    break;
+                }
+            }
+            ossClient.shutdown();
+        } catch (OSSException e) {
+            if (StringUtils.equalsIgnoreCase(e.getErrorCode(), "OperationNotSupported")) {
+                logger.warn("ListVersion is not supported in this environment!", e);
             } else {
-                break;
+                throw e;
             }
         }
-        ossClient.shutdown();
+
         return result;
+    }
+
+    boolean getBucketVersioningEnabled() {
+        try {
+            OSS ossClient = getOssClient();
+            BucketVersioningConfiguration versioningConfiguration =
+                ossClient.getBucketVersioning(ossConfig.getBucketName());
+            ossClient.shutdown();
+            return versioningConfiguration != null && BucketVersioningConfiguration.ENABLED.equals(
+                versioningConfiguration.getStatus());
+        } catch (OSSException e) {
+            if (StringUtils.equalsIgnoreCase(e.getErrorCode(), "OperationNotSupported")) {
+                logger.warn("getBucketVersioning is not supported in this environment!", e);
+                return false;
+            } else {
+                throw e;
+            }
+        }
     }
 
     @Override

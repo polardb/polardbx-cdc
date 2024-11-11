@@ -1,23 +1,13 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor;
 
 import com.alibaba.fastjson.JSON;
-import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.TimelineEnvConfig;
 import com.aliyun.polardbx.binlog.canal.MySqlInfo;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
@@ -30,19 +20,15 @@ import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
-import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.ServerInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
-import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
-import com.aliyun.polardbx.binlog.util.HttpHelper;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc;
 import com.aliyun.polardbx.rpc.cdc.DumpRequest;
@@ -55,9 +41,9 @@ import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,12 +54,10 @@ import org.springframework.util.CollectionUtils;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.text.MessageFormat;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport.instType;
@@ -90,12 +74,8 @@ public class CdcExtractor extends BaseExtractor {
         "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";
     private static final String QUERY_STORAGE_LIMIT_1 =
         "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
-    private static final String QUERY_DAEMON = "select * from binlog_node_info  limit 1";
-    private static final Integer TASK_HEARTBEAT = 5;
-    private static final Integer NORMAL_HEARTBEAT = 30;
     private String cdcServerIp;
     private Integer cdcPort;
-    private AtomicLong count = new AtomicLong(0);
     private EventHandle handle;
     private boolean run;
     private BinlogPosition position;
@@ -175,35 +155,11 @@ public class CdcExtractor extends BaseExtractor {
         mySqlInfo.init(connection);
     }
 
-    private void modifyHeartbeatFlushIntervalIfNeed(int sec) {
-        Long interval = new TimelineEnvConfig().getLong(ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL);
-        if (interval.intValue() == sec) {
-            return;
-        }
-        logger.info("modify dumper heartbeat flush interval with : " + sec);
-        NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
-        NodeInfo nodeInfo =
-            nodeInfoMapper.select(c -> c.orderBy(NodeInfoDynamicSqlSupport.gmtModified.descending()).limit(1))
-                .get(0);
-        String url =
-            MessageFormat.format("http://{0}:{1}/system/setConfigEnv", nodeInfo.getIp(), nodeInfo.getDaemonPort() + "");
-        Map<String, String> params = Maps.newHashMap();
-        params.put("name", ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL);
-        //心跳修改为5s
-        params.put("value", sec + "");
-        String result = HttpHelper.doPost(url, JSON.toJSONString(params), null);
-        logger.info("result heart beat result : " + result);
-        if (!result.equalsIgnoreCase("成功")) {
-            throw new PolardbxException("reset heart beat failed! " + result);
-        }
-    }
-
     @Override
     public void start() throws Exception {
         super.start();
         this.run = true;
         logger.info("start cdc extractor " + cdcServerIp + " :" + cdcPort);
-        modifyHeartbeatFlushIntervalIfNeed(TASK_HEARTBEAT);
         ManagedChannel channel = ManagedChannelBuilder
             .forAddress(cdcServerIp, cdcPort)
             .usePlaintext()
@@ -221,7 +177,7 @@ public class CdcExtractor extends BaseExtractor {
         cdcServiceStub.dump(DumpRequest.newBuilder()
             .setFileName(position.getFileName())
             .setExt(JSON.toJSONString(ext))
-            .setPosition(position.getPosition()).build(), logBuffer);
+            .setPosition(4).build(), logBuffer);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
@@ -256,6 +212,7 @@ public class CdcExtractor extends BaseExtractor {
         parseThread = new Thread(() -> {
             try {
                 logger.info("parser thread started!");
+                boolean shouldIgnore = true;
                 while (run && logBuffer.fetch()) {
 
                     LogEvent event = decoder.decode(logBuffer, context);
@@ -263,6 +220,16 @@ public class CdcExtractor extends BaseExtractor {
                     if (event == null) {
                         continue;
                     }
+                    if (shouldIgnore){
+                        if (StringUtils.equals(logPosition.getFileName(), position.getFileName()) &&
+                            logPosition.getPosition() < position.getPosition()){
+                            continue;
+                        }
+                        logger.info("parser position ignore end @ "+ logPosition.getFileName()+":"+logPosition.getPosition());
+                    }
+
+                    shouldIgnore = false;
+
                     handle.handle(event, context.getLogPosition());
                     if (handle.interrupt()) {
                         logger.warn(" handler interrupt");
@@ -290,7 +257,6 @@ public class CdcExtractor extends BaseExtractor {
     @Override
     public void stop() {
         super.stop();
-        modifyHeartbeatFlushIntervalIfNeed(NORMAL_HEARTBEAT);
         this.run = false;
     }
 

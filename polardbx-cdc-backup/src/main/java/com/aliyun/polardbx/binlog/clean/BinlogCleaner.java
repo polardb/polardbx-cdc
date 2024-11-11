@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.clean;
 
@@ -42,8 +34,10 @@ import org.springframework.util.CollectionUtils;
 
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -59,7 +53,7 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.binlogFile;
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.clusterId;
-import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.gmtCreated;
+import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.gmtModified;
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.groupId;
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.purgeStatus;
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.streamId;
@@ -75,7 +69,7 @@ public class BinlogCleaner {
     private static final Logger logger = LoggerFactory.getLogger(BinlogCleaner.class);
     private final String stream;
     private final String group;
-    private final CdcFileSystem fileSystem;
+    private CdcFileSystem fileSystem;
     private final long maxTotalBytes;
     private List<ICleanBarrier> cleanBarriers;
 
@@ -85,7 +79,7 @@ public class BinlogCleaner {
         this.maxTotalBytes = calculateMaxTotalBytes(context.getStreamList().size());
         this.fileSystem =
             new CdcFileSystem(BinlogFileUtil.getRootPath(context.getTaskType(), context.getVersion()), group, stream);
-        initCleanBarrier(context.getTaskName(), context.getTaskType());
+        initCleanBarrier(context.getVersion(), context.getTaskName(), context.getTaskType());
     }
 
     public void cleanLocalFiles() {
@@ -147,50 +141,71 @@ public class BinlogCleaner {
      * 并更新binlog_oss_record表中purgeStatus字段
      */
     public void purgeRemote() {
-        cleanRemoteFiles();
+        // 防止正在dump的文件被删掉，这里仅清理掉BINLOG_BACKUP_FILE_PRESERVE_DAYS + 1天之前的文件
+        Date expireTime = new Date(
+            GmsTimeUtil.getCurrentTimeMillis() - TimeUnit.DAYS.toMillis(getInt(BINLOG_BACKUP_FILE_PRESERVE_DAYS) + 1));
+        boolean purgeLocalByTime = DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_BACKUP_PURGE_LOCAL_BY_TIME);
+        cleanRemoteFiles(expireTime, purgeLocalByTime, getObject(BinlogOssRecordService.class),
+            getObject(BinlogOssRecordMapper.class));
         cleanOssRecords();
     }
 
-    private void cleanRemoteFiles() {
-        Date expireTime =
-            new Date(
-                GmsTimeUtil.getCurrentTimeMillis() - TimeUnit.DAYS.toMillis(getInt(BINLOG_BACKUP_FILE_PRESERVE_DAYS)));
+    public void cleanRemoteFiles(Date expireTime, boolean purgeLocalByTime, BinlogOssRecordService ossService,
+                                 BinlogOssRecordMapper mapper) {
         logger.info("try to clean remote binlog files! expire time: " + DateFormatUtils
             .format(expireTime, "yyyy-MM-dd HH:mm:ss"));
 
         String cid = getString(ConfigKeys.CLUSTER_ID);
+
+        Set<String> localFileNames = new HashSet<>();
+        for (CdcFile file : fileSystem.listLocalFiles()) {
+            localFileNames.add(file.getName());
+        }
+
         List<BinlogOssRecord> filesToClean =
-            getObject(BinlogOssRecordService.class).getRecordsForPurge(group, stream, cid, expireTime);
+            ossService.getRecordsForPurge(group, stream, cid, expireTime);
+
+        if (!purgeLocalByTime) {
+            filesToClean = filesToClean.stream().filter(record -> !localFileNames.contains(record.getBinlogFile()))
+                .collect(Collectors.toList());
+        }
+
+        // purgeLocalByTime 场景下会将本地的过时文件也删除
         for (BinlogOssRecord record : filesToClean) {
             try {
-                fileSystem.deleteRemoteFile(record.getBinlogFile());
-                logger.info("remote file:{} has been cleaned!", record.getBinlogFile());
+                String binlogName = record.getBinlogFile();
+                fileSystem.deleteRemoteFile(binlogName);
+                logger.info("remote file:{} has been cleaned!", binlogName);
+                if (purgeLocalByTime && localFileNames.contains(binlogName)) {
+                    fileSystem.deleteLocalFile(binlogName);
+                    logger.info("local file:{} has been cleaned!", binlogName);
+                }
             } catch (Exception e) {
                 logger.error("delete from remote failed!", e);
                 MonitorManager.getInstance().triggerAlarm(BINLOG_BACKUP_DELETE_ERROR, record.getBinlogFile());
                 break;
             }
-            getObject(BinlogOssRecordMapper.class).update(u -> u.set(purgeStatus)
+            mapper.update(u -> u.set(purgeStatus)
                 .equalTo(BinlogPurgeStatus.COMPLETE.getValue())
                 .where(BinlogOssRecordDynamicSqlSupport.id, SqlBuilder.isEqualTo(record.getId())));
             logger.info("update binlog:{} upload_status to complete", record.getBinlogFile());
         }
     }
 
-    private void cleanOssRecords() {
+    public void cleanOssRecords() {
         String cid = getString(ConfigKeys.CLUSTER_ID);
         Optional<BinlogOssRecord> maxPurgedRecord =
             getObject(BinlogOssRecordService.class).getMaxPurgedRecord(group, stream, cid);
         maxPurgedRecord.ifPresent(record -> {
             int recordExpireDays =
                 DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_PURGED_RECORD_PRESERVE_DAYS);
-            Date endDate = new Date(record.getGmtCreated().getTime() - TimeUnit.DAYS.toMillis(recordExpireDays));
+            Date endDate = new Date(GmsTimeUtil.getCurrentTimeMillis() - TimeUnit.DAYS.toMillis(recordExpireDays));
             logger.info("try to delete purged records, max purged record:{}, expire time:{}", record.getBinlogFile(),
                 endDate);
             getObject(BinlogOssRecordMapper.class).delete(
                 s -> s.where(groupId, isEqualTo(group)).and(streamId, isEqualTo(stream)).and(clusterId, isEqualTo(cid))
                     .and(binlogFile, isLessThan(record.getBinlogFile()))
-                    .and(purgeStatus, isEqualTo(COMPLETE.getValue())).and(gmtCreated, isLessThan(endDate)));
+                    .and(purgeStatus, isEqualTo(COMPLETE.getValue())).and(gmtModified, isLessThan(endDate)));
         });
     }
 
@@ -207,11 +222,13 @@ public class BinlogCleaner {
         return true;
     }
 
-    private void initCleanBarrier(String taskName, TaskType taskType) {
-        if (taskType == TaskType.DumperX || RuntimeLeaderElector.isDumperLeader(taskName)) {
-            if (RemoteBinlogProxy.getInstance().isBackupOn()) {
-                cleanBarriers = Collections.singletonList(new UploadFinishedBarrier(group, stream));
-            }
+    private void initCleanBarrier(long version, String taskName, TaskType taskType) {
+        if (!RemoteBinlogProxy.getInstance().isBackupOn()) {
+            return;
+        }
+
+        if (RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
+            cleanBarriers = Collections.singletonList(new UploadFinishedBarrier(group, stream));
         }
     }
 
@@ -219,5 +236,13 @@ public class BinlogCleaner {
         long physicalMaxBytes = (long) (getLong(DISK_SIZE) * getDouble(BINLOG_PURGE_DISK_USE_RATIO)) << 20;
         long configMaxBytes = getLong(BINLOG_DISK_SPACE_MAX_SIZE_MB) << 20;
         return Math.min(physicalMaxBytes, configMaxBytes) / streamCount;
+    }
+
+    public CdcFileSystem getFileSystem() {
+        return this.fileSystem;
+    }
+
+    public void setFileSystem(CdcFileSystem fileSystem) {
+        this.fileSystem = fileSystem;
     }
 }

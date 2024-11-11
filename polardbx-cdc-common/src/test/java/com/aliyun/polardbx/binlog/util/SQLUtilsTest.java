@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
 
@@ -26,9 +18,14 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTabl
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlLockTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlUnlockTablesStatement;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
+
+import javax.sql.DataSource;
+import java.sql.SQLException;
 
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.removeSomeHints;
@@ -37,7 +34,7 @@ import static com.aliyun.polardbx.binlog.util.SQLUtils.toSQLStringWithTrueUcase;
 /**
  * created by ziyang.lb
  **/
-public class SQLUtilsTest {
+public class SQLUtilsTest extends BaseTestWithGmsTables {
 
     @Test
     public void testSubPartitionToString() {
@@ -462,5 +459,54 @@ public class SQLUtilsTest {
         SQLAlterTableStatement statement = parseSQLStatement(sql);
         statement.getItems().removeIf(i -> i instanceof MySqlAlterTableAlterFullTextIndex);
         Assert.assertEquals("ALTER TABLE `t_order_0`", statement.toString());
+    }
+
+    @Test
+    public void testLeaderBySqlQuery() {
+        DataSource dataSource = SpringContextHolder.getObject("metaDataSource");
+        try {
+            SQLUtils.isLeaderBySqlQuery(dataSource);
+        } catch (SQLException e) {
+            Assert.assertEquals("Table \"ALISQL_CLUSTER_LOCAL\" not found; SQL statement:\n"
+                + "select * from information_schema.alisql_cluster_local [42102-220]", e.getMessage());
+        }
+    }
+
+    @Test
+    public void testLeaderByDdl() {
+        DataSource dataSource = SpringContextHolder.getObject("metaDataSource");
+        try {
+            SQLUtils.isLeaderByDdl(dataSource);
+        } catch (SQLException e) {
+            Assert.assertEquals(
+                "Syntax error in SQL statement \"DROP [*]TEMPORARY TABLE IF EXISTS binlog_leader_test\"; expected \"TABLE, INDEX, USER, SEQUENCE, CONSTANT, TRIGGER, MATERIALIZED, VIEW, ROLE, ALIAS, SCHEMA, ALL OBJECTS, DOMAIN, TYPE, DATATYPE, AGGREGATE, SYNONYM\"; SQL statement:\n"
+                    + "DROP TEMPORARY TABLE IF EXISTS binlog_leader_test [42001-220]", e.getMessage());
+        }
+    }
+
+    @Test
+    public void testAlterTableRemovePartitioning() {
+        String sql = "ALTER TABLE t1\n"
+            + "\tREMOVE PARTITIONING WITH TABLEGROUP=tg604 IMPLICIT, INDEX `i``1` WITH TABLEGROUP=tg604 IMPLICIT";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+        Assert.assertEquals("ALTER TABLE t1\n"
+                + "\tREMOVE PARTITIONING WITH TABLEGROUP=tg604 IMPLICIT, INDEX `i``1` WITH TABLEGROUP=tg604 IMPLICIT",
+            statement.toString());
+    }
+
+    @Test
+    public void testAlterTableWithFullTextIndexAndParser() {
+        String sql = " /*DRDS /null/18b7a7dc76002000/null/181818/ */CREATE TABLE `tb1_u0fQ_00001` (\n"
+            + "        a int PRIMARY KEY,\n"
+            + "        b text,\n"
+            + "        c text,\n"
+            + "        d text,\n"
+            + "        e text,\n"
+            + "        FULLTEXT KEY `test_idx1` (`b`) COMMENT '123' /*!50100 WITH PARSER `ngram` */,\n"
+            + "        FULLTEXT INDEX `test_idx2`(`b`) COMMENT '234' /*!50100 WITH PARSER `ngram` */,\n"
+            + "        FULLTEXT KEY `test_idx3` (`d`) WITH PARSER ngram,\n"
+            + "        FULLTEXT INDEX `test_idx4`(`e`) WITH PARSER ngram\n"
+            + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci";
+        SQLStatement statement = parseSQLStatement(sql);
     }
 }

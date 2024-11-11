@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.random;
 
@@ -36,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
@@ -269,38 +262,43 @@ public class TestModeTwo extends RplBaseTestCase {
         return new Thread(() -> {
 
             while (running.get()) {
-                if (Thread.currentThread().isInterrupted()) {
-                    break;
-                }
+                try {
+                    if (Thread.currentThread().isInterrupted()) {
+                        log.error("dml thread is interrupted!");
+                        break;
+                    }
 
-                int index = new Random().nextInt(dmlTypes.size());
-                DmlType dmlType = dmlTypes.get(index);
+                    int index = new Random().nextInt(dmlTypes.size());
+                    DmlType dmlType = dmlTypes.get(index);
 
-                switch (dmlType) {
-                case INSERT:
-                    insertSingle();
-                    break;
-                case UPDATE:
-                    updateSingle();
-                    break;
-                case DELETE:
-                    deleteSingle();
-                    break;
-                case INSERT_BATCH:
-                    insertBatch();
-                    break;
-                case UPDATE_BATCH:
-                    updateBatch();
-                    break;
-                case DELETE_BATCH:
-                    deleteBatch();
-                    break;
-                default:
-                    throw new PolardbxException("invalid dml type " + dmlType);
-                }
+                    switch (dmlType) {
+                    case INSERT:
+                        insertSingle();
+                        break;
+                    case UPDATE:
+                        updateSingle();
+                        break;
+                    case DELETE:
+                        deleteSingle();
+                        break;
+                    case INSERT_BATCH:
+                        insertBatch();
+                        break;
+                    case UPDATE_BATCH:
+                        updateBatch();
+                        break;
+                    case DELETE_BATCH:
+                        deleteBatch();
+                        break;
+                    default:
+                        throw new PolardbxException("invalid dml type " + dmlType);
+                    }
 
-                if (!isDdlExecuting.get()) {
-                    sleep(dmlIntervalMs);
+                    if (!isDdlExecuting.get()) {
+                        sleep(dmlIntervalMs);
+                    }
+                } catch (Throwable t) {
+                    log.error("execute dml failed!, go to next execute.", t);
                 }
             }
             log.info("dml thread finished!");
@@ -341,12 +339,31 @@ public class TestModeTwo extends RplBaseTestCase {
         });
     }
 
+    private long lastSqlModeUpdateTime;
+
+    private static final String[] SQL_MODE_ARRAY = {
+        "",
+        "REAL_AS_FLOAT"
+    };
+
+    private static long currentIdx = 0;
+
+    private String randomSqlMode() {
+        long now = System.currentTimeMillis();
+        long diff = now - lastSqlModeUpdateTime;
+        if (diff >= TimeUnit.SECONDS.toMillis(30)) {
+            lastSqlModeUpdateTime = now;
+            currentIdx++;
+        }
+        return SQL_MODE_ARRAY[(int) (currentIdx % 2)];
+    }
+
     private void addColumn() {
         String columnName = RandomUtil.randomIdentifier();
         Pair<String, String> pair = ddlSqlBuilder.buildAddColumnSql(columnName);
 
         try (Connection connection = getPolardbxConnection(DB_NAME)) {
-            setSqlMode("", connection);
+            setSqlMode(randomSqlMode(), connection);
             Statement stmt = connection.createStatement();
             stmt.execute(pair.getValue());
             columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.put(columnName, pair.getKey());
@@ -380,7 +397,7 @@ public class TestModeTwo extends RplBaseTestCase {
         String sql = pair.getValue();
 
         try (Connection connection = getPolardbxConnection(DB_NAME)) {
-            setSqlMode("", connection);
+            setSqlMode(randomSqlMode(), connection);
             Statement stmt = connection.createStatement();
             stmt.execute(sql);
             columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.put(columnName, columnType);

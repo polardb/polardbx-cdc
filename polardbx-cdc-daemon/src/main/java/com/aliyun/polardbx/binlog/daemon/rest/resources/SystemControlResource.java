@@ -1,25 +1,15 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
 
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.InstructionType;
 import com.aliyun.polardbx.binlog.ResultCode;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.cluster.bootstrap.ClusterBootStrapFactory;
@@ -59,9 +49,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 
 import javax.ws.rs.GET;
-import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
 import java.io.File;
 import java.io.IOException;
@@ -77,7 +67,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -108,9 +97,6 @@ public class SystemControlResource {
         "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";
     private static final String QUERY_STORAGE_LIMIT_1 =
         "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
-    private static final String TRANSACTION_POLICY = "set drds_transaction_policy='TSO'";
-    private static final String SEND_CONFIG_UPDATE_CMND =
-        "insert into __cdc_instruction__(INSTRUCTION_TYPE, INSTRUCTION_CONTENT, INSTRUCTION_ID) values(?,?,?)";
 
     private final DumperInfoMapper dumperInfoMapper =
         SpringContextHolder.getObject(DumperInfoMapper.class);
@@ -204,20 +190,38 @@ public class SystemControlResource {
         }
     }
 
+    /**
+     * 多流子实例清理接口，
+     * 其他如replica/recover 公有云新版发布后，不会调用这个接口
+     * @param clusterId
+     * @return
+     */
     @GET
     @Path("/clean")
     @Leader
-    public String clean() {
-        logger.info("receive clean request");
+    public String clean(@QueryParam("clusterId") String clusterId) {
+        logger.info("receive clean request with clusterId : " + clusterId);
         if (!RuntimeLeaderElector.isDaemonLeader()) {
             throw new PolardbxException("clean operation must execute in daemon leader!");
         }
 
-        closeBinlogXAutoInit();
-        ClusterBootstrapService bootstrapService = ClusterBootStrapFactory
-            .getBootstrapService(ClusterType.valueOf(DynamicApplicationConfig.getClusterType()));
-        bootstrapService.stop();
-        return doClean();
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.DAEMON_CLEAN_INTERFACE_FORCE_CHECK_CLUSTER_ENABLED)) {
+            if (!Objects.equals(clusterId, DynamicApplicationConfig.getString(CLUSTER_ID))) {
+                throw new PolardbxException("clean operation check cluster id failed!");
+            }
+        }
+
+        ClusterType clusterType = ClusterType.valueOf(DynamicApplicationConfig.getClusterType());
+        if (Objects.equals(clusterType, ClusterType.BINLOG_X)) {
+            //多流清理
+            closeBinlogXAutoInit();
+            ClusterBootstrapService bootstrapService = ClusterBootStrapFactory
+                .getBootstrapService(clusterType);
+            bootstrapService.stop();
+            return doClean();
+        }
+
+        return "成功";
     }
 
     @GET
@@ -255,30 +259,6 @@ public class SystemControlResource {
                 ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(e.getMessage()).data(false).build();
             return JSON.toJSONString(res);
         }
-    }
-
-    @POST
-    @Path("/setConfigEnv")
-    public String setConfigEnv(String content) {
-        JSONObject object = JSON.parseObject(content);
-        String name = object.getString("name");
-        String value = object.getString("value");
-        logger.info("receive set name : " + name + " , value : " + value);
-        if (StringUtils.isBlank(name)) {
-            return "name should not be empty";
-        }
-        JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
-        TransactionTemplate transactionTemplate = SpringContextHolder.getObject("polarxTransactionTemplate");
-        transactionTemplate.execute((o) -> transactionTemplate.execute(transactionStatus -> {
-            template.execute(TRANSACTION_POLICY);
-            JSONObject newObject = new JSONObject();
-            newObject.put(name, value);
-            template
-                .update(SEND_CONFIG_UPDATE_CMND, InstructionType.CdcEnvConfigChange.name(), newObject.toJSONString(),
-                    UUID.randomUUID().toString());
-            return null;
-        }));
-        return "成功";
     }
 
     private void doReset() {

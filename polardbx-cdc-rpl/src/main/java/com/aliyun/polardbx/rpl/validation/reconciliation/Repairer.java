@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation.reconciliation;
 
@@ -94,9 +86,9 @@ public class Repairer {
 
     private DruidDataSource createDataSourceHelper(DataImportMeta.ConnInfo connInfo, String dbName)
         throws Exception {
-        return DataSourceUtil.createDruidMySqlDataSource(connInfo.getHost(), connInfo.getPort(), dbName,
-            connInfo.getUser(), connInfo.getPassword(), "", parallelism, parallelism, null,
-            null);
+        return DataSourceUtil.createDruidMySqlDataSource(false, connInfo.getHost(), connInfo.getPort(),
+            dbName, connInfo.getUser(), connInfo.getPassword(), "", parallelism, parallelism, true,
+            null, null);
     }
 
     private void startRepair() {
@@ -145,6 +137,7 @@ public class Repairer {
                 }
             }
             futures.clear();
+            Thread.sleep(1000);
         }
     }
 
@@ -152,20 +145,20 @@ public class Repairer {
         try {
             DiffRecord.DiffType diffType = DiffRecord.DiffType.valueOf(diff.getType());
 
-            List<Object> keyVal = JSONObject.parseArray(diff.getSrcKeyColVal(), Object.class);
-            List<Object> row = selectFromSource(tableInfo, keyVal);
-            SqlContextBuilder.SqlContext sqlContext = null;
-            switch (diffType) {
-            case DIFF:
-            case MISS:
-                sqlContext = ValSQLGenerator.getReplaceIntoSql(dstDbName, tableName, tableInfo, row);
-                break;
-            case ORPHAN:
-                sqlContext = ValSQLGenerator.getDeleteFromSql(dstDbName, tableName, tableInfo, keyVal);
-                break;
+            List<Object> keyVal;
+            if (diffType == DiffRecord.DiffType.ORPHAN) {
+                keyVal = JSONObject.parseArray(diff.getDstKeyColVal(), Object.class);
+            } else {
+                keyVal = JSONObject.parseArray(diff.getSrcKeyColVal(), Object.class);
             }
-
-            int affectedRows = 0;
+            List<Object> row = selectFromSource(tableInfo, keyVal);
+            SqlContextBuilder.SqlContext sqlContext;
+            if (row.isEmpty()) {
+                sqlContext = ValSQLGenerator.getDeleteFromSql(dstDbName, tableName, tableInfo, keyVal);
+            } else {
+                sqlContext = ValSQLGenerator.getReplaceIntoSql(dstDbName, tableName, tableInfo, row);
+            }
+            int affectedRows;
             try (Connection conn = dstDs.get(dstDbName).getConnection();
                 PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql())) {
                 int i = 1;
@@ -186,7 +179,7 @@ public class Repairer {
     }
 
     private List<Object> selectFromSource(TableInfo tableInfo, List<Object> keyVal) throws SQLException {
-        List<Object> res = null;
+        List<Object> res = new ArrayList<>();
 
         SqlContextBuilder.SqlContext sqlContext = ValSQLGenerator.getPointSelectSql(tableInfo, keyVal);
         try (Connection conn = srcDs.get(tableInfo.getSchema()).getConnection();
@@ -198,8 +191,8 @@ public class Repairer {
             }
 
             try (ResultSet rs = stmt.executeQuery()) {
+                // assert only one row or 0 row returned
                 while (rs.next()) {
-                    res = new ArrayList<>();
                     for (ColumnInfo columnInfo : tableInfo.getColumns()) {
                         Object val = ExtractorUtil.getColumnValue(rs, columnInfo.getName(), columnInfo.getType());
                         res.add(val);

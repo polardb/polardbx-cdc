@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
@@ -213,8 +205,8 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
             long maxWaitSeconds =
                 DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_DUMP_DOWNLOAD_MAX_WAIT_TIME_SECONDS);
             Timer waitTimeoutTimer = new Timer(maxWaitSeconds * 1000);
-            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000);
-            long sleepTime = Math.min(1000, masterHeartbeatPeriod / 1000);
+            Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000000);
+            long sleepTime = Math.min(1000, masterHeartbeatPeriod / 1000000);
             long start = System.currentTimeMillis();
             while (!observer.isCancelled() && !f.exists()) {
                 if (fileDownLoadErrorMap.containsKey(fileName)) {
@@ -311,6 +303,8 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
                 .collect(Collectors.toList());
 
         downloadList.clear();
+        left = 0;
+        right = 0;
         log.info("download file list:{}", filesToDownload);
         downloadList.addAll(filesToDownload);
     }

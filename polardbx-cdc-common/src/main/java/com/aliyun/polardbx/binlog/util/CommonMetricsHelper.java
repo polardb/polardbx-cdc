@@ -1,20 +1,13 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
 
 import com.aliyun.polardbx.binlog.CommonMetrics;
+import com.aliyun.polardbx.binlog.domain.po.RplStatMetrics;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
 import com.google.common.collect.Maps;
@@ -45,6 +38,7 @@ public class CommonMetricsHelper {
     private static final Map<String, CommonMetrics> TASK = Maps.newHashMap();
     private static final Map<String, CommonMetrics> DAEMON = Maps.newHashMap();
     private static final Map<String, CommonMetrics> COLUMNAR = Maps.newHashMap();
+    private static final Map<String, CommonMetrics> REPLICA = Maps.newHashMap();
     private static final Map<String, CommonMetrics> ALL = Maps.newHashMap();
 
     private static final AtomicBoolean INITED = new AtomicBoolean(false);
@@ -94,6 +88,10 @@ public class CommonMetricsHelper {
                     COLUMNAR.put(ss[3], CommonMetrics.builder().key(ss[0]).desc(ss[4])
                         .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
                 }
+                if (ss[0].contains("_replica_")) {
+                    COLUMNAR.put(ss[3], CommonMetrics.builder().key(ss[0]).desc(ss[4])
+                        .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
+                }
                 ALL.put(ss[0], CommonMetrics.builder().key(ss[0]).desc(ss[4])
                     .type(StringUtils.equals(TYPE, ss[2]) ? 2 : 1).build());
             }
@@ -104,6 +102,7 @@ public class CommonMetricsHelper {
                 log.debug("init metrics done DUMPER {}", DUMPER);
                 log.debug("init metrics done TASK {}", TASK);
                 log.debug("init metrics done COLUMNAR {}", COLUMNAR);
+                log.debug("init metrics done REPLICA {}", REPLICA);
             }
         } catch (IOException e) {
             log.error("prepare metrics fail", e);
@@ -139,6 +138,10 @@ public class CommonMetricsHelper {
     public static Map<String, CommonMetrics> getColumnar() {
         init();
         return COLUMNAR;
+    }
+
+    public static Map<String, CommonMetrics> getReplica() {
+        return REPLICA;
     }
 
     public static Map<String, CommonMetrics> getALL() {
@@ -196,6 +199,114 @@ public class CommonMetricsHelper {
             .key(prefix + "currentThreadCount")
             .type(1)
             .value(jvmSnapshot.getCurrentThreadCount())
+            .build());
+    }
+
+    public static void addReplicaMetrics(List<CommonMetrics> commonMetrics, RplStatMetrics statMetrics, String prefix) {
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "trueDelayMills")
+            .type(1)
+            .value(statMetrics.getTrueDelayMills())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "outRps")
+            .type(1)
+            .value(statMetrics.getOutRps())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "applyCount")
+            .type(1)
+            .value(statMetrics.getApplyCount())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "inEps")
+            .type(1)
+            .value(statMetrics.getInEps())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "outBps")
+            .type(1)
+            .value(statMetrics.getOutBps())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "inBps")
+            .type(1)
+            .value(statMetrics.getInBps())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "outInsertRps")
+            .type(1)
+            .value(statMetrics.getOutInsertRps())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "outUpdateRps")
+            .type(1)
+            .value(statMetrics.getOutUpdateRps())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "outDeleteRps")
+            .type(1)
+            .value(statMetrics.getOutDeleteRps())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "receiveDelay")
+            .type(1)
+            .value(statMetrics.getReceiveDelay())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "processDelay")
+            .type(1)
+            .value(statMetrics.getProcessDelay())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "mergeBatchSize")
+            .type(1)
+            .value(statMetrics.getMergeBatchSize())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "rt")
+            .type(1)
+            .value(statMetrics.getRt())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "skipCounter")
+            .type(1)
+            .value(statMetrics.getSkipCounter())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "skipExceptionCounter")
+            .type(1)
+            .value(statMetrics.getSkipExceptionCounter())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "persistMsgCounter")
+            .type(1)
+            .value(statMetrics.getPersistMsgCounter())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "msgCacheSize")
+            .type(1)
+            .value(statMetrics.getMsgCacheSize())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "cpuUseRatio")
+            .type(1)
+            .value(statMetrics.getCpuUseRatio())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "memUseRatio")
+            .type(1)
+            .value(statMetrics.getMemUseRatio())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "fullGcCount")
+            .type(1)
+            .value(statMetrics.getFullGcCount())
+            .build());
+        commonMetrics.add(CommonMetrics.builder()
+            .key(prefix + "totalCommitCount")
+            .type(1)
+            .value(statMetrics.getTotalCommitCount())
             .build());
     }
 

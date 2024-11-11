@@ -1,55 +1,38 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.scheduler;
 
-import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.dao.BinlogNodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
-import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
-import com.aliyun.polardbx.binlog.enums.NodeStatus;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.Resource;
+import com.aliyun.polardbx.binlog.service.NodeInfoService;
 import com.aliyun.polardbx.binlog.util.GmsTimeUtil;
-import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-
-import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES_KEY;
 
 /**
  * Created by ShuGuang
@@ -58,30 +41,24 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NOD
 public class ResourceManager {
 
     private final String clusterId;
-    private final NodeInfoMapper nodeInfoMapper;
     private final BinlogTaskInfoMapper taskInfoMapper;
     private final DumperInfoMapper dumperInfoMapper;
     private final BinlogTaskConfigMapper taskConfigMapper;
-    private final BinlogNodeInfoMapper binlogNodeInfoMapper;
-    private Set<String> topologyExcludeNodes;
+    private final NodeInfoService nodeInfoService;
 
     public ResourceManager(String clusterId) {
         this.clusterId = clusterId;
-        this.nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
         this.taskInfoMapper = SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
         this.dumperInfoMapper = SpringContextHolder.getObject(DumperInfoMapper.class);
         this.taskConfigMapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
-        this.binlogNodeInfoMapper = SpringContextHolder.getObject(BinlogNodeInfoMapper.class);
+        this.nodeInfoService = SpringContextHolder.getObject(NodeInfoService.class);
     }
 
     /**
      * 所有可参与拓扑计算的容器的列表
      */
     public Set<String> allContainers() {
-        return nodeInfoMapper.select(s ->
-                s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                    .and(NodeInfoDynamicSqlSupport.status, SqlBuilder.isEqualTo(NodeStatus.AVAILABLE.getValue()))
-                    .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isNotInWhenPresent(getTopologyExcludeNodes())))
+        return nodeInfoService.getAllNodes(clusterId)
             .stream().map(NodeInfo::getContainerId).collect(Collectors.toSet());
     }
 
@@ -89,14 +66,17 @@ public class ResourceManager {
      * 不在线的容器列表
      */
     public Set<String> allOfflineContainers() {
-        return getDeadNodes().stream().map(NodeInfo::getContainerId).collect(Collectors.toSet());
+        return nodeInfoService.getDeadNodes(clusterId)
+            .stream().map(NodeInfo::getContainerId)
+            .collect(Collectors.toSet());
     }
 
     /**
      * 在线的容器列表
      */
     public Set<String> allOnlineContainers() {
-        return getAliveNodes().stream().map(NodeInfo::getContainerId).collect(Collectors.toSet());
+        return nodeInfoService.getAliveNodes(clusterId)
+            .stream().map(NodeInfo::getContainerId).collect(Collectors.toSet());
     }
 
     public boolean isAllContainerExist(Set<String> containers) {
@@ -108,7 +88,7 @@ public class ResourceManager {
      * 集群资源容量（cpu进一步虚拟化，当前机器的cpu*4）
      */
     public List<Container> availableContainers() {
-        List<NodeInfo> nodeInfoList = getAliveNodes();
+        List<NodeInfo> nodeInfoList = nodeInfoService.getAliveNodes(clusterId);
         List<Container> result = Lists.newArrayListWithCapacity(nodeInfoList.size());
         for (final NodeInfo nodeInfo : nodeInfoList) {
             List<Integer> portList = Lists.newArrayList(nodeInfo.getAvailablePorts().split(",")).stream().map(
@@ -198,31 +178,5 @@ public class ResourceManager {
         } else {
             return !isHeartbeatTimeOut(heartbeatTimeMills);
         }
-    }
-
-    private List<NodeInfo> getAliveNodes() {
-        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS);
-        Set<String> excludeNodes = getTopologyExcludeNodes();
-        List<NodeInfo> aliveNodes = binlogNodeInfoMapper.getAliveNodes(clusterId, timeoutThresholdMs);
-        return aliveNodes.stream().filter(r -> !excludeNodes.contains(r.getContainerId())).collect(Collectors.toList());
-    }
-
-    private List<NodeInfo> getDeadNodes() {
-        int timeoutThresholdMs = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS);
-        Set<String> excludeNodes = getTopologyExcludeNodes();
-        List<NodeInfo> deadNodes = binlogNodeInfoMapper.getDeadNodes(clusterId, timeoutThresholdMs);
-        return deadNodes.stream().filter(r -> !excludeNodes.contains(r.getContainerId())).collect(Collectors.toList());
-    }
-
-    private Set<String> getTopologyExcludeNodes() {
-        if (topologyExcludeNodes == null) {
-            String config = SystemDbConfig.getSystemDbConfig(CLUSTER_TOPOLOGY_EXCLUDE_NODES_KEY);
-            if (StringUtils.isNotBlank(config)) {
-                topologyExcludeNodes = new HashSet<>(JSONObject.parseArray(config, String.class));
-            } else {
-                topologyExcludeNodes = new HashSet<>();
-            }
-        }
-        return topologyExcludeNodes;
     }
 }

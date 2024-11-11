@@ -1,23 +1,17 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
@@ -37,7 +31,7 @@ import java.util.zip.CRC32;
 
 @Slf4j
 @Ignore
-public class LogFileGeneratorTest {
+public class LogFileGeneratorTest extends BaseTest {
 
     private static final byte[] BINLOG_FILE_HEADER = new byte[] {(byte) 0xfe, 0x62, 0x69, 0x6e};
     final String version = "8.0.21-PolarDB-X";
@@ -47,6 +41,39 @@ public class LogFileGeneratorTest {
     File dir = new File(System.getProperty("user.dir") + "/binlog");
 
     List<byte[]> data = Lists.newArrayList();
+
+    @Test
+    public void testCalcSeekBufferSize() {
+        int size = LogFileGenerator.calcSeekBufferSize(false, 4);
+        Assert.assertEquals(32, size);
+
+        size = LogFileGenerator.calcSeekBufferSize(true, 4);
+        Assert.assertEquals(32, size);
+
+        size = LogFileGenerator.calcSeekBufferSize(true, 32);
+        Assert.assertEquals(8, size);
+    }
+
+    @Test
+    public void testCalcFlowControlWindowSize() {
+        int size = LogFileGenerator.calcFlowControlWindowSize(false, 0, 0);
+        Assert.assertEquals(256, size);
+
+        size = LogFileGenerator.calcFlowControlWindowSize(false, 0, 100);
+        Assert.assertEquals(80, size);
+
+        size = LogFileGenerator.calcFlowControlWindowSize(false, 0, 500);
+        Assert.assertEquals(256, size);
+
+        size = LogFileGenerator.calcFlowControlWindowSize(true, 8, 0);
+        Assert.assertEquals(64, size);
+
+        size = LogFileGenerator.calcFlowControlWindowSize(true, 8, 1000);
+        Assert.assertEquals(64, size);
+
+        size = LogFileGenerator.calcFlowControlWindowSize(true, 8, 256);
+        Assert.assertEquals(25, size);
+    }
 
     @Test
     public void read() {

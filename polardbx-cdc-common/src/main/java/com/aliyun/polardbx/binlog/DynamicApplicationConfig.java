@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog;
 
@@ -29,6 +21,7 @@ import org.springframework.util.CollectionUtils;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 1、优先从binlog_system_config表获取数据。 <br>
@@ -41,6 +34,8 @@ public class DynamicApplicationConfig {
     private static final Map<String, String> propBeforeImageMap = Maps.newHashMap();
     private static final List<String> watchPropList = Lists.newArrayList();
     private static IConfigDataProvider provider = new DbConfigDataProvider();
+
+    private static AtomicBoolean started = new AtomicBoolean(false);
 
     public static String getValue(String key) {
         return provider.getValue(key);
@@ -140,10 +135,25 @@ public class DynamicApplicationConfig {
             propertyChangeListenerList.add(listener);
             watchPropList.add(prop);
         }
+        propBeforeImageMap.put(prop, getValue(prop));
+    }
+
+    public static void removePropListener(String prop, PropertyChangeListener listener) {
+        synchronized (changeListenerMap) {
+            List<PropertyChangeListener> propertyChangeListenerList =
+                changeListenerMap.get(prop);
+            if (!CollectionUtils.isEmpty(propertyChangeListenerList)) {
+                propertyChangeListenerList.remove(listener);
+            }
+            if (CollectionUtils.isEmpty(propertyChangeListenerList)) {
+                watchPropList.remove(prop);
+            }
+        }
 
     }
 
     public static void afterPropSet() {
+        started.set(true);
         for (String prop : watchPropList) {
             propBeforeImageMap.put(prop, getValue(prop));
         }
@@ -176,21 +186,22 @@ public class DynamicApplicationConfig {
                 final String prop = propEntry.getKey();
                 final String oldValue = propEntry.getValue();
                 final String newValue = getValue(prop);
-                if (!StringUtils.equals(newValue, oldValue)) {
-                    List<PropertyChangeListener> listeners = changeListenerMap.get(prop);
-                    if (!CollectionUtils.isEmpty(listeners)) {
-                        listeners.stream().forEach(l -> {
-                            try {
-                                l.onPropertyChange(prop, oldValue, newValue);
-                            } catch (Throwable e) {
-                                log.error(
-                                    "execute prop change listener error [" + prop + ": (" + oldValue + "->" + newValue
-                                        + ")", e);
-                            }
-                        });
-                    }
-                    propBeforeImageMap.put(prop, newValue);
+                if (StringUtils.equals(oldValue, newValue)) {
+                    continue;
                 }
+                List<PropertyChangeListener> listeners = changeListenerMap.get(prop);
+                if (!CollectionUtils.isEmpty(listeners)) {
+                    listeners.stream().forEach(l -> {
+                        try {
+                            l.onPropertyChange(prop, oldValue, newValue);
+                        } catch (Throwable e) {
+                            log.error(
+                                "execute prop change listener error [" + prop + ": (" + oldValue + "->" + newValue
+                                    + ")", e);
+                        }
+                    });
+                }
+                propBeforeImageMap.put(prop, newValue);
             }
         }
     }

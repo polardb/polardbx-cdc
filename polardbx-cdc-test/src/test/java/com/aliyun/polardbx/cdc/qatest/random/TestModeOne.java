@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.random;
 
@@ -477,12 +469,31 @@ public class TestModeOne extends RplBaseTestCase {
         loopWait(tableName, polardbxConnection, checkParameter.getLoopWaitTimeoutMs());
     }
 
+    private long lastSqlModeUpdateTime;
+
+    private static final String[] SQL_MODE_ARRAY = {
+        "",
+        "REAL_AS_FLOAT"
+    };
+
+    private static long currentIdx = 0;
+
+    private String randomSqlMode() {
+        long now = System.currentTimeMillis();
+        long diff = now - lastSqlModeUpdateTime;
+        if (diff >= TimeUnit.SECONDS.toMillis(30)) {
+            lastSqlModeUpdateTime = now;
+            currentIdx++;
+        }
+        return SQL_MODE_ARRAY[(int) (currentIdx % 2)];
+    }
+
     private void addColumn() {
         String columnName = RandomUtil.randomIdentifier();
         Pair<String, String> pair = ddlSqlBuilder.buildAddColumnSql(columnName);
 
         try (Connection connection = getDdlConnection(dbName)) {
-            setSqlMode("", connection);
+            setSqlMode(randomSqlMode(), connection);
             Statement stmt = connection.createStatement();
             stmt.execute(pair.getValue());
             columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.put(columnName, pair.getKey());
@@ -516,7 +527,7 @@ public class TestModeOne extends RplBaseTestCase {
         String sql = pair.getValue();
 
         try (Connection connection = getDdlConnection(dbName)) {
-            setSqlMode("", connection);
+            setSqlMode(randomSqlMode(), connection);
             Statement stmt = connection.createStatement();
             stmt.execute(sql);
             columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.put(columnName, columnType);
@@ -733,6 +744,8 @@ public class TestModeOne extends RplBaseTestCase {
                     insertSingle(false);
                 }
             }
+        } catch (Throwable t) {
+            log.error("truncate error!!", t);
         }
     }
 

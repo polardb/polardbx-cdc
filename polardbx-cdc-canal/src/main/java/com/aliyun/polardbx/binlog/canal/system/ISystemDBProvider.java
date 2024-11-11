@@ -1,16 +1,8 @@
 /**
- * Copyright (c) 2013-2022, Alibaba Group Holding Limited;
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * <p>
- * http://www.apache.org/licenses/LICENSE-2.0
- * </p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
+ * All rights reserved.
+ *
+ * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.system;
 
@@ -32,6 +24,10 @@ public interface ISystemDBProvider {
     String INSTRUCTION_FIELD_INSTRUCTION_ID = "INSTRUCTION_ID";
     String INSTRUCTION_FIELD_CLUSTER_ID = "CLUSTER_ID";
     String DDL_RECORD_FIELD_EXT = "EXT";
+
+    // sync point related info
+    String POLARX_SYNC_POINT_RECORD_FIELD_ID = "ID";
+
     String LOGIC_SCHEMA = "__cdc__";
 
     /*
@@ -43,6 +39,8 @@ public interface ISystemDBProvider {
     String DRDS_GLOBAL_TX_LOG = "__drds_global_tx_log";
     String POLARX_GLOBAL_TRX_LOG = "polarx_global_trx_log";
     String DRDS_REDO_LOG = "__drds_redo_log";
+    String POLARX_SYNC_POINT = "__polardbx_sync_point__";
+    String CDC_SYNC_POINT_META = "cdc_sync_point_meta";
     String GLOBAL_TX_LOG_FIELD_COMMIT_TS = "COMMIT_TS";
     String GLOBAL_TX_LOG_FIELD_TYPE = "TYPE";
     String GLOBAL_TX_LOG_FIELD_TXID = "TXID";
@@ -50,6 +48,10 @@ public interface ISystemDBProvider {
     String CDC_SINGLE_GROUP_NAME = "__CDC___SINGLE_GROUP";
 
     String DRDS_IMPLICIT_ID = "_drds_implicit_id_";
+
+    String MYSQL_SCHEMA = "mysql";
+
+    String META_DB_SCHEMA = "polardbx_meta_db";
 
     String CREATE_DRDS_GLOBAL_TX_LOG =
         String.format("CREATE TABLE `%s` (\n" + "  `TXID` bigint(20) NOT NULL,\n"
@@ -65,15 +67,26 @@ public interface ISystemDBProvider {
             + "  PRIMARY KEY (`TXID`)\n"
             + ") ENGINE=InnoDB DEFAULT CHARSET=utf8", DRDS_GLOBAL_TX_LOG);
 
+    String CREATE_POLARX_SYNC_POINT =
+        String.format("CREATE TABLE `%s` (\n"
+            + "  `ID` bigint(20) NOT NULL AUTO_INCREMENT,\n"
+            + "  `GMT_CREATED` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+            + "  PRIMARY KEY (`ID`)\n"
+            + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", POLARX_SYNC_POINT);
+
     boolean ddlRecordTable(String db, String table);
 
     boolean instructionTable(String db, String table);
 
     boolean heartbeatTable(String db, String phyTable);
 
+    boolean isSyncPoint(String db, String phyTable);
+
     TableMeta getDdlTableMeta();
 
     TableMeta getInstructionTableMeta();
+
+    TableMeta getSyncPointTableMeta();
 
     TableMeta getHeartbeatTableMeta();
 
@@ -87,6 +100,10 @@ public interface ISystemDBProvider {
 
     boolean isSys(String db);
 
+    boolean isMysql(String db);
+
+    boolean isMetaDb(String db);
+
     boolean isCdcSingleGroup(String groupName);
 
     boolean isGlobalTxTable(String tableName);
@@ -94,4 +111,6 @@ public interface ISystemDBProvider {
     boolean isPolarxGlobalTrxLogTable(String tableName);
 
     boolean isDrdsRedoLogTable(String tableName);
+
+    boolean isAndorDatabase(String db);
 }
