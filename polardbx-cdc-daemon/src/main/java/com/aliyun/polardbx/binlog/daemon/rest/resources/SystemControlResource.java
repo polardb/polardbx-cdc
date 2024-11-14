@@ -32,6 +32,7 @@ import com.aliyun.polardbx.binlog.enums.BinlogTaskStatus;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
+import com.aliyun.polardbx.binlog.service.StorageInfoService;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
 import com.aliyun.polardbx.binlog.util.PooledHttpHelper;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
@@ -46,7 +47,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.util.CollectionUtils;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -64,7 +64,6 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -82,7 +81,9 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.GLOBAL_BINLOG_LATEST_CURSOR;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
+import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.isVip;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.status;
+import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.storageInstId;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.buildStartCmd;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
@@ -92,18 +93,14 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
 @Singleton
 public class SystemControlResource {
     private static final Logger logger = LoggerFactory.getLogger(SystemControlResource.class);
-
-    private static final String QUERY_VIP_STORAGE =
-        "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";
-    private static final String QUERY_STORAGE_LIMIT_1 =
-        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
-
     private final DumperInfoMapper dumperInfoMapper =
         SpringContextHolder.getObject(DumperInfoMapper.class);
     private final BinlogTaskInfoMapper taskInfoMapper =
         SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
     private final NodeInfoMapper nodeInfoMapper =
         SpringContextHolder.getObject(NodeInfoMapper.class);
+    private final StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
+    private final StorageInfoService service = SpringContextHolder.getObject(StorageInfoService.class);
 
     private static String getGroupName() {
         String clusterType = DynamicApplicationConfig.getClusterType();
@@ -369,8 +366,6 @@ public class SystemControlResource {
     }
 
     private void flushDNLogs() {
-        JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
-        final StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
         List<StorageInfo> storageInfos;
         storageInfos = storageInfoMapper.select(c ->
             c.where(instKind, isEqualTo(0))//0:master, 1:slave, 2:metadb
@@ -382,20 +377,29 @@ public class SystemControlResource {
                 (s1, s2) -> s1)).values());
 
         for (StorageInfo storageInfo : storageInfos) {
-            List<Map<String, Object>> dataList =
-                metaTemplate.queryForList(String.format(QUERY_VIP_STORAGE, storageInfo.getStorageInstId()));
-            if (CollectionUtils.isEmpty(dataList)) {
-                dataList =
-                    metaTemplate.queryForList(String.format(QUERY_STORAGE_LIMIT_1, storageInfo.getStorageInstId()));
-            }
-            if (dataList.size() != 1) {
-                throw new PolardbxException("storageInstId expect size 1 , but query meta db size " + dataList.size());
+            StorageInfo masterStorageInfoForOneDn;
+            // 魔术字定义请参照 cn StorageInfoRecord
+            // from vip addr
+            Optional<StorageInfo> vipStorageInfosForOneDn = storageInfoMapper.selectOne(c ->
+                c.where(instKind, isEqualTo(0))
+                    .and(isVip, isEqualTo(1))
+                    .and(storageInstId, isEqualTo(storageInfo.getStorageInstId()))
+                    .and(status, isNotEqualTo(2))
+                    .limit(1)
+            );
+
+            // if no vip addr
+            masterStorageInfoForOneDn =
+                vipStorageInfosForOneDn.orElseGet(() -> service.getNormalStorageInfo(storageInfo.getStorageInstId()));
+
+            if (masterStorageInfoForOneDn == null) {
+                throw new PolardbxException("cannot find master storage info for dn " + storageInfo.getStorageInstId());
             }
 
-            String ip = (String) dataList.get(0).get("ip");
-            int port = (int) dataList.get(0).get("port");
-            String user = (String) dataList.get(0).get("user");
-            String passwordEnc = (String) dataList.get(0).get("passwd_enc");
+            String ip = masterStorageInfoForOneDn.getIp();
+            int port = masterStorageInfoForOneDn.getPort();
+            String user = masterStorageInfoForOneDn.getUser();
+            String passwordEnc = masterStorageInfoForOneDn.getPasswdEnc();
             String password = PasswdUtil.decryptBase64(passwordEnc);
 
             try {

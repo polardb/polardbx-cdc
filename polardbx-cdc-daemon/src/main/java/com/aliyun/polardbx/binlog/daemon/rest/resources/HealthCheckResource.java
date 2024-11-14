@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.RDS_BID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RDS_UID;
+import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 
 @Path("/health")
 @Singleton
@@ -46,15 +47,13 @@ public class HealthCheckResource {
 
     private String checkRdsOssDownload() {
         try {
-            JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
-            List<Map<String, Object>> dataList =
-                metaTemplate.queryForList("select * from storage_info where inst_kind=0 and is_vip = 1 limit 1");
-
+            JdbcTemplate cnTemplate = getObject("polarxJdbcTemplate");
+            List<Map<String, Object>> dataList = cnTemplate.queryForList("SHOW STORAGE limit 1");
             if (dataList.size() != 1) {
                 throw new PolardbxException("storageInstId expect size 1 , but query meta db size " + dataList.size());
             }
 
-            String storageInstId = (String) dataList.get(0).get("storage_inst_id");
+            String storageInstId = (String) dataList.get(0).get("STORAGE_INST_ID");
             String uid = DynamicApplicationConfig.getString(RDS_UID);
             String bid = DynamicApplicationConfig.getString(RDS_BID);
             long end = System.currentTimeMillis();

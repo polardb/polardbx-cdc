@@ -21,9 +21,6 @@ import java.util.List;
 import java.util.Map;
 
 public class MetaDbHelper {
-
-    private static final String QUERY_ONE_VIP_STORAGE =
-        "select * from storage_info where inst_kind=0 and is_vip = 1 and status != 2 limit 1";
     private static final String QUERY_BASE_SNAPSHOT =
         "select tso , topology from binlog_logic_meta_history where type = 1 order by tso desc limit 1";
 
@@ -65,10 +62,6 @@ public class MetaDbHelper {
                 connection.close();
             }
         }
-    }
-
-    public List<Map<String, Object>> selectVipStorage() throws SQLException {
-        return executeQuery(QUERY_ONE_VIP_STORAGE);
     }
 
     public List<Map<String, Object>> selectMasterDumperInfo() throws SQLException {

@@ -27,6 +27,7 @@ import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instId;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.isVip;
+import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.status;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.storageInstId;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.storageMasterInstId;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
@@ -53,7 +54,10 @@ public class StorageInfoService {
     public StorageInfo getNormalStorageInfo(String sid) {
         StorageInfo result = null;
         List<StorageInfo> storageInfos =
-            new ArrayList<>(mapper.select(s -> s.where(storageInstId, isEqualTo(sid)).and(instKind, isEqualTo(0))));
+            new ArrayList<>(mapper.select(s ->
+                s.where(storageInstId, isEqualTo(sid))
+                    .and(instKind, isEqualTo(0))
+                    .and(status, isNotEqualTo(2))));
         if (storageInfos.isEmpty()) {
             return null;
         }
@@ -84,7 +88,7 @@ public class StorageInfoService {
         StorageInfo result = null;
         Optional<StorageInfo> vipStorage = mapper.selectOne(
             s -> s.where(instId, isEqualTo(polarxInstId)).and(storageMasterInstId, isEqualTo(masterInstId))
-                .and(isVip, isNotEqualTo(1)));
+                .and(isVip, isNotEqualTo(1)).and(status, isNotEqualTo(2)));
         if (vipStorage.isPresent() && dnHealthChecker.apply(vipStorage.get())) {
             result = vipStorage.get();
         } else {

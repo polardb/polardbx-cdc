@@ -70,10 +70,6 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
 public class CdcExtractor extends BaseExtractor {
 
     private static final Logger logger = LoggerFactory.getLogger(CdcExtractor.class);
-    private static final String QUERY_VIP_STORAGE =
-        "select * from storage_info where inst_kind=0 and is_vip = 1 and storage_inst_id = '%s' limit 1";
-    private static final String QUERY_STORAGE_LIMIT_1 =
-        "select * from storage_info where inst_kind=0  and storage_inst_id = '%s' limit 1";
     private String cdcServerIp;
     private Integer cdcPort;
     private EventHandle handle;
@@ -98,6 +94,12 @@ public class CdcExtractor extends BaseExtractor {
     @Override
     public void init() throws Exception {
         super.init();
+        initDumperInfo();
+        initHostInfo();
+        initCharset();
+    }
+
+    private void initDumperInfo() throws Exception {
         DumperInfoMapper mapper = SpringContextHolder.getObject(DumperInfoMapper.class);
         RetryTemplate template = RetryTemplate.builder()
             .maxAttempts(120)
@@ -116,39 +118,25 @@ public class CdcExtractor extends BaseExtractor {
         cdcServerIp = info.getIp();
         cdcPort = info.getPort();
         logger.info("override cdc server ip and port " + cdcServerIp + " : " + cdcPort + " success!");
-
-        initCharset();
+    }
+    private void initHostInfo() {
+        ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
+        List<ServerInfo> serverInfoList = serverInfoMapper.select(c ->
+            c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
+                .and(ServerInfoDynamicSqlSupport.status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
+        );
+        String dstIp = serverInfoList.get(0).getIp();
+        Integer dstPort = serverInfoList.get(0).getPort();
+        hostInfo.setHost(dstIp);
+        hostInfo.setPort(dstPort);
     }
 
     private void initCharset() throws IOException {
         mySqlInfo = new MySqlInfo();
-        StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
-        List<StorageInfo> storageInfos;
-        storageInfos = storageInfoMapper.select(c ->
-            c.where(instKind, isEqualTo(0))//0:master, 1:slave, 2:metadb
-                .and(status, isNotEqualTo(2))//0:storage ready, 1:storage not_ready
-                .orderBy(id)
-        );
-        storageInfos = Lists.newArrayList(storageInfos.stream().collect(
-            Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1,
-                (s1, s2) -> s1)).values());
-        JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
-        StorageInfo storageInfo = storageInfos.get(0);
-        List<Map<String, Object>> dataList =
-            metaTemplate.queryForList(String.format(QUERY_VIP_STORAGE, storageInfo.getStorageInstId()));
-        if (CollectionUtils.isEmpty(dataList)) {
-            dataList =
-                metaTemplate.queryForList(String.format(QUERY_STORAGE_LIMIT_1, storageInfo.getStorageInstId()));
-        }
-        if (dataList.size() != 1) {
-            throw new PolardbxException("storageInstId expect size 1 , but query meta db size " + dataList.size());
-        }
-
-        String ip = (String) dataList.get(0).get("ip");
-        int port = (int) dataList.get(0).get("port");
-        String user = (String) dataList.get(0).get("user");
-        String passwordEnc = (String) dataList.get(0).get("passwd_enc");
-        String password = PasswdUtil.decryptBase64(passwordEnc);
+        String ip = hostInfo.getHost();
+        int port = hostInfo.getPort();
+        String user = hostInfo.getUserName();
+        String password = hostInfo.getPassword();
         AuthenticationInfo authInfo = new AuthenticationInfo(new InetSocketAddress(ip, port), user, password);
         MysqlConnection connection = new MysqlConnection(authInfo);
         connection.connect();
@@ -187,16 +175,6 @@ public class CdcExtractor extends BaseExtractor {
 
             }
         }));
-
-        ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
-        List<ServerInfo> serverInfoList = serverInfoMapper.select(c ->
-            c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
-                .and(ServerInfoDynamicSqlSupport.status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
-        );
-        String dstIp = serverInfoList.get(0).getIp();
-        Integer dstPort = serverInfoList.get(0).getPort();
-        hostInfo.setHost(dstIp);
-        hostInfo.setPort(dstPort);
 
         ImportLogEventConvert convert = new ImportLogEventConvert(hostInfo, baseFilter, position, HostType.POLARX2);
         convert.init();
