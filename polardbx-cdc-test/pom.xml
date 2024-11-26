@@ -16,7 +16,7 @@
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
         <license.dir>${project.parent.basedir}</license.dir>
-        <canal.version>1.1.8-SNAPSHOT</canal.version>
+        <canal.version>1.1.7</canal.version>
     </properties>
 
     <dependencies>
