@@ -736,7 +736,7 @@
                             <repositoryLayout>default</repositoryLayout>
                             <groupId>com.alibaba.polardbx</groupId>
                             <artifactId>polardbx-parser</artifactId>
-                            <version>6.9</version>
+                            <version>6.21</version>
                             <packaging>jar</packaging>
                             <generatePom>true</generatePom>
                         </configuration>
