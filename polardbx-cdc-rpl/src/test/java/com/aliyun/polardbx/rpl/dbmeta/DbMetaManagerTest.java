@@ -1,13 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.dbmeta;
 
 import com.alibaba.druid.pool.DruidDataSource;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import org.junit.Assert;
 import org.junit.Test;
@@ -35,7 +35,7 @@ import static org.junit.Assert.assertTrue;
  */
 
 @RunWith(MockitoJUnitRunner.class)
-public class DbMetaManagerTest extends BaseTestWithGmsTables {
+public class DbMetaManagerTest extends BaseTest {
 
     // 测试用例: 多个唯一键组且每个组内有多列的情况
     @Test

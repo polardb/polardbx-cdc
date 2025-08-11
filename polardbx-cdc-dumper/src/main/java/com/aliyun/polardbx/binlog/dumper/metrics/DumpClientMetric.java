@@ -1,13 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.metrics;
 
-import com.aliyun.polardbx.binlog.dumper.CdcServer;
 import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumClientType;
+import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumProtocolType;
 import lombok.Getter;
 
 import java.util.concurrent.TimeUnit;
@@ -22,10 +22,21 @@ public class DumpClientMetric {
     private String fileName;
     @Getter
     private long position;
+    /**
+     * 分协议来说:
+     * DUMP:从最后一个event中解析出来的时间戳
+     * SYNC:由于不在服务端拆分event，因此设为-1
+     */
     @Getter
     private long timestamp;
     @Getter
     private EnumClientType clientType;
+    @Getter
+    private long processId;
+    @Getter
+    private String traceId;
+    @Getter
+    private EnumProtocolType protocolType;
 
     private long lastAvgTimestamp = System.currentTimeMillis();
 
@@ -49,12 +60,7 @@ public class DumpClientMetric {
     @Getter
     private long lastSyncTimestamp;
 
-    public static DumpClientMetric get() {
-        return CdcServer.KEY_CLIENT_METRICS.get();
-    }
-
-    public static void addDumpBytes(long bytes) {
-        DumpClientMetric metrics = get();
+    public static void addDumpBytes(long bytes, DumpClientMetric metrics) {
         if (metrics == null) {
             return;
         }
@@ -69,26 +75,27 @@ public class DumpClientMetric {
         return dumpBytes.getAndSet(0) / diff;
     }
 
-    public static void startDump(EnumClientType clientType) {
-        DumpClientMetric metrics = get();
+    public static void startDump(EnumClientType clientType, EnumProtocolType protocolType, long processId,
+                                 String traceId, DumpClientMetric metrics) {
         if (metrics == null) {
             return;
         }
         metrics.dumpStartTimestamp = System.currentTimeMillis();
         metrics.metricsManager.addClientMetric(metrics);
         metrics.clientType = clientType;
+        metrics.processId = processId;
+        metrics.traceId = traceId;
+        metrics.protocolType = protocolType;
     }
 
-    public static void stopDump() {
-        DumpClientMetric metrics = get();
+    public static void stopDump(DumpClientMetric metrics) {
         if (metrics == null) {
             return;
         }
         metrics.metricsManager.removeClientMetric(metrics);
     }
 
-    public static void recordPosition(String fileName, long position, long timestamp) {
-        DumpClientMetric metrics = get();
+    public static void recordPosition(String fileName, long position, long timestamp, DumpClientMetric metrics) {
         if (metrics == null) {
             return;
         }

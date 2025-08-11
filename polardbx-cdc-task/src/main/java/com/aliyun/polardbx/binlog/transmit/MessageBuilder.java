@@ -1,13 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.transmit;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
 import com.aliyun.polardbx.binlog.protocol.EventData;
@@ -61,9 +60,9 @@ public class MessageBuilder {
         }
     }
 
-    public static TxnBegin buildTxnBegin(TxnToken token, TaskType taskType) {
+    public static TxnBegin buildTxnBegin(TxnToken token, boolean relayStage) {
         TxnBegin txnBegin;
-        if (taskType == TaskType.Relay) {
+        if (relayStage) {
             txnBegin = TxnBegin.newBuilder().setTxnToken(token).build();
         } else {
             txnBegin = TxnBegin.newBuilder().setTxnMergedToken(buildTxnMergedToken(token)).build();
@@ -71,9 +70,9 @@ public class MessageBuilder {
         return txnBegin;
     }
 
-    public static TxnMessage buildTxnMessage(TxnToken token, TaskType taskType, TxnBuffer buffer) {
+    public static TxnMessage buildTxnMessage(TxnToken token, TxnBuffer buffer, boolean relayStage) {
         // make begin
-        TxnBegin txnBegin = buildTxnBegin(token, taskType);
+        TxnBegin txnBegin = buildTxnBegin(token, relayStage);
 
         // make data
         List<TxnItem> items = new ArrayList<>();

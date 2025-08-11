@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.sort;
@@ -14,8 +14,6 @@ import com.aliyun.polardbx.binlog.extractor.log.TransactionFilter;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -34,8 +32,6 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACT_SORT_HOLD_SIZE;
  **/
 @Slf4j
 public class Sorter {
-    private static final Logger skipTransLogger = LoggerFactory.getLogger("SKIP_TRANS_LOG");
-
     private final Set<TxnKey> waitTrans;
     private final List<SortItem> items;
     private final Map<TxnKey, Transaction> transMap;

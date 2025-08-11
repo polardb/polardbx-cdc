@@ -34,6 +34,9 @@ service CdcService {
 
   rpc ShowSlaveStatus (ShowSlaveStatusRequest) returns (stream ShowSlaveStatusResponse) {}
 
+  rpc ShowBinlogDumpStatus (ShowBinlogDumpStatusRequest) returns (stream BinlogDumpStatus) {}
+
+  rpc getDumperInfo (ShowBinlogDumpStatusRequest) returns (GetDumperInfoResponse) {}
 }
 
 message Request {
@@ -57,6 +60,10 @@ message DumpRequest{
   bool             registered = 4;
   string           ext = 5;
   string           streamName = 6;
+}
+
+message ShowBinlogDumpStatusRequest{
+  string streamName = 1;
 }
 
 message BinaryLog {
@@ -145,6 +152,29 @@ message ShowSlaveStatusRequest{
 
 message ShowSlaveStatusResponse{
   string    response = 1;
+}
+
+message BinlogDumpStatus{
+  string    ip = 1;
+  int64     id = 2;
+  string    traceId = 3;
+  int32     port = 4;
+  string    fileName = 5;
+  int64     position = 6;
+  int64     delay = 7;
+  int64     bps = 8;
+  int64     lastSyncTimeStamp = 9;
+  int64     aliveSecond = 10;
+}
+
+message GetDumperInfoResponse{
+  string  file = 1;
+  int64   position = 2;
+  int64  lastEventTimestamp = 3;
+  int64   delay = 4;
+  int32   sessionCount = 5;
+  int64   avgDumpBpsSum = 6;
+  double   cpuUsage = 7;
 }
 
 enum EventSplitMode{

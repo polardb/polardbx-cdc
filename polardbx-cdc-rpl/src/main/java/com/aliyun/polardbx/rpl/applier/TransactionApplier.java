@@ -1,11 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
@@ -131,12 +133,20 @@ public class TransactionApplier extends MysqlApplier {
         logTransactionCommit();
     }
 
-    private void updateMetrics(List<Transaction> curTransactions) {
+    public void updateMetrics(List<Transaction> curTransactions) {
         for (Transaction trans : curTransactions) {
             StatMetrics.getInstance().doStatOut(
                 trans.getInsertCount(), trans.getUpdateCount(), trans.getDeleteCount(),
                 trans.getByteSize(), trans.peekLast());
-            StatMetrics.getInstance().addCommitCount(trans.getEventCount());
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)){
+                Transaction.RangeIterator iterator = trans.rangeIterator();
+                while (iterator.hasNext()) {
+                    Transaction.Range range = iterator.next();
+                    StatMetrics.getInstance().addCommitCount(range.getEvents());
+                }
+            }else {
+                StatMetrics.getInstance().addCommitCount(trans.getEventCount());
+            }
         }
     }
 }

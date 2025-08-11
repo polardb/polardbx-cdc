@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.collect;
@@ -38,13 +38,13 @@ public class LogEventCollectorTest extends BaseTest {
     private void testInternal(TaskType taskType) throws Exception {
         int txnCount = 1000;
         int partitionCount = 4;
-        LogEventStorage storage = new LogEventStorage(
+        LogEventStorage storage = new LogEventStorage("",
             new Repository(false, "/tmp/RocksDB", PersistMode.AUTO, 0.8, 500, 500,
                 DeleteMode.SINGLE, 1));
         storage.start();
         List<TxnToken> tokens = generateTokens(txnCount, partitionCount, storage);
 
-        LogEventCollector collector = new LogEventCollector(storage, null, 65536, taskType, false);
+        LogEventCollector collector = new LogEventCollector(storage, null, 65536, false, false, false);
         collector.start();
         tokens.forEach(collector::push);
         while (true) {

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.dbmeta;
@@ -50,13 +50,14 @@ public class DbMetaManager {
     private static final String SHOW_TABLES = "SHOW TABLES";
     private static final String PRIMARY = "PRIMARY";
     private static final String DESC = "DESC %s.%s";
-    private static final boolean enableUk =
-        !DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
+    private static final boolean ignoreUK =
+        DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
 
     private static final boolean isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
 
     public static TableInfo getTableInfo(DataSource dataSource, String schema, String tbName,
                                          HostType hostType) throws SQLException {
+        boolean enableUk = hostType != HostType.POLARX1 || !ignoreUK;
         return getTableInfo(dataSource, schema, tbName, hostType, enableUk);
     }
 

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor.flashback;
@@ -258,6 +258,11 @@ public class LocalBinLogConnection implements ErosaConnection {
     @Override
     public String preFileName(String currentFileName) {
         throw new NullPointerException("Not implement yet");
+    }
+
+    @Override
+    public List<String> binlogList() {
+        return binlogList;
     }
 
     @Override

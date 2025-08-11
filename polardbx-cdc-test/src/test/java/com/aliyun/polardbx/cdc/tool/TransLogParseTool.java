@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.tool;
@@ -56,9 +56,9 @@ public class TransLogParseTool {
         }
 
         System.out.println(JSONObject.toJSONString(map.entrySet().stream().map(
-            e -> Pair.of(
-                e.getKey(),
-                Pair.of(e.getValue().getKey().toString(), e.getValue().getValue().toString())))
+                e -> Pair.of(
+                    e.getKey(),
+                    Pair.of(e.getValue().getKey().toString(), e.getValue().getValue().toString())))
             .collect(Collectors.toList()), true));
     }
 }

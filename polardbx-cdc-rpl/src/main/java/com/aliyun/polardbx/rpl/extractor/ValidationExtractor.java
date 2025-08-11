@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor;
@@ -52,7 +52,8 @@ public class ValidationExtractor extends BaseExtractor {
     public ValidationExtractor(ValidationExtractorConfig extractorConfig) {
         super(extractorConfig);
         this.extractorConfig = extractorConfig;
-        executorService = ThreadPoolUtil.createExecutorWithFixedNum(extractorConfig.getParallelCount(), "validation");
+        // 不再使用 extractorConfig 中的 parallelCount，防止造成误解
+        executorService = ThreadPoolUtil.createExecutorWithFixedNum(1, "validation");
         runningProcessors = new ArrayList<>();
     }
 

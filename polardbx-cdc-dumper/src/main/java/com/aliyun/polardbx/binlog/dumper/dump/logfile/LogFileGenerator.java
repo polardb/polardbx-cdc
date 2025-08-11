@@ -1,12 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.TypeReference;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.LabEventManager;
@@ -47,6 +49,8 @@ import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.DirectByteOutput;
 import com.aliyun.polardbx.binlog.util.LabEventType;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.commons.lang3.math.NumberUtils;
@@ -104,7 +108,6 @@ import static com.aliyun.polardbx.binlog.format.utils.EventGenerator.makeCommit;
 import static com.aliyun.polardbx.binlog.format.utils.EventGenerator.makeMarkEvent;
 import static com.aliyun.polardbx.binlog.format.utils.EventGenerator.makeRowsQuery;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.getTsoPhysicalTime;
-import static com.aliyun.polardbx.binlog.util.CommonUtils.parseStreamSeq;
 import static com.aliyun.polardbx.binlog.util.ServerConfigUtil.getTargetServerIds;
 
 /**
@@ -150,18 +153,26 @@ public class LogFileGenerator {
     private byte[] formatDescData;
     private ExecutorService executor;
     private String startTso;
+    @Setter
     private TxnMergedToken currentToken;
+    @Getter
     private long currentTsoTimeSecond;//为了性能优化，将物理时间保存到该实例变量，避免每次实时解析
     private long currentTsoTimeTxnCount;
     private long currentTsoTimeMillSecond;
+    @Setter
     private Long currentServerId;
     private boolean firstTraceWrite = false;
+    @Setter
     private volatile BinlogFile binlogFile;
     private volatile FlushPolicy currentFlushPolicy;
     private TableIdManager tableIdManager;
     private BinlogFile.SeekResult latestSeekResult;
+    @Setter
     private TimelineEnvConfig timelineEnvConfig;
     private volatile boolean running;
+    @Getter
+    private long delay;
+    private int txnItemIdx;
 
     public LogFileGenerator(LogFileManager logFileManager, int binlogFileSize, boolean dryRun, FlushPolicy flushPolicy,
                             int flushInterval, int writeBufferSize, String taskName, TaskType taskType,
@@ -195,6 +206,7 @@ public class LogFileGenerator {
             executionConfig.getSources().size() * streamCount, executionConfig.getReservedMemMb());
         this.metrics = StreamMetrics.getStreamMetrics(streamName);
         this.targetServerIds4Check = getTargetServerIds();
+        this.delay = Long.MAX_VALUE;
     }
 
     public void start() {
@@ -203,7 +215,7 @@ public class LogFileGenerator {
         }
         running = true;
 
-        String threadName = "binlog-writer-stream-" + parseStreamSeqStr(streamName);
+        String threadName = "binlog-writer-" + streamName;
         executor = Executors.newFixedThreadPool(1,
             new ThreadFactoryBuilder().setNameFormat(threadName).build());
         executor.execute(() -> {
@@ -354,6 +366,7 @@ public class LogFileGenerator {
             Assert.isTrue(currentToken.getType() == TxnType.DML);
             metrics.markBegin();
             metrics.setLatestDelayTimeOnCommit(System.currentTimeMillis() - currentTsoTimeMillSecond);
+            delay = metrics.getLatestDelayTimeOnCommit();
             writeBegin(needCheckServerId(currentToken));
 
             break;
@@ -370,6 +383,7 @@ public class LogFileGenerator {
             metrics.markEnd();
             metrics.incrementTotalWriteTxnCount();
             metrics.setLatestDelayTimeOnCommit(calcDelayTime());
+            delay = metrics.getLatestDelayTimeOnCommit();
             break;
         case TAG:
             currentToken = message.getTxnTag().getTxnMergedToken();
@@ -434,7 +448,23 @@ public class LogFileGenerator {
 
         byte[] data;
         try {
-            String queryString = CommonUtils.PRIVATE_DDL_DDL_PREFIX + LogEventUtil.SYNC_POINT_PRIVATE_DDL_SQL + "\n"
+            // Try to get extra.
+            String tableId = null;
+            try {
+                Map<String, String> extra = JSON.parseObject(
+                    new String(currentToken.getPayload().toByteArray()),
+                    new TypeReference<Map<String, String>>() {
+                    }
+                );
+                tableId = extra.get("tableId");
+            } catch (Exception e) {
+                logger.warn("write sync point error when parsing extra", e);
+            }
+            if (null == tableId) {
+                tableId = "";
+            }
+            String sql = LogEventUtil.SYNC_POINT_PRIVATE_DDL_SQL + "(" + tableId + ")";
+            String queryString = CommonUtils.PRIVATE_DDL_DDL_PREFIX + sql + "\n"
                 + CommonUtils.PRIVATE_DDL_TSO_PREFIX + currentToken.getTso() + "\n"
                 + CommonUtils.PRIVATE_DDL_ID_PREFIX + "0" + "\n";
             QueryEventBuilder builder =
@@ -472,6 +502,7 @@ public class LogFileGenerator {
      */
     private void writeHeartbeat() throws IOException {
         metrics.setLatestDelayTimeOnCommit(calcDelayTime());
+        delay = metrics.getLatestDelayTimeOnCommit();
         boolean writeAsTxn = DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_WRITE_HEARTBEAT_AS_TXN);
         if (useParallelWrite) {
             if (shouldWriteHeartBeat()) {
@@ -534,8 +565,35 @@ public class LogFileGenerator {
         EnvConfigChangeInfo envConfigChangeInfo =
             JSONObject.parseObject(new String(currentToken.getPayload().toByteArray()), EnvConfigChangeInfo.class);
         timelineEnvConfig.tryRecordEnvConfigHistory(currentToken.getTso(), envConfigChangeInfo);
-        writeConfigChangeEvent();
+        writeConfigChangeAsTxn();
         tryFlush(true, nextWritePosition, currentToken.getTso(), currentTsoTimeSecond, true, false);
+    }
+
+    public void writeConfigChangeAsTxn() throws IOException {
+        // write begin
+        nextWritePosition += BEGIN_EVENT_LENGTH;
+        Pair<byte[], Integer> begin = makeBegin(currentTsoTimeSecond, currentServerId, nextWritePosition);
+        binlogFile.writeEvent(begin.getLeft(), 0, begin.getRight(), true, false);
+        firstTraceWrite = true;
+
+        // write config change comment
+        String rowsQuery = "# CONFIG CHANGE TXN";
+        int eventSize = ROWS_QUERY_FIXED_LENGTH + rowsQuery.length();
+        nextWritePosition += eventSize;
+        final Pair<byte[], Integer> rowsQueryEvent =
+            makeRowsQuery(currentTsoTimeSecond, currentServerId, rowsQuery, nextWritePosition);
+        binlogFile.writeEvent(rowsQueryEvent.getLeft(), 0, rowsQueryEvent.getRight(), true, false);
+
+        // write commit
+        nextWritePosition += COMMIT_EVENT_LENGTH;
+        final Pair<byte[], Integer> commit = makeCommit(currentTsoTimeSecond, currentServerId,
+            XID_SEQ.incrementAndGet(), nextWritePosition);
+        binlogFile.writeEvent(commit.getLeft(), 0, commit.getRight(), true, false);
+
+        // write config change event
+        writeConfigChangeEvent();
+        tryFlush(true, nextWritePosition, currentToken.getTso(),
+            currentTsoTimeSecond, true, false);
     }
 
     private void tryInvalidateTableId() {
@@ -611,7 +669,7 @@ public class LogFileGenerator {
      */
     private void buildBinlogFile() throws IOException {
         latestSeekResult = null;
-        CdcFile maxLocalCdcFile = logFileManager.getLocalMaxBinlogFile();
+        CdcFile maxLocalCdcFile = logFileManager.getLocalMaxBinlogFile(false);
         File maxLocalFile = maxLocalCdcFile == null ? null : maxLocalCdcFile.newFile();
         long maxTableId = DynamicApplicationConfig.getLong(BINLOG_WRITE_TABLE_ID_BASE_VALUE);
 
@@ -637,7 +695,7 @@ public class LogFileGenerator {
             startTso = recoverInfo.getStartTso();
         } else {
             BinlogFile.SeekResult seekResult;
-            List<CdcFile> files = logFileManager.getAllLocalBinlogFilesOrdered();
+            List<CdcFile> files = logFileManager.getAllLocalBinlogFilesOrdered(false);
             int count = files.size();
 
             // 从最后一个文件，尝试第一次获取startTso
@@ -725,6 +783,7 @@ public class LogFileGenerator {
     }
 
     private void writeBegin(boolean needCheckServerId) throws IOException {
+        txnItemIdx = 0;
         nextWritePosition += BEGIN_EVENT_LENGTH;
         if (useParallelWrite) {
             parallelWriter.push(SingleEventToken.builder().tso(currentToken.getTso()).nextPosition(nextWritePosition)
@@ -738,14 +797,13 @@ public class LogFileGenerator {
     }
 
     private void writeDml(List<TxnItem> itemsList) throws IOException {
-        int index = 0;
         String lastRowsQuery = null;
         TxnItem lastTxnItem = null;
         for (TxnItem txnItem : itemsList) {
             // 从TableMap中取之前暂存的RowsQuery，生成一个RowsQuery Event
             if (txnItem.getEventType() == LogEvent.TABLE_MAP_EVENT && supportWriteRowQueryLogEvent) {
                 String currentRowsQuery = txnItem.getRowsQuery();
-                tryCheckRowsQuery(index, currentRowsQuery, lastRowsQuery, lastTxnItem);
+                tryCheckRowsQuery(txnItemIdx, currentRowsQuery, lastRowsQuery, lastTxnItem);
                 if (firstTraceWrite) {
                     StringBuilder traceBuilder = new StringBuilder();
                     if (StringUtils.isNotBlank(currentRowsQuery)) {
@@ -780,7 +838,7 @@ public class LogFileGenerator {
                 binlogFile.writeEvent(data, 0, data.length, true, needCheckServerId(currentToken));
             }
             metrics.incrementTotalWriteDmlEventCount(txnItem.getEventType());
-            index++;
+            txnItemIdx++;
             lastTxnItem = txnItem;
         }
     }
@@ -833,10 +891,10 @@ public class LogFileGenerator {
         }
     }
 
-    private long extractServerIdFromTraceId(String traceId) {
-        String[] primarySplitArray = StringUtils.split(traceId, "/");
-        if (primarySplitArray.length > 4 && NumberUtils.isCreatable(primarySplitArray[4])) {
-            return Long.parseLong(primarySplitArray[4]);
+    protected long extractServerIdFromTraceId(String traceId) {
+        String[] primarySplitArray = StringUtils.splitPreserveAllTokens(traceId, "/");
+        if (primarySplitArray.length > 5 && NumberUtils.isCreatable(primarySplitArray[5])) {
+            return Long.parseLong(primarySplitArray[5]);
         } else {
             return executionConfig.getServerIdWithCompatibility();
         }
@@ -967,6 +1025,7 @@ public class LogFileGenerator {
             resetCurrentTsoTime(false);
 
             metrics.setLatestDelayTimeOnCommit(calcDelayTime());
+            delay = metrics.getLatestDelayTimeOnCommit();
             if (message.getTxnTag().getTxnMergedToken().getType() == TxnType.META_DDL) {
                 metrics.incrementTotalWriteDdlEventCount();
             }
@@ -976,6 +1035,7 @@ public class LogFileGenerator {
             resetCurrentTsoTime(false);
 
             metrics.setLatestDelayTimeOnCommit(calcDelayTime());
+            delay = metrics.getLatestDelayTimeOnCommit();
             metrics.incrementTotalWriteEventCount();//模拟begin
             for (int i = 0; i < message.getTxnData().getTxnItemsCount(); i++) {
                 metrics.incrementTotalWriteDmlEventCount(19);
@@ -989,6 +1049,7 @@ public class LogFileGenerator {
             resetCurrentTsoTime(false);
 
             metrics.setLatestDelayTimeOnCommit(calcDelayTime());
+            delay = metrics.getLatestDelayTimeOnCommit();
             metrics.incrementTotalWriteEventCount();//模拟begin
             break;
         case DATA:
@@ -1056,7 +1117,7 @@ public class LogFileGenerator {
     private void updateCursor(String tso) throws IOException {
         binlogFile.flush();
         BinlogCursor cursor = new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer(),
-            groupName, streamName, tso, executionConfig.getRuntimeVersion());
+            groupName, streamName, tso, executionConfig.getRuntimeVersion(), binlogFile.getFileSequence());
         logFileManager.setLatestFileCursor(cursor);
         new LatestFileCursorChangeEvent(cursor).post();
         if (logger.isDebugEnabled()) {
@@ -1124,14 +1185,6 @@ public class LogFileGenerator {
                 Double.valueOf(maxSeekBufferSize / streamCount).intValue());
         } else {
             return DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE);
-        }
-    }
-
-    public String parseStreamSeqStr(String streamName) {
-        if (ClusterType.BINLOG.name().equalsIgnoreCase(getClusterType())) {
-            return StringUtils.substringAfterLast(streamName, "_");
-        } else {
-            return String.valueOf(parseStreamSeq(streamName));
         }
     }
 

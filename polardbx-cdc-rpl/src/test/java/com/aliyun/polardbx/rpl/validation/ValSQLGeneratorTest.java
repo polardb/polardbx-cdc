@@ -1,12 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation;
 
 import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.rpl.RplWithGmsTablesBaseTest;
 import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.DbMetaManager;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
@@ -24,7 +25,7 @@ import java.util.List;
  * @author yudong
  * @since 2024/1/16 17:35
  **/
-public class ValSQLGeneratorTest extends BaseTest {
+public class ValSQLGeneratorTest extends RplWithGmsTablesBaseTest {
 
     @Test
     @SneakyThrows
@@ -58,14 +59,14 @@ public class ValSQLGeneratorTest extends BaseTest {
         queryContext =
             ValSQLGenerator.getBatchCheckSql(tableInfo.getSchema(), tableInfo.getName(), tableInfo, lowerBounds, null);
         Assert.assertEquals(
-            "SELECT COUNT(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED)) AS CHECKSUM FROM `valSqlGeneratorTest`.`test_tb` WHERE (`pk1` >= ?) OR (`pk1` = ? AND `pk2` >= ?) OR (`pk1` = ? AND `pk2` = ? AND `pk3` >= ?)",
+            "SELECT COUNT(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED)) AS CHECKSUM FROM `valSqlGeneratorTest`.`test_tb` WHERE (`pk1` > ?) OR (`pk1` = ? AND `pk2` > ?) OR (`pk1` = ? AND `pk2` = ? AND `pk3` >= ?)",
             queryContext.sql);
 
         // test with upperBounds
         queryContext =
             ValSQLGenerator.getBatchCheckSql(tableInfo.getSchema(), tableInfo.getName(), tableInfo, null, upperBounds);
         Assert.assertEquals(
-            "SELECT COUNT(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED)) AS CHECKSUM FROM `valSqlGeneratorTest`.`test_tb` WHERE (pk1 < ?) OR (pk1 = ? AND pk2 < ?) OR (pk1 = ? AND pk2 = ? AND pk3 < ?)",
+            "SELECT COUNT(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED)) AS CHECKSUM FROM `valSqlGeneratorTest`.`test_tb` WHERE (`pk1` < ?) OR (`pk1` = ? AND `pk2` < ?) OR (`pk1` = ? AND `pk2` = ? AND `pk3` < ?)",
             queryContext.sql);
 
         // test with lowerBounds and upperBounds
@@ -73,7 +74,7 @@ public class ValSQLGeneratorTest extends BaseTest {
             ValSQLGenerator.getBatchCheckSql(tableInfo.getSchema(), tableInfo.getName(), tableInfo, lowerBounds,
                 upperBounds);
         Assert.assertEquals(
-            "SELECT COUNT(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED)) AS CHECKSUM FROM `valSqlGeneratorTest`.`test_tb` WHERE ((`pk1` >= ?) OR (`pk1` = ? AND `pk2` >= ?) OR (`pk1` = ? AND `pk2` = ? AND `pk3` >= ?)) AND ((pk1 < ?) OR (pk1 = ? AND pk2 < ?) OR (pk1 = ? AND pk2 = ? AND pk3 < ?))",
+            "SELECT COUNT(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED)) AS CHECKSUM FROM `valSqlGeneratorTest`.`test_tb` WHERE ((`pk1` > ?) OR (`pk1` = ? AND `pk2` > ?) OR (`pk1` = ? AND `pk2` = ? AND `pk3` >= ?)) AND ((`pk1` < ?) OR (`pk1` = ? AND `pk2` < ?) OR (`pk1` = ? AND `pk2` = ? AND `pk3` < ?))",
             queryContext.sql);
     }
 
@@ -114,7 +115,7 @@ public class ValSQLGeneratorTest extends BaseTest {
         queryContext =
             ValSQLGenerator.getRowCheckSql(tableInfo.getSchema(), tableInfo.getName(), tableInfo, null, upperBounds);
         Assert.assertEquals(
-            "SELECT CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED) AS CHECKSUM, ```pk```, `db_shard_key`, `tb_shard_key` FROM `valSqlGeneratorTest`.`test_tb` WHERE (`pk` < ?) ORDER BY ```pk```, `db_shard_key`, `tb_shard_key`",
+            "SELECT CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED) AS CHECKSUM, ```pk```, `db_shard_key`, `tb_shard_key` FROM `valSqlGeneratorTest`.`test_tb` WHERE (```pk``` < ?) ORDER BY ```pk```, `db_shard_key`, `tb_shard_key`",
             queryContext.sql);
 
         // test with lowerBounds and upperBounds
@@ -122,7 +123,7 @@ public class ValSQLGeneratorTest extends BaseTest {
             ValSQLGenerator.getRowCheckSql(tableInfo.getSchema(), tableInfo.getName(), tableInfo, lowerBounds,
                 upperBounds);
         Assert.assertEquals(
-            "SELECT CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED) AS CHECKSUM, ```pk```, `db_shard_key`, `tb_shard_key` FROM `valSqlGeneratorTest`.`test_tb` WHERE ((```pk``` >= ?)) AND ((`pk` < ?)) ORDER BY ```pk```, `db_shard_key`, `tb_shard_key`",
+            "SELECT CAST(CRC32(CONCAT_WS(',', `col1`, `col2`, `col3`, CONCAT(ISNULL(`col1`), ISNULL(`col2`), ISNULL(`col3`))))AS UNSIGNED) AS CHECKSUM, ```pk```, `db_shard_key`, `tb_shard_key` FROM `valSqlGeneratorTest`.`test_tb` WHERE ((```pk``` >= ?)) AND ((```pk``` < ?)) ORDER BY ```pk```, `db_shard_key`, `tb_shard_key`",
             queryContext.sql);
     }
 

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
@@ -17,15 +17,23 @@ import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.relay.HashLevel;
 import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
-import com.google.common.collect.Lists;
+import com.aliyun.polardbx.binlog.service.XStreamService;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.commons.lang3.tuple.Pair;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -39,11 +47,15 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_SCHEDULE_DISPATCHER_
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_SCHEDULE_DISPATCHER_MEMORY_MIN;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_SCHEDULE_DISPATCHER_MEMORY_UNIT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_SCHEDULE_DISPATCHER_ROCKSDB_RATIO;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_HASH_LEVEL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_FORCE_DOWNLOAD_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_WEIGHT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_TASK_WEIGHT;
-import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.getStreamConfig;
+import static com.aliyun.polardbx.binlog.service.StorageHistoryService.saveStorageHistoryDetail;
+import static com.aliyun.polardbx.binlog.service.XStreamService.buildAndSaveXStream;
+import static com.aliyun.polardbx.binlog.service.XStreamService.getXStreamsInCurrentCluster;
+import static com.aliyun.polardbx.binlog.service.XStreamService.markStreamAsPending;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 /**
@@ -61,12 +73,19 @@ public class BinlogXTopologyBuilder {
         this.clusterId = clusterId;
     }
 
-    public Pair<Long, List<BinlogTaskConfig>> buildTopology(List<Container> containerList,
-                                                            List<StorageInfo> storageInfoList,
-                                                            String expectedStorageTso, long newVersion,
-                                                            ClusterSnapshot preClusterSnapshot, long serverId) {
-        List<BinlogTaskConfig> result = Lists.newArrayList();
+    public Topology buildTopology(List<Container> containerList,
+                                  List<StorageInfo> storageInfoList,
+                                  String expectedStorageTso,
+                                  long newVersion,
+                                  ClusterSnapshot preClusterSnapshot,
+                                  long serverId,
+                                  String instructionId) {
+        Topology topology = new Topology();
 
+        // process stream for add/remove datanode
+        Map<String, String> streamStorageMap = buildStreamStorageMap(storageInfoList,
+            preClusterSnapshot, expectedStorageTso, instructionId);
+        // build recover info
         prepareRecoverInfo(expectedStorageTso);
         // 测试recover tso功能开关
         boolean forceRecover = isForceRecover();
@@ -74,19 +93,15 @@ public class BinlogXTopologyBuilder {
         boolean forceDownload = isForceDownload();
 
         List<BinlogTaskConfig> dumperList = buildDumpers(containerList, expectedStorageTso, newVersion,
-            forceRecover, forceDownload, serverId);
+            forceRecover, forceDownload, serverId, streamStorageMap);
         List<BinlogTaskConfig> dispatcherList = buildDispatchers(containerList, storageInfoList,
             expectedStorageTso, newVersion, serverId);
 
-        dumperList.forEach(d -> {
-            ExecutionConfig executionConfig = JSONObject.parseObject(d.getConfig(), ExecutionConfig.class);
-            executionConfig.setSources(dispatcherList.stream()
-                .map(BinlogTaskConfig::getTaskName).collect(Collectors.toList()));
-            d.setConfig(JSONObject.toJSONString(executionConfig));
-        });
+        buildUpstreamSources(dispatcherList, dumperList);
 
-        result.addAll(dumperList);
-        result.addAll(dispatcherList);
+        topology.getConfigList().addAll(dumperList);
+        topology.getConfigList().addAll(dispatcherList);
+        topology.setStreamStorageMap(streamStorageMap);
 
         BinlogTaskConfigMapper taskConfigMapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
         List<BinlogTaskConfig> preDumperList =
@@ -95,7 +110,43 @@ public class BinlogXTopologyBuilder {
                 .and(BinlogTaskConfigDynamicSqlSupport.role, isEqualTo(TaskType.DumperX.name())));
         compareDumperConfigAndReset(preDumperList, dumperList, forceRecover);
 
-        return Pair.of(serverId, result);
+        topology.setServerID(serverId);
+        return topology;
+    }
+
+    public static void buildUpstreamSources(List<BinlogTaskConfig> dispatcherList, List<BinlogTaskConfig> dumperList) {
+        HashLevel hashLevel = HashLevel.from(DynamicApplicationConfig.getString(BINLOGX_TRANSMIT_HASH_LEVEL));
+        Map<String, Integer> sourceUsageCount = new HashMap<>();
+
+        dumperList.forEach(d -> {
+            ExecutionConfig executionConfig = JSONObject.parseObject(d.getConfig(), ExecutionConfig.class);
+            if (hashLevel == HashLevel.DATANODE) {
+                List<String> sources = dispatcherList.stream()
+                    .filter(i -> StringUtils.equalsIgnoreCase(d.getContainerId(), i.getContainerId()))
+                    .map(BinlogTaskConfig::getTaskName).collect(Collectors.toList());
+
+                if (sources.isEmpty()) {
+                    String leastUsedDispatcher = dispatcherList.stream()
+                        .min(Comparator.comparingInt(t -> sourceUsageCount.getOrDefault(t.getTaskName(), 0)))
+                        .map(BinlogTaskConfig::getTaskName)
+                        .orElseThrow(() -> new RuntimeException("No available dispatcher found"));
+
+                    executionConfig.setSources(Collections.singletonList(leastUsedDispatcher));
+                    sourceUsageCount.compute(leastUsedDispatcher, (k, v) -> (v == null) ? 1 : v + 1);
+                } else {
+                    executionConfig.setSources(sources);
+                    sources.forEach(s -> sourceUsageCount.compute(s, (k, v) -> (v == null) ? 1 : v + 1));
+                }
+            } else {
+                List<String> allSources = dispatcherList.stream()
+                    .map(BinlogTaskConfig::getTaskName)
+                    .collect(Collectors.toList());
+                executionConfig.setSources(allSources);
+                allSources.forEach(s -> sourceUsageCount.compute(s, (k, v) -> (v == null) ? 1 : v + 1));
+            }
+
+            d.setConfig(JSONObject.toJSONString(executionConfig));
+        });
     }
 
     private static BinlogTaskConfig createTask(long id, TaskType taskType, Container container, String exeConfigStr,
@@ -114,12 +165,12 @@ public class BinlogXTopologyBuilder {
 
     private List<BinlogTaskConfig> buildDumpers(List<Container> containerList, String expectedStorageTso,
                                                 long newVersion, boolean forceRecover, boolean forceDownload,
-                                                long serverId) {
+                                                long serverId, Map<String, String> streamStorageMap) {
         List<BinlogTaskConfig> result = new ArrayList<>();
         int dumperWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_DUMPER_WEIGHT);
         int taskWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_TASK_WEIGHT);
         int rasterize = dumperWeight + taskWeight;
-        List<XStream> xStreamList = getStreamConfig();
+        List<XStream> xStreamList = getXStreamsInCurrentCluster();
 
         // DumperX，一个Container一个DumperX进程，如果流的个数小于Container的个数，则对应Container上不启动DumperX进程
         TreeMap<Integer, Set<String>> dumperxTopologyMap = new TreeMap<>();
@@ -155,7 +206,9 @@ public class BinlogXTopologyBuilder {
             exeConfig.setServerId(serverId);
             exeConfig.setReservedMemMb(container.getCapability().getReservedMemMb());
 
-            BinlogTaskConfig taskConfig = createTask(container.getContainerId().hashCode(), TaskType.DumperX,
+            long identifier = NumberUtils.isCreatable(container.getContainerId()) ?
+                Long.parseLong(container.getContainerId()) : container.getContainerId().hashCode();
+            BinlogTaskConfig taskConfig = createTask(identifier, TaskType.DumperX,
                 container, JSONObject.toJSONString(exeConfig), newVersion);
             taskConfig.setClusterId(clusterId);
             taskConfig.setMem(dumperWeight * memUnit);
@@ -165,11 +218,113 @@ public class BinlogXTopologyBuilder {
             result.add(taskConfig);
         });
 
+        if (HashLevel.getCurrentHashLevel() == HashLevel.DATANODE) {
+            for (BinlogTaskConfig taskConfig : result) {
+                ExecutionConfig executionConfig = JSONObject.parseObject(taskConfig.getConfig(), ExecutionConfig.class);
+                executionConfig.setStreamStorageMap(streamStorageMap);
+                taskConfig.setConfig(JSONObject.toJSONString(executionConfig));
+            }
+        }
         return result;
     }
 
+    private Map<String, String> buildStreamStorageMap(List<StorageInfo> storageInfoList,
+                                                      ClusterSnapshot preClusterSnapshot,
+                                                      String expectedStorageTso,
+                                                      String instructionId) {
+        HashLevel hashLevel = HashLevel.from(DynamicApplicationConfig.getString(BINLOGX_TRANSMIT_HASH_LEVEL));
+        if (hashLevel == HashLevel.DATANODE) {
+            List<XStream> xStreamList = getXStreamsInCurrentCluster();
+            Map<String, String> streamStorageMap = new HashMap<>(xStreamList.size());
+
+            if (preClusterSnapshot.isOrigin()) {
+                if (storageInfoList.size() != xStreamList.size()) {
+                    throw new PolardbxException(
+                        String.format("stream count %s is not equal to storage count %s",
+                            xStreamList.size(), storageInfoList.size()));
+                }
+
+                for (XStream xStream : xStreamList) {
+                    String streamName = xStream.getStreamName();
+                    streamStorageMap.put(streamName, XStreamService.extractStorageInstId(streamName));
+                }
+            } else {
+                if (CollectionUtils.isEmpty(preClusterSnapshot.getStreamStorageMap())) {
+                    throw new PolardbxException("stream storage mapping info is empty in previous cluster snapshot!");
+                }
+
+                Map<String, String> preStreamStorageMap = preClusterSnapshot.getStreamStorageMap();
+                Set<String> currentStorageSet = storageInfoList.stream()
+                    .map(StorageInfo::getStorageInstId).collect(Collectors.toSet());
+                Set<String> previousStorageSet = new HashSet<>(preStreamStorageMap.values());
+
+                if (storageInfoList.size() != preStreamStorageMap.size()) {
+                    if (storageInfoList.size() > preStreamStorageMap.size()) {
+                        adjustStreamWhenAddStorage(currentStorageSet, previousStorageSet, storageInfoList,
+                            preStreamStorageMap, expectedStorageTso, instructionId);
+                    } else {
+                        adjustStreamWhenRemoveStorage(currentStorageSet, previousStorageSet, preStreamStorageMap);
+                    }
+                } else {
+                    boolean checkResult = currentStorageSet.equals(previousStorageSet);
+                    if (!checkResult) {
+                        throw new PolardbxException(
+                            String.format("current storage set is different from previous stream storage set, %s, %s"
+                                , currentStorageSet, previousStorageSet));
+                    }
+                }
+                streamStorageMap = preStreamStorageMap;
+            }
+            return streamStorageMap;
+        }
+
+        return null;
+    }
+
+    void adjustStreamWhenAddStorage(Set<String> currentStorageSet, Set<String> previousStorageSet,
+                                    List<StorageInfo> storageInfoList, Map<String, String> preStreamStorageMap,
+                                    String expectedStorageTso, String instructionId) {
+        boolean checkResult = currentStorageSet.containsAll(previousStorageSet);
+        if (!checkResult) {
+            throw new PolardbxException(
+                String.format("current storage set not contains all previous stream storage set, %s ,%s"
+                    , currentStorageSet, previousStorageSet));
+        }
+
+        TransactionTemplate transactionTemplate = SpringContextHolder.getObject("metaTransactionTemplate");
+        for (StorageInfo storageInfo : storageInfoList) {
+            if (!previousStorageSet.contains(storageInfo.getStorageInstId())) {
+                transactionTemplate.execute((o) -> {
+                    XStream xStream = buildAndSaveXStream(storageInfo, -1, expectedStorageTso);
+                    saveStorageHistoryDetail(expectedStorageTso, xStream.getStreamName(), instructionId);
+                    preStreamStorageMap.put(xStream.getStreamName(), storageInfo.getStorageInstId());
+                    return null;
+                });
+            }
+        }
+    }
+
+    void adjustStreamWhenRemoveStorage(Set<String> currentStorageSet, Set<String> previousStorageSet,
+                                       Map<String, String> preStreamStorageMap) {
+        boolean checkResult = previousStorageSet.containsAll(currentStorageSet);
+        if (!checkResult) {
+            throw new PolardbxException(
+                String.format("previous stream storage set not contains all current storage set, %s ,%s"
+                    , previousStorageSet, currentStorageSet));
+        }
+
+        preStreamStorageMap.entrySet().removeIf(entry -> {
+            boolean isRemove = !currentStorageSet.contains(entry.getValue());
+            if (isRemove) {
+                markStreamAsPending(entry.getKey());
+                log.info("stream is marked as pending, {}.", entry.getKey());
+            }
+            return isRemove;
+        });
+    }
+
     private void prepareRecoverInfo(String expectedStorageTso) {
-        List<XStream> xStreamList = getStreamConfig();
+        List<XStream> xStreamList = getXStreamsInCurrentCluster();
         recoverTsoMap = new HashMap<>(xStreamList.size());
         recoverFileMap = new HashMap<>(xStreamList.size());
         for (XStream xStream : xStreamList) {

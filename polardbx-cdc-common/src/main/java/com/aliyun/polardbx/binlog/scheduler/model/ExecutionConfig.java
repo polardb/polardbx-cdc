@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.scheduler.model;
@@ -28,7 +28,7 @@ public class ExecutionConfig {
      */
     private String type;
     /**
-     * 上游sources
+     * 上游sources，单流和多流非DATANODE模式下使用
      */
     private List<String> sources;
     /**
@@ -36,9 +36,13 @@ public class ExecutionConfig {
      */
     private String tso;
     /**
-     * 和xstream的映射关系
+     * 某个工作进程需负责管理运行的streamName集合
      */
     private Set<String> streamNameSet;
+    /**
+     * streamName -> Storage id
+     */
+    private Map<String, String> streamStorageMap;
     /**
      * 运行时版本号
      */

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
@@ -18,6 +18,9 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.google.common.collect.Lists;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
@@ -34,6 +37,7 @@ import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_FORCE_DOWNLOAD_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_MASTER_MAX_RATIO;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_SLAVE_MAX_MEM;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_WEIGHT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_TASK_WEIGHT;
@@ -63,14 +67,6 @@ public class GlobalBinlogTopologyBuilder {
         List<List<StorageInfo>> relayStorageList = calcStorageListForRelayTask(containerCount, storageInfoList);
         List<BinlogTaskConfig> result = Lists.newArrayList();
 
-        int dumperWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_DUMPER_WEIGHT);
-        int taskWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_TASK_WEIGHT);
-        int totalWeight = dumperWeight + taskWeight;
-        int vcpu = containerList.get(0).getCapability().getVirCpu();
-        int memUnit = containerList.get(0).getCapability().getFreeMemMb() / totalWeight;
-        int memPerTask = relayStorageList.size() > 0 ? (memUnit * taskWeight) / 2 : memUnit * taskWeight;
-        int memPerDumper = memUnit * dumperWeight;
-
         // build recover tso
         List<String> recoverInfo =
             RecoverTsoBuilder.buildRecoverInfo(CommonConstants.GROUP_NAME_GLOBAL, CommonConstants.STREAM_NAME_GLOBAL,
@@ -79,12 +75,13 @@ public class GlobalBinlogTopologyBuilder {
         recoverTsoMap.put(CommonConstants.STREAM_NAME_GLOBAL, recoverInfo.get(0));
         Map<String, String> recoverFileNameMap = new HashMap<>(1);
         recoverFileNameMap.put(CommonConstants.STREAM_NAME_GLOBAL, recoverInfo.get(1));
-        // 测试recover tso功能开关
+        // 测试recover tso功能开关,这个开关在实验室是random的
         boolean forceRecover = isForceRecover();
         // 测试binlog下载功能开关
         boolean forceDownload = isForceDownload();
 
         // 为每个容器分配一个Dumper，并计算出每个Dumper的配置
+        Container dumperMasterContainer = null;
         for (int i = 0; i < containerList.size(); i++) {
             ExecutionConfig tc = new ExecutionConfig();
             tc.setType(MergeSourceType.RPC.name());
@@ -100,14 +97,19 @@ public class GlobalBinlogTopologyBuilder {
             tc.setServerId(serverId);
 
             Container container = containerList.get(i);
-            container.deductMem(memPerDumper);
+            CpuMemoryItem cpuMemoryItem = calcCpuMemoryItem(container, relayStorageList.size());
+            if (StringUtils.equals(dumperMasterNodeId, container.getContainerId())) {
+                dumperMasterContainer = container;
+            }
+
+            container.deductMem(cpuMemoryItem.memPerDumper);
             tc.setReservedMemMb(container.getCapability().getReservedMemMb());
 
             BinlogTaskConfig dumperConfig =
                 makeTask((long) (i + 1), TaskType.Dumper, container, JSONObject.toJSONString(tc), newVersion);
             dumperConfig.setClusterId(clusterId);
-            dumperConfig.setMem(memPerDumper);
-            dumperConfig.setVcpu(vcpu);
+            dumperConfig.setMem(cpuMemoryItem.memPerDumper);
+            dumperConfig.setVcpu(cpuMemoryItem.vcpu);
             result.add(dumperConfig);
         }
 
@@ -118,11 +120,13 @@ public class GlobalBinlogTopologyBuilder {
             AtomicLong index = new AtomicLong(0);
             Iterator<List<StorageInfo>> iterator = relayStorageList.iterator();
             for (Container container : containerList) {
-                relayTaskList.add(buildRelayTask(clusterId, memPerTask, vcpu, expectedStorageTso,
-                    newVersion, container, index, iterator.next(), serverId));
+                CpuMemoryItem cpuMemoryItem = calcCpuMemoryItem(container, relayStorageList.size());
+
+                relayTaskList.add(buildRelayTask(clusterId, cpuMemoryItem.memPerTask, cpuMemoryItem.vcpu,
+                    expectedStorageTso, newVersion, container, index, iterator.next(), serverId));
                 if (container != finalContainer) {
-                    relayTaskList.add(buildRelayTask(clusterId, memPerTask, vcpu, expectedStorageTso,
-                        newVersion, container, index, iterator.next(), serverId));
+                    relayTaskList.add(buildRelayTask(clusterId, cpuMemoryItem.memPerTask, cpuMemoryItem.vcpu,
+                        expectedStorageTso, newVersion, container, index, iterator.next(), serverId));
                 }
             }
             if (iterator.hasNext()) {
@@ -133,7 +137,8 @@ public class GlobalBinlogTopologyBuilder {
         }
 
         // Final
-        finalContainer.deductMem(memPerTask);
+        CpuMemoryItem finalCpuMemoryItem = calcCpuMemoryItem(finalContainer, relayStorageList.size());
+        finalContainer.deductMem(finalCpuMemoryItem.memPerTask);
         ExecutionConfig config = new ExecutionConfig();
         config.setType(!relayTaskList.isEmpty() ? MergeSourceType.RPC.name() : MergeSourceType.BINLOG.name());
         if (!relayTaskList.isEmpty()) {
@@ -148,25 +153,31 @@ public class GlobalBinlogTopologyBuilder {
         BinlogTaskConfig finalConfig = makeTask(0L, TaskType.Final, finalContainer,
             JSONObject.toJSONString(config), newVersion);
         finalConfig.setClusterId(clusterId);
-        finalConfig.setMem(memPerTask);
-        finalConfig.setVcpu(vcpu);
+        finalConfig.setMem(finalCpuMemoryItem.memPerTask);
+        finalConfig.setVcpu(finalCpuMemoryItem.vcpu);
         finalConfig.setStatus(BinlogTaskConfigStatus.ENABLE_AUTO_SCHEDULE);
         result.add(finalConfig);
 
         // rewrite dumper master memory
         // 如果dumper master和final task不在一个容器，则尝试调高dumper master的内存占用
         if (relayTaskList.size() <= 0 && !StringUtils.equals(dumperMasterNodeId, finalContainer.getContainerId())) {
+            int dumperWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_DUMPER_WEIGHT);
+            int taskWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_TASK_WEIGHT);
+            double masterMaxRatio = DynamicApplicationConfig.getDouble(TOPOLOGY_RESOURCE_DUMPER_MASTER_MAX_RATIO);
             int newWeight = dumperWeight + taskWeight;
+
             Optional<BinlogTaskConfig> optional = result.stream().filter(t -> TaskType.Dumper.name().equals(t.getRole())
                 && StringUtils.equals(t.getContainerId(), dumperMasterNodeId)).findFirst();
+            CpuMemoryItem cpuMemoryItem = calcCpuMemoryItem(dumperMasterContainer, relayStorageList.size());
+
             if (optional.isPresent()) {
-                optional.get().setMem(memUnit * newWeight);
-                optional.get().setVcpu(containerList.get(0).getCapability().getVirCpu());
+                optional.get().setMem(Double.valueOf(cpuMemoryItem.memUnit * newWeight * masterMaxRatio).intValue());
+                optional.get().setVcpu(dumperMasterContainer.getCapability().getVirCpu());
             }
         }
 
         // 如果dumper master和final task不在一个容器，则dumper salve和final是放在一个容器的，尝试调低dumper slave的内存
-        // 如果dumper slave的内存大于设定的最大值，将多出的内存分配给task，task对内存的需求dumper要旺盛的多
+        // 如果dumper slave的内存大于设定的最大值，将多出的内存分配给task，task对内存的需求比dumper要旺盛的多
         if (!StringUtils.equals(dumperMasterNodeId, finalContainer.getContainerId())) {
             Optional<BinlogTaskConfig> optional = result.stream().filter(t -> TaskType.Dumper.name().equals(t.getRole())
                 && StringUtils.equals(t.getContainerId(), finalContainer.getContainerId())).findFirst();
@@ -239,35 +250,6 @@ public class GlobalBinlogTopologyBuilder {
     }
 
     /**
-     * 容器栅格化（Final，Dumper2倍Relay 内存配比）
-     *
-     * @param tc 任务个数
-     * @param nc 容器个数
-     * @return 栅格化比例
-     */
-    public int rasterize(int tc, int nc) {
-        //机器富余
-        int count;
-        if (tc <= nc) {
-            log.debug("{} {} {}", tc, nc, 2);
-            count = 2;
-        } else {
-            if (nc < 2) {
-                //只有一台机器 dumper(2)+final(2)+relay
-                count = tc <= 3 ? tc * 2 : 2 * 2 + 1 * 2 + (tc - 2 - 1);
-                log.debug("<2  {} {} {}", tc, nc, count);
-            } else {
-                //剩余的relay转化为何dumper，relay规格相等的任务
-                int left = tc - 3 - (nc == 2 ? 1 : (nc - 3)) * 2;
-                int append = (left + nc - 1) / nc;
-                count = (nc == 2 ? 4 : 2) + append;
-                log.debug(">=3 {} {} {}", tc, nc, count);
-            }
-        }
-        return count;
-    }
-
-    /**
      * 当DN节点数据超过阈值时，使用RelayTask
      * 计算是否需要使用RelayTask，以及如果使用RelayTask，每个RelayTask需要对接的DN节点
      */
@@ -295,123 +277,26 @@ public class GlobalBinlogTopologyBuilder {
         }
     }
 
-    /**
-     * 容器栅格化（Final:Dumper:Relay = x:y:z ）
-     *
-     * @param tc 任务个数
-     * @param nc 容器个数
-     * @param x Dumper内存配比
-     * @param y Final内存配比
-     * @param z Relay内存配比
-     * @return 栅格化比例
-     */
-    public int rasterize(int tc, int nc, int x, int y, int z) {
-        assert (nc | tc) > 0;
-        //机器富余
-        int count;
-        if (tc <= nc) {
-            log.debug("    {} {} {}", tc, nc, 2);
-            count = x;
-        } else {
-            int xy = Math.max(x, y);
-            int xyz = Math.max(xy, z);
-            int left, append;
-            switch (nc) {
-            case 1:
-                count = tc <= 3 ? tc * 2 : 2 * x + 1 * y + (tc - 2 - 1) * z;
-                log.debug("<2  {} {} {}", tc, nc, count);
-                break;
-            case 2:
-                left = xy <= z ? (tc - 2 - 1 - 1) * z : (tc - 2 - 1 - y / z) * z;
-                append = left <= 0 ? 0 : (left + nc - 1) / nc;
-                count = x + y + append;
-                log.debug("==2 {} {} {}", tc, nc, count);
-                break;
-            default:
-                left = xy <= z ? (tc - nc) * z :
-                    (tc - 3 - Math.abs(x - y) / z - (nc - 3) * xy / z) * z;
-                append = left <= 0 ? 0 : (left + nc - 1) / nc;
-                count = xyz + append;
-                log.debug(">=3 {} {} {}", tc, nc, count);
-                break;
-            }
-        }
-        return count;
+    private CpuMemoryItem calcCpuMemoryItem(Container container, int relayStorageSize) {
+        int dumperWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_DUMPER_WEIGHT);
+        int taskWeight = DynamicApplicationConfig.getInt(TOPOLOGY_RESOURCE_TASK_WEIGHT);
+        int totalWeight = dumperWeight + taskWeight;
+
+        int vcpu = container.getCapability().getVirCpu();
+        int memUnit = container.getCapability().getBaseAvailableMemMb() / totalWeight;
+        int memPerTask = relayStorageSize > 0 ? (memUnit * taskWeight) / 2 : memUnit * taskWeight;
+        int memPerDumper = memUnit * dumperWeight;
+
+        return new CpuMemoryItem(vcpu, memUnit, memPerTask, memPerDumper);
     }
 
-    public static void main(String[] args) {
-        GlobalBinlogTopologyBuilder storageCountStrategy = new GlobalBinlogTopologyBuilder("test");
-
-        log.debug("=============1=============");
-        storageCountStrategy.rasterize(1, 1);
-        storageCountStrategy.rasterize(2, 1);
-        storageCountStrategy.rasterize(3, 1);
-        storageCountStrategy.rasterize(4, 1);
-        storageCountStrategy.rasterize(5, 1);
-        storageCountStrategy.rasterize(6, 1);
-        storageCountStrategy.rasterize(7, 1);
-
-        log.debug("=============x=============");
-        storageCountStrategy.rasterize(1, 1, 2, 2, 1);
-        storageCountStrategy.rasterize(2, 1, 2, 2, 1);
-        storageCountStrategy.rasterize(3, 1, 2, 2, 1);
-        storageCountStrategy.rasterize(4, 1, 2, 2, 1);
-        storageCountStrategy.rasterize(5, 1, 2, 2, 1);
-        storageCountStrategy.rasterize(6, 1, 2, 2, 1);
-        storageCountStrategy.rasterize(7, 1, 2, 2, 1);
-
-        log.debug("=============2=============");
-        storageCountStrategy.rasterize(1, 2);
-        storageCountStrategy.rasterize(2, 2);
-        storageCountStrategy.rasterize(3, 2);
-        storageCountStrategy.rasterize(4, 2);
-        storageCountStrategy.rasterize(5, 2);
-        storageCountStrategy.rasterize(6, 2);
-        storageCountStrategy.rasterize(7, 2);
-        storageCountStrategy.rasterize(8, 2);
-        storageCountStrategy.rasterize(9, 2);
-        log.debug("=============x=============");
-        storageCountStrategy.rasterize(1, 2, 2, 2, 1);
-        storageCountStrategy.rasterize(2, 2, 2, 2, 1);
-        storageCountStrategy.rasterize(3, 2, 2, 2, 1);
-        storageCountStrategy.rasterize(4, 2, 2, 2, 1);
-        storageCountStrategy.rasterize(5, 2, 2, 2, 1);
-        storageCountStrategy.rasterize(6, 2, 2, 2, 1);
-        storageCountStrategy.rasterize(7, 2, 2, 2, 1);
-        storageCountStrategy.rasterize(8, 2, 2, 2, 1);
-        storageCountStrategy.rasterize(9, 2, 2, 2, 1);
-        log.debug("=============3=============");
-        storageCountStrategy.rasterize(2, 3);
-        storageCountStrategy.rasterize(3, 3);
-        storageCountStrategy.rasterize(4, 3);
-        storageCountStrategy.rasterize(5, 3);
-        storageCountStrategy.rasterize(6, 3);
-        storageCountStrategy.rasterize(7, 3);
-        log.debug("=============x=============");
-        storageCountStrategy.rasterize(2, 3, 2, 2, 1);
-        storageCountStrategy.rasterize(3, 3, 2, 2, 1);
-        storageCountStrategy.rasterize(4, 3, 2, 2, 1);
-        storageCountStrategy.rasterize(5, 3, 2, 2, 1);
-        storageCountStrategy.rasterize(6, 3, 2, 2, 1);
-        storageCountStrategy.rasterize(7, 3, 2, 2, 1);
-        log.debug("=============4=============");
-        storageCountStrategy.rasterize(3, 4);
-        storageCountStrategy.rasterize(4, 4);
-        storageCountStrategy.rasterize(5, 4);
-        storageCountStrategy.rasterize(6, 4);
-        storageCountStrategy.rasterize(7, 4);
-        storageCountStrategy.rasterize(8, 4);
-        storageCountStrategy.rasterize(9, 4);
-        storageCountStrategy.rasterize(10, 4);
-        log.debug("=============x=============");
-        storageCountStrategy.rasterize(3, 4, 2, 2, 1);
-        storageCountStrategy.rasterize(4, 4, 2, 2, 1);
-        storageCountStrategy.rasterize(5, 4, 2, 2, 1);
-        storageCountStrategy.rasterize(6, 4, 2, 2, 1);
-        storageCountStrategy.rasterize(7, 4, 2, 2, 1);
-        storageCountStrategy.rasterize(8, 4, 2, 2, 1);
-        storageCountStrategy.rasterize(9, 4, 2, 2, 1);
-        storageCountStrategy.rasterize(10, 4, 2, 2, 1);
-
+    @Data
+    @AllArgsConstructor
+    @ToString
+    static class CpuMemoryItem {
+        int vcpu;
+        int memUnit;
+        int memPerTask;
+        int memPerDumper;
     }
 }

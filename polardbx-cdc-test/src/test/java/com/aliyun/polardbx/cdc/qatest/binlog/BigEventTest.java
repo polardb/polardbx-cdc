@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.binlog;
@@ -24,6 +24,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Properties;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * created by ziyang.lb
@@ -32,6 +33,7 @@ import java.util.Properties;
 public class BigEventTest extends RplBaseTestCase {
     private static final String DB_NAME = "cdc_big_event";
     private static final String TABLE_NAME = "t_big_event";
+    private static final int INSERT_TIMES = 500;
 
     @BeforeClass
     public static void bootStrap() throws SQLException {
@@ -56,9 +58,16 @@ public class BigEventTest extends RplBaseTestCase {
             "insert into " + DB_NAME + "." + TABLE_NAME + " values (1,'a')");
         JdbcUtil.executeSuccess(polardbxConnection,
             "insert into " + DB_NAME + "." + TABLE_NAME + " values (2, repeat('2',16*1024*1024))");
-        JdbcUtil.executeSuccess(polardbxConnection,
-            "insert into " + DB_NAME + "." + TABLE_NAME + " values (3, repeat('2',3*16*1024*1024))");
-
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        for (int i = 0; i < INSERT_TIMES; i++) {
+            // 随机一个长度为valueLength(64K~128K) 的字符串
+            int valueLength = random.nextInt(64 * 1024, 128 * 1024);
+            String value = RandomStringUtils.randomAlphabetic(valueLength);
+            int id = i + 3;
+            String values = String.format(" values (%s, '%s')", id, value);
+            JdbcUtil.executeSuccess(polardbxConnection,
+                "insert into " + DB_NAME + "." + TABLE_NAME + values);
+        }
         waitAndCheck(CheckParameter.builder().dbName(DB_NAME).tbName(TABLE_NAME).build());
     }
 

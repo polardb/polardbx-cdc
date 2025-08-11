@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.binlog.metadata;
@@ -203,9 +203,9 @@ public class TableMocker {
                     System.getProperty("line.separator"));
 
             builder.append("\t").append("id").append(StringUtils.SPACE).append(
-                "int unsigned NOT NULL AUTO_INCREMENT")
+                    "int unsigned NOT NULL AUTO_INCREMENT")
                 .append(",").append(
-                System.getProperty("line.separator"));
+                    System.getProperty("line.separator"));
 
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i);

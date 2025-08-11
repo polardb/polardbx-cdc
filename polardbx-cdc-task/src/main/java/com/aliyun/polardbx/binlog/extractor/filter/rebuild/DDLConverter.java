@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
@@ -127,7 +127,7 @@ public class DDLConverter {
                 if (e > i) {
                     String searchPattern = ddl.substring(i + 2, e).trim();
                     i = e;
-                    String[] kv = searchPattern.split("=");
+                    String[] kv = searchPattern.split("=", 2);
                     if (kv.length != 2) {
                         continue;
                     }
@@ -253,9 +253,12 @@ public class DDLConverter {
             }
         }
 
-        SQLHintsFilter.filter(sqlStatement);
-        removeSomeHints(sqlStatement);
-        String privateDdlSql = toSQLStringWithTrueUcase(sqlStatement);
+        String privateDdlSql = "";
+        if (sqlStatement != null) {
+            SQLHintsFilter.filter(sqlStatement);
+            removeSomeHints(sqlStatement);
+            privateDdlSql = toSQLStringWithTrueUcase(sqlStatement);
+        }
 
         if (StringUtils.contains(privateDdlSql, "\n")) {
             log.warn("polarx original sql contains CRLF, encoding to base64, tso : {}, sql : {}", tso, privateDdlSql);
@@ -271,11 +274,15 @@ public class DDLConverter {
         if (isCci) {
             ddlTypes = ddlTypes + "CCI";
         }
+        String extraDdl = extractCommentValue(ddlSqlForPolar, "EXTRA_DDL");
         sqlBuilder.append(CommonUtils.PRIVATE_DDL_DDL_PREFIX).append(privateDdlSql).append("\n");
         sqlBuilder.append(CommonUtils.PRIVATE_DDL_TSO_PREFIX).append(tso).append("\n");
         sqlBuilder.append(CommonUtils.PRIVATE_DDL_ID_PREFIX).append(ddlId).append("\n");
         if (StringUtils.isNotBlank(ddlTypes)) {
             sqlBuilder.append(CommonUtils.PRIVATE_DDL_DDL_TYPES_PREFIX).append(ddlTypes).append("\n");
+        }
+        if (StringUtils.isNotBlank(extraDdl)) {
+            sqlBuilder.append(CommonUtils.PRIVATE_DDL_EXTRA_DDL_PREFIX).append(extraDdl).append("\n");
         }
         if (polarxVariables != null && !polarxVariables.isEmpty()) {
             sqlBuilder.append(CommonUtils.PRIVATE_DDL_POLARX_VARIABLES_PREFIX)
@@ -571,6 +578,7 @@ public class DDLConverter {
         boolean isLike = createTableStatement.getLike() != null;
         List<SQLAssignItem> optionItemList = createTableStatement.getTableOptions();
         Set<String> optionSet = new HashSet<>();
+        String optionCharset = null;
 
         for (SQLAssignItem i : optionItemList) {
             String option = StringUtils.upperCase(SQLUtils.normalize(i.getTarget().toString()));
@@ -596,6 +604,9 @@ public class DDLConverter {
             if (value != null) {
                 i.setValue(value);
             }
+            if (StringUtils.equalsAny(option, "CHARACTER", "CHARSET", "CHARACTER SET")) {
+                optionCharset = i.getValue().toString();
+            }
         }
         if (!isLike && StringUtils.isNotBlank(tbCollation)) {
             String charset = CharsetConversion.getCharsetByCollation(tbCollation);
@@ -605,7 +616,12 @@ public class DDLConverter {
             }
 
             if (!optionSet.contains("COLLATE")) {
-                createTableStatement.addOption("COLLATE", new SQLIdentifierExpr(tbCollation));
+                if (StringUtils.isBlank(optionCharset) || optionCharset.equalsIgnoreCase(charset)) {
+                    // 仅在以下情况补全collate信息：
+                    // 1. charset为空
+                    // 2. 或者collate与charset相同
+                    createTableStatement.addOption("COLLATE", new SQLIdentifierExpr(tbCollation));
+                }
             }
         }
     }

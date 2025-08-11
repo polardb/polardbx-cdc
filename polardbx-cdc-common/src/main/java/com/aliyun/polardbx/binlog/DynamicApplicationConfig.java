@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog;
@@ -33,16 +33,10 @@ public class DynamicApplicationConfig {
     private static final Map<String, List<PropertyChangeListener>> changeListenerMap = Maps.newHashMap();
     private static final Map<String, String> propBeforeImageMap = Maps.newHashMap();
     private static final List<String> watchPropList = Lists.newArrayList();
-    private static IConfigDataProvider provider = new DbConfigDataProvider();
-
-    private static AtomicBoolean started = new AtomicBoolean(false);
+    private static final IConfigDataProvider provider = new DbConfigDataProvider();
 
     public static String getValue(String key) {
         return provider.getValue(key);
-    }
-
-    public static void setConfigDataProvider(IConfigDataProvider provider) {
-        DynamicApplicationConfig.provider = provider;
     }
 
     /**
@@ -153,7 +147,6 @@ public class DynamicApplicationConfig {
     }
 
     public static void afterPropSet() {
-        started.set(true);
         for (String prop : watchPropList) {
             propBeforeImageMap.put(prop, getValue(prop));
         }

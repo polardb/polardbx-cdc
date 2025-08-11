@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.common;
@@ -77,7 +77,7 @@ public class LogUtil {
     public static String generateStatisticLogV2(RplStatMetrics rplStatMetrics) {
         return CommonUtil.getCurrentTime()
             + " outRps:" + rplStatMetrics.getOutRps()
-            + " applyCount:" + rplStatMetrics.getApplyCount()
+            + " executeCountPerSecond:" + rplStatMetrics.getApplyCount()
             + " inEps:" + rplStatMetrics.getInEps()
             + " outBps:" + rplStatMetrics.getOutBps()
             + " inBps:" + rplStatMetrics.getInBps()
@@ -96,8 +96,8 @@ public class LogUtil {
             + " memUseRatio:" + rplStatMetrics.getMemUseRatio()
             + " fullGcCount:" + rplStatMetrics.getFullGcCount()
             + " workerIp:" + rplStatMetrics.getWorkerIp()
-            + " totalCommitCount" + rplStatMetrics.getTotalCommitCount()
-            + " trueDelayMills" + rplStatMetrics.getTrueDelayMills();
+            + " totalCommitCount:" + rplStatMetrics.getTotalCommitCount()
+            + " trueDelayMills:" + rplStatMetrics.getTrueDelayMills();
     }
 
     public static void logFullCommitInfo(List<DBMSEvent> dbmsEvents, String physicalInfo) {

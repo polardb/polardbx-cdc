@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.fetcher;
@@ -23,10 +23,14 @@ public class StreamPipe {
 
     private static final long TIME_OUT = TimeUnit.MINUTES.toMillis(1);
 
-    private long lastReceiveTime = System.currentTimeMillis();
+    private volatile long lastReceiveTime = System.currentTimeMillis();
 
     public StreamPipe() throws IOException {
-        BUFFER_SIZE = 1024 * 1024 * 16;
+        BUFFER_SIZE = 1024 * 1024 * 100;
+    }
+
+    protected void updateReceiveTime(){
+        lastReceiveTime = System.currentTimeMillis();
     }
 
     public int read(byte[] dst, int offset, int limit) throws IOException {

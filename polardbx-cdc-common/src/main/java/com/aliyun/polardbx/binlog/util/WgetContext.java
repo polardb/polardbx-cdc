@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
@@ -22,21 +22,13 @@ public class WgetContext {
     private static final int SIZE_IDX = 0;
     private static final int SPEED_IDX = 7;
     private static final int PROGRESS_IDX = 6;
-    private static LoadingCache<Long, AvgSpeed> speedPerSecMap =
-        CacheBuilder.newBuilder().expireAfterAccess(10, TimeUnit.SECONDS).build(
-            new CacheLoader<Long, AvgSpeed>() {
-                @Override
-                public AvgSpeed load(Long s) throws Exception {
-                    return new AvgSpeed();
-                }
-            });
-
-    public static void main(String[] args) {
-//        WgetContext.add("196700K .......... .......... .......... .......... .......... 38% 6.50M 48s");
-        WgetContext.add("9000K .......... .......... .......... .......... ..........  1%  234K 27m52s");
-        WgetContext.add("0K .......... .......... .......... .......... ..........  0%  1  20d6h");
-        WgetContext.add("0K .......... .......... .......... .......... ..........  0%  1M  20d6h");
-    }
+    private static final LoadingCache<Long, AvgSpeed> speedPerSecMap =
+        CacheBuilder.newBuilder().expireAfterAccess(10, TimeUnit.SECONDS).build(new CacheLoader<Long, AvgSpeed>() {
+            @Override
+            public AvgSpeed load(Long s) throws Exception {
+                return new AvgSpeed();
+            }
+        });
 
     /**
      * 196700K .......... .......... .......... .......... .......... 38% 6.50M 48s

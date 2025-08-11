@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dao;
@@ -9,41 +9,53 @@ package com.aliyun.polardbx.binlog.dao;
 import java.sql.JDBCType;
 import java.util.Date;
 import javax.annotation.Generated;
+
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class BinlogPolarxCommandDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.236+08:00", comments="Source Table: binlog_polarx_command")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.236+08:00",
+        comments = "Source Table: binlog_polarx_command")
     public static final BinlogPolarxCommand binlogPolarxCommand = new BinlogPolarxCommand();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.237+08:00", comments="Source field: binlog_polarx_command.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.237+08:00",
+        comments = "Source field: binlog_polarx_command.id")
     public static final SqlColumn<Long> id = binlogPolarxCommand.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.237+08:00", comments="Source field: binlog_polarx_command.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.237+08:00",
+        comments = "Source field: binlog_polarx_command.gmt_created")
     public static final SqlColumn<Date> gmtCreated = binlogPolarxCommand.gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.238+08:00", comments="Source field: binlog_polarx_command.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.238+08:00",
+        comments = "Source field: binlog_polarx_command.gmt_modified")
     public static final SqlColumn<Date> gmtModified = binlogPolarxCommand.gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.238+08:00", comments="Source field: binlog_polarx_command.cmd_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.238+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_id")
     public static final SqlColumn<String> cmdId = binlogPolarxCommand.cmdId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.238+08:00", comments="Source field: binlog_polarx_command.cmd_type")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.238+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_type")
     public static final SqlColumn<String> cmdType = binlogPolarxCommand.cmdType;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.238+08:00", comments="Source field: binlog_polarx_command.cmd_status")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.238+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_status")
     public static final SqlColumn<Long> cmdStatus = binlogPolarxCommand.cmdStatus;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.238+08:00", comments="Source field: binlog_polarx_command.cluster_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.238+08:00",
+        comments = "Source field: binlog_polarx_command.cluster_id")
     public static final SqlColumn<String> clusterId = binlogPolarxCommand.clusterId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.238+08:00", comments="Source field: binlog_polarx_command.cmd_request")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.238+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_request")
     public static final SqlColumn<String> cmdRequest = binlogPolarxCommand.cmdRequest;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.238+08:00", comments="Source field: binlog_polarx_command.cmd_reply")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.238+08:00",
+        comments = "Source field: binlog_polarx_command.cmd_reply")
     public static final SqlColumn<String> cmdReply = binlogPolarxCommand.cmdReply;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-15T12:04:39.236+08:00", comments="Source Table: binlog_polarx_command")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-15T12:04:39.236+08:00",
+        comments = "Source Table: binlog_polarx_command")
     public static final class BinlogPolarxCommand extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

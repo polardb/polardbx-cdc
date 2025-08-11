@@ -1,13 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.rpc;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import io.grpc.stub.ServerCallStreamObserver;
+import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,6 +19,7 @@ import java.util.concurrent.atomic.AtomicLong;
  **/
 public class TxnOutputStream<T> {
     private static final Logger logger = LoggerFactory.getLogger(TxnOutputStream.class);
+    @Getter
     private final ServerCallStreamObserver<T> observer;
     private final AtomicLong onReadyCallBackCount;
     private int streamSeq;

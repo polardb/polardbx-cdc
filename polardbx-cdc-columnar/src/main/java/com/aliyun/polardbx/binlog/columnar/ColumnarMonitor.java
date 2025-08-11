@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.columnar;
@@ -45,7 +45,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_NO_ALARM_WITHOUT_CCI;
 import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS;
 
 /**
@@ -122,7 +122,8 @@ public class ColumnarMonitor {
         boolean excessiveLatency = false;
 
         ColumnarInfoMapper columnarInfoMapper = SpringContextHolder.getObject(ColumnarInfoMapper.class);
-        boolean columnarIndexExist = columnarInfoMapper.getColumnarIndexExist();
+        boolean alarmWithCci = DynamicApplicationConfig.getBoolean(COLUMNAR_NO_ALARM_WITHOUT_CCI);
+        boolean columnarIndexExist = columnarInfoMapper.getColumnarIndexExist() && alarmWithCci;
 
         if (columnarIndexExist && latency > DynamicApplicationConfig.getInt(
             COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS)) {
@@ -135,24 +136,25 @@ public class ColumnarMonitor {
         long currentPos = sourceInfo.pos;
 
         // 如果file和pos都没有改变
-        checkFilePos(columnarIndexExist, currentFile, currentPos, excessiveLatency);
+        checkFilePos(columnarIndexExist, currentFile, currentPos, excessiveLatency, latency);
     }
 
     public void checkFilePos(boolean columnarIndexExist, String currentFile, long currentPos,
-                             boolean excessiveLatency) {
+                             boolean excessiveLatency, long offsetLatency) {
         if (columnarIndexExist && currentFile.equals(getLastFile()) && currentPos == getLastPos()) {
-            // 检查是否已经过了10分钟
+            // 检查是否已经过了阈值
             long hang = System.currentTimeMillis() - getLastUpdateTime().get();
             if (hang >= DynamicApplicationConfig.getInt(
                 COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS)) {
                 // 已经超过阈值，发出警报
                 log.warn("columnar binlog 位点已经 {} 秒没有变化", hang / 1000);
                 MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_BINLOG_POSITION_WARNING, hang / 1000);
-                // 同时延迟超过10分钟，上升为严重警报
+                // binlog延迟和offset延迟超过阈值，上升为严重警报
                 if (excessiveLatency) {
                     MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_FATAL_ERROR,
-                        "Columnar offset延迟和binlog消费位点都已经超过{}秒阈值！", DynamicApplicationConfig.getInt(
-                            COLUMNAR_PROCESS_LATENCY_TIMEOUT_MS));
+                        String.format(
+                            "Columnar offset延迟和binlog消费位点都已经超阈值，offset延迟%s秒，binlog位点卡主%s秒",
+                            offsetLatency / 1000, hang / 1000));
                 }
                 // 重置更新时间
 //                lastUpdateTime.set(System.currentTimeMillis());
@@ -181,7 +183,14 @@ public class ColumnarMonitor {
         ManagedChannel channel = ManagedChannelBuilder.forAddress(info.getIp(), info.getPort()).usePlaintext()
             .maxInboundMessageSize(0xFFFFFF + 0xFF).build();
 
-        return getCdcTso(channel);
+        try {
+            return getCdcTso(channel);
+        } finally {
+            channel.shutdown();
+            if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
+                channel.shutdownNow();
+            }
+        }
     }
 
     public long getCdcTso(ManagedChannel channel) {

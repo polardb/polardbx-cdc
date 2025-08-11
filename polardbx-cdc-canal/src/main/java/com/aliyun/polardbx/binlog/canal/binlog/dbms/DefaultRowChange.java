@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.dbms;
@@ -56,6 +56,11 @@ public class DefaultRowChange extends DBMSRowChange {
     protected Map<String, String> separatorMap = new HashMap<>();
 
     protected boolean hasHiddenPk = false;
+
+    /**
+     * trace信息，for columnar
+     */
+    protected String traceInfo;
 
     public DefaultRowChange() {
     }
@@ -419,5 +424,13 @@ public class DefaultRowChange extends DBMSRowChange {
                 }
             }
         }
+    }
+
+    public String getTraceInfo() {
+        return traceInfo;
+    }
+
+    public void setTraceInfo(String traceInfo) {
+        this.traceInfo = traceInfo;
     }
 }

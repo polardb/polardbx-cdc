@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.format.utils.generator;
@@ -122,18 +122,23 @@ public class BinlogGenerateUtil {
         }
     }
 
-    private void doFlush() {
+    public void updatePos(int eventSize){
         byte[] data = output.toBytes();
         int size = output.size();
         virtualFile.offset += size;
         ByteArray byteArray = new ByteArray(data);
-        byteArray.skip(13);
+        byteArray.skip(size - eventSize + 13);
         byteArray.writeLong(virtualFile.offset, 4);
         CRC32 crc32 = new CRC32();
         crc32.update(data, 0, size - LogEvent.BINLOG_CHECKSUM_LEN);
         byteArray = new ByteArray(data);
         byteArray.skip(size - LogEvent.BINLOG_CHECKSUM_LEN);
         byteArray.writeLong(crc32.getValue(), LogEvent.BINLOG_CHECKSUM_LEN);
+    }
+
+    private void doFlush() {
+        byte[] data = output.toBytes();
+        int size = output.size();
         try {
             outputStream.write(data, 0, size);
         } catch (Exception e) {
@@ -161,6 +166,7 @@ public class BinlogGenerateUtil {
     public void generateXidLogEvent() throws Exception {
         XidEventBuilder xidEventBuilder = new XidEventBuilder(getTimestamp(), serverId, xidSequence.getAndIncrement());
         xidEventBuilder.write(output);
+        updatePos(xidEventBuilder.getEventSize());
         doFlush();
     }
 
@@ -177,6 +183,7 @@ public class BinlogGenerateUtil {
             1,
             0);
         ddlBuilder.write(output);
+        updatePos(ddlBuilder.getEventSize());
         doFlush();
     }
 
@@ -215,6 +222,7 @@ public class BinlogGenerateUtil {
     public long generateRotate(String nextFileName) throws Exception {
         RotateEventBuilder rotateEventBuilder = new RotateEventBuilder(getTimestamp(), serverId, nextFileName, 0);
         rotateEventBuilder.write(output);
+        updatePos(rotateEventBuilder.getEventSize());
         doFlush();
         virtualFile.fileName = nextFileName;
         return virtualFile.offset;
@@ -223,6 +231,7 @@ public class BinlogGenerateUtil {
     public void generateRowsQueryLog(String rowsQueryLog) throws Exception {
         RowsQueryEventBuilder rotateEventBuilder = new RowsQueryEventBuilder(getTimestamp(), serverId, rowsQueryLog);
         rotateEventBuilder.write(output);
+        updatePos(rotateEventBuilder.getEventSize());
         doFlush();
     }
 
@@ -231,6 +240,7 @@ public class BinlogGenerateUtil {
         XAPrepareEventBuilder prepareEventBuilder =
             new XAPrepareEventBuilder(getTimestamp(), serverId, false, 1, 0, data.length, data);
         prepareEventBuilder.write(output);
+        updatePos(prepareEventBuilder.getEventSize());
         doFlush();
     }
 
@@ -253,6 +263,7 @@ public class BinlogGenerateUtil {
         }
         tme.setFieldList(fieldList);
         tme.write(output);
+        updatePos(tme.getEventSize());
 
         for (int r = 1; r < td.dataList.size(); r++) {
             List<String> dataList = td.dataList.get(r);
@@ -286,6 +297,7 @@ public class BinlogGenerateUtil {
         rowData.setBiNullBitMap(nullBitmap);
         reb.addRowData(rowData);
         reb.write(output);
+        updatePos(reb.getEventSize());
         doFlush();
     }
 
@@ -297,6 +309,7 @@ public class BinlogGenerateUtil {
             new SequenceEventBuilder(getTimestamp(),
                 SequenceLogEvent.ENUM_SEQUENCE_TYPE.SNAPSHOT_SEQUENCE.ordinal(), serverId, tso);
         sequenceEventBuilder.write(output);
+        updatePos(sequenceEventBuilder.getEventSize());
         doFlush();
     }
 
@@ -308,6 +321,7 @@ public class BinlogGenerateUtil {
             new SequenceEventBuilder(getTimestamp(),
                 SequenceLogEvent.ENUM_SEQUENCE_TYPE.COMMIT_SEQUENCE.ordinal(), serverId, tso);
         sequenceEventBuilder.write(output);
+        updatePos(sequenceEventBuilder.getEventSize());
         doFlush();
     }
 
@@ -319,6 +333,7 @@ public class BinlogGenerateUtil {
             new GcnEventBuilder(getTimestamp(),
                 2, serverId, tso);
         sequenceEventBuilder.write(output);
+        updatePos(sequenceEventBuilder.getEventSize());
         doFlush();
     }
 
@@ -330,6 +345,7 @@ public class BinlogGenerateUtil {
             new GcnEventBuilder(getTimestamp(),
                 0x00000004, serverId, tso);
         sequenceEventBuilder.write(output);
+        updatePos(sequenceEventBuilder.getEventSize());
         doFlush();
     }
 

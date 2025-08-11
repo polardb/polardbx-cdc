@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote.lindorm;
@@ -87,10 +87,10 @@ public class LindormClient implements AutoCloseable {
         // config s3 client
         String s3Endpoint = "http://" + endPoint + ":" + s3Port;
         this.s3Client = AmazonS3ClientBuilder.standard().
-                withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(s3Endpoint, null)).
-                withPathStyleAccessEnabled(true).
-                withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessKey, accessSecret))).
-                build();
+            withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(s3Endpoint, null)).
+            withPathStyleAccessEnabled(true).
+            withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessKey, accessSecret))).
+            build();
         System.setProperty(SkipMd5CheckStrategy.DISABLE_GET_OBJECT_MD5_VALIDATION_PROPERTY, "true");
     }
 
@@ -140,7 +140,7 @@ public class LindormClient implements AutoCloseable {
             keys.add(new DeleteObjectsRequest.KeyVersion(fileName));
         });
         DeleteObjectsRequest req = new DeleteObjectsRequest(bucketName).
-                withKeys(keys);
+            withKeys(keys);
         DeleteObjectsResult res = s3Client.deleteObjects(req);
         int successfulDeletes = res.getDeletedObjects().size();
         log.info(successfulDeletes + " objects successfully deleted.");
@@ -150,7 +150,6 @@ public class LindormClient implements AutoCloseable {
         log.info("get object meta data of file: {}, in bucket: {}", fileName, bucketName);
         return s3Client.getObjectMetadata(bucketName, fileName);
     }
-
 
     public ListObjectsV2Result listObjects(String bucketName, String path) {
         log.info("list objects in path: {}, bucket: {}", path, bucketName);
@@ -168,9 +167,9 @@ public class LindormClient implements AutoCloseable {
         expTimeMillis += expireTimeInSec * 1000;
         expiration.setTime(expTimeMillis);
         GeneratePresignedUrlRequest generatePresignedUrlRequest =
-                new GeneratePresignedUrlRequest(bucketName, fileName).
-                        withMethod(HttpMethod.GET).
-                        withExpiration(expiration);
+            new GeneratePresignedUrlRequest(bucketName, fileName).
+                withMethod(HttpMethod.GET).
+                withExpiration(expiration);
         URL url = s3Client.generatePresignedUrl(generatePresignedUrlRequest);
         return url.toString();
     }
@@ -191,10 +190,10 @@ public class LindormClient implements AutoCloseable {
      * 数据写入成功后需要调用flush写入的数据才对用户可见
      */
     public WriteFileResponse writeFile(String oid, String bucketName, String fileName,
-                          ByteBuffer src, int srcOffset, int srcLength,
-                          long fileOffset, long fileCrc64) throws  Exception {
+                                       ByteBuffer src, int srcOffset, int srcLength,
+                                       long fileOffset, long fileCrc64) throws Exception {
         WriteFileRequest req = new WriteFileRequest(oid, bucketName, fileName,
-                src, srcOffset, srcLength, fileOffset, fileCrc64, generateAuth("writeFile", null));
+            src, srcOffset, srcLength, fileOffset, fileCrc64, generateAuth("writeFile", null));
         return thriftClient.writeFile(req);
     }
 
@@ -211,7 +210,7 @@ public class LindormClient implements AutoCloseable {
      */
     public FileInfo completeFile(String oid, String bucketName, String fileName) throws Exception {
         CompleteFileRequest req = new CompleteFileRequest(oid, bucketName,
-                fileName, generateAuth("completeFile", null));
+            fileName, generateAuth("completeFile", null));
         return thriftClient.completeFile(req);
     }
 
@@ -265,7 +264,7 @@ public class LindormClient implements AutoCloseable {
     }
 
     private Authorization generateAuth(String action, String stsToken)
-            throws Exception {
+        throws Exception {
         long timestamp = System.currentTimeMillis();
         String sign = signature(timestamp, action);
         Authorization auth = new Authorization(accessKey, sign, timestamp);
@@ -274,7 +273,7 @@ public class LindormClient implements AutoCloseable {
     }
 
     private String signature(long timestamp, String action)
-            throws UnsupportedEncodingException, NoSuchAlgorithmException {
+        throws UnsupportedEncodingException, NoSuchAlgorithmException {
         byte[] hashedPassword = toSHA1(accessSecret.getBytes("utf-8"));
         byte[] akBytes = accessKey.getBytes("utf-8");
         byte[] encodedNameAndPass = toSHA1(merge(hashedPassword, akBytes));
@@ -302,7 +301,7 @@ public class LindormClient implements AutoCloseable {
     }
 
     private String hmacSHA1Signature(byte[] hashedPassword, byte[] encodedNameAndPass, long timestamp, String action)
-            throws UnsupportedEncodingException, NoSuchAlgorithmException {
+        throws UnsupportedEncodingException, NoSuchAlgorithmException {
         byte[] bytes1 = toSHA1(merge((timestamp + "").getBytes("utf-8"), action.getBytes("utf-8"), encodedNameAndPass));
         return xor(bytes1, hashedPassword);
     }

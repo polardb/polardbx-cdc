@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.domain;
@@ -10,13 +10,13 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistory;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
 import org.junit.Test;
 
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
-public class BinlogPhyDdlHistoryTest extends BaseTestWithGmsTables {
+public class BinlogPhyDdlHistoryTest extends BaseTest {
     @Test
     public void testWhitespaceInTable() throws Exception {
         BinlogPhyDdlHistoryMapper map = SpringContextHolder.getObject(BinlogPhyDdlHistoryMapper.class);

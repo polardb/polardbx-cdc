@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
@@ -15,6 +15,7 @@ import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapperExtend;
 import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapperExtend;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapperExtend;
 import com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogPolarxCommandMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
@@ -22,17 +23,20 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogPolarxCommand;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_PURGE_BATCH_SIZE;
 
 /**
  * @author yanfenglin
@@ -45,12 +49,18 @@ public class TableMetaHistoryDbHelper {
     private BinlogLogicMetaHistoryMapper logicMetaHistoryMapper;
 
     @Resource
+    @Setter
     private BinlogLogicMetaHistoryMapperExtend logicMetaHistoryMapperExt;
 
     @Resource
+    @Setter
     private BinlogPhyDdlHistoryMapper phyDdlHistoryMapper;
 
     @Resource
+    private BinlogPhyDdlHistoryMapperExtend phyDdlHistoryMapperExt;
+
+    @Resource
+    @Setter
     private BinlogPolarxCommandMapper polarxCommandMapper;
 
     @Resource
@@ -58,31 +68,24 @@ public class TableMetaHistoryDbHelper {
 
     private int buildMetaSnapshotRetryTimes = 0;
 
-    @Transactional(rollbackFor = Throwable.class)
-    public void tryClean() {
+    public void process() {
         if (log.isDebugEnabled()) {
-            log.debug("begin to manage logic table meta data");
+            log.debug("begin to manage logic and physical table meta data.");
         }
-        String tso = processLogicMeta();
-        tryCleanPhyDDL(tso);
+
+        trySetRebuildTableMetaSnapFlag();
+        String tso = tryCleanLogicDdl();
+        tryCleanPhyDDL(tso, phyDdlHistoryMapperExt);
+
         if (log.isDebugEnabled()) {
-            log.debug("success manage logic table meta data");
+            log.debug("successfully managed logic and physical table meta data");
         }
     }
 
-    /**
-     * 统一清理LogicDDL
-     * 需要判断是否所有 系统不会丢失元数据
-     */
-    private String cleanLogicHistory() {
-        if (log.isDebugEnabled()) {
-            log.debug("begin to clean logic history");
-        }
-        // 查找2个
+    private String tryCleanLogicDdl() {
         List<String> lastest2SnapshotTsoList = logicMetaHistoryMapperExt.getLatest2SnapshotTso();
 
         if (!CollectionUtils.isEmpty(lastest2SnapshotTsoList) && lastest2SnapshotTsoList.size() == 2) {
-            // 倒数第二个tso
             String secondlyRecentTso = lastest2SnapshotTsoList.get(1);
 
             List<BinlogOssRecord> binlogOssRecordList = binlogOssRecordMapperExtend.selectMaxTso();
@@ -103,41 +106,77 @@ public class TableMetaHistoryDbHelper {
                 // secondly recent snap tso > maxTso  ，不能清理，保障最近一个文件有snap可用
                 return null;
             }
-            int deleteCount = 0;
-            if (DynamicApplicationConfig.getBoolean(ConfigKeys.META_PURGE_LOGIC_DDL_SOFT_DELETE_ENABLED)) {
-                deleteCount = logicMetaHistoryMapperExt.softClean(secondlyRecentTso);
-            } else {
-                deleteCount = logicMetaHistoryMapper.delete(s -> s.where(BinlogLogicMetaHistoryDynamicSqlSupport.tso,
-                    SqlBuilder.isLessThan(secondlyRecentTso)));
-            }
-            log.warn("clean logic meta rows count " + deleteCount);
+
+            cleanLogicMeta(secondlyRecentTso, logicMetaHistoryMapperExt);
             return secondlyRecentTso;
         }
         return null;
     }
 
-    private String processLogicMeta() {
-        String tso = cleanLogicHistory();
-        trySetRebuildTableMetaSnapFlag();
-        return tso;
+    int cleanLogicMeta(String secondlyRecentTso, BinlogLogicMetaHistoryMapperExtend logicMetaHistoryMapperExt) {
+        if (log.isDebugEnabled()) {
+            log.debug("begin to clean logic history with checkpoint tso {}.", secondlyRecentTso);
+        }
+
+        int deleteCount = 0;
+        int executeCount = 0;
+        int purgeBatchSize = DynamicApplicationConfig.getInt(META_PURGE_BATCH_SIZE);
+
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.META_PURGE_LOGIC_DDL_SOFT_DELETE_ENABLED)) {
+            while (true) {
+                int result = logicMetaHistoryMapperExt.softClean(secondlyRecentTso, purgeBatchSize);
+                if (result != 0) {
+                    deleteCount += result;
+                    executeCount++;
+                } else {
+                    break;
+                }
+            }
+        } else {
+            while (true) {
+                int result = logicMetaHistoryMapperExt.deleteByTsoWithLimit(secondlyRecentTso, purgeBatchSize);
+                if (result != 0) {
+                    deleteCount += result;
+                    executeCount++;
+                } else {
+                    break;
+                }
+            }
+        }
+        log.warn("clean logic meta rows count : " + deleteCount + ", with execute count " + executeCount);
+        return deleteCount;
     }
 
-    private void tryCleanPhyDDL(String tso) {
+    int tryCleanPhyDDL(String tso, BinlogPhyDdlHistoryMapperExtend phyDdlHistoryMapperExt) {
         if (StringUtils.isNotBlank(tso)) {
             if (DynamicApplicationConfig.getBoolean(ConfigKeys.META_PURGE_LOGIC_DDL_SOFT_DELETE_ENABLED)) {
                 log.warn("skip delete phy ddl count for tso {}, because soft delete is enabled.", tso);
+                return 0;
             } else {
                 // build snap 时会保障发生时， 不会有ddl正在运行或者将要运行， 这里可以安全的清理
-                int deleteCount = phyDdlHistoryMapper
-                    .delete(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.tso, SqlBuilder.isLessThan(tso)));
-                log.info("delete phy ddl count : " + deleteCount);
+                int purgeBatchSize = DynamicApplicationConfig.getInt(META_PURGE_BATCH_SIZE);
+                int deleteCount = 0;
+                int executeCount = 0;
+                while (true) {
+                    int result = phyDdlHistoryMapperExt.deleteByTsoWithLimit(tso, purgeBatchSize);
+                    if (result > 0) {
+                        deleteCount += result;
+                        executeCount++;
+                    } else {
+                        break;
+                    }
+                }
+                log.info("delete phy ddl count : " + deleteCount + ", with execute count " + executeCount);
+                return deleteCount;
             }
         }
+        return 0;
     }
 
-    private long getRegionDDLCount() {
+    private Pair<String, Long> getRegionDDLCount() {
         String latestSnapshotTso = logicMetaHistoryMapperExt.getLatestSnapshotTso();
         long phyCount;
+
         //只计算大于最近一次snap后产生的ddl个数
         if (StringUtils.isNotBlank(latestSnapshotTso)) {
             phyCount = phyDdlHistoryMapper.count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.tso,
@@ -145,7 +184,8 @@ public class TableMetaHistoryDbHelper {
         } else {
             phyCount = phyDdlHistoryMapper.count(s -> s);
         }
-        return phyCount;
+
+        return Pair.of(latestSnapshotTso, phyCount);
     }
 
     private boolean testLastCommandFinish() {
@@ -207,23 +247,30 @@ public class TableMetaHistoryDbHelper {
      * 避免多次重复 设置snapshot， 要求两个指令之间时间间隔至少超过
      * 设置前 需要到 logic表查询当前command是否已经记录，如果记录，则可以设置下一次的snap， 否则不能重复设置
      */
-    private void trySetRebuildTableMetaSnapFlag() {
+    boolean trySetRebuildTableMetaSnapFlag() {
         if (log.isDebugEnabled()) {
             log.debug("try to set rebuild snap command!");
         }
-        // 查找最近snap后产生的ddl数量
-        long phyCount = getRegionDDLCount();
-        log.info("last phy count: " + phyCount);
+
+        // 查找最近snap后产生的物理ddl数量
+        Pair<String, Long> pair = getRegionDDLCount();
+        String latestSnapshotTso = pair.getKey();
+        long phyCount = pair.getValue();
+        log.info("current phy ddl count after max snapshot tso [{}] is {}.", latestSnapshotTso, phyCount);
+
         // 按照各自的ddl数量判断
         int limit = DynamicApplicationConfig.getInt(ConfigKeys.META_BUILD_FULL_SNAPSHOT_THRESHOLD);
         if (phyCount > limit) {
             // 检测上一次指令是否执行结束
             if (!testLastCommandFinish()) {
-                return;
+                return false;
             }
             // 执行新的build指令
             pushNewSnapCommand();
             log.info("success set build meta snap command success!");
+            return true;
+        } else {
+            return false;
         }
     }
 }

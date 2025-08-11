@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote.channel;
@@ -89,6 +89,6 @@ public class OssBinlogFileReadChannel extends AbstractBinlogFileReadChannel {
             throw new OSSException("Get file size from oss error!");
         }
         String[] rangeAndSize = strs[1].split("/");
-        return Integer.parseInt(rangeAndSize[1]);
+        return Long.parseLong(rangeAndSize[1]);
     }
 }

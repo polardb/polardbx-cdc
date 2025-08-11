@@ -1,22 +1,27 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.binlog.util.ConfigPropMap;
 import org.junit.Assert;
 import org.junit.Test;
+import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-public class CnDataSourceTest extends BaseTestWithGmsTables {
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
+
+public class CnDataSourceTest extends BaseTest {
 
     private static int timeoutInSec = 10;
 
@@ -25,27 +30,35 @@ public class CnDataSourceTest extends BaseTestWithGmsTables {
         Field field = ConfigPropMap.class.getDeclaredField("CONFIG_MAP");
         field.setAccessible(true);
         Map<String, String> CONFIG_MAP = (Map<String, String>) field.get(null);
-        CONFIG_MAP.put(ConfigKeys.DATASOURCE_CN_GET_TIMEOUT_IN_SECOND, String.valueOf(timeoutInSec));
-        CnDataSource dataSource = new CnDataSource(null, false);
-        long now = System.currentTimeMillis();
-        PolardbxException exception = null;
+        String oldValue = CONFIG_MAP.get(ConfigKeys.DATASOURCE_CN_GET_TIMEOUT_IN_SECOND);
         try {
-            dataSource.waitNestedAddressReady();
-        } catch (PolardbxException e) {
-            exception = e;
+            CONFIG_MAP.put(ConfigKeys.DATASOURCE_CN_GET_TIMEOUT_IN_SECOND, String.valueOf(timeoutInSec));
+            CnDataSource dataSource = new CnDataSource(null, false);
+            long now = System.currentTimeMillis();
+            PolardbxException exception = null;
+            try {
+                dataSource.waitNestedAddressReady();
+            } catch (PolardbxException e) {
+                exception = e;
+            }
+            Assert.assertTrue(System.currentTimeMillis() - now > TimeUnit.SECONDS.toMillis(timeoutInSec));
+            Assert.assertNotNull(exception);
+        } finally {
+            CONFIG_MAP.put(ConfigKeys.DATASOURCE_CN_GET_TIMEOUT_IN_SECOND, oldValue);
         }
-        Assert.assertTrue(System.currentTimeMillis() - now > TimeUnit.SECONDS.toMillis(timeoutInSec));
-        Assert.assertNotNull(exception);
     }
 
     @Test(timeout = 30000)
     public void testDoNotWait() {
-        setConfig(ConfigKeys.DATASOURCE_CN_GET_TIMEOUT_IN_SECOND, String.valueOf(timeoutInSec));
-        CnDataSource dataSource = new CnDataSource(null, false);
-        long now = System.currentTimeMillis();
-        dataSource.nestedAddresses.add("127.0.0.1");
-        dataSource.waitNestedAddressReady();
-        Assert.assertTrue(System.currentTimeMillis() - now < TimeUnit.SECONDS.toMillis(timeoutInSec));
+        // 加了timeout参数后，会在另一线程执行测试方法，需要单独对DynamicApplicationConfig进行mock
+        try (MockedStatic<DynamicApplicationConfig> appConfig = mockStatic(DynamicApplicationConfig.class)) {
+            when(getInt(ConfigKeys.DATASOURCE_CN_GET_TIMEOUT_IN_SECOND)).thenReturn(timeoutInSec);
+            CnDataSource dataSource = new CnDataSource(null, false);
+            long now = System.currentTimeMillis();
+            dataSource.nestedAddresses.add("127.0.0.1");
+            dataSource.waitNestedAddressReady();
+            Assert.assertTrue(System.currentTimeMillis() - now < TimeUnit.SECONDS.toMillis(timeoutInSec));
+        }
     }
 
 }

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.dump;
@@ -11,6 +11,7 @@ import com.aliyun.polardbx.binlog.canal.core.gtid.GTIDSet;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * 通用的Erosa的链接接口, 用于一般化处理mysql/oracle的解析过程
@@ -28,8 +29,7 @@ public interface ErosaConnection {
      */
     void seek(String binlogfilename, Long binlogPosition, SinkFunction func) throws Exception;
 
-    void dump(String binlogfilename, Long binlogPosition, Long startTimestampMills,
-              SinkFunction func) throws Exception;
+    void dump(String binlogfilename, Long binlogPosition, Long startTimestampMills, SinkFunction func) throws Exception;
 
     void dump(long timestamp, SinkFunction func) throws Exception;
 
@@ -44,4 +44,6 @@ public interface ErosaConnection {
     long binlogFileSize(String searchFileName) throws IOException;
 
     String preFileName(String currentFileName);
+
+    List<String> binlogList();
 }

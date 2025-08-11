@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation;
@@ -43,7 +43,13 @@ public class SqlContextBuilder {
                     lowerCondition.append(String.format("`%s`", escape(KeyNames.get(j)))).append(" = ? AND ");
                     params.add(lowerBound.get(j));
                 }
-                lowerCondition.append(String.format("`%s`", escape(KeyNames.get(i)))).append(" >= ?");
+                // 多列情况下，区间左端点的带全key列条件的最后一列才需要是 >= ，否则和之前校验的区间会有重复
+                // 极端情况下，例如key列为多列，并且第一列全为同一值，原先的错误方案会造成一直从表所有数据的最小端开始校验
+                if (i == KeyNames.size() - 1) {
+                    lowerCondition.append(String.format("`%s`", escape(KeyNames.get(i)))).append(" >= ?");
+                } else {
+                    lowerCondition.append(String.format("`%s`", escape(KeyNames.get(i)))).append(" > ?");
+                }
                 params.add(lowerBound.get(i));
                 lowerCondition.append(")");
             }
@@ -58,10 +64,10 @@ public class SqlContextBuilder {
                 }
                 upperCondition.append("(");
                 for (int j = 0; j < i; j++) {
-                    upperCondition.append(KeyNames.get(j)).append(" = ? AND ");
+                    upperCondition.append(String.format("`%s`", escape(KeyNames.get(j)))).append(" = ? AND ");
                     params.add(upperBound.get(j));
                 }
-                upperCondition.append(KeyNames.get(i)).append(" < ?");
+                upperCondition.append(String.format("`%s`", escape(KeyNames.get(i)))).append(" < ?");
                 params.add(upperBound.get(i));
                 upperCondition.append(")");
             }

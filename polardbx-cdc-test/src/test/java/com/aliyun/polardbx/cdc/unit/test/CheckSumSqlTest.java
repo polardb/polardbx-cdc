@@ -1,12 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.unit.test;
 
-import com.aliyun.polardbx.cdc.qatest.check.bothcheck.common.DataConsistencyTest;
+import com.aliyun.polardbx.cdc.qatest.check.bothcheck.binlog.DataConsistencyTest;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;

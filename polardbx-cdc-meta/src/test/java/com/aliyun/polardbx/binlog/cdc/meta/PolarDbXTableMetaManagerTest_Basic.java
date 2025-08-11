@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
@@ -11,9 +11,11 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
+import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
+import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.MockData;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.google.common.collect.Sets;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
@@ -30,10 +32,12 @@ import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_ENABLED;
-import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildSnapshotTopology;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @Slf4j
-public class PolarDbXTableMetaManagerTest_Basic extends BaseTestWithGmsTables {
+public class PolarDbXTableMetaManagerTest_Basic extends BaseTest {
 
     private static final String STORAGE_INST_ID = "polardbx-storage-0-master";
     private final Supplier<Boolean> hiddenPkSupplier = () -> false;
@@ -42,14 +46,14 @@ public class PolarDbXTableMetaManagerTest_Basic extends BaseTestWithGmsTables {
 
     @Before
     public void before() {
-        setConfig(META_PERSIST_ENABLED, "OFF");
-        setConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
+        mockConfig(META_PERSIST_ENABLED, "OFF");
+        mockConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
         buildMetaManager();
     }
 
     @Test
     public void testApply() {
-        LogicMetaTopology x = buildTopology("000",
+        LogicMetaTopology x = buildSnapshotTopology("000",
             () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
 
         PolarDbXTableMetaManager metaManager1 = new PolarDbXTableMetaManager("polardbx-storage-0-master",
@@ -76,7 +80,7 @@ public class PolarDbXTableMetaManagerTest_Basic extends BaseTestWithGmsTables {
     @Test
     public void testFindPhyTable() {
         // prepare data
-        LogicMetaTopology x = buildTopology("000",
+        LogicMetaTopology x = buildSnapshotTopology("000",
             () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
 
         // remove some physical table
@@ -99,7 +103,7 @@ public class PolarDbXTableMetaManagerTest_Basic extends BaseTestWithGmsTables {
         });
 
         // check
-        x = buildTopology("000",
+        x = buildSnapshotTopology("000",
             () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
         Set<Pair<String, String>> checkSet = new HashSet<>();
         x.getLogicDbMetas().forEach(d -> {
@@ -130,7 +134,7 @@ public class PolarDbXTableMetaManagerTest_Basic extends BaseTestWithGmsTables {
 
     @Test
     public void testMetaCache() throws NoSuchFieldException, IllegalAccessException, InterruptedException {
-        LogicMetaTopology x = buildTopology("000",
+        LogicMetaTopology x = buildSnapshotTopology("000",
             () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
 
         PolarDbXTableMetaManager metaManager1 = new PolarDbXTableMetaManager("polardbx-storage-0-master",
@@ -142,10 +146,20 @@ public class PolarDbXTableMetaManagerTest_Basic extends BaseTestWithGmsTables {
         field.setAccessible(true);
         Map<String, LogicTableMeta> cache = (Map<String, LogicTableMeta>) field.get(metaManager1);
         Assert.assertEquals(1, cache.size());
-        setConfig(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED, "true");
+        mockConfig(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED, "true");
         DynamicApplicationConfig.setValue(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED, "true");
         Thread.sleep(10000);
         Assert.assertEquals(0, cache.size());
+    }
+
+    @Test
+    public void testCloneAndProcessBeforeApply() {
+        DDLExtInfo ddlExtInfo = mock(DDLExtInfo.class);
+        when(ddlExtInfo.getSqlMode()).thenReturn("");
+        DDLRecord ddlRecord =
+            new DDLRecord(1L, 1L, "FLUSH_LOGS", "test", "test", "CREATE TABLE test", "test", 1, ddlExtInfo);
+        DDLRecord res = PolarDbXTableMetaManager.cloneAndProcessBeforeApply(ddlRecord);
+        Assert.assertEquals(ddlRecord.getExtInfo().getSqlMode(), res.getExtInfo().getSqlMode());
     }
 
     private void buildMetaManager() {

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog;
@@ -53,6 +53,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.text.MessageFormat;
 import java.util.BitSet;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL_MS;
@@ -90,6 +91,10 @@ public final class LogDecoder {
 
     protected boolean needFixRotate = true;
 
+    protected long curMaxPosition = 0;
+    protected long totalMaxPosition = 0;
+    protected boolean needFixBigBinlogFileLogPos = true;
+
     public LogDecoder() {
     }
 
@@ -97,12 +102,50 @@ public final class LogDecoder {
         handleSet.set(fromIndex, toIndex);
     }
 
+
+    public LogEvent decode(LogBuffer buffer, LogHeader header, LogContext context) throws IOException {
+        LogEvent event = innerDecode(buffer, header, context);
+        if (needFixBigBinlogFileLogPos){
+            if (header.getType() == LogEvent.HEARTBEAT_LOG_EVENT ||
+                header.getType() == LogEvent.ROTATE_EVENT){
+                // 忽略心跳事件和ROTATE_EVENT
+                // rotate event logPosition和header.getLogPos 值不同
+                return event;
+            }
+            long curPosition = header.getLogPos();
+            // position 回退， 需要调整保证递增
+            // position 使用4bytes记录， 每超过4bytes，会回退一次，重新开始，此处使用此算法(totalMaxPosition + curPosition)方式，
+            // 避免服务器端生成的虚拟event被误统计到位点当中的情况，也会保证event的位点幂等性和单调递增的特性。
+            // totalMaxPosition 和 curMaxPosition 在文件rotate的时候，自动归0， 针对 rotate 文件出现在文件中的时候，在rotate处做了判断
+            String warningMsg = null;
+            if (curPosition < curMaxPosition){
+                warningMsg = String.format("receive log pos reset event, will use history max pos to make position linearly increasing, last max pos %d, cur pos %d, history max pos %d",
+                    curMaxPosition, curPosition, totalMaxPosition);
+                // 计算真实文件中的offset
+                long length = header.getEventLen();
+                totalMaxPosition = totalMaxPosition + curMaxPosition + length - curPosition;
+            }
+            curMaxPosition = curPosition;
+            if (totalMaxPosition == 0){
+                // 不需要调整
+                return event;
+            }
+            if (warningMsg != null){
+                logger.warn(warningMsg);
+            }
+            long newPos = curPosition + totalMaxPosition;
+            header.setLogPos(newPos);
+            context.getLogPosition().position = newPos;
+        }
+
+        return event;
+    }
     /**
      * Deserialize an event from buffer.
      *
      * @return <code>UknownLogEvent</code> if event type is unknown or skipped.
      */
-    public LogEvent decode(LogBuffer buffer, LogHeader header, LogContext context) throws IOException {
+    protected LogEvent innerDecode(LogBuffer buffer, LogHeader header, LogContext context) throws IOException {
         FormatDescriptionLogEvent descriptionEvent = context.getFormatDescription();
         LogPosition logPosition = context.getLogPosition();
 
@@ -174,12 +217,18 @@ public final class LogDecoder {
         }
         case LogEvent.ROTATE_EVENT: {
             RotateLogEvent event = new RotateLogEvent(header, buffer, descriptionEvent);
+            final RotateLogEvent oldEvent = event;
             if (needFixRotate) {
                 event = tryFixRotateEvent(event, logPosition);
             }
             /* updating position in context */
             logPosition = new LogPosition(event.getFilename(), event.getPosition());
             context.setLogPosition(logPosition);
+            // 只有正常rotate event ， 触发maxPosition 归0
+            if (oldEvent == event){
+                curMaxPosition = 0;
+                totalMaxPosition = 0;
+            }
             return event;
         }
         case LogEvent.LOAD_EVENT:
@@ -558,5 +607,9 @@ public final class LogDecoder {
 
     public void setNeedRecordData(boolean needRecordData) {
         this.needRecordData = needRecordData;
+    }
+
+    public void setNeedFixBigBinlogFileLogPos(boolean needFixBigBinlogFileLogPos) {
+        this.needFixBigBinlogFileLogPos = needFixBigBinlogFileLogPos;
     }
 }

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.backup;
@@ -59,6 +59,7 @@ import java.util.stream.Collectors;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_UPLOAD_MAX_THREAD_NUM;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_KEY;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_VALUE_BINLOG_BACKUP;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 
 /**
@@ -133,6 +134,7 @@ public class BinlogUploadManager implements Runnable {
     private final ScheduledThreadPoolExecutor keepAliveExecutor;
     @Getter
     private final boolean isLabEnv;
+    private final int scanUploadIntervalMs;
 
     public BinlogUploadManager(StreamContext context, Map<String, MetricsObserver> metrics) {
         this.recordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
@@ -147,7 +149,7 @@ public class BinlogUploadManager implements Runnable {
         this.streamList = context.getStreamList();
         this.clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
         this.isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
-
+        this.scanUploadIntervalMs = getInt(ConfigKeys.BINLOG_BACKUP_UPLOAD_SCAN_INTERVAL_MS);
         this.metricsObserverMap = metrics;
 
         fileSystemMap = new HashMap<>();
@@ -196,7 +198,7 @@ public class BinlogUploadManager implements Runnable {
             while (runnable) {
                 try {
                     // 每隔一段时间进行一轮扫描上传
-                    Thread.sleep(1000);
+                    Thread.sleep(scanUploadIntervalMs);
                     if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
                         continue;
                     }

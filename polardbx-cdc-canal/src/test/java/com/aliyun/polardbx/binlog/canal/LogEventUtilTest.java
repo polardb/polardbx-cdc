@@ -1,12 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal;
 
 import org.apache.commons.lang3.StringUtils;
+import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
@@ -85,9 +86,29 @@ public class LogEventUtilTest {
 
     @Test
     public void testValidXid() {
-        String xid =
-            "X'504f4c415244422d582d5245434f5645522d5441534b4031356534353366646234383031303030',X'6e6f726d616c2d636f6d6d69742d32',2";
-        System.out.println(LogEventUtil.isValidXid(xid));
+        String xid = "X'504f4c415244422d582d5245434f5645522d5441534b4031356534353366646234383031303030'"
+            + ",X'6e6f726d616c2d636f6d6d69742d32',2";
+        Assert.assertFalse(LogEventUtil.isValidXid(xid));
+
+        xid = "X'504f4c415244422d582d5245434f5645522d5441534b4031356534353366646234383031303030'"
+            + ",X'6e6f726d616c2d636f6d6d69742d32',1";
+        Assert.assertTrue(LogEventUtil.isValidXid(xid));
+
+        xid = "X'504f4c415244422d582d5245434f5645522d5441534b4031356534353366646234383031303030'"
+            + ",X'6e6f726d616c2d636f6d6d69742d32',3";
+        Assert.assertTrue(LogEventUtil.isValidXid(xid));
+
+        xid = "X'504f4c415244422d582d5245434f5645522d5441534b4031356534353366646234383031303030'"
+            + ",X'6e6f726d616c2d636f6d6d69742d32',10001";
+        Assert.assertTrue(LogEventUtil.isValidXid(xid));
+
+        xid = "X'504f4c415244422d582d5245434f5645522d5441534b4031356534353366646234383031303030'"
+            + ",X'6e6f726d616c2d636f6d6d69742d32',10002";
+        Assert.assertTrue(LogEventUtil.isValidXid(xid));
+
+        xid = "X'504f4c415244422d582d5245434f5645522d5441534b4031356534353366646234383031303030'"
+            + ",X'6e6f726d616c2d636f6d6d69742d32',10003";
+        Assert.assertTrue(LogEventUtil.isValidXid(xid));
     }
 
     public String toXidString(long transId, String group, long primaryGroupUid) {

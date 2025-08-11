@@ -1,15 +1,16 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.unit;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
-import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
-import com.aliyun.polardbx.binlog.proc.ProcUtils;
 import lombok.Data;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
@@ -24,18 +25,18 @@ public class StatMetrics {
 
     private static final Logger logger = LoggerFactory.getLogger(StatMetrics.class);
     private static final StatMetrics INSTANCE = new StatMetrics();
-    private StatisticCounter outMessageCount = new StatisticCounter();
-    private StatisticCounter applyCount = new StatisticCounter();
-    private StatisticCounter inMessageCount = new StatisticCounter();
-    private StatisticCounter outBytesCount = new StatisticCounter();
-    private StatisticCounter inBytesCount = new StatisticCounter();
-    private StatisticCounter insertMessageCount = new StatisticCounter();
-    private StatisticCounter updateMessageCount = new StatisticCounter();
-    private StatisticCounter deleteMessageCount = new StatisticCounter();
+    private AtomicLong outMessageCount = new AtomicLong();
+    private AtomicLong applyCount = new AtomicLong();
+    private AtomicLong inMessageCount = new AtomicLong();
+    private AtomicLong outBytesCount = new AtomicLong();
+    private AtomicLong inBytesCount = new AtomicLong();
+    private AtomicLong insertMessageCount = new AtomicLong();
+    private AtomicLong updateMessageCount = new AtomicLong();
+    private AtomicLong deleteMessageCount = new AtomicLong();
     private AtomicLong receiveDelay = new AtomicLong();
     private AtomicLong processDelay = new AtomicLong();
-    private StatisticCounter mergeBatchSize = new StatisticCounter();
-    private StatisticCounter rt = new StatisticCounter();
+    private AtomicLong mergeBatchSize = new AtomicLong();
+    private AtomicLong rt = new AtomicLong();
     private AtomicLong skipCounter = new AtomicLong();
     private AtomicLong skipExceptionCounter = new AtomicLong();
     private AtomicLong persistentMessageCounter = new AtomicLong();
@@ -74,9 +75,9 @@ public class StatMetrics {
 
     public void doStatOut(long insertCount, long updateCount, long deleteCount, long byteSize, DBMSEvent lastEvent) {
         addOutBytes(byteSize);
-        deleteMessageCount.add(deleteCount);
-        updateMessageCount.add(updateCount);
-        insertMessageCount.add(insertCount);
+        deleteMessageCount.getAndAdd(deleteCount);
+        updateMessageCount.getAndAdd(updateCount);
+        insertMessageCount.getAndAdd(insertCount);
         addOutMessageCount(deleteCount + updateCount + insertCount);
         if (lastEvent != null) {
             doStatOutDelay(lastEvent);
@@ -94,19 +95,19 @@ public class StatMetrics {
     }
 
     public void addOutMessageCount(long count) {
-        outMessageCount.add(count);
+        outMessageCount.getAndAdd(count);
     }
 
     public void addMergeBatchSize(long count) {
-        mergeBatchSize.add(count);
+        mergeBatchSize.getAndAdd(count);
     }
 
     public void addRt(long count) {
-        rt.add(count);
+        rt.getAndAdd(count);
     }
 
     public void addApplyCount(long count) {
-        applyCount.add(count);
+        applyCount.getAndAdd(count);
     }
 
     public void addSkipCount(long count) {
@@ -118,15 +119,15 @@ public class StatMetrics {
     }
 
     public void addInMessageCount(long count) {
-        inMessageCount.add(count);
+        inMessageCount.getAndAdd(count);
     }
 
     public void addInBytes(long count) {
-        inBytesCount.add(count);
+        inBytesCount.getAndAdd(count);
     }
 
     public void addOutBytes(long count) {
-        outBytesCount.add(count);
+        outBytesCount.getAndAdd(count);
     }
 
     public void setReceiveDelay(long delay) {
@@ -145,16 +146,15 @@ public class StatMetrics {
         persistentMessageCounter.addAndGet(-delNum);
     }
 
-    public long getPeriodCommitCount() {
-        return periodCommitCount.getAndSet(0);
-    }
-
-    public long getReceiveDelay() {
-        return receiveDelay.getAndSet(0);
-    }
-
-    public long getProcessDelay() {
-        return processDelay.getAndSet(0);
+    public void addCommitCount(List<DBMSEvent> events) {
+        long eventSize = 0;
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)){
+            eventSize = events.stream().filter(event -> (!(event instanceof DefaultQueryLog) ||
+                (((DefaultQueryLog) event).getQuery().contains("# POLARX_TSO=")))).count();
+        }else{
+            eventSize = events.size();
+        }
+        addCommitCount(eventSize);
     }
 
     public void addCommitCount(long addCount) {

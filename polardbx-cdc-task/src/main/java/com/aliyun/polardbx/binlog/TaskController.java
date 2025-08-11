@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog;
@@ -10,12 +10,11 @@ import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
+import com.aliyun.polardbx.binlog.extractor.DnHealthCheckerManager;
 import com.aliyun.polardbx.binlog.metrics.MetricsManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.rpc.TxnStreamRpcServer;
-import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,8 +22,6 @@ import org.springframework.dao.DuplicateKeyException;
 
 import java.io.IOException;
 import java.util.Optional;
-
-import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_ENGINE_AUTO_START;
 
 /**
  * Created by ziyang.lb
@@ -41,6 +38,7 @@ public class TaskController {
     private TaskEngine taskEngine;
     private TxnStreamRpcServer rpcServer;
     private volatile boolean running;
+    private DnHealthCheckerManager checker;
 
     public TaskController(String cluster, TaskConfigProvider taskConfigProvider) {
         this.cluster = cluster;
@@ -60,18 +58,16 @@ public class TaskController {
 
         // 系统启动时不需要知道startTSO，但为了测试方便，此处允许从TaskInfo获取；如果startTSO为空，则不启动TaskEngine
         taskEngine = new TaskEngine(taskConfigProvider, taskRuntimeConfig);
-        if (StringUtils.isNotBlank(taskRuntimeConfig.getStartTSO())
-            || DynamicApplicationConfig.getBoolean(TASK_ENGINE_AUTO_START)
-            || taskRuntimeConfig.getType() == TaskType.Dispatcher) {
-            taskEngine.start(taskRuntimeConfig.getStartTSO());
-        }
+        taskEngine.start();
 
         rpcServer = new TxnStreamRpcServer(taskRuntimeConfig.getServerPort(), taskEngine, taskRuntimeConfig.getType());
         rpcServer.setVersion(taskRuntimeConfig.getBinlogTaskConfig().getVersion());
         rpcServer.start();
+        this.checker = SpringContextHolder.getObject(DnHealthCheckerManager.class);
 
         metricsManager.start();
         MonitorManager.getInstance().startup();
+        checker.start();
 
         logger.info("task controller started.");
     }
@@ -96,6 +92,7 @@ public class TaskController {
 
         metricsManager.stop();
         MonitorManager.getInstance().shutdown();
+        checker.stop();
 
         logger.info("task controller stopped.");
     }

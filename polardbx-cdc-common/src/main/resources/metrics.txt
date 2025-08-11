@@ -15,6 +15,7 @@
 |polardbx_cdc_dumper_m_youngCollectionTime|dumper_m_youngCollectionTime|累计值|-|dumper master年轻代GC时间|
 |polardbx_cdc_dumper_m_oldCollectionTime|dumper_m_oldCollectionTime|累计值|-|dumper master老年代GC时间|
 |polardbx_cdc_dumper_m_currentThreadCount|dumper_m_currentThreadCount|瞬时值|-|dumper master线程数|
+|polardbx_cdc_dumper_m_consumerCount|dumper_m_consumerCount|瞬时值|consumerCount|dumper master下游消费链路个数|
 |polardbx_cdc_dumper_s_delay|dumper_s_delay|平均值|latestDelayTimeOnCommit|dumper slave延迟时间|
 |polardbx_cdc_dumper_s_eps|dumper_s_eps|平均值|avgWriteEps|dumper slave每秒处理Event的个数|
 |polardbx_cdc_dumper_s_tps|dumper_s_tps|平均值|avgWriteTps|dumper slave每秒处理事务的个数|
@@ -31,8 +32,10 @@
 |polardbx_cdc_dumper_s_youngCollectionTime|dumper_s_youngCollectionTime|累计值|-|dumper slave年轻代GC时间|
 |polardbx_cdc_dumper_s_oldCollectionTime|dumper_s_oldCollectionTime|累计值|-|dumper slave老年代GC时间|
 |polardbx_cdc_dumper_s_currentThreadCount|dumper_s_currentThreadCount|瞬时值|-|dumper slave当前线程数|
+|polardbx_cdc_dumper_s_consumerCount|dumper_s_consumerCount|瞬时值|consumerCount|dumper slave下游消费链路个数|
 |polardbx_cdc_dumper_upload_bps|dumper_upload_bps|平均值|avgUploadBps|dumper每秒上传的字节数|
 |polardbx_cdc_dumper_dump_bps|dumper_dump_bps|平均值|avgDumpBps|dumper每秒通过dump协议发送的字节数|
+|polardbx_cdc_dumper_sync_bps|dumper_sync_bps|平均值|avgSyncBps|dumper每秒通过sync协议发送的字节数|
 |polardbx_cdc_dumper_rev_buf_size|dumper_rev_buf_size|平均值|receiveQueueSize|dumper数据接收缓冲队列大小|
 |polardbx_cdc_dumper_write_buf_size|dumper_write_buf_size|平均值|writeQueueSize|dumper数据写入缓冲队列大小|
 |polardbx_cdc_dumper_cpu_percent|dumper_cpu_percent|瞬时值|-|dumper进程CPU使用率|
@@ -127,6 +130,10 @@
 |polardbx_cdc_dumper_x_max_dump_bps|dumper_x_max_dump_bps|瞬时值|maxDumpBps|dumperx上所有流的最大dump bps|
 |polardbx_cdc_dumper_x_min_dump_bps|dumper_x_min_dump_bps|瞬时值|minDumpBps|dumperx上所有流的最小dump bps|
 |polardbx_cdc_dumper_x_sum_dump_bps|dumper_x_sum_dump_bps|瞬时值|sumDumpBps|dumperx上所有流的dump bps求和|
+|polardbx_cdc_dumper_x_avg_sync_bps|dumper_x_avg_sync_bps|瞬时值|avgSyncBps|dumperx上所有流的平均sync bps|
+|polardbx_cdc_dumper_x_max_sync_bps|dumper_x_max_sync_bps|瞬时值|maxSyncBps|dumperx上所有流的最大sync bps|
+|polardbx_cdc_dumper_x_min_sync_bps|dumper_x_min_sync_bps|瞬时值|minSyncBps|dumperx上所有流的最小sync bps|
+|polardbx_cdc_dumper_x_sum_sync_bps|dumper_x_sum_sync_bps|瞬时值|sumSyncBps|dumperx上所有流的sync bps求和|
 |polardbx_cdc_dumper_x_avg_write_buf_size|dumper_x_avg_write_buf_size|瞬时值|avgWriteQueueSize|dumperx上所有流的平均write_buf_size|
 |polardbx_cdc_dumper_x_max_write_buf_size|dumper_x_max_write_buf_size|瞬时值|maxWriteQueueSize|dumperx上所有流的最大write_buf_size|
 |polardbx_cdc_dumper_x_min_write_buf_size|dumper_x_min_write_buf_size|瞬时值|minWriteQueueSize|dumperx上所有流的最小write_buf_size|

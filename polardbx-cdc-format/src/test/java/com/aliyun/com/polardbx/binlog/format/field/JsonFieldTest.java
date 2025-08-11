@@ -1,26 +1,43 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.com.polardbx.binlog.format.field;
 
 import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
+import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogBuffer;
 import com.aliyun.polardbx.binlog.format.field.Field;
 import com.aliyun.polardbx.binlog.format.field.MakeFieldFactory;
 import com.google.common.collect.Lists;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.RandomUtils;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.io.File;
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.List;
 
 public class JsonFieldTest {
     private static final String defaultCharset = "utf8";
+
+
+    @Test
+    public void testBigJson() throws IOException {
+        String bigJson = FileUtils.readFileToString(new File(JsonFieldTest.class.getResource("/big_json_test.json").getFile()), "utf8");
+        Field field = MakeFieldFactory.makeField("json", bigJson, defaultCharset, true, false);
+        byte[] data = field.encode();
+        System.out.println(field.encode().length);
+        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(new LogBuffer(data, 0, data.length), 1, "utf8");
+        Serializable json = rowsLogBuffer.nextValue(field.getMysqlType().getType(), 4);
+        Assert.assertEquals(bigJson, json.toString());
+    }
 
     @Test
     public void testNull() {
@@ -34,6 +51,24 @@ public class JsonFieldTest {
         Field field = MakeFieldFactory.makeField("json", "1", defaultCharset, true, false);
         Assert.assertArrayEquals(new byte[] {4}, field.doGetTableMeta());
         Assert.assertArrayEquals(new byte[] {3, 0, 0, 0, 5, 1, 0}, field.encode());
+    }
+
+    @Test
+    public void test1Empty() {
+        Field field = MakeFieldFactory.makeField("json", "[]", defaultCharset, true, false);
+        byte[] data = field.encode();
+        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(new LogBuffer(data, 0, data.length), 1, "utf8");
+        Serializable json = rowsLogBuffer.nextValue(field.getMysqlType().getType(), 4);
+        Assert.assertEquals("[]", json.toString());
+    }
+
+    @Test
+    public void test2Empty() {
+        Field field = MakeFieldFactory.makeField("json", "{}", defaultCharset, true, false);
+        byte[] data = field.encode();
+        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(new LogBuffer(data, 0, data.length), 1, "utf8");
+        Serializable json = rowsLogBuffer.nextValue(field.getMysqlType().getType(), 4);
+        Assert.assertEquals("{}", json.toString());
     }
 
     @Test
@@ -151,6 +186,9 @@ public class JsonFieldTest {
         Field field = MakeFieldFactory.makeField("json", jsonBuilder.toString(),
             defaultCharset, true, false);
         Assert.assertArrayEquals(new byte[] {4}, field.doGetTableMeta());
-        System.out.println(field.encode().length);
+        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(new LogBuffer(field.encode(), 0, field.encode().length), 1, "utf8");
+        Serializable json = rowsLogBuffer.nextValue(field.getMysqlType().getType(), 4);
+        String expect = JSON.parseObject(jsonBuilder.toString()).toJSONString();
+        Assert.assertEquals(expect, json.toString());
     }
 }

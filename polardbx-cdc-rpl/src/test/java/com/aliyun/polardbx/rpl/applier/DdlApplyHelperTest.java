@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
@@ -116,7 +116,7 @@ public class DdlApplyHelperTest extends RplWithGmsTablesBaseTest {
 
     @Test
     public void testTryAttachAsyncDdlHints() {
-        setConfig(ConfigKeys.RPL_ASYNC_DDL_ENABLED, "true");
+        mockConfig(ConfigKeys.RPL_ASYNC_DDL_ENABLED, "true");
         /*
          * analyze table
          */
@@ -323,6 +323,15 @@ public class DdlApplyHelperTest extends RplWithGmsTablesBaseTest {
         Assert.assertTrue(pair.getValue());
     }
 
+    @Test
+    public void testTryRemoveColumnarIndex_4_CallColumnarSetConfig() {
+        String sql = "CALL polardbx.columnar_set_config(256, 'TYPE', 'SNAPSHOT')";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+        Pair<Boolean, Boolean> pair = tryRemoveColumnarIndex(statement, null);
+        Assert.assertTrue(pair.getKey());
+        Assert.assertFalse(pair.getValue());
+    }
+
     private void tryAttacheAndCheck(String sql) {
         String result = tryAttachAsyncDdlHints(sql, Long.MAX_VALUE);
         Assert.assertEquals(RplConstants.ASYNC_DDL_HINTS + sql, result);
@@ -385,6 +394,8 @@ public class DdlApplyHelperTest extends RplWithGmsTablesBaseTest {
         Statement statement = Mockito.mock(Statement.class);
         ResultSet resultSet1 = Mockito.mock(ResultSet.class);
         ResultSet resultSet2 = Mockito.mock(ResultSet.class);
+        ResultSet resultSet3 = Mockito.mock(ResultSet.class);
+        ResultSet resultSet4 = Mockito.mock(ResultSet.class);
 
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
@@ -394,14 +405,31 @@ public class DdlApplyHelperTest extends RplWithGmsTablesBaseTest {
         when(statement.executeQuery(
             "show full processlist where info like '%token2%' and info not like 'show full processlist%'")).thenReturn(
             resultSet2);
+        when(statement.executeQuery("select * from metadb.db_info where db_status!=0 and db_name='d1'")).thenReturn(
+            resultSet3);
+        when(statement.executeQuery("select * from metadb.db_info where db_status!=0 and db_name='d2'")).thenReturn(
+            resultSet4);
         when(resultSet1.next()).thenReturn(true);
         when(resultSet2.next()).thenReturn(false);
+        when(resultSet3.next()).thenReturn(true);
+        when(resultSet4.next()).thenReturn(false);
 
         try {
-            DdlApplyHelper.tryWaitCreateOrDropDatabase(dataSource, "token1", 5);
+            DdlApplyHelper.tryWaitCreateOrDropDatabase(dataSource, "token1", "000000", 2, "d1");
             Assert.fail();
         } catch (TimeoutException ignored) {
         }
-        DdlApplyHelper.tryWaitCreateOrDropDatabase(dataSource, "token2", 5);
+        try {
+            DdlApplyHelper.tryWaitCreateOrDropDatabase(dataSource, "token1", "000000", 2, "d2");
+            Assert.fail();
+        } catch (TimeoutException ignored) {
+        }
+        try {
+            DdlApplyHelper.tryWaitCreateOrDropDatabase(dataSource, "token2", "000000", 2, "d1");
+            Assert.fail();
+        } catch (TimeoutException ignored) {
+        }
+
+        DdlApplyHelper.tryWaitCreateOrDropDatabase(dataSource, "token2", "000000", 5, "d2");
     }
 }

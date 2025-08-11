@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.domain;
@@ -19,7 +19,7 @@ public enum TaskType {
      */
     Final,
     /**
-     * 分发类型，将Binlog按照主键ID进行Hash分发
+     * 分发类型，将Binlog按照拆分策略进行分发
      */
     Dispatcher,
     /**

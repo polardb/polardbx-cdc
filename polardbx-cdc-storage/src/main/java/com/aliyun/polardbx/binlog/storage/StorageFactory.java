@@ -1,15 +1,15 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.storage;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.MEM_SIZE;
+import java.io.File;
+
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_CLEAN_WORKER_COUNT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_BASE_PATH;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_DELETE_MODE;
@@ -19,34 +19,34 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_NEW_THRESHOL
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_TXNITEM_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_TXN_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_UNIT_COUNT;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getDouble;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
 /**
  * created by ziyang.lb
  **/
 public class StorageFactory {
-    private static final Storage INSTANCE = buildStorage();
 
-    public static Storage getStorage() {
-        return INSTANCE;
+    public static Storage createStorage(String identifier, boolean oneStoragePerDn) {
+        return buildStorage(identifier, oneStoragePerDn);
     }
 
-    private static Storage buildStorage() {
-        int memory = DynamicApplicationConfig.getInt(MEM_SIZE);
-        int repoUnitCount = DynamicApplicationConfig.getInt(STORAGE_PERSIST_UNIT_COUNT);
-        //内存小于15G时，repoUnitCount设定为1，保证rocksdb有足够内存空间，大于15G时用config文件默认配置
-        if (memory < 15360) {
-            repoUnitCount = 1;
-        }
-        return new LogEventStorage(new Repository(DynamicApplicationConfig.getBoolean(STORAGE_PERSIST_ENABLE),
-            DynamicApplicationConfig.getString(STORAGE_PERSIST_BASE_PATH) + "/" + DynamicApplicationConfig
-                .getString(ConfigKeys.TASK_NAME),
-            PersistMode.valueOf(DynamicApplicationConfig.getString(STORAGE_PERSIST_MODE)),
-            DynamicApplicationConfig.getDouble(STORAGE_PERSIST_NEW_THRESHOLD),
-            DynamicApplicationConfig.getInt(STORAGE_PERSIST_TXN_THRESHOLD),
-            DynamicApplicationConfig.getInt(STORAGE_PERSIST_TXNITEM_THRESHOLD),
-            DeleteMode.valueOf(DynamicApplicationConfig.getString(STORAGE_PERSIST_DELETE_MODE)),
-            repoUnitCount),
-            DynamicApplicationConfig.getInt(STORAGE_CLEAN_WORKER_COUNT));
+    private static Storage buildStorage(String identifier, boolean oneStoragePerDn) {
+        int repoUnitCount = oneStoragePerDn ? 1 : getInt(STORAGE_PERSIST_UNIT_COUNT);
+        int cleanWorkerCount = oneStoragePerDn ? 1 : getInt(STORAGE_CLEAN_WORKER_COUNT);
+        String persistPath = getString(STORAGE_PERSIST_BASE_PATH) + File.pathSeparator +
+            getString(ConfigKeys.TASK_NAME) + File.pathSeparator + identifier;
 
+        Repository repository = new Repository(getBoolean(STORAGE_PERSIST_ENABLE),
+            persistPath,
+            PersistMode.valueOf(getString(STORAGE_PERSIST_MODE)),
+            getDouble(STORAGE_PERSIST_NEW_THRESHOLD),
+            getInt(STORAGE_PERSIST_TXN_THRESHOLD),
+            getInt(STORAGE_PERSIST_TXNITEM_THRESHOLD),
+            DeleteMode.valueOf(getString(STORAGE_PERSIST_DELETE_MODE)),
+            repoUnitCount);
+        return new LogEventStorage(identifier, repository, cleanWorkerCount);
     }
 }

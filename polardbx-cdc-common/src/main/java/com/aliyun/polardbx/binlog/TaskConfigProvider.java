@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog;
@@ -70,29 +70,13 @@ public class TaskConfigProvider {
         List<MergeSourceInfo> sourceInfos = new ArrayList<>();
         if (mergeSourceType == MergeSourceType.BINLOG) {
             AtomicInteger num = new AtomicInteger();
-
             config.getSources().forEach(p -> {
-                MergeSourceInfo info = new MergeSourceInfo();
-                info.setId(String.format("%s-db-%s", num.getAndIncrement(), p));
-                info.setType(mergeSourceType);
-
-                BinlogParameter parameter = new BinlogParameter();
-                parameter.setStorageInstId(p);
-                info.setBinlogParameter(parameter);
-
+                MergeSourceInfo info = buildBinlogMergeSourceInfo(num.getAndIncrement(), p);
                 sourceInfos.add(info);
             });
         } else if (mergeSourceType == MergeSourceType.RPC) {
             config.getSources().forEach(p -> {
-                MergeSourceInfo info = new MergeSourceInfo();
-                info.setId(String.format("merge-source-%s", p));
-                info.setType(mergeSourceType);
-
-                RpcParameter parameter = new RpcParameter();
-                parameter.setTaskName(p);
-                parameter.setDynamic(true);
-                info.setRpcParameter(parameter);
-
+                MergeSourceInfo info = buildRpcMergeSourceInfo(p);
                 sourceInfos.add(info);
             });
         } else {
@@ -102,6 +86,29 @@ public class TaskConfigProvider {
         taskRuntimeConfig.setMergeSourceInfos(sourceInfos);
         taskRuntimeConfig.setForceCompleteHbWindow(getStorageContent(config.getTso()).isRepaired());
         return taskRuntimeConfig;
+    }
+
+    public MergeSourceInfo buildBinlogMergeSourceInfo(int seq, String storageInstId) {
+        MergeSourceInfo info = new MergeSourceInfo();
+        info.setId(String.format("%s-db-%s", seq, storageInstId));
+        info.setType(MergeSourceType.BINLOG);
+
+        BinlogParameter parameter = new BinlogParameter();
+        parameter.setStorageInstId(storageInstId);
+        info.setBinlogParameter(parameter);
+        return info;
+    }
+
+    public MergeSourceInfo buildRpcMergeSourceInfo(String sourceTaskName) {
+        MergeSourceInfo info = new MergeSourceInfo();
+        info.setId(String.format("merge-source-%s", sourceTaskName));
+        info.setType(MergeSourceType.RPC);
+
+        RpcParameter parameter = new RpcParameter();
+        parameter.setTaskName(sourceTaskName);
+        parameter.setDynamic(true);
+        info.setRpcParameter(parameter);
+        return info;
     }
 
     private StorageContent getStorageContent(String currentTso) {

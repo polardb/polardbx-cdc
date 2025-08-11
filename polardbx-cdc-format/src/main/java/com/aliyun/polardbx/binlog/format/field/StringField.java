@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.format.field;
@@ -26,7 +26,7 @@ public class StringField extends Field {
         } else {
             data = String.valueOf(this.data).getBytes(charset);
         }
-        
+
         int length_bytes = (fieldLength > 255) ? 2 : 1;
         int length = data.length;
         if (fieldLength < length_bytes) {

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.common;
@@ -67,6 +67,7 @@ public class DataSourceUtil {
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowLocalInfile", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowUrlInLocalInfile", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("autoDeserialize", "false");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useSSL", "false");
     }
 
     public static void closeQuery(ResultSet rs, Statement stmt, Connection conn) {

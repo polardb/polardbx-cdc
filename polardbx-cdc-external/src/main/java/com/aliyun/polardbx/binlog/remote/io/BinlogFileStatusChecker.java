@@ -1,12 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote.io;
 
 import com.aliyun.polardbx.binlog.domain.BinlogCursor;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +39,7 @@ public class BinlogFileStatusChecker {
         }
 
         // 新文件已经创建，但cursor可能还未更新，会出现currentFile大于lastCursor的情况，需要等待
-        if (currentFile.compareTo(cursor.getFileName()) > 0) {
+        if (BinlogFileUtil.compareBinlogFileName(currentFile, cursor.getFileName()) > 0) {
             return true;
         } else {
             return (alreadyReadLen >= cursor.getFilePosition() && cursor.getFileName()
@@ -50,11 +51,11 @@ public class BinlogFileStatusChecker {
      * 判断该文件是否已经写完，如果当前流的最新Cursor的文件名不等于fileName，
      * 说明当前没有在写fileName这个文件，我们就认为已经成功rotate到fileName之后的文件
      */
-    public boolean isCompleteFile(String fileName) {
+    public boolean isCompleteFile(int fileSequence) {
         BinlogCursor cursor = provider.getCursor(stream);
         if (cursor == null) {
             return false;
         }
-        return !fileName.equalsIgnoreCase(cursor.getFileName());
+        return fileSequence != cursor.getFileSequence();
     }
 }

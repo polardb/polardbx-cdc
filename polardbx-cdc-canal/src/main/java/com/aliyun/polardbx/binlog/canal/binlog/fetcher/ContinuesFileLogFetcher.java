@@ -1,69 +1,52 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.fetcher;
 
 import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
-import com.aliyun.polardbx.binlog.canal.binlog.BinlogDownloader;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.download.DownloadTask;
+import com.aliyun.polardbx.binlog.canal.binlog.download.DownloadTaskFactory;
+import com.aliyun.polardbx.binlog.canal.binlog.download.StorageDownloader;
 import com.aliyun.polardbx.binlog.canal.exception.ConsumeOSSBinlogEndException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.LinkedList;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 public class ContinuesFileLogFetcher extends LogFetcher {
 
-    private static final Logger logger = LoggerFactory.getLogger(ContinuesFileLogFetcher.class);
+    private static Logger logger = LoggerFactory.getLogger(ContinuesFileLogFetcher.class);
     private static final long ALERT_INTERVAL = TimeUnit.SECONDS.toMillis(10);
     private FileLogFetcher fileLogFetcher;
-    private String path;
+    private final String path;
     private BinlogFile binlogFile;
-    private LinkedList<BinlogFile> binlogFileQueue;
-    private boolean asyncDownload = false;
-    private String storageInstanceId;
+    private final LinkedList<BinlogFile> binlogFileQueue;
+    private final String storageInstanceId;
+    private final StorageDownloader downloader;
 
     public ContinuesFileLogFetcher(String storageInstanceId, FileLogFetcher fileLogFetcher, String path,
-                                   BinlogFile binlogFile,
-                                   LinkedList<BinlogFile> binlogFileQueue, boolean asyncDownload) {
+                                   BinlogFile binlogFile, LinkedList<BinlogFile> binlogFileQueue,
+                                   StorageDownloader downloader) {
         super(0);
         this.storageInstanceId = storageInstanceId;
         this.fileLogFetcher = fileLogFetcher;
         this.path = path;
         this.binlogFile = binlogFile;
         this.binlogFileQueue = binlogFileQueue;
-        this.asyncDownload = asyncDownload;
-        if (asyncDownload) {
-            boolean find = false;
-            for (BinlogFile bf : binlogFileQueue) {
-                if (binlogFile == bf) {
-                    find = true;
-                }
-                if (!find) {
-                    continue;
-                }
-                if (logger.isDebugEnabled()) {
-                    logger.debug("add download binlog : " + bf.getLogname());
-                }
-                try {
-                    BinlogDownloader.getInstance().addDownloadTask(storageInstanceId,
-                        new DownloadTask(storageInstanceId, bf.getIntranetDownloadLink(),
-                            path + File.separator + bf.getLogname()));
-                } catch (ExecutionException e) {
-                    throw new PolardbxException(e);
-                }
-            }
+        this.downloader = downloader;
+    }
 
-        }
+    public void setLogger(Logger logger) {
+        ContinuesFileLogFetcher.logger = logger;
     }
 
     @Override
@@ -74,41 +57,45 @@ public class ContinuesFileLogFetcher extends LogFetcher {
         }
         File currentFilePath = new File(path + File.separator + binlogFile.getLogname());
         if (currentFilePath.exists()) {
-            currentFilePath.delete();
+            FileUtils.forceDelete(currentFilePath);
         }
         int idx = binlogFileQueue.indexOf(binlogFile) + 1;
         if (idx >= binlogFileQueue.size()) {
+            logger.info("last file {} finish, will trigger oss end and try direct consume!", binlogFile.getLogname());
             throw new ConsumeOSSBinlogEndException();
         }
         BinlogFile nextFile = binlogFileQueue.get(idx);
-        logger.info(
-            "last file " + binlogFile.getLogname() + " finish , rotate to new binlog file " + nextFile.getLogname());
-        if (nextFile == null) {
-            throw new ConsumeOSSBinlogEndException();
-        }
+        logger.info("last file {} finish , rotate to new binlog file {}", binlogFile.getLogname(),
+            nextFile.getLogname());
         String nextFilePath = path + File.separator + nextFile.getLogname();
-        if (!asyncDownload) {
+        if (downloader == null) {
             DownloadTask downloadTask =
-                new DownloadTask(storageInstanceId, nextFile.getIntranetDownloadLink(), nextFilePath);
-            downloadTask.exec();
+                DownloadTaskFactory.createDownloadTask(storageInstanceId, nextFile,
+                    nextFilePath);
+            try {
+                downloadTask.exec();
+            } catch (Exception e) {
+                throw new PolardbxException("download file " + nextFilePath + " failed!", e);
+            }
         } else {
             File f = new File(nextFilePath);
             long lastAlertTimestampInMl = 0;
-            do {
-                if (f.exists()) {
-                    break;
+            while (!f.exists()) {
+                if (downloader.getException() != null) {
+                    throw new PolardbxException("download file " + nextFilePath + " failed!",
+                        downloader.getException());
                 }
                 long now = System.currentTimeMillis();
                 if (now - lastAlertTimestampInMl > ALERT_INTERVAL) {
-                    logger.warn("wait for binlog : " + nextFilePath);
+                    logger.warn("wait for binlog : {}", nextFilePath);
                     lastAlertTimestampInMl = now;
                 }
                 try {
                     Thread.sleep(500);
                 } catch (InterruptedException e) {
-
+                    throw new PolardbxException("wait for binlog " + nextFilePath + " failed!", e);
                 }
-            } while (true);
+            }
         }
 
         binlogFile = nextFile;

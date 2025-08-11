@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.rpc;
@@ -16,7 +16,6 @@ import io.grpc.ServerBuilder;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -137,22 +136,7 @@ public class TxnStreamRpcServer {
                     txnOutputStream.setExecutingThead(Thread.currentThread());
                     logger.info("The client successfully acquired lock, with lockId {}.", lockId);
                     logger.info("request tso is : [" + request.getTso() + "], with lockId {}.", lockId);
-                    if (StringUtils.isNotBlank(request.getTso())) {
-                        if (shouldRestart()) {
-                            provider.restart(request.getTso());
-                        }
-                        // 再次验证，如果仍然不满足条件，则直接抛异常
-                        if (!provider.checkTSO(request.getTso(), txnOutputStream, true)) {
-                            throw new PolardbxException("can`t find binlog for tso " + request.getTso());
-                        }
-                    } else {
-                        if (shouldRestart()) {
-                            //如果tso为空，不进行任何判断，直接重启，然后从最新位点开始消费
-                            provider.restart(request.getTso());
-                        }
-                    }
-
-                    provider.dump(request.getTso(), txnOutputStream);
+                    provider.dump(request, txnOutputStream);
 
                     // 如果出现没有抛异常，dump方法退出的情况，只有一种可能：Provider执行了stop操作，此时通过报错的方式通知客户端
                     responseObserver.onError(new PolardbxException("server is shutdown, with dumperId " + lockId));
@@ -168,12 +152,8 @@ public class TxnStreamRpcServer {
             });
         }
 
-        private boolean shouldRestart() {
-            return taskType != TaskType.Dispatcher;
-        }
-
         private void checkVersion(long requestVersion) {
-            if (taskType == TaskType.Dispatcher && requestVersion != TxnStreamRpcServer.this.version) {
+            if (requestVersion != 0 && requestVersion != TxnStreamRpcServer.this.version) {
                 throw new PolardbxException(
                     "version is inconsistent, request version is " + requestVersion + " , current version is "
                         + version);

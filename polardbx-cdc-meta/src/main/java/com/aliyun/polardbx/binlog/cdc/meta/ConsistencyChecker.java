@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
@@ -104,8 +104,10 @@ public class ConsistencyChecker {
             String reformatDDL = "";
             try {
                 SQLStatement statements = parseSQLStatement(record.getDdlSql());
-                reformatDDL = statements.toString();
-                parseSQLStatement(reformatDDL);
+                if (statements != null) {
+                    reformatDDL = statements.toString();
+                    parseSQLStatement(reformatDDL);
+                }
             } catch (Exception e) {
                 log.error("org ddl : " + record.getDdlSql());
                 log.error("after reformat ddl : " + reformatDDL);
@@ -198,8 +200,8 @@ public class ConsistencyChecker {
         }
     }
 
-    private void compareForOneLogicTable(String tso, String logicSchema, String logicTable,
-                                         boolean createPhyIfNotExist) {
+    void compareForOneLogicTable(String tso, String logicSchema, String logicTable,
+                                 boolean createPhyIfNotExist) {
         Pair<LogicMetaTopology.LogicDbTopology, LogicMetaTopology.LogicTableMetaTopology> pair =
             topologyManager.getTopology(logicSchema, logicTable);
         LogicMetaTopology.LogicTableMetaTopology logicTableMetaTopology = pair.getRight();

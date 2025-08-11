@@ -1,13 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.merge;
 
 import com.aliyun.polardbx.binlog.collect.Collector;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Ignore;
@@ -57,7 +56,7 @@ public class LogEventMergerTest extends BaseTest {
     }
 
     private LogEventMerger generateMerger() {
-        LogEventMerger merger = new LogEventMerger(TaskType.Relay, new Collector() {
+        LogEventMerger merger = new LogEventMerger(new Collector() {
 
             @Override
             public void start() {

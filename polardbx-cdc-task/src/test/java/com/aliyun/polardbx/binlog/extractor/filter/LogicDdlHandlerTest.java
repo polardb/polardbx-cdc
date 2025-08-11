@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
@@ -11,7 +11,6 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
-import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.ddl.ThreadRecorder;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
@@ -27,7 +26,7 @@ import com.aliyun.polardbx.binlog.extractor.filter.rebuild.LogicDDLHandler;
 import com.aliyun.polardbx.binlog.extractor.log.DDLEvent;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
@@ -45,10 +44,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent.FORMAT_DESCRIPTION_EVENT_5_x;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
-public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
+public class LogicDdlHandlerTest extends BaseTest {
     @Test
     public void testProcessWithInstanceServerIdDdl() throws Exception {
         long instanceServerId = 1;
@@ -59,7 +59,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
         Mockito.doNothing().when(logicDDLHandler).rebuildDDL(transaction, context, transactionServerId);
         Mockito.doCallRealMethod().when(logicDDLHandler).processDDL(transaction, context);
         Mockito.when(logicDDLHandler.getInstanceServerId()).thenReturn(instanceServerId);
-        Mockito.when(transaction.getServerId()) .thenReturn(null);
+        Mockito.when(transaction.getServerId()).thenReturn(null);
         logicDDLHandler.processDDL(transaction, context);
         Mockito.verify(logicDDLHandler, Mockito.times(1)).rebuildDDL(transaction, context, instanceServerId);
     }
@@ -74,7 +74,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
         Mockito.doNothing().when(logicDDLHandler).rebuildDDL(transaction, context, transactionServerId);
         Mockito.doCallRealMethod().when(logicDDLHandler).processDDL(transaction, context);
         Mockito.when(logicDDLHandler.getInstanceServerId()).thenReturn(instanceServerId);
-        Mockito.when(transaction.getServerId()) .thenReturn(transactionServerId);
+        Mockito.when(transaction.getServerId()).thenReturn(transactionServerId);
         logicDDLHandler.processDDL(transaction, context);
         Mockito.verify(logicDDLHandler, Mockito.times(1)).rebuildDDL(transaction, context, transactionServerId);
     }
@@ -84,7 +84,8 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
         rc.setBinlogFile("bb.01");
         rc.setAuthenticationInfo(new AuthenticationInfo());
         rc.getAuthenticationInfo().setStorageInstId("aaa");
-        Transaction tx = new Transaction(FormatDescriptionLogEvent.FORMAT_DESCRIPTION_EVENT_5_x, new FormatDescriptionEvent((short)5, "5.7", 1L), rc);
+        Transaction tx = new Transaction(null, FORMAT_DESCRIPTION_EVENT_5_x,
+            new FormatDescriptionEvent((short) 5, "5.7", 1L), rc);
         tx.setVirtualTSO("111");
         DDLEvent event = new DDLEvent();
         event.initVisible(visibility, null);
@@ -110,22 +111,16 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
 
     private JdbcTemplate mockPolarxJdbcTemplate() throws Exception {
         JdbcTemplate polarxJdbcTemplate = Mockito.mock(JdbcTemplate.class);
-        Field field = SpringContextHolder.class.getDeclaredField("applicationContext");
-        field.setAccessible(true);
-        ApplicationContext applicationContext = (ApplicationContext) field.get(null);
-        DefaultListableBeanFactory listableBeanFactory =
-            (DefaultListableBeanFactory) applicationContext.getAutowireCapableBeanFactory();
-        listableBeanFactory.destroySingleton("polarxJdbcTemplate");
-        listableBeanFactory.registerSingleton("polarxJdbcTemplate", polarxJdbcTemplate);
+        registerSpringObject("polarxJdbcTemplate", polarxJdbcTemplate);
         return polarxJdbcTemplate;
     }
 
     @Test
     public void testTableWithUseCdcRecordFirstForExt() throws Exception {
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
-        setConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST, "true");
-        setConfig(ConfigKeys.IS_LAB_ENV, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
+        mockConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST, "true");
+        mockConfig(ConfigKeys.IS_LAB_ENV, "false");
 
         String createSql = "CREATE TABLE `order_refund_manage ` (\n"
             + "\t`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id',\n"
@@ -156,7 +151,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
         String tableName = "order_refund_manage";
         Map<String, Object> returnMap = new HashMap();
         returnMap.put("ddl_sql", expected);
-        returnMap.put("visibility", (long)visibility);
+        returnMap.put("visibility", (long) visibility);
         DDLExtInfo newDdlExtInfo = new DDLExtInfo();
         newDdlExtInfo.setOriginalDdl("select 1");
         returnMap.put("ext", JSON.toJSONString(newDdlExtInfo));
@@ -190,10 +185,10 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
 
     @Test
     public void testReplaceWithHistoryTable() {
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "true");
-        setConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST, "false");
-        setConfig(ConfigKeys.IS_LAB_ENV, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "true");
+        mockConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST, "false");
+        mockConfig(ConfigKeys.IS_LAB_ENV, "false");
 
         String createSql = "CREATE TABLE `order_refund_manage ` (\n"
             + "\t`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id',\n"
@@ -244,7 +239,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
     }
 
     @Test
-    public void testProcessDdlEventBefore(){
+    public void testProcessDdlEventBefore() {
         DDLEvent ddlEvent = new DDLEvent();
         DDLRecord ddlRecord = new DDLRecord();
         ddlRecord.setSchemaName("d1");
@@ -264,7 +259,6 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
         Mockito.when(logicDDLHandler.tryRewriteDropTableSql(any(),
             any(), any())).thenCallRealMethod();
         Mockito.when(logicDDLHandler.tryRewriteTruncateSql(any(), any())).thenCallRealMethod();
-
 
         //1 . rewrite move database sql
         ddlEvent.setVisible(true);
@@ -291,7 +285,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
     }
 
     @Test
-    public void testBuildOutputDdlForPolarx(){
+    public void testBuildOutputDdlForPolarx() {
         DDLRecord ddlRecord = new DDLRecord();
         ddlRecord.setSchemaName("d1");
         ddlRecord.setTableName("tb");
@@ -315,7 +309,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
     }
 
     @Test
-    public void testBuildOutputDdlForMysql(){
+    public void testBuildOutputDdlForMysql() {
         DDLRecord ddlRecord = new DDLRecord();
         ddlRecord.setSchemaName("d1");
         ddlRecord.setTableName("tb");
@@ -377,7 +371,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
     }
 
     @Test
-    public void testRebuildDdlForApply(){
+    public void testRebuildDdlForApply() {
         String createSql = "CREATE TABLE `order_refund_manage ` (\n"
             + "\t`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id',\n"
             + "\t`order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换',\n"
@@ -430,7 +424,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
     }
 
     @Test
-    public void testDoApplyAndRebuildFilter(){
+    public void testDoApplyAndRebuildFilter() {
         String createSql = "CREATE TABLE `order_refund_manage ` (\n"
             + "\t`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id',\n"
             + "\t`order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换',\n"
@@ -458,9 +452,9 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
         transaction.getDdlEvent().getDdlRecord().getExtInfo().setGsi(false);
         transaction.getDdlEvent().getDdlRecord().getExtInfo().setCci(true);
         logicDDLHandler.doApplyAndRebuildFilter(transaction);
-        Mockito.verify(polarDbXTableMetaManager, Mockito.times(3)).applyLogic(Mockito.any(), Mockito.any(), Mockito.any());
+        Mockito.verify(polarDbXTableMetaManager, Mockito.times(3))
+            .applyLogic(Mockito.any(), Mockito.any(), Mockito.any());
         Mockito.verify(eventAcceptFilter, Mockito.times(1)).rebuild();
-
 
     }
 
@@ -492,11 +486,12 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
 
         logicDDLHandler.buildQueryLogEvent(transaction, context, createSql, createSql, 1L, "gbk", "gbk_chinese_ci");
         String queryString = transaction.getDdlEvent().getQueryEventBuilder().getQueryString();
-        Assert.assertEquals("# POLARX_ORIGIN_SQL=CREATE TABLE `order_refund_manage ` ( `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id', `order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换', `days` INT(8) NOT NULL COMMENT '退款支持的天数', `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间', `update_time` datetime NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间', `is_deleted` TINYINT(4) NOT NULL DEFAULT 0 COMMENT '删除标识', PRIMARY KEY (`id`) ) DEFAULT CHARACTER SET = gbk DEFAULT COLLATE = gbk_chinese_ci COMMENT '退款管理表 ';\n"
-            + "# POLARX_TSO=111\n"
-            + "# POLARX_DDL_ID=0\n"
-            + "CREATE TABLE `order_refund_manage` ( `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id', `order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换', `days` INT(8) NOT NULL COMMENT '退款支持的天数', `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间', `update_time` datetime NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间', `is_deleted` TINYINT(4) NOT NULL DEFAULT 0 COMMENT '删除标识', PRIMARY KEY (`id`) ) DEFAULT CHARACTER SET = gbk DEFAULT COLLATE = gbk_chinese_ci COMMENT '退款管理表 ';", queryString);
-
+        Assert.assertEquals(
+            "# POLARX_ORIGIN_SQL=CREATE TABLE `order_refund_manage ` ( `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id', `order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换', `days` INT(8) NOT NULL COMMENT '退款支持的天数', `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间', `update_time` datetime NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间', `is_deleted` TINYINT(4) NOT NULL DEFAULT 0 COMMENT '删除标识', PRIMARY KEY (`id`) ) DEFAULT CHARACTER SET = gbk DEFAULT COLLATE = gbk_chinese_ci COMMENT '退款管理表 ';\n"
+                + "# POLARX_TSO=111\n"
+                + "# POLARX_DDL_ID=0\n"
+                + "CREATE TABLE `order_refund_manage` ( `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id', `order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换', `days` INT(8) NOT NULL COMMENT '退款支持的天数', `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间', `update_time` datetime NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间', `is_deleted` TINYINT(4) NOT NULL DEFAULT 0 COMMENT '删除标识', PRIMARY KEY (`id`) ) DEFAULT CHARACTER SET = gbk DEFAULT COLLATE = gbk_chinese_ci COMMENT '退款管理表 ';",
+            queryString);
 
         // ignore output mysql
         transaction.getDdlEvent().setVisible(true);
@@ -506,8 +501,8 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
         queryString = transaction.getDdlEvent().getQueryEventBuilder().getQueryString();
         Assert.assertEquals(
             "# POLARX_ORIGIN_SQL=CREATE TABLE `order_refund_manage ` ( `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id', `order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换', `days` INT(8) NOT NULL COMMENT '退款支持的天数', `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间', `update_time` datetime NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间', `is_deleted` TINYINT(4) NOT NULL DEFAULT 0 COMMENT '删除标识', PRIMARY KEY (`id`) ) DEFAULT CHARACTER SET = gbk DEFAULT COLLATE = gbk_chinese_ci COMMENT '退款管理表 ';\n"
-            + "# POLARX_TSO=111\n"
-            + "# POLARX_DDL_ID=0\n", queryString);
+                + "# POLARX_TSO=111\n"
+                + "# POLARX_DDL_ID=0\n", queryString);
 
         // ignore output polarx
         transaction.getDdlEvent().setVisible(true);
@@ -516,9 +511,8 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
         logicDDLHandler.buildQueryLogEvent(transaction, context, createSql, createSql, 1L, "gbk", "gbk_chinese_ci");
         queryString = transaction.getDdlEvent().getQueryEventBuilder().getQueryString();
         Assert.assertEquals(
-            "CREATE TABLE `order_refund_manage` ( `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id', `order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换', `days` INT(8) NOT NULL COMMENT '退款支持的天数', `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间', `update_time` datetime NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间', `is_deleted` TINYINT(4) NOT NULL DEFAULT 0 COMMENT '删除标识', PRIMARY KEY (`id`) ) DEFAULT CHARACTER SET = gbk DEFAULT COLLATE = gbk_chinese_ci COMMENT '退款管理表 ';", queryString);
-
-
+            "CREATE TABLE `order_refund_manage` ( `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id', `order_type` TINYINT(32) NOT NULL COMMENT '订单类型：1堂食，2外卖，3买单，4积分兑换', `days` INT(8) NOT NULL COMMENT '退款支持的天数', `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间', `update_time` datetime NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间', `is_deleted` TINYINT(4) NOT NULL DEFAULT 0 COMMENT '删除标识', PRIMARY KEY (`id`) ) DEFAULT CHARACTER SET = gbk DEFAULT COLLATE = gbk_chinese_ci COMMENT '退款管理表 ';",
+            queryString);
 
     }
 
@@ -526,11 +520,13 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
     public void testTryRewriteSql() {
 
         LogicDDLHandler logicDDLHandler = Mockito.mock(LogicDDLHandler.class);
-        Mockito.when(logicDDLHandler.tryRewriteDropTableSql(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
+        Mockito.when(
+                logicDDLHandler.tryRewriteDropTableSql(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
             .thenCallRealMethod();
         String s1 = logicDDLHandler.tryRewriteDropTableSql("aa", "bb", "drop table aa.bb");
         String s2 = logicDDLHandler.tryRewriteDropTableSql("aa", "bb", "drop table aa.bb,aa.zz,xx.bb");
-        String s3 = logicDDLHandler.tryRewriteDropTableSql("a`a", "b`b", "drop table `a``a`.`b``b`,`vv`.`b``b`,`a``a`.cc");
+        String s3 =
+            logicDDLHandler.tryRewriteDropTableSql("a`a", "b`b", "drop table `a``a`.`b``b`,`vv`.`b``b`,`a``a`.cc");
         String s4 = logicDDLHandler.tryRewriteDropTableSql("aa", "bb", "drop table bb,cc,dd");
         String s5 = logicDDLHandler.tryRewriteDropTableSql("aa", "bb", "drop table bb");
         String s6 = logicDDLHandler.tryRewriteDropTableSql("aa", "bb", "drop table aa.bb,aa.zz,aa.bb");
@@ -566,7 +562,7 @@ public class LogicDdlHandlerTest extends BaseTestWithGmsTables {
     }
 
     @Test
-    public void testDropShardKeyTable(){
+    public void testDropShardKeyTable() {
         String sql1 = "create table d1.t1(id bigint primary key , name varchar(20))";
         String sql2 = "alter table d1.t1 dbpartition by hash(`name`)";
         String sql3 = "create table `d1`.`t2` like `d1`.`t1`";

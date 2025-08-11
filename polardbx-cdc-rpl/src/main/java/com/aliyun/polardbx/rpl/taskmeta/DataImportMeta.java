@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.taskmeta;
@@ -32,7 +32,7 @@ public class DataImportMeta {
     /**
      * back flow info
      */
-    private PhysicalMeta backFlowMeta;
+    private List<PhysicalMeta> backFlowMetaList;
 
     /**
      * for full data extraction
@@ -75,6 +75,11 @@ public class DataImportMeta {
      * cluster id of running cluster
      */
     private String cdcClusterId;
+
+    /**
+     * group name of back flow tasks, empty means use main stream
+     */
+    private String groupName;
 
     /**
      * physical info
@@ -130,6 +135,11 @@ public class DataImportMeta {
         private String rdsUid;
         private String rdsBid;
         private String rdsInstanceId;
+
+        /**
+         * stream name of back flow task, empty means use main stream
+         */
+        private String streamName;
     }
 
     @Data

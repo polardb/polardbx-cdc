@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor;
@@ -36,6 +36,7 @@ import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.extractor.search.PositionFinder;
 import com.aliyun.polardbx.rpl.extractor.search.handler.PositionSearchHandler;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -64,6 +65,10 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     protected IErrorHandler userDefinedHandler;
     protected EventRepository eventRepository;
     protected boolean polarx;
+    @Setter
+    private long lastPosition = -1;
+    @Setter
+    private String lastFile;
 
     public MysqlEventParser(int bufferSize, EventRepository eventRepository) {
         // 初始化一下
@@ -244,7 +249,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
             return fixedPosition;
         }
 
-        MysqlConnection mysqlConnection = (MysqlConnection) connection;
+        MysqlConnection mysqlConnection = connection;
         long startTimestamp = TimeUnit.MILLISECONDS
             .toSeconds(System.currentTimeMillis() + 102L * 365 * 24 * 3600 * 1000); // 当前时间的未来102年
         return findAsPerTimestampInSpecificLogFile(mysqlConnection,
@@ -254,7 +259,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     }
 
     protected BinlogPosition findEndPositionWithMasterIdAndTimestamp(MysqlConnection connection) {
-        MysqlConnection mysqlConnection = (MysqlConnection) connection;
+        MysqlConnection mysqlConnection = connection;
         final BinlogPosition endPosition = findEndPosition(mysqlConnection);
         long startTimestamp = System.currentTimeMillis();
         return findAsPerTimestampInSpecificLogFile(mysqlConnection,
@@ -466,6 +471,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
         long startTs = -1;
         boolean enabled = getProfilingEnabled();
         long now = System.currentTimeMillis();
+        boolean isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
         if (enabled) {
             startTs = now;
         }
@@ -476,6 +482,9 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
             StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
         }
         MySQLDBMSEvent event = binlogParser.parse(logEvent, isSeek);
+        if (isLabEnv && !isSeek) {
+            checkPosition(logEvent);
+        }
         if (event != null) {
             DBMSEvent dbmsEvent = event.getDbmsEventPayload();
             dbmsEvent.setSourceTimeStamp(logEvent.getWhen() * 1000);
@@ -524,6 +533,33 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
 
     public void setPolarx(boolean polarx) {
         this.polarx = polarx;
+    }
+
+    /**
+     * 检查同一个binlog文件被dump时产生的事件pos是否有序。
+     */
+    public void checkPosition(LogEvent logEvent) {
+        String fileName = binlogParser.getBinlogFileName();
+        if (lastFile == null) {
+            lastFile = fileName;
+        }
+        if (lastPosition == -1) {
+            lastPosition = logEvent.getLogPos();
+        }
+        if (logEvent.getHeader().getType() == LogEvent.ROTATE_EVENT) {
+            lastFile = fileName;
+            lastPosition = 0;
+            return;
+        }
+        if (lastFile.equalsIgnoreCase(fileName) && lastPosition > logEvent.getLogPos()) {
+            log.error("get smaller position, event:{}, file:{}, pos:{}, file_old:{}, pos_old:{}",
+                logEvent.getHeader().getType(),
+                fileName, logEvent.getLogPos(),
+                lastFile, lastPosition);
+            LabEventManager.logEvent(LabEventType.REPLICA_BINLOG_POS_CHECK, fileName + ":" + logEvent.getLogPos());
+        }
+        lastPosition = logEvent.getLogPos();
+        lastFile = fileName;
     }
 
     @Override

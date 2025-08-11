@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl;
@@ -19,9 +19,9 @@ import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.remote.Appender;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.util.LoopRetry;
+import com.aliyun.polardbx.rpl.applier.HeartbeatManager;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.RplConstants;
-import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.RecoveryCombineConfig;
@@ -43,6 +43,7 @@ import static com.aliyun.polardbx.binlog.enums.BinlogBackupType.LINDORM;
 import static com.aliyun.polardbx.binlog.enums.BinlogBackupType.OSS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.FLASHBACK_DOWNLOAD_LINK_PRESERVE_SECOND;
 import static com.aliyun.polardbx.binlog.ConfigKeys.FLASHBACK_UPLOAD_MULTI_MODE_THRESHOLD;
+import static com.aliyun.polardbx.binlog.enums.BinlogBackupType.S3;
 import static com.aliyun.polardbx.rpl.common.RplConstants.FLASH_BACK_COMBINE_RESULT_FILE;
 
 /**
@@ -81,9 +82,11 @@ public class FlashbackResultCombiner {
         this.resultFile = MessageFormat.format(FLASH_BACK_COMBINE_RESULT_FILE, combineConfig.getRandomUUID());
         this.expireTimeInSec = DynamicApplicationConfig.getLong(FLASHBACK_DOWNLOAD_LINK_PRESERVE_SECOND);
         this.allTaskResultMeta = buildSearchTaskResultMeta();
+        HeartbeatManager.getInstance().init(taskId);
     }
 
     public void run() {
+        HeartbeatManager.getInstance().start();
         RplTask task = DbTaskMetaManager.getTask(taskId);
         if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.FINISHED) {
             log.info("task {} has already finished, skip execute.", taskId);
@@ -109,7 +112,7 @@ public class FlashbackResultCombiner {
         };
         if (!loopRetry.loop(new AtomicInteger(10))) {
             StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.RPL_FLASHBACK_ERROR,
-                TaskContext.getInstance().getTaskId(), "mergeResult failed!");
+                taskId, "mergeResult failed!");
             throw new RuntimeException("mergeResult failed!");
         }
 
@@ -122,11 +125,13 @@ public class FlashbackResultCombiner {
     private void configBackupStorage() {
         String backupType = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_BACKUP_TYPE);
         BinlogBackupType backupTypeEnum = BinlogBackupType.typeOf(backupType);
-        if (backupTypeEnum != null) {
+        if (backupTypeEnum != BinlogBackupType.NULL) {
             if (backupTypeEnum == OSS) {
                 stateMachineContext.setFileStorageType(OSS.name());
             } else if (backupTypeEnum == LINDORM) {
                 stateMachineContext.setFileStorageType(LINDORM.name());
+            } else if (backupTypeEnum == S3) {
+                stateMachineContext.setFileStorageType(S3.name());
             }
         } else {
             throw new PolardbxException("backup type should not be null");
@@ -155,7 +160,7 @@ public class FlashbackResultCombiner {
         long totalSize = 0;
         for (String objectName : objectList) {
             checkMd5(objectName);
-            StatisticalProxy.getInstance().heartbeat();
+            HeartbeatManager.getInstance().heartbeat();
             totalSize += getFileSize(objectName);
         }
         log.info("total size for all files is " + totalSize);
@@ -173,6 +178,7 @@ public class FlashbackResultCombiner {
 
         log.info("Start to merge in single mode.");
         appender.begin();
+        // TODO(zm): 这里的objectList在S3作为远程存储时不能超过一万
         for (String objectName : objectList) {
             checkMd5(objectName);
             StatisticalProxy.getInstance().heartbeat();

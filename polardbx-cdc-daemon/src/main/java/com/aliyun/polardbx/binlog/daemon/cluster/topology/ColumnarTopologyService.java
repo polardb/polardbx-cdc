@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
@@ -12,6 +12,7 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.columnar.ColumnarMetaManager;
 import com.aliyun.polardbx.binlog.daemon.constant.ClusterRebalanceInstruction;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.ColumnarInfoMapper;
 import com.aliyun.polardbx.binlog.dao.ColumnarTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.ColumnarTaskConfigMapper;
 import com.aliyun.polardbx.binlog.dao.ColumnarTaskDynamicSqlSupport;
@@ -30,6 +31,7 @@ import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -45,6 +47,8 @@ import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SUSPEND_TOPOLOGY_REBUILDING;
+import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_NO_ALARM_WITHOUT_CCI;
+import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_PROCESS_RESTART_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_FORCE_REFRESH_TOPOLOGY_INTERVAL;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildExpectedStorageTso;
@@ -61,9 +65,12 @@ public class ColumnarTopologyService implements TopologyService {
     private final String clusterId;
     private final String clusterType;
     private static String leaderIp;
+    private static Long restartTimes = 0L;
     private final ColumnarTaskConfigMapper columnarTaskConfigMapper = getObject(ColumnarTaskConfigMapper.class);
 
     private final ColumnarTaskMapper columnarTaskMapper = getObject(ColumnarTaskMapper.class);
+    @Getter
+    private final ColumnarInfoMapper columnarInfoMapper = getObject(ColumnarInfoMapper.class);
 
     private final TransactionTemplate transactionTemplate = getObject("metaTransactionTemplate");
 
@@ -111,10 +118,18 @@ public class ColumnarTopologyService implements TopologyService {
         }
     }
 
-    public static void checkColumnarContainers(ColumnarResourceManager resourceManager) {
+    public void checkColumnarContainers(ColumnarResourceManager resourceManager) {
         Set<String> set = resourceManager.allOfflineContainers();
         if (!set.isEmpty()) {
-            MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_PROCESS_DEAD_ERROR, set);
+            boolean alarmWithCci = DynamicApplicationConfig.getBoolean(COLUMNAR_NO_ALARM_WITHOUT_CCI);
+            if (getColumnarInfoMapper().getColumnarIndexExist() && alarmWithCci) {
+                if (restartTimes > DynamicApplicationConfig.getInt(COLUMNAR_PROCESS_RESTART_THRESHOLD)) {
+                    MonitorManager.getInstance().triggerAlarm(MonitorType.COLUMNAR_PROCESS_DEAD_ERROR, set);
+                    restartTimes = 0L;
+                } else {
+                    restartTimes++;
+                }
+            }
             log.warn("Columnar process on containers {} is down.", set);
         }
     }
@@ -198,7 +213,7 @@ public class ColumnarTopologyService implements TopologyService {
             return true;
         }
 
-        if (preClusterSnapshot.isNew()) {
+        if (preClusterSnapshot.isOrigin()) {
             log.info("cluster snapshot is new, topology will rebuild.");
             return true;
         }

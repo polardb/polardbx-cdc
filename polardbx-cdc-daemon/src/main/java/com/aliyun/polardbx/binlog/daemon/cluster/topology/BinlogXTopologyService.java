@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
@@ -32,11 +32,11 @@ import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
 import com.aliyun.polardbx.binlog.scheduler.ScheduleHistoryContent;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.service.XStreamService;
 import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -53,7 +53,6 @@ import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyService
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildStorageInfos;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.checkContainerStatus;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.clearStaleMetaData;
-import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.getStreamConfig;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.lockAndCheck;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.shouldRefreshTopology;
 import static com.aliyun.polardbx.binlog.util.ServerConfigUtil.SERVER_ID;
@@ -120,8 +119,9 @@ public class BinlogXTopologyService implements TopologyService {
             long newVersion = preClusterSnapshot.getVersion() + 1;
             List<Container> containers = resourceManager.availableContainers();
             long serverId = ServerConfigUtil.getGlobalNumberVarDirect(SERVER_ID);
-            Pair<Long, List<BinlogTaskConfig>> taskConfigs = topologyBuilder.buildTopology(containers, storageInfos,
-                buildExpectedStorageTso4BinlogX(), newVersion, preClusterSnapshot, serverId);
+            Topology topology = topologyBuilder.buildTopology(containers, storageInfos,
+                buildExpectedStorageTso4BinlogX(), newVersion, preClusterSnapshot, serverId,
+                storageHistoryInfo == null ? "" : storageHistoryInfo.getInstructionId());
             ClusterSnapshot postClusterSnapshot = new ClusterSnapshot(newVersion,
                 System.currentTimeMillis(),
                 containers.stream().map(Container::getContainerId).collect(Collectors.toSet()),
@@ -130,9 +130,10 @@ public class BinlogXTopologyService implements TopologyService {
                 "",
                 storageHistoryInfo == null ? ExecutionConfig.ORIGIN_TSO : storageHistoryInfo.getTso(),
                 clusterType,
-                taskConfigs.getKey()
+                topology.getServerID(),
+                topology.getStreamStorageMap()
             );
-            persist(taskConfigs.getValue(), storageInfos, preClusterSnapshot, postClusterSnapshot,
+            persist(topology.getConfigList(), storageInfos, preClusterSnapshot, postClusterSnapshot,
                 storageHistoryInfo, executionSnapshot);
         }
     }
@@ -190,7 +191,7 @@ public class BinlogXTopologyService implements TopologyService {
                 info.setGroupName(DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME));
                 storageHistoryMapper.insert(info);
 
-                List<XStream> streams = getStreamConfig();
+                List<XStream> streams = XStreamService.getXStreamsInCurrentCluster();
                 for (XStream stream : streams) {
                     StorageHistoryDetailInfo detailInfo = new StorageHistoryDetailInfo();
                     detailInfo.setStreamName(stream.getStreamName());

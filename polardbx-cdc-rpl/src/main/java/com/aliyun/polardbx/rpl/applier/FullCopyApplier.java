@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 
@@ -73,7 +73,7 @@ public class FullCopyApplier extends MysqlApplier {
         List<Future<Void>> futures = new ArrayList<>();
         for (SqlContextV2 sqlContext : sqlContexts) {
             Callable<Void> task = () -> {
-                execSqlContextsV2(dataSource, Collections.singletonList(sqlContext));
+                execSqlContextsV2(dbMetaCache.getBuiltInDefaultDataSource(), Collections.singletonList(sqlContext));
                 sqlContext.setSucceed(true);
                 return null;
             };

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.scheduler;
@@ -12,6 +12,7 @@ import lombok.ToString;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.util.CollectionUtils;
 
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -27,6 +28,7 @@ public class ClusterSnapshot {
     private String dumperMasterNode;
     private String storageHistoryTso;
     private Long serverId;
+    private Map<String, String> streamStorageMap;
 
     public ClusterSnapshot() {
     }
@@ -34,6 +36,13 @@ public class ClusterSnapshot {
     public ClusterSnapshot(long version, Long timestamp, Set<String> containers, Set<String> storages,
                            String dumperMasterNode, String dumperMaster, String storageHistoryTso,
                            String clusterType, Long serverId) {
+        this(version, timestamp, containers, storages, dumperMasterNode, dumperMaster, storageHistoryTso, clusterType,
+            serverId, null);
+    }
+
+    public ClusterSnapshot(long version, Long timestamp, Set<String> containers, Set<String> storages,
+                           String dumperMasterNode, String dumperMaster, String storageHistoryTso,
+                           String clusterType, Long serverId, Map<String, String> streamStorageMap) {
         if (version != 1L && timestamp == null) {
             throw new PolardbxException("timestamp can not be null.");
         }
@@ -66,12 +75,10 @@ public class ClusterSnapshot {
         this.dumperMaster = dumperMaster;
         this.storageHistoryTso = storageHistoryTso;
         this.serverId = serverId;
+        this.streamStorageMap = streamStorageMap;
     }
 
-    /**
-     * todo isNew 代表什么含义?
-     */
-    public boolean isNew() {
+    public boolean isOrigin() {
         return version == 1L;
     }
 
@@ -138,4 +145,14 @@ public class ClusterSnapshot {
     public void setServerId(Long serverId) {
         this.serverId = serverId;
     }
+
+    public Map<String, String> getStreamStorageMap() {
+        return streamStorageMap;
+    }
+
+    public void setStreamStorageMap(Map<String, String> streamStorageMap) {
+        this.streamStorageMap = streamStorageMap;
+    }
+
+
 }

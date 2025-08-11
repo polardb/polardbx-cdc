@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
@@ -31,6 +31,8 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_CHECK_SERVER_ID
 @Slf4j
 public class ServerConfigUtil {
     public static final String SERVER_ID = "SERVER_ID";
+    private static final String QUERY_FOR_VERSION = "select version()";
+    private static String CN_VERSION = null;
 
     private static final CacheLoader<String, String> GLOBAL_SYSTEM_VARIABLE_LOADER = new CacheLoader<String, String>() {
         @Override
@@ -38,10 +40,10 @@ public class ServerConfigUtil {
             return get(key);
         }
     };
-    private static final LoadingCache<String, String> CACHE = CacheBuilder.newBuilder()
-        .maximumSize(1024)
-        .expireAfterWrite(30, TimeUnit.SECONDS)
-        .build(GLOBAL_SYSTEM_VARIABLE_LOADER);
+
+    private static final LoadingCache<String, String> CACHE =
+        CacheBuilder.newBuilder().maximumSize(1024).expireAfterWrite(30, TimeUnit.SECONDS)
+            .build(GLOBAL_SYSTEM_VARIABLE_LOADER);
 
     public static String getGlobalVar(String var) {
         return CACHE.getUnchecked(var);
@@ -49,6 +51,14 @@ public class ServerConfigUtil {
 
     public static long getGlobalNumberVar(String var) {
         return Long.parseLong(CACHE.getUnchecked(var));
+    }
+
+    public static synchronized String getCnVersion() {
+        if (CN_VERSION == null) {
+            JdbcTemplate polarxTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+            CN_VERSION = polarxTemplate.queryForObject(QUERY_FOR_VERSION, String.class);
+        }
+        return CN_VERSION;
     }
 
     public static long getGlobalNumberVarDirect(String var) {
@@ -59,8 +69,7 @@ public class ServerConfigUtil {
         // change 'select @@GLOBAL.xxx' to 'show global variables like ...'
         // @see https://aone.alibaba-inc.com/v2/project/860366/bug/51153559
         JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
-        List<String> list = template.query("show global variables like '" + key + "'",
-            (rs, rowNum) -> rs.getString(2));
+        List<String> list = template.query("show global variables like '" + key + "'", (rs, rowNum) -> rs.getString(2));
 
         if (list.size() == 1) {
             return list.get(0);

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.monitor;
@@ -231,6 +231,14 @@ public enum MonitorType {
         30,
         false
     ),
+    RPL_RESOURCE_NOT_ENOUGH_ERROR(
+        "polarx_cdc_rpl_resource_not_enough_error",
+        true,
+        "rpl任务 %s 资源不足无法启动, 请及时关注",
+        1,
+        30,
+        false
+    ),
     RPL_HEARTBEAT_TIMEOUT_ERROR(
         "polarx_cdc_rpl_heartbeat_timeout_error",
         true,
@@ -290,7 +298,7 @@ public enum MonitorType {
     COLUMNAR_FATAL_ERROR(
         "polarx_columnar_binlog_fatal_error",
         true,
-        "Columnar链路异常，已升级为电话报警，请尽快排查, 原报警信息： %s",
+        "Columnar链路异常，已升级为严重报警，多次告警后将升级为电话告警，请尽快排查！详细原因：%s",
         1,
         5,
         false,

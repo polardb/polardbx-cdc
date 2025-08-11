@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.task;
@@ -34,6 +34,7 @@ import java.util.Map;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.GLOBAL_BINLOG_LATEST_CURSOR;
 import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
+import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 /**
  * Created by ziyang.lb
@@ -45,7 +46,7 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
     private final DumperInfoMapper dumperInfoMapper = SpringContextHolder.getObject(DumperInfoMapper.class);
     private final NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
     private final XStreamMapper xStreamMapper = SpringContextHolder.getObject(XStreamMapper.class);
-    private Map<String, ICursorProvider> cursorProviderMap;
+    private Map<String, IDumperStatisticProvider> dumperStatisticProviderMap;
 
     public TaskHeartbeat(String clusterId, String clusterType, String name, int interval, BinlogTaskConfig config) {
         super(clusterId, clusterType, name, interval);
@@ -69,12 +70,13 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
         String role = this.config.getRole();
         if (role.equals(TaskType.Dumper.name())) {
             BinlogDumperInfoMapper binlogDumperInfoMapper = SpringContextHolder.getObject(BinlogDumperInfoMapper.class);
-            BinlogCursor cursor = cursorProviderMap.get(STREAM_NAME_GLOBAL).getLatestFileCursor();
+            BinlogCursor cursor = dumperStatisticProviderMap.get(STREAM_NAME_GLOBAL).getLatestFileCursor();
+            long dumperDelay = dumperStatisticProviderMap.get(STREAM_NAME_GLOBAL).getDumperDelay();
             final boolean dumperLeader = RuntimeLeaderElector.isDumperMaster(version, name);
 
-            // 更新心跳
-            int result = binlogDumperInfoMapper.updateDumperHeartbeat(name,
-                dumperLeader ? DumperType.MASTER.getName() : DumperType.SLAVE.getName(), clusterId);
+            // 更新心跳（包括一些统计信息，现在只有delay）
+            int result = binlogDumperInfoMapper.updateDumperHeartbeatWithInfo(name,
+                dumperLeader ? DumperType.MASTER.getName() : DumperType.SLAVE.getName(), clusterId, dumperDelay);
             if (result == 0) {
                 log.error("Dumper info has been removed from database, this process will exit");
                 Runtime.getRuntime().halt(1);
@@ -121,18 +123,18 @@ public class TaskHeartbeat extends AbstractBinlogTimerTask {
 
             ExecutionConfig executionConfig = JSONObject.parseObject(config.getConfig(), ExecutionConfig.class);
             executionConfig.getStreamNameSet().forEach(streamName -> {
-                BinlogCursor cursor = cursorProviderMap.get(streamName).getLatestFileCursor();
+                BinlogCursor cursor = dumperStatisticProviderMap.get(streamName).getLatestFileCursor();
                 if (cursor != null) {
                     xStreamMapper.update(
                         u -> u.set(XStreamDynamicSqlSupport.latestCursor).equalTo(JSONObject.toJSONString(cursor))
-                            .where(XStreamDynamicSqlSupport.streamName, SqlBuilder.isEqualTo(streamName)));
+                            .where(XStreamDynamicSqlSupport.streamName, isEqualTo(streamName)));
                 }
             });
         }
     }
 
-    public void setCursorProviderMap(
-        Map<String, ICursorProvider> cursorProviderMap) {
-        this.cursorProviderMap = cursorProviderMap;
+    public void setDumperStatisticProviderMap(
+        Map<String, IDumperStatisticProvider> dumperStatisticProviderMap) {
+        this.dumperStatisticProviderMap = dumperStatisticProviderMap;
     }
 }

@@ -1,14 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.topology;
 
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.google.common.collect.Sets;
 import org.hamcrest.CoreMatchers;
 import org.junit.Assert;
@@ -22,11 +22,11 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_EN
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_ENABLED;
 import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCaseLogicMetaTopology;
 
-public class TopologyManagerTest extends BaseTestWithGmsTables {
+public class TopologyManagerTest extends BaseTest {
     @Before
     public void before() {
-        setConfig(META_PERSIST_ENABLED, "OFF");
-        setConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
+        mockConfig(META_PERSIST_ENABLED, "OFF");
+        mockConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
     }
 
     @Test

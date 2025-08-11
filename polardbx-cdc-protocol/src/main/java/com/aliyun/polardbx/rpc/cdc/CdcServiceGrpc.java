@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpc.cdc;
@@ -436,6 +436,68 @@ public final class CdcServiceGrpc {
     return getShowSlaveStatusMethod;
   }
 
+  private static volatile io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest,
+      com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus> getShowBinlogDumpStatusMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "ShowBinlogDumpStatus",
+      requestType = com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest.class,
+      responseType = com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.SERVER_STREAMING)
+  public static io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest,
+      com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus> getShowBinlogDumpStatusMethod() {
+    io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest, com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus> getShowBinlogDumpStatusMethod;
+    if ((getShowBinlogDumpStatusMethod = CdcServiceGrpc.getShowBinlogDumpStatusMethod) == null) {
+      synchronized (CdcServiceGrpc.class) {
+        if ((getShowBinlogDumpStatusMethod = CdcServiceGrpc.getShowBinlogDumpStatusMethod) == null) {
+          CdcServiceGrpc.getShowBinlogDumpStatusMethod = getShowBinlogDumpStatusMethod =
+              io.grpc.MethodDescriptor.<com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest, com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.SERVER_STREAMING)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "ShowBinlogDumpStatus"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus.getDefaultInstance()))
+              .setSchemaDescriptor(new CdcServiceMethodDescriptorSupplier("ShowBinlogDumpStatus"))
+              .build();
+        }
+      }
+    }
+    return getShowBinlogDumpStatusMethod;
+  }
+
+  private static volatile io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest,
+      com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse> getGetDumperInfoMethod;
+
+  @io.grpc.stub.annotations.RpcMethod(
+      fullMethodName = SERVICE_NAME + '/' + "getDumperInfo",
+      requestType = com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest.class,
+      responseType = com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse.class,
+      methodType = io.grpc.MethodDescriptor.MethodType.UNARY)
+  public static io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest,
+      com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse> getGetDumperInfoMethod() {
+    io.grpc.MethodDescriptor<com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest, com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse> getGetDumperInfoMethod;
+    if ((getGetDumperInfoMethod = CdcServiceGrpc.getGetDumperInfoMethod) == null) {
+      synchronized (CdcServiceGrpc.class) {
+        if ((getGetDumperInfoMethod = CdcServiceGrpc.getGetDumperInfoMethod) == null) {
+          CdcServiceGrpc.getGetDumperInfoMethod = getGetDumperInfoMethod =
+              io.grpc.MethodDescriptor.<com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest, com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse>newBuilder()
+              .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+              .setFullMethodName(generateFullMethodName(SERVICE_NAME, "getDumperInfo"))
+              .setSampledToLocalTracing(true)
+              .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest.getDefaultInstance()))
+              .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(
+                  com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse.getDefaultInstance()))
+              .setSchemaDescriptor(new CdcServiceMethodDescriptorSupplier("getDumperInfo"))
+              .build();
+        }
+      }
+    }
+    return getGetDumperInfoMethod;
+  }
+
   /**
    * Creates a new async stub that supports all call types for the service
    */
@@ -575,6 +637,20 @@ public final class CdcServiceGrpc {
       asyncUnimplementedUnaryCall(getShowSlaveStatusMethod(), responseObserver);
     }
 
+    /**
+     */
+    public void showBinlogDumpStatus(com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest request,
+        io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus> responseObserver) {
+      asyncUnimplementedUnaryCall(getShowBinlogDumpStatusMethod(), responseObserver);
+    }
+
+    /**
+     */
+    public void getDumperInfo(com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest request,
+        io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse> responseObserver) {
+      asyncUnimplementedUnaryCall(getGetDumperInfoMethod(), responseObserver);
+    }
+
     @java.lang.Override public final io.grpc.ServerServiceDefinition bindService() {
       return io.grpc.ServerServiceDefinition.builder(getServiceDescriptor())
           .addMethod(
@@ -668,6 +744,20 @@ public final class CdcServiceGrpc {
                 com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusRequest,
                 com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusResponse>(
                   this, METHODID_SHOW_SLAVE_STATUS)))
+          .addMethod(
+            getShowBinlogDumpStatusMethod(),
+            asyncServerStreamingCall(
+              new MethodHandlers<
+                com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest,
+                com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus>(
+                  this, METHODID_SHOW_BINLOG_DUMP_STATUS)))
+          .addMethod(
+            getGetDumperInfoMethod(),
+            asyncUnaryCall(
+              new MethodHandlers<
+                com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest,
+                com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse>(
+                  this, METHODID_GET_DUMPER_INFO)))
           .build();
     }
   }
@@ -789,6 +879,22 @@ public final class CdcServiceGrpc {
       asyncServerStreamingCall(
           getChannel().newCall(getShowSlaveStatusMethod(), getCallOptions()), request, responseObserver);
     }
+
+    /**
+     */
+    public void showBinlogDumpStatus(com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest request,
+        io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus> responseObserver) {
+      asyncServerStreamingCall(
+          getChannel().newCall(getShowBinlogDumpStatusMethod(), getCallOptions()), request, responseObserver);
+    }
+
+    /**
+     */
+    public void getDumperInfo(com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest request,
+        io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse> responseObserver) {
+      asyncUnaryCall(
+          getChannel().newCall(getGetDumperInfoMethod(), getCallOptions()), request, responseObserver);
+    }
   }
 
   /**
@@ -901,6 +1007,21 @@ public final class CdcServiceGrpc {
       return blockingServerStreamingCall(
           getChannel(), getShowSlaveStatusMethod(), getCallOptions(), request);
     }
+
+    /**
+     */
+    public java.util.Iterator<com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus> showBinlogDumpStatus(
+        com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest request) {
+      return blockingServerStreamingCall(
+          getChannel(), getShowBinlogDumpStatusMethod(), getCallOptions(), request);
+    }
+
+    /**
+     */
+    public com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse getDumperInfo(com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest request) {
+      return blockingUnaryCall(
+          getChannel(), getGetDumperInfoMethod(), getCallOptions(), request);
+    }
   }
 
   /**
@@ -972,6 +1093,14 @@ public final class CdcServiceGrpc {
       return futureUnaryCall(
           getChannel().newCall(getResetSlaveMethod(), getCallOptions()), request);
     }
+
+    /**
+     */
+    public com.google.common.util.concurrent.ListenableFuture<com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse> getDumperInfo(
+        com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest request) {
+      return futureUnaryCall(
+          getChannel().newCall(getGetDumperInfoMethod(), getCallOptions()), request);
+    }
   }
 
   private static final int METHODID_SHOW_BINARY_LOGS = 0;
@@ -987,6 +1116,8 @@ public final class CdcServiceGrpc {
   private static final int METHODID_STOP_SLAVE = 10;
   private static final int METHODID_RESET_SLAVE = 11;
   private static final int METHODID_SHOW_SLAVE_STATUS = 12;
+  private static final int METHODID_SHOW_BINLOG_DUMP_STATUS = 13;
+  private static final int METHODID_GET_DUMPER_INFO = 14;
 
   private static final class MethodHandlers<Req, Resp> implements
       io.grpc.stub.ServerCalls.UnaryMethod<Req, Resp>,
@@ -1056,6 +1187,14 @@ public final class CdcServiceGrpc {
         case METHODID_SHOW_SLAVE_STATUS:
           serviceImpl.showSlaveStatus((com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusRequest) request,
               (io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusResponse>) responseObserver);
+          break;
+        case METHODID_SHOW_BINLOG_DUMP_STATUS:
+          serviceImpl.showBinlogDumpStatus((com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest) request,
+              (io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus>) responseObserver);
+          break;
+        case METHODID_GET_DUMPER_INFO:
+          serviceImpl.getDumperInfo((com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest) request,
+              (io.grpc.stub.StreamObserver<com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse>) responseObserver);
           break;
         default:
           throw new AssertionError();
@@ -1131,6 +1270,8 @@ public final class CdcServiceGrpc {
               .addMethod(getStopSlaveMethod())
               .addMethod(getResetSlaveMethod())
               .addMethod(getShowSlaveStatusMethod())
+              .addMethod(getShowBinlogDumpStatusMethod())
+              .addMethod(getGetDumperInfoMethod())
               .build();
         }
       }

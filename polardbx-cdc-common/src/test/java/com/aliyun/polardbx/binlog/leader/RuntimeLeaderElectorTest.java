@@ -1,14 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.leader;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.TaskType;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.junit.MockitoJUnitRunner;
@@ -22,7 +22,7 @@ import static org.junit.Assert.assertTrue;
  * @since 2024/7/24 13:58
  **/
 @RunWith(MockitoJUnitRunner.class)
-public class RuntimeLeaderElectorTest extends BaseTestWithGmsTables {
+public class RuntimeLeaderElectorTest extends BaseTest {
 
     private final String globalBinlogClusterSnapshot =
         "{\"containers\":[\"c841309e-11bd-4b71-8e8b-a3cc4b9dff4c\",\"fe037f7e-6bf9-4ad8-a3c5-8714ed0f4db5\"],\"dumperMaster\":\"Dumper-2\",\"dumperMasterNode\":\"fe037f7e-6bf9-4ad8-a3c5-8714ed0f4db5\",\"new\":false,\"serverId\":1235254397,\"storageHistoryTso\":\"000000000000000000000000000000000000000000000000000000\",\"storages\":[\"xrelease-240724133642-f560-nh7n-dn-0\",\"xrelease-240724133642-f560-nh7n-dn-1\"],\"timestamp\":1721804211009,\"version\":2}";

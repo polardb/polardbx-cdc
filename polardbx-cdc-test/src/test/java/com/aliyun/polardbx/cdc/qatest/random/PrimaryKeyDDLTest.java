@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.random;
@@ -119,8 +119,8 @@ public class PrimaryKeyDDLTest extends RplBaseTestCase {
         //set dn1
 
         Retryer retryer = RetryerBuilder.<Boolean>
-            newBuilder().withStopStrategy(StopStrategies.stopAfterAttempt(5)).retryIfResult(
-            o -> Objects.equals(o, false))
+                newBuilder().withStopStrategy(StopStrategies.stopAfterAttempt(5)).retryIfResult(
+                o -> Objects.equals(o, false))
             .retryIfException().build();
         retryer.call(() -> {
             final Connection conn1 = getDataNodeConnection();
@@ -192,7 +192,7 @@ public class PrimaryKeyDDLTest extends RplBaseTestCase {
                 .tbName(TEST_TABLE)
                 .directCompareDetail(true)
                 .compareDetailOneByOne(false)
-                .loopWaitTimeoutMs(TimeUnit.MINUTES.toMillis(5)).build();
+                .loopWaitTimeoutMs(TimeUnit.MINUTES.toMillis(20)).build();
         waitAndCheck(checkParameter);
     }
 

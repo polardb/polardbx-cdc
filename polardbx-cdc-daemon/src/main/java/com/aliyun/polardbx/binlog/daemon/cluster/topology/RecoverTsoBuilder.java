@@ -1,13 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
@@ -17,6 +16,7 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
@@ -98,7 +98,7 @@ public class RecoverTsoBuilder {
                 fileName = record.get().getBinlogFile();
             } else {
                 log.info("cannot find a tso, will use origin tso");
-                tso = ExecutionConfig.ORIGIN_TSO;
+                tso = expectedStorageTso;
                 fileName = ExecutionConfig.ORIGIN_BINLOG_FILE;
             }
         }

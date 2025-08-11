@@ -1,14 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.collect.handle;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.CollectException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.metrics.MergeMetrics;
@@ -36,7 +35,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_COLLECT_BUILD_PACKET_SIZE_LIMIT;
-import static com.aliyun.polardbx.binlog.domain.TaskType.Dispatcher;
 import static com.aliyun.polardbx.binlog.transmit.MessageBuilder.buildTxnMessage;
 import static com.aliyun.polardbx.binlog.transmit.MessageBuilder.packetMode;
 
@@ -50,15 +48,17 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
     private final HandleContext handleContext;
     private final Storage storage;
     private final boolean isMergeNoTsoXa;
-    private final TaskType taskType;
+    private final boolean preBuildMessage;
+    private final boolean relayStage;
     private final PersistAllChecker persistAllChecker;
 
     public TxnMergeStageHandler(HandleContext handleContext, Storage storage, boolean isMergeNoTsoXa,
-                                TaskType taskType) {
+                                boolean preBuildMessage, boolean relayStage) {
         this.handleContext = handleContext;
         this.storage = storage;
         this.isMergeNoTsoXa = isMergeNoTsoXa;
-        this.taskType = taskType;
+        this.preBuildMessage = preBuildMessage;
+        this.relayStage = relayStage;
         this.persistAllChecker = new PersistAllChecker();
     }
 
@@ -170,19 +170,19 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
         return txnBuffer.memSize();
     }
 
-    private TxnMessage tryBuildTxnMessageObject(MessageEvent messageEvent) {
+    TxnMessage tryBuildTxnMessageObject(MessageEvent messageEvent) {
         long threshold = DynamicApplicationConfig.getLong(TASK_COLLECT_BUILD_PACKET_SIZE_LIMIT);
-        if (taskType != Dispatcher && messageEvent.getMemSize() <= threshold) {
-            return buildTxnMessage(messageEvent.getToken(), taskType, messageEvent.getTxnBuffers().get(0));
+        if (preBuildMessage && messageEvent.getMemSize() <= threshold) {
+            return buildTxnMessage(messageEvent.getToken(), messageEvent.getTxnBuffers().get(0), relayStage);
         }
         return null;
     }
 
-    private ByteString tryBuildTxnMessageBytes(MessageEvent messageEvent) {
+    ByteString tryBuildTxnMessageBytes(MessageEvent messageEvent) {
         long threshold = DynamicApplicationConfig.getLong(TASK_COLLECT_BUILD_PACKET_SIZE_LIMIT);
-        if (taskType != Dispatcher && messageEvent.getMemSize() <= threshold) {
-            return buildTxnMessage(messageEvent.getToken(), taskType,
-                messageEvent.getTxnBuffers().get(0)).toByteString();
+        if (preBuildMessage && messageEvent.getMemSize() <= threshold) {
+            return buildTxnMessage(messageEvent.getToken(), messageEvent.getTxnBuffers().get(0),
+                relayStage).toByteString();
         }
         return null;
     }

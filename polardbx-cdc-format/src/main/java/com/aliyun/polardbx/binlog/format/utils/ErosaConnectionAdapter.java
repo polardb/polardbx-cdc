@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.format.utils;
@@ -13,6 +13,8 @@ import com.aliyun.polardbx.binlog.canal.core.gtid.GTIDSet;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
 
 public class ErosaConnectionAdapter implements ErosaConnection {
 
@@ -58,8 +60,7 @@ public class ErosaConnectionAdapter implements ErosaConnection {
     }
 
     @Override
-    public LogFetcher providerFetcher(String binlogfilename, long binlogPosition, boolean search)
-        throws IOException {
+    public LogFetcher providerFetcher(String binlogfilename, long binlogPosition, boolean search) throws IOException {
         return null;
     }
 
@@ -76,5 +77,10 @@ public class ErosaConnectionAdapter implements ErosaConnection {
     @Override
     public String preFileName(String currentFileName) {
         return null;
+    }
+
+    @Override
+    public List<String> binlogList() {
+        return Collections.emptyList();
     }
 }

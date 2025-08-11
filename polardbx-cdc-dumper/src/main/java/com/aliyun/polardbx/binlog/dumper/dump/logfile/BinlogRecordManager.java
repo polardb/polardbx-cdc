@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
@@ -159,7 +159,9 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
                 }
             } else {
                 // 本地有binlog文件，表中没有对应的记录，并且文件不属于已经被purged的文件，则进行补偿
-                if (!maxPurgedRecord.isPresent() || f.getName().compareTo(maxPurgedRecord.get().getBinlogFile()) > 0) {
+
+                if (!maxPurgedRecord.isPresent()
+                    || BinlogFileUtil.compareBinlogFileName(f.getName(), maxPurgedRecord.get().getBinlogFile()) > 0) {
                     logger.info("local file corresponding record not exist, add finish task, file name:{}",
                         f.getName());
                     LabEventManager.logEvent(LabEventType.DUMPER_DO_COMPENSATION);

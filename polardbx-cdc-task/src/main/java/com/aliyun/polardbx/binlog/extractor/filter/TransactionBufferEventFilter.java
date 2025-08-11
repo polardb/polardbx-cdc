@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
@@ -28,6 +28,8 @@ import com.aliyun.polardbx.binlog.extractor.log.processor.EventFilter;
 import com.aliyun.polardbx.binlog.extractor.log.processor.FilterBlacklistTableFilter;
 import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
 import com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil;
+import com.aliyun.polardbx.binlog.storage.Storage;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.LabEventType;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -35,12 +37,15 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
+
 /**
  * @author chengjin.lyf on 2020/7/15 7:24 下午
  * @since 1.0.25
  */
 @Slf4j
 public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
+    private final Storage storage;
     private final List<EventFilter> eventFilterList = new ArrayList<>();
     private TransactionStorage transactionStorage;
     private Transaction currentTran;
@@ -53,14 +58,16 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
      */
     private long lastCommitSequenceNum = -1L;
     private long lastSyncPointSequenceNum = -1L;
+    private long requestTso = -1;
 
-    private final boolean checkSyncPoint =
-        DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_CHECK_SYNC_POINT_ENABLED);
-
-    public TransactionBufferEventFilter() {
+    public TransactionBufferEventFilter(Storage storage, String startTso) {
+        this.storage = storage;
         String blacklist = DynamicApplicationConfig.getString(ConfigKeys.TASK_EXTRACT_FILTER_PHYSICAL_TABLE_BLACKLIST);
         if (StringUtils.isNotBlank(blacklist)) {
-            eventFilterList.add(new FilterBlacklistTableFilter(blacklist));
+            this.eventFilterList.add(new FilterBlacklistTableFilter(blacklist));
+        }
+        if (StringUtils.isNotEmpty(startTso)){
+            requestTso = CommonUtils.getTsoTimestamp(startTso);
         }
     }
 
@@ -132,7 +139,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
     }
 
-    private void processRollback(LogEvent logEvent, HandlerContext context) {
+    public void processRollback(LogEvent logEvent, HandlerContext context) {
         lastCommitSequenceNum = -1;
         String xid = LogEventUtil.getXid(logEvent);
         RuntimeContext rc = context.getRuntimeContext();
@@ -140,8 +147,11 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         if (StringUtils.isNotBlank(xid)) {
             Transaction transaction = transactionStorage.getByXid(xid, context.getRuntimeContext());
             if (transaction == null) {
-                log.warn("rollback event not found transaction obj , xid : " + xid + " event log : "
-                    + logEvent.getHeader().getLogPos());
+                // 只有正常点xa事物才输出log
+                if (LogEventUtil.isValidXid(xid)){
+                    log.warn("rollback event not found transaction obj , xid : {} event log : {}:{}", xid,
+                        context.getRuntimeContext().getBinlogFile(), logEvent.getHeader().getLogPos());
+                }
                 return;
             }
             transaction.setRollback(rc);
@@ -150,7 +160,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
     }
 
-    private void processStart(LogEvent logEvent, HandlerContext context) {
+    public void processStart(LogEvent logEvent, HandlerContext context) {
         lastCommitSequenceNum = -1L;
         if (currentTran != null && currentTran.isStart()) {
             String errorMsg = "occur fatal error, new transaction start but last transaction not finish! last id: "
@@ -160,7 +170,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             throw new PolardbxException(errorMsg);
         }
         try {
-            Transaction tran = new Transaction(logEvent, context.getRuntimeContext());
+            Transaction tran = new Transaction(storage, logEvent, context.getRuntimeContext());
             tran.setStart();
             currentTran = tran;
             if (tran.isCdcSingle()) {
@@ -178,7 +188,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
     }
 
-    private void processCommit(LogEvent event, HandlerContext context) throws Exception {
+    public void processCommit(LogEvent event, HandlerContext context) throws Exception {
         //DN8.0的V1版本将Commit Tso通过Variables的方式，记录到了XA Commit Event
         if (LogEventUtil.containsCommitGCN(event)) {
             processCommitSequence(((QueryLogEvent) event).getCommitGCN());
@@ -189,13 +199,35 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         String xid = LogEventUtil.getXid(event);
         if (StringUtils.isNotBlank(xid)) {
             commitTran = transactionStorage.getByXid(xid, context.getRuntimeContext());
-            if (commitTran != null && lastCommitSequenceNum > 0) {
-                commitTran.setTsoTransaction(true);
-                commitTran.setRealTSO(lastCommitSequenceNum);
-            }
+            if (commitTran != null){
+                if (lastCommitSequenceNum > 0) {
+                    commitTran.setTsoTransaction(true);
+                    commitTran.setRealTSO(lastCommitSequenceNum);
+                }
 
-            if (commitTran != null && commitTran.isSyncPoint()) {
-                lastSyncPointSequenceNum = lastCommitSequenceNum;
+                if (commitTran.isSyncPoint()) {
+                    lastSyncPointSequenceNum = lastCommitSequenceNum;
+                }
+            } else {
+                boolean ignoreLog = false;
+                try{
+                    String group = StringUtils.lowerCase(LogEventUtil.getGroupFromXid(xid, "UTF8"));
+                    if ((group != null && group.startsWith("__cdc___single_group")) || !LogEventUtil.isValidXid(xid)){
+                        // 忽略cdc 和 不合法的xid事物
+                        ignoreLog = true;
+                    }
+                } catch (Throwable ignored){
+                }
+                if (!ignoreLog){
+                    log.warn("commit event not found transaction obj , xid : {} {}:{}", xid,
+                        context.getRuntimeContext().getBinlogFile(), event.getHeader().getLogPos());
+                    // 异常检查，丢失commit的事物，如果tso > request tso ，抛出异常
+                    if (requestTso > 0 && lastCommitSequenceNum >= requestTso && DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_LOSS_COMMIT_CHECK)){
+                        throw new PolardbxException("commit event not found transaction obj , xid "+ xid + " " +
+                            context.getRuntimeContext().getBinlogFile()+":"+ event.getHeader().getLogPos()+
+                            ", tso = "+lastCommitSequenceNum+", request tso "+requestTso);
+                    }
+                }
             }
         } else {
             RuntimeContext rc = context.getRuntimeContext();
@@ -209,6 +241,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             commitTran = currentTran;
         }
 
+        boolean checkSyncPoint = getBoolean(ConfigKeys.TASK_EXTRACT_CHECK_SYNC_POINT_ENABLED);
         if (checkSyncPoint) {
             // getEventCount > 0 保证处理的是常规事务
             // DN binlog中可能存在下面这种事务：
@@ -248,7 +281,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
     }
 
-    private void processSequence(LogEvent event, HandlerContext context) {
+    public void processSequence(LogEvent event, HandlerContext context) {
         //check commit sequence for DN 5.7
         SequenceLogEvent sequenceLogEvent = (SequenceLogEvent) event;
         if (sequenceLogEvent.isCommitSequence()) {
@@ -256,7 +289,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
     }
 
-    private void processGcn(LogEvent event, HandlerContext context) {
+    public void processGcn(LogEvent event, HandlerContext context) {
         //check commit sequence for DN 8.0 V2
         GcnLogEvent gcnLogEvent = (GcnLogEvent) event;
         if (LogEventUtil.isHaveCommitSequence(gcnLogEvent)) {
@@ -282,7 +315,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         FormatDescriptionEvent formatDescriptionEvent = BinlogGenerateUtil.buildFormatDescriptionEvent(
             context.getRuntimeContext().getServerId(),
             context.getRuntimeContext().getVersion());
-        Transaction transaction = new Transaction(fde, formatDescriptionEvent, context.getRuntimeContext());
+        Transaction transaction = new Transaction(storage, fde, formatDescriptionEvent, context.getRuntimeContext());
         transactionStorage.add(transaction);
         transaction.setCommit(context.getRuntimeContext());
         receiveFormatDesc = true;
@@ -296,7 +329,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             }
             // 如果currentTran==null，说明此Query Event是DDL，识别出是DDL，直接push清空storage
             if (event.getHeader().getType() == LogEvent.QUERY_EVENT) {
-                Transaction transaction = new Transaction((QueryLogEvent) event, context.getRuntimeContext());
+                Transaction transaction = new Transaction(storage, (QueryLogEvent) event, context.getRuntimeContext());
                 transactionStorage.add(transaction);
                 transaction.setCommit(context.getRuntimeContext());
             }
@@ -309,7 +342,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         }
         if (event.getHeader().getType() == LogEvent.QUERY_EVENT) {
             // 事务中出现了DDL
-            if (DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_SKIP_DDL_IN_TRANSACTION)) {
+            if (getBoolean(ConfigKeys.BINLOG_SKIP_DDL_IN_TRANSACTION)) {
                 log.warn("transaction contains ddl, skip it! {}",
                     currentTran.getXid() + ", " + currentTran.getBinlogFileName() + ":" + currentTran.getStartLogPos()
                         + JSON.toJSONString(event));

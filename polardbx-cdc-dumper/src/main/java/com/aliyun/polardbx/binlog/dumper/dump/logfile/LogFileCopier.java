@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
@@ -35,6 +35,7 @@ import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import org.apache.commons.lang3.StringUtils;
@@ -99,6 +100,13 @@ public class LogFileCopier {
     @Setter
     private ExecutionConfig executionConfig;
     private volatile boolean running;
+    /**
+     * 不直接使用metrics里面的delay，因为metrics中的delay被初始化为0可能是不准的，这会导致getDumperTarget误判该dumper为可用。
+     */
+    @Getter
+    private long delay;
+    @Getter
+    private long lastEventTimeStampSecond;
 
     public LogFileCopier(LogFileManager logFileManager, int writeBufferSize, int seekBufferSize,
                          ExecutionConfig executionConfig) {
@@ -118,6 +126,7 @@ public class LogFileCopier {
         this.lastInjectTroubleTime = System.currentTimeMillis();
         this.contactBuffer = ByteBuffer.allocate(65536);
         this.metrics = StreamMetrics.getStreamMetrics(STREAM_NAME_GLOBAL);
+        this.delay = Long.MAX_VALUE;
     }
 
     public void start() {
@@ -191,11 +200,14 @@ public class LogFileCopier {
         clearContactInfo();
         buildTarget();
         buildBinlogFile();
+        // 这里会更新lastEventTimestamp
         String lastTso = seekLastTso();
         if (StringUtils.isNotBlank(lastTso)) {
             timelineEnvConfig = new TimelineEnvConfig();
             timelineEnvConfig.initConfigByTso(lastTso);
         }
+        logFileManager.setLatestFileCursor(
+            new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer(), binlogFile.getFileSequence()));
         metrics.setLatestDelayTimeOnCommit(0);
     }
 
@@ -241,7 +253,7 @@ public class LogFileCopier {
         }
 
         if (splitMode == EventSplitMode.CLIENT && isHeartBeat) {
-            processHeartBeat();
+            tryFlushAndUpdateCursor(false);
             return;
         }
 
@@ -252,16 +264,21 @@ public class LogFileCopier {
                     contactBuffer + " , contact context " + currentContactContext);
             }
 
+            // currentContactContext 记录了上一个packet写入了一半的event的相关信息
             if (currentContactContext != null) {
                 int remaining = currentContactContext.eventLength - currentContactContext.currentWriteLength;
                 if (remaining > packet.length) {
+                    // 如果event总长度减去已经写入的event长度大于当前packet总长度，那么当前packet仍然是一个不完整的事件
                     binlogFile.writeData(packet, 0, packet.length);
                     currentContactContext.currentWriteLength = currentContactContext.currentWriteLength + packet.length;
+                    // offset 就是packet已经读到哪的指针
                     offset += packet.length;
                 } else {
-                    //先check，再write，避免数据不一致
+                    // 先check，再write，避免数据不一致
+                    // 这里将上次不完整的事件写入完整了
                     binlogFile.checkPosition(currentContactContext.eventPos, binlogFile.writePointer() + remaining);
                     binlogFile.writeData(packet, 0, remaining);
+                    tryFlushAndUpdateCursor(false);
                     offset += remaining;
                     currentContactContext = null;
                 }
@@ -321,8 +338,10 @@ public class LogFileCopier {
         if (offset < packet.length) {
             checkOffset(offset, packet.length);
             if (packet.length - offset <= contactBuffer.capacity()) {
+                // 最后一个不完整的事件如果可以存到内存中，先存到内存里
                 contactBuffer.put(packet, offset, packet.length - offset);
             } else {
+                // 否则记录一些信息，写入文件中
                 currentContactContext = new ContactContext();
                 currentContactContext.eventLength = eventLength;
                 currentContactContext.eventPos = eventPos;
@@ -330,8 +349,6 @@ public class LogFileCopier {
                 binlogFile.writeData(packet, offset, packet.length - offset);
             }
         }
-
-        logFileManager.setLatestFileCursor(new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer()));
     }
 
     private void checkOffset(int offset, int length) {
@@ -363,7 +380,7 @@ public class LogFileCopier {
                 binlogFile.flush();
             }
         } else if (eventType == LogEvent.HEARTBEAT_LOG_EVENT) {
-            processHeartBeat();
+            tryFlushAndUpdateCursor(false);
         } else {
             checkDelay(eventType, data, offset);
             binlogFile.writeEventForSync(data, offset, length);
@@ -371,6 +388,7 @@ public class LogFileCopier {
 
         if (eventType == LogEvent.XID_EVENT) {
             metrics.incrementTotalWriteTxnCount();
+            tryFlushAndUpdateCursor(true);
         }
 
         if (injectTrouble && System.currentTimeMillis() - lastInjectTroubleTime > 5 * 60 * 1000) {
@@ -381,15 +399,22 @@ public class LogFileCopier {
         lastEventType = eventType;
     }
 
-    private void processHeartBeat() throws IOException {
-        if (binlogFile.hasBufferedData() && binlogFile.getLastFlushTime() < System.currentTimeMillis() - 5000) {
-            binlogFile.flush();
-            logFileManager.setLatestFileCursor(new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer()));
+    private void tryFlushAndUpdateCursor(boolean forced) throws IOException {
+        if (forced || System.currentTimeMillis() - logFileManager.getLatestFileCursor().getTimestamp()
+            >= logFileManager.getFlushInterval()) {
+            if (binlogFile.hasBufferedData()) {
+                binlogFile.flush();
+            }
+            BinlogCursor cursor =
+                new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer(), binlogFile.getFileSequence());
+            if (!logFileManager.getLatestFileCursor().equals(cursor)) {
+                logFileManager.setLatestFileCursor(cursor);
+            }
         }
     }
 
     public void buildBinlogFile() throws IOException {
-        CdcFile maxLocalCdcFile = logFileManager.getLocalMaxBinlogFile();
+        CdcFile maxLocalCdcFile = logFileManager.getLocalMaxBinlogFile(false);
         File maxLocalFile;
         if (maxLocalCdcFile == null) {
             maxLocalFile = findFirstFile();
@@ -436,6 +461,9 @@ public class LogFileCopier {
                 new BinlogFile(new File(fullPath, fileName), "rw",
                     writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
             BinlogFile.SeekResult result = binlogFile.seekLastTso();
+            if (result.getLastEventTimestamp() != null) {
+                lastEventTimeStampSecond = result.getLastEventTimestamp();
+            }
             binlogFile.close();
             if (StringUtils.isNotBlank(result.getLastTso())) {
                 return result.getLastTso();
@@ -453,6 +481,8 @@ public class LogFileCopier {
         binlogFile.close();
         File newFile = logFileManager.rotateFile(binlogFile.getFile(), null);
         binlogFile = new BinlogFile(newFile, "rw", writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
+        logFileManager.setLatestFileCursor(new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer(),
+            binlogFile.getFileSequence()));
         binlogFile.writeHeader();
     }
 
@@ -487,7 +517,9 @@ public class LogFileCopier {
                 timestamp |= (seed << (i << 3));
             }
 
+            lastEventTimeStampSecond = timestamp;
             long delayTime = System.currentTimeMillis() - timestamp * 1000;//Binlog中时间戳的单位是秒，需要转化为毫秒再计算
+            this.delay = delayTime;
             metrics.setLatestDelayTimeOnCommit(delayTime);
         }
     }

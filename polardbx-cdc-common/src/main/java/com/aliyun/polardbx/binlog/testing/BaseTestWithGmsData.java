@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.testing;
@@ -14,7 +14,6 @@ import org.springframework.core.io.Resource;
 
 import java.io.File;
 import java.sql.Connection;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * created by ziyang.lb
@@ -22,28 +21,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public class BaseTestWithGmsData extends BaseTest {
 
-    private static final AtomicBoolean GMS_TABLE_INITED = new AtomicBoolean();
-
     @SneakyThrows
-    public BaseTestWithGmsData() {
-        //同一进程内，所有test method 共享这一份内存库表数据
-        if (GMS_TABLE_INITED.compareAndSet(false, true)) {
-            long start = System.currentTimeMillis();
-            try (Connection connection = getGmsDataSource().getConnection()) {
-                H2Util.executeBatchSqlGzip(connection, getCompressSqlFile());
+    @Override
+    protected void initGmsInfo() {
+        long start = System.currentTimeMillis();
+        try (Connection connection = getGmsDataSource().getConnection()) {
+            H2Util.executeBatchSqlGzip(connection, getCompressSqlFile());
 
-                Resource resource2 = new DefaultResourceLoader().getResource(
-                    "classpath:testing-conf/gms_additional.sql");
-                H2Util.executeBatchSql(connection, resource2.getFile());
-            }
-            H2Util.execUpdate(getGmsDataSource(), "alter table binlog_logic_meta_history "
-                + "add column `need_apply` tinyint(1) default 1 not null");
-
-            if (log.isDebugEnabled()) {
-                log.debug("successfully init gms cdc tables and data, cost time {} (ms)",
-                    System.currentTimeMillis() - start);
-            }
+            Resource resource2 = new DefaultResourceLoader().getResource(
+                "classpath:testing-conf/gms_additional.sql");
+            H2Util.executeBatchSql(connection, resource2.getFile());
         }
+        H2Util.execUpdate(getGmsDataSource(), "alter table binlog_logic_meta_history "
+            + "add column `need_apply` tinyint(1) default 1 not null");
+
+        log.info("successfully init gms cdc tables and data, cost time {} (ms)",
+            System.currentTimeMillis() - start);
     }
 
     @SneakyThrows
@@ -51,5 +44,10 @@ public class BaseTestWithGmsData extends BaseTest {
         Resource resource = new DefaultResourceLoader().getResource(
             "classpath:testing-conf/gms_cdc_tables_and_data.sql.gz");
         return resource.getFile();
+    }
+
+    @Override
+    protected boolean truncateGmsTableAtEachBefore() {
+        return false;
     }
 }

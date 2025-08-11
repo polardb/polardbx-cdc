@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
@@ -56,7 +56,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_RECORD_SQL_WITH_E
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_META_MAX_SIZE;
 import static com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo.parseExtInfo;
-import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildSnapshotTopology;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.reWriteWrongDdl;
@@ -470,7 +470,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
     }
 
     private LogicMetaTopology fetchLogicMetaTopology(String snapshotTso) {
-        return buildTopology(snapshotTso, () -> buildLogicMetaTopology(snapshotTso));
+        return buildSnapshotTopology(snapshotTso, () -> buildLogicMetaTopology(snapshotTso));
     }
 
     private LogicMetaTopology buildLogicMetaTopology(String snapshotTso) {

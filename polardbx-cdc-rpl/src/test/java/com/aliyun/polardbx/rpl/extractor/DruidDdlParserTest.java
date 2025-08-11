@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor;
@@ -39,7 +39,8 @@ public class DruidDdlParserTest {
 
     @Test
     public void testCall() {
-        String sql = "CALL __polardbx_inner_procedure__.trigger_sync_point_trx()";
+        String sql = "CALL polardbx.columnar_set_config(266, 'TYPE', 'SNAPSHOT')";
         DdlResult ddlResult = DruidDdlParser.parse(sql, "abc");
+        Assert.assertNotNull(ddlResult.getSqlStatement());
     }
 }

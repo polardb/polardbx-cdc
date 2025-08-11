@@ -1,12 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.transmit.relay;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -103,7 +104,7 @@ public class RelayFileManager {
     public void cleanRelayFilesAfter(File file) {
         List<File> allRelayFiles = listRelayFiles();
         allRelayFiles.forEach(f -> {
-            if (f.getName().compareTo(file.getName()) > 0) {
+            if (BinlogFileUtil.compareBinlogFileName(f.getName(), file.getName()) > 0) {
                 deleteFile(f);
             }
         });
@@ -112,7 +113,7 @@ public class RelayFileManager {
     public void cleanRelayFilesBefore(String fileName) {
         List<File> allRelayFiles = listRelayFiles();
         allRelayFiles.forEach(f -> {
-            if (f.getName().compareTo(fileName) < 0) {
+            if (BinlogFileUtil.compareBinlogFileName(f.getName(), fileName) < 0) {
                 deleteFile(f);
                 log.info("clean relay file:{}", f.getName());
             }

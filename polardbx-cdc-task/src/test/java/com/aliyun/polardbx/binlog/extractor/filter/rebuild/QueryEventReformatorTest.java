@@ -1,24 +1,21 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
-import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
-import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
-import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat.QueryEventReformator;
 import com.aliyun.polardbx.binlog.format.utils.SqlModeUtil;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-public class QueryEventReformatorTest extends BaseTestWithGmsTables {
+public class QueryEventReformatorTest extends BaseTest {
 
     @Test
     public void ignoreTruncateTableTest() {
@@ -31,13 +28,27 @@ public class QueryEventReformatorTest extends BaseTestWithGmsTables {
     }
 
     @Test
+    public void testIgnoreDisableKeys() {
+        QueryEventReformator reformator = Mockito.mock(QueryEventReformator.class);
+        QueryLogEvent queryLogEvent = Mockito.mock(QueryLogEvent.class);
+        Mockito.when(queryLogEvent.getDbName()).thenReturn("test_db");
+        Mockito.when(reformator.accept(queryLogEvent)).thenCallRealMethod();
+
+        Mockito.when(queryLogEvent.getQuery()).thenReturn("alter table `t_01022` disable keys");
+        Assert.assertFalse(reformator.accept(queryLogEvent));
+
+        Mockito.when(queryLogEvent.getQuery()).thenReturn("alter table `t_01022` enable keys");
+        Assert.assertFalse(reformator.accept(queryLogEvent));
+    }
+
+    @Test
     public void ignoreTruncateTableExceptionTest() {
         QueryEventReformator reformator = Mockito.mock(QueryEventReformator.class);
         QueryLogEvent queryLogEvent = Mockito.mock(QueryLogEvent.class);
         Mockito.when(queryLogEvent.getQuery()).thenReturn("this is not a ddl st");
         Mockito.when(queryLogEvent.getDbName()).thenReturn("test_db");
         Mockito.when(reformator.accept(queryLogEvent)).thenCallRealMethod();
-        setConfig(ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_FILTER_IGNORE_PARSE_ERROR, "false");
+        mockConfig(ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_FILTER_IGNORE_PARSE_ERROR, "false");
         Exception ex = null;
         try {
             reformator.accept(queryLogEvent);
@@ -45,7 +56,7 @@ public class QueryEventReformatorTest extends BaseTestWithGmsTables {
             ex = e;
         }
         Assert.assertNotNull(ex);
-        setConfig(ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_FILTER_IGNORE_PARSE_ERROR, "true");
+        mockConfig(ConfigKeys.META_BUILD_PHYSICAL_DDL_SQL_BLACKLIST_FILTER_IGNORE_PARSE_ERROR, "true");
         Assert.assertTrue(reformator.accept(queryLogEvent));
     }
 
@@ -70,7 +81,6 @@ public class QueryEventReformatorTest extends BaseTestWithGmsTables {
             + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci";
         Assert.assertEquals(expect, reformator.processQueryDDL(queryLogEvent));
     }
-
 
     @Test
     public void testCloneAndProcessBeforeApplyWithAlterTableAdd() {

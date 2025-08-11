@@ -1,14 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.merge;
 
-import com.aliyun.polardbx.binlog.util.CommonUtils;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
@@ -18,7 +17,6 @@ import java.util.function.Consumer;
  **/
 @Slf4j
 public class MergeBarrier {
-    private final TaskType taskType;
     /**
      * 正在进行排队，等待合并完成的XA事务
      */
@@ -32,8 +30,7 @@ public class MergeBarrier {
      */
     private final Consumer<TxnToken> consumer;
 
-    public MergeBarrier(TaskType taskType, boolean isMergeNoTsoXa, Consumer<TxnToken> consumer) {
-        this.taskType = taskType;
+    public MergeBarrier(boolean isMergeNoTsoXa, Consumer<TxnToken> consumer) {
         this.isMergeNoTsoXa = isMergeNoTsoXa;
         this.xaTransactionHolder = new XaTransactionHolder();
         this.consumer = consumer;
@@ -109,7 +106,6 @@ public class MergeBarrier {
     }
 
     private boolean shouldMerge() {
-        //return taskType != TaskType.Dispatcher;
         return true;
     }
 

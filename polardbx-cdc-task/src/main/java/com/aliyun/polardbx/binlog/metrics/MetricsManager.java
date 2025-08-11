@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.metrics;
@@ -15,11 +15,9 @@ import com.aliyun.polardbx.binlog.canal.unit.SearchRecorderMetrics;
 import com.aliyun.polardbx.binlog.cdc.meta.MetaMetrics;
 import com.aliyun.polardbx.binlog.dao.BinlogLogicMetaHistoryMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
-import com.aliyun.polardbx.binlog.extractor.MultiStreamStartTsoWindow;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
-import com.aliyun.polardbx.binlog.metrics.format.TableFormat;
 import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
 import com.aliyun.polardbx.binlog.proc.ProcUtils;
 import com.aliyun.polardbx.binlog.storage.StorageMetrics;
@@ -28,6 +26,7 @@ import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.MetricsReporter;
+import com.aliyun.polardbx.binlog.util.format.TableFormat;
 import com.google.common.collect.Lists;
 import lombok.SneakyThrows;
 import org.apache.commons.lang3.time.DateFormatUtils;
@@ -102,8 +101,7 @@ public class MetricsManager {
 
     private void print(MetricsSnapshot snapshot) {
         StringBuilder stringBuilder = new StringBuilder();
-        stringBuilder.append("\n")
-            .append(
+        stringBuilder.append("\n").append(
                 "################################################## task metrics begin ####################################################")
             .append("\n");
 
@@ -116,8 +114,7 @@ public class MetricsManager {
         contactRelayWriterMetrics(snapshot, stringBuilder);
         contactRelayStreamMetrics(snapshot, stringBuilder);
 
-        stringBuilder.append("\r\n")
-            .append(
+        stringBuilder.append("\r\n").append(
                 "################################################## task metrics end ########################################################")
             .append("\r\n");
 
@@ -174,8 +171,7 @@ public class MetricsManager {
             "netInBps",
             "inTps",
             "inEps",
-            "maxDelay(ms)",
-            "isAllReady");
+            "maxDelay(ms)");
         tableFormat.addRow(
             tsoC + noTsoC + hc,
             tsoC,
@@ -184,8 +180,7 @@ public class MetricsManager {
             snapshot.aggregateCoreMetrics.netInBps,
             snapshot.aggregateCoreMetrics.inTps,
             snapshot.aggregateCoreMetrics.inEps,
-            snapshot.aggregateCoreMetrics.inDelay,
-            MultiStreamStartTsoWindow.getInstance().isAllReady());
+            snapshot.aggregateCoreMetrics.inDelay);
         stringBuilder.append(tableFormat);
 
         //Extractor search metrics
@@ -194,19 +189,15 @@ public class MetricsManager {
             threadInfoFormat.addColumn("tid", "storage", "stat", "binlog-pos", "timestamp", "file-size", "unCommitXA",
                 "needXAStart", "dst-tso-time", "source");
             for (SearchRecorder searchRecorder : SearchRecorderMetrics.getSearchRecorderMap().values()) {
-                threadInfoFormat.addRow(searchRecorder.getTid(),
-                    searchRecorder.getStorageName(),
+                threadInfoFormat.addRow(searchRecorder.getTid(), searchRecorder.getStorageName(),
                     searchRecorder.isFinish() ? "finish" : "running",
                     searchRecorder.getFileName() + ":" + searchRecorder.getPosition(),
                     DateFormatUtils.format(searchRecorder.getTimestamp() * 1000, "yyyy-MM-dd HH:mm:ss"),
-                    searchRecorder.getSize(),
-                    searchRecorder.getUnCommitXidSet().size(),
-                    searchRecorder.getNeedStartXidSet().size(),
-                    searchRecorder.getSearchTime() > 0 ?
+                    searchRecorder.getSize(), searchRecorder.getUnCommitXidSet().size(),
+                    searchRecorder.getNeedStartXidSet().size(), searchRecorder.getSearchTime() > 0 ?
                         DateFormatUtils.format(
                             CommonUtils.tso2physicalTime(searchRecorder.getSearchTime(), TimeUnit.MILLISECONDS),
-                            "yyyy-MM-dd HH:mm:ss") :
-                        "CdcStart",
+                            "yyyy-MM-dd HH:mm:ss") : "CdcStart",
                     searchRecorder.isLocal() ? "rds-local" : "backup-remote");
             }
             stringBuilder.append(threadInfoFormat);
@@ -221,30 +212,15 @@ public class MetricsManager {
             } else {
                 TableFormat threadInfoFormat = new TableFormat("Extractor threadInfo");
                 TableFormat threadExtInfoFormat = new TableFormat("Extractor threadExtInfo");
-                threadInfoFormat.addColumn("tid",
-                    "storage",
-                    "stat",
-                    "rt(ms)",
-                    "status",
-                    "pos",
-                    "delay(ms)",
-                    "sorter_queue",
-                    "sorter_first_trans",
-                    "ms_queue_size",
-                    "ms_pass_cnt");
+                threadInfoFormat.addColumn("tid", "storage", "stat", "rt(ms)", "status", "pos", "delay(ms)",
+                    "sorter_queue", "sorter_first_trans", "ms_queue_size", "ms_pass_cnt");
                 threadExtInfoFormat.addColumn("tid", "storage", "firstTransKeyInSorter");
                 for (ThreadRecorder record : ThreadRecorder.getRecorderMap().values()) {
-                    threadInfoFormat.addRow(record.getTid(),
-                        record.getStorageInstanceId(),
-                        record.getState(),
-                        record.getRt(),
-                        record.isComplete() ? "RUNNING" : "BLOCK",
-                        record.getPosition(),
+                    threadInfoFormat.addRow(record.getTid(), record.getStorageInstanceId(), record.getState(),
+                        record.getRt(), record.isComplete() ? "RUNNING" : "BLOCK", record.getPosition(),
                         Math.max(System.currentTimeMillis() - record.getWhen() * 1000, 0),
-                        record.getQueuedTransSizeInSorter(),
-                        record.getFirstTransPosInSorter(),
-                        record.getMergeSourceQueueSize(),
-                        record.getMergeSourcePassCount());
+                        record.getQueuedTransSizeInSorter(), record.getFirstTransPosInSorter(),
+                        record.getMergeSourceQueueSize(), record.getMergeSourcePassCount());
 
                     String firstTransKey = record.getFirstTransKeyInSorter();
                     threadExtInfoFormat.addRow(record.getTid(), record.getStorageInstanceId(), firstTransKey);
@@ -259,20 +235,11 @@ public class MetricsManager {
         MergeMetrics mergeMetrics = snapshot.mergeMetrics;
         // first part
         TableFormat threadInfoFormat1 = new TableFormat("Merger Metrics");
-        threadInfoFormat1.addColumn(
-            "totalMergePassCount",
-            "totalMergePass2PCCount",
-            "totalMergePollEmptyCount",
-            "collectQueuedSize",
-            "delayTimeOnMerge(ms)",
-            "delayTimeOnCollect(ms)");
-        threadInfoFormat1.addRow(
-            mergeMetrics.getTotalMergePassCount(),
-            mergeMetrics.getTotalMergePass2PCCount(),
-            mergeMetrics.getTotalMergePollEmptyCount(),
-            mergeMetrics.getCollectQueuedSize(),
-            mergeMetrics.getDelayTimeOnMerge(),
-            mergeMetrics.getDelayTimeOnCollect());
+        threadInfoFormat1.addColumn("totalMergePassCount", "totalMergePass2PCCount", "totalMergePollEmptyCount",
+            "collectQueuedSize", "delayTimeOnMerge(ms)", "delayTimeOnCollect(ms)");
+        threadInfoFormat1.addRow(mergeMetrics.getTotalMergePassCount(), mergeMetrics.getTotalMergePass2PCCount(),
+            mergeMetrics.getTotalMergePollEmptyCount(), mergeMetrics.getCollectQueuedSize(),
+            mergeMetrics.getDelayTimeOnMerge(), mergeMetrics.getDelayTimeOnCollect());
         sb.append(threadInfoFormat1);
     }
 
@@ -280,43 +247,22 @@ public class MetricsManager {
         // second part
         TransmitMetrics transmitMetrics = snapshot.transmitMetrics;
         TableFormat threadInfoFormat2 = new TableFormat("Transmit Metrics");
-        threadInfoFormat2.addColumn(
-            "transmitQueuedSize",
-            "dumpingQueuedSize",
-            "totalTransmitCount",
-            "totalSingleTransmitCount",
-            "totalChunkTransmitCount",
-            "delayTimeOnTransmit(ms)");
-        threadInfoFormat2.addRow(
-            transmitMetrics.getTransmitQueuedSize(),
-            transmitMetrics.getDumpingQueueSize(),
-            transmitMetrics.getTotalTransmitCount(),
-            transmitMetrics.getTotalSingleTransmitCount(),
-            transmitMetrics.getTotalChunkTransmitCount(),
-            transmitMetrics.getDelayTimeOnTransmit());
+        threadInfoFormat2.addColumn("transmitQueuedSize", "dumpingQueuedSize", "totalTransmitCount",
+            "totalSingleTransmitCount", "totalChunkTransmitCount", "delayTimeOnTransmit(ms)");
+        threadInfoFormat2.addRow(transmitMetrics.getTransmitQueuedSize(), transmitMetrics.getDumpingQueueSize(),
+            transmitMetrics.getTotalTransmitCount(), transmitMetrics.getTotalSingleTransmitCount(),
+            transmitMetrics.getTotalChunkTransmitCount(), transmitMetrics.getDelayTimeOnTransmit());
         sb.append(threadInfoFormat2);
     }
 
     private void contactJvmMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
         TableFormat jvmFormatInfo = new TableFormat("Jvm Metrics");
-        jvmFormatInfo.addColumn(
-            "youngUsed",
-            "youngMax",
-            "youngCollectionCnt",
-            "youngCollectionTime(ms)",
-            "oldUsed",
-            "oldMax",
-            "oldCollectionCnt",
-            "oldCollectionTime(ms)");
-        jvmFormatInfo.addRow(
-            snapshot.jvmSnapshot.getYoungUsed(),
-            snapshot.jvmSnapshot.getYoungMax(),
-            snapshot.jvmSnapshot.getYoungCollectionCount(),
-            snapshot.jvmSnapshot.getYoungCollectionTime(),
-            snapshot.jvmSnapshot.getOldUsed(),
-            snapshot.jvmSnapshot.getOldMax(),
-            snapshot.jvmSnapshot.getOldCollectionCount(),
-            snapshot.jvmSnapshot.getOldCollectionTime());
+        jvmFormatInfo.addColumn("youngUsed", "youngMax", "youngCollectionCnt", "youngCollectionTime(ms)", "oldUsed",
+            "oldMax", "oldCollectionCnt", "oldCollectionTime(ms)");
+        jvmFormatInfo.addRow(snapshot.jvmSnapshot.getYoungUsed(), snapshot.jvmSnapshot.getYoungMax(),
+            snapshot.jvmSnapshot.getYoungCollectionCount(), snapshot.jvmSnapshot.getYoungCollectionTime(),
+            snapshot.jvmSnapshot.getOldUsed(), snapshot.jvmSnapshot.getOldMax(),
+            snapshot.jvmSnapshot.getOldCollectionCount(), snapshot.jvmSnapshot.getOldCollectionTime());
         sb.append(jvmFormatInfo);
     }
 
@@ -326,45 +272,22 @@ public class MetricsManager {
         }
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         TableFormat osFormatInfo = new TableFormat("Proc Metrics");
-        osFormatInfo.addColumn(
-            "pid",
-            "startTime",
-            "cpuPercent",
-            "cpuTotal",
-            "cpuUser",
-            "cpuSys",
-            "memSize",
-            "fdNum");
-        osFormatInfo.addRow(
-            snapshot.procSnapshot.getPid(),
-            sdf.format(new Date(snapshot.procSnapshot.getStartTime())),
-            CpuPerc.format(snapshot.procSnapshot.getCpuPercent()),
-            snapshot.procSnapshot.getCpuTotal(),
-            snapshot.procSnapshot.getCpuUser(),
-            snapshot.procSnapshot.getCpuSys(),
-            snapshot.procSnapshot.getMemSize(),
+        osFormatInfo.addColumn("pid", "startTime", "cpuPercent", "cpuTotal", "cpuUser", "cpuSys", "memSize", "fdNum");
+        osFormatInfo.addRow(snapshot.procSnapshot.getPid(), sdf.format(new Date(snapshot.procSnapshot.getStartTime())),
+            CpuPerc.format(snapshot.procSnapshot.getCpuPercent()), snapshot.procSnapshot.getCpuTotal(),
+            snapshot.procSnapshot.getCpuUser(), snapshot.procSnapshot.getCpuSys(), snapshot.procSnapshot.getMemSize(),
             snapshot.procSnapshot.getFdNum());
         sb.append(osFormatInfo);
     }
 
     private void contactStorageMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
         TableFormat storageMetrics = new TableFormat("Storage Metrics");
-        storageMetrics.addColumn(
-            "curTxnBufferCnt",
-            "persistTxnBufferCnt",
-            "curTxnItemCnt",
-            "persistTxnItemCnt",
-            "curTransactionCnt",
-            "persistTransactionCnt",
-            "cleanerQueuedSize");
-        storageMetrics.addRow(
-            TxnBuffer.CURRENT_TXN_BUFFER_COUNT.get(),
-            TxnBuffer.CURRENT_TXN_BUFFER_PERSISTED_COUNT.get(),
-            TxnItemRef.CURRENT_TXN_ITEM_COUNT.get(),
-            TxnItemRef.CURRENT_TXN_ITEM_PERSISTED_COUNT.get(),
-            Transaction.CURRENT_TRANSACTION_COUNT.get(),
-            Transaction.CURRENT_TRANSACTION_PERSISTED_COUNT.get(),
-            StorageMetrics.get().getCleanerQueuedSize());
+        storageMetrics.addColumn("curTxnBufferCnt", "persistTxnBufferCnt", "curTxnItemCnt", "persistTxnItemCnt",
+            "curTransactionCnt", "persistTransactionCnt", "cleanerQueuedSize");
+        storageMetrics.addRow(TxnBuffer.CURRENT_TXN_BUFFER_COUNT.get(),
+            TxnBuffer.CURRENT_TXN_BUFFER_PERSISTED_COUNT.get(), TxnItemRef.CURRENT_TXN_ITEM_COUNT.get(),
+            TxnItemRef.CURRENT_TXN_ITEM_PERSISTED_COUNT.get(), Transaction.CURRENT_TRANSACTION_COUNT.get(),
+            Transaction.CURRENT_TRANSACTION_PERSISTED_COUNT.get(), StorageMetrics.get().getCleanerQueuedSize());
         sb.append(storageMetrics);
     }
 
@@ -373,20 +296,10 @@ public class MetricsManager {
             return;
         }
         TableFormat relayWriterFormatInfo = new TableFormat("Relay Writer Metrics");
-        relayWriterFormatInfo.addColumn(
-            "threadId",
-            "queuedSize",
-            "putCount",
-            "takeCount",
-            "streams");
+        relayWriterFormatInfo.addColumn("threadId", "queuedSize", "putCount", "takeCount", "streams");
         for (RelayWriterMetrics metrics : RelayWriterMetrics.getMetricsMap().values()) {
-            relayWriterFormatInfo.addRow(
-                metrics.getThreadId(),
-                metrics.getQueuedSize(),
-                metrics.getPutCount(),
-                metrics.getTakeCount(),
-                metrics.getStreams()
-            );
+            relayWriterFormatInfo.addRow(metrics.getThreadId(), metrics.getQueuedSize(), metrics.getPutCount(),
+                metrics.getTakeCount(), metrics.getStreams());
         }
 
         sb.append(relayWriterFormatInfo);
@@ -398,38 +311,16 @@ public class MetricsManager {
         }
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         TableFormat relayStreamFormatInfo = new TableFormat("Relay Stream Metrics");
-        relayStreamFormatInfo.addColumn(
-            "streamSeq",
-            "writeEventCount",
-            "readEventCount",
-            "writeEps",
-            "readEps",
-            "writeBytes",
-            "readBytes",
-            "writeBps",
-            "readBps",
-            "writeDelay(ms)",
-            "readDelay(ms)",
-            "minRelayDataTime",
-            "maxRelayDataTime",
-            "fileCount");
+        relayStreamFormatInfo.addColumn("streamSeq", "writeEventCount", "readEventCount", "writeEps", "readEps",
+            "writeBytes", "readBytes", "writeBps", "readBps", "writeDelay(ms)", "readDelay(ms)", "minRelayDataTime",
+            "maxRelayDataTime", "fileCount");
         for (RelayStreamMetrics metrics : RelayStreamMetrics.getMetricsMap().values()) {
-            relayStreamFormatInfo.addRow(
-                metrics.getStreamSeq(),
-                metrics.getWriteEventCount().get(),
-                metrics.getReadEventCount().get(),
-                metrics.getWriteEps().get(),
-                metrics.getReadEps().get(),
-                metrics.getWriteByteSize().get(),
-                metrics.getReadByteSize().get(),
-                metrics.getWriteBps().get(),
-                metrics.getReadBps().get(),
-                metrics.getWriteDelay().get(),
-                metrics.getReadDelay().get(),
+            relayStreamFormatInfo.addRow(metrics.getStreamSeq(), metrics.getWriteEventCount().get(),
+                metrics.getReadEventCount().get(), metrics.getWriteEps().get(), metrics.getReadEps().get(),
+                metrics.getWriteByteSize().get(), metrics.getReadByteSize().get(), metrics.getWriteBps().get(),
+                metrics.getReadBps().get(), metrics.getWriteDelay().get(), metrics.getReadDelay().get(),
                 sdf.format(new Date(metrics.getMinRelayTimestamp().get())),
-                sdf.format(new Date(metrics.getMaxRelayTimestamp().get())),
-                metrics.getFileCount().get()
-            );
+                sdf.format(new Date(metrics.getMaxRelayTimestamp().get())), metrics.getFileCount().get());
         }
 
         sb.append(relayStreamFormatInfo);
@@ -438,54 +329,28 @@ public class MetricsManager {
     //meta信息不经常变动，且输出量比较大，单独放到一个文件中
     private void printMeta(MetricsSnapshot snapshot) {
         StringBuilder sb = new StringBuilder();
-        sb.append("\n")
-            .append(
+        sb.append("\n").append(
                 "######################################################## meta metrics begin #####################################################")
             .append("\n");
 
         TableFormat metaMetrics1 = new TableFormat("Meta Metrics Common");
-        metaMetrics1.addColumn(
-            "logicDbCount",
-            "logicTableCount",
-            "phyDbCount",
-            "phyTableCount",
-            "rollbackFinishCount",
-            "rollbackAvgTime(ms)",
-            "rollbackMaxTime(ms)",
-            "rollbackMinTime(ms)");
-        metaMetrics1.addRow(
-            snapshot.metaMetrics.getLogicDbCount(),
-            snapshot.metaMetrics.getLogicTableCount(),
-            snapshot.metaMetrics.getPhyDbCount(),
-            snapshot.metaMetrics.getPhyTableCount(),
-            snapshot.metaMetrics.getRollbackFinishCount(),
-            snapshot.metaMetrics.getRollbackAvgTime(),
-            snapshot.metaMetrics.getRollbackMaxTime(),
-            snapshot.metaMetrics.getRollbackMinTime());
+        metaMetrics1.addColumn("logicDbCount", "logicTableCount", "phyDbCount", "phyTableCount", "rollbackFinishCount",
+            "rollbackAvgTime(ms)", "rollbackMaxTime(ms)", "rollbackMinTime(ms)");
+        metaMetrics1.addRow(snapshot.metaMetrics.getLogicDbCount(), snapshot.metaMetrics.getLogicTableCount(),
+            snapshot.metaMetrics.getPhyDbCount(), snapshot.metaMetrics.getPhyTableCount(),
+            snapshot.metaMetrics.getRollbackFinishCount(), snapshot.metaMetrics.getRollbackAvgTime(),
+            snapshot.metaMetrics.getRollbackMaxTime(), snapshot.metaMetrics.getRollbackMinTime());
         sb.append(metaMetrics1);
 
         TableFormat metaMetrics2 =
             new TableFormat("Meta Metrics Logic Rollback,[Snap = Snapshot],[Hist = History],[T = Time]");
-        metaMetrics2.addColumn(
-            "applySnapAvgT(ms)",
-            "applySnapMaxT(ms)",
-            "applySnapMinT(ms)",
-            "applyHisAvgT(ms)",
-            "applyHistMaxT(ms)",
-            "applyHistMinT(ms)",
-            "queryDdlHistAvgT(ms)",
-            "queryDdlHistMaxT(ms)",
-            "queryDdlHistMinT(ms)",
-            "querySnapAvgT(ms)",
-            "avgQueryDdlHistCount");
-        metaMetrics2.addRow(
-            snapshot.metaMetrics.getLogicApplySnapshotAvgTime(),
-            snapshot.metaMetrics.getLogicApplySnapshotMaxTime(),
-            snapshot.metaMetrics.getLogicApplySnapshotMinTime(),
-            snapshot.metaMetrics.getLogicApplyHistoryAvgTime(),
-            snapshot.metaMetrics.getLogicApplyHistoryMaxTime(),
-            snapshot.metaMetrics.getLogicApplyHistoryMinTime(),
-            snapshot.metaMetrics.getLogicQueryDdlHistoryAvgTime(),
+        metaMetrics2.addColumn("applySnapAvgT(ms)", "applySnapMaxT(ms)", "applySnapMinT(ms)", "applyHisAvgT(ms)",
+            "applyHistMaxT(ms)", "applyHistMinT(ms)", "queryDdlHistAvgT(ms)", "queryDdlHistMaxT(ms)",
+            "queryDdlHistMinT(ms)", "querySnapAvgT(ms)", "avgQueryDdlHistCount");
+        metaMetrics2.addRow(snapshot.metaMetrics.getLogicApplySnapshotAvgTime(),
+            snapshot.metaMetrics.getLogicApplySnapshotMaxTime(), snapshot.metaMetrics.getLogicApplySnapshotMinTime(),
+            snapshot.metaMetrics.getLogicApplyHistoryAvgTime(), snapshot.metaMetrics.getLogicApplyHistoryMaxTime(),
+            snapshot.metaMetrics.getLogicApplyHistoryMinTime(), snapshot.metaMetrics.getLogicQueryDdlHistoryAvgTime(),
             snapshot.metaMetrics.getLogicQueryDdlHistoryMaxTime(),
             snapshot.metaMetrics.getLogicQueryDdlHistoryMinTime(),
             snapshot.metaMetrics.getAvgLogicQuerySnapshotCostTime(),
@@ -494,32 +359,18 @@ public class MetricsManager {
 
         TableFormat metaMetrics3 =
             new TableFormat("Meta Metrics Physical Rollback,[Snap = Snapshot],[Hist = History],[T = Time]");
-        metaMetrics3.addColumn(
-            "applySnapAvgT(ms)",
-            "applySnapMaxT(ms)",
-            "applySnapMinT(ms)",
-            "applyHistAvgT(ms)",
-            "applyHistMaxT(ms)",
-            "applyHistMinT(ms)",
-            "queryDdlHistAvgT(ms)",
-            "queryDdlHistMaxT(ms)",
-            "queryDdlHistMinT(ms)",
-            "avgQueryDdlHistCount");
-        metaMetrics3.addRow(
-            snapshot.metaMetrics.getPhyApplySnapshotAvgTime(),
-            snapshot.metaMetrics.getPhyApplySnapshotMaxTime(),
-            snapshot.metaMetrics.getPhyApplySnapshotMinTime(),
-            snapshot.metaMetrics.getPhyApplyHistoryAvgTime(),
-            snapshot.metaMetrics.getPhyApplyHistoryMaxTime(),
-            snapshot.metaMetrics.getPhyApplyHistoryMinTime(),
-            snapshot.metaMetrics.getPhyQueryDdlHistoryAvgTime(),
-            snapshot.metaMetrics.getPhyQueryDdlHistoryMaxTime(),
-            snapshot.metaMetrics.getPhyQueryDdlHistoryMinTime(),
+        metaMetrics3.addColumn("applySnapAvgT(ms)", "applySnapMaxT(ms)", "applySnapMinT(ms)", "applyHistAvgT(ms)",
+            "applyHistMaxT(ms)", "applyHistMinT(ms)", "queryDdlHistAvgT(ms)", "queryDdlHistMaxT(ms)",
+            "queryDdlHistMinT(ms)", "avgQueryDdlHistCount");
+        metaMetrics3.addRow(snapshot.metaMetrics.getPhyApplySnapshotAvgTime(),
+            snapshot.metaMetrics.getPhyApplySnapshotMaxTime(), snapshot.metaMetrics.getPhyApplySnapshotMinTime(),
+            snapshot.metaMetrics.getPhyApplyHistoryAvgTime(), snapshot.metaMetrics.getPhyApplyHistoryMaxTime(),
+            snapshot.metaMetrics.getPhyApplyHistoryMinTime(), snapshot.metaMetrics.getPhyQueryDdlHistoryAvgTime(),
+            snapshot.metaMetrics.getPhyQueryDdlHistoryMaxTime(), snapshot.metaMetrics.getPhyQueryDdlHistoryMinTime(),
             snapshot.metaMetrics.getAvgPhyQueryDdlHistoryCount());
         sb.append(metaMetrics3);
 
-        sb.append("\r\n")
-            .append(
+        sb.append("\r\n").append(
                 "######################################################## meta metrics end ########################################################")
             .append("\r\n");
 
@@ -549,20 +400,18 @@ public class MetricsManager {
     private AggregateCoreMetrics buildCoreMetrics(MetricsSnapshot snapshot) {
         AggregateCoreMetrics aggregateCoreMetrics = new AggregateCoreMetrics();
         if (lastSnapshot != null) {
-            long d1 = snapshot.extractorMetrics.getTotalTranCount() -
-                lastSnapshot.extractorMetrics.getTotalTranCount();
+            long d1 = snapshot.extractorMetrics.getTotalTranCount() - lastSnapshot.extractorMetrics.getTotalTranCount();
             aggregateCoreMetrics.inTps = Double.valueOf(((double) d1) / Math.max(snapshot.period, 1)).longValue();
 
-            long d2 = snapshot.extractorMetrics.getEventTotalCount() -
-                lastSnapshot.extractorMetrics.getEventTotalCount();
+            long d2 =
+                snapshot.extractorMetrics.getEventTotalCount() - lastSnapshot.extractorMetrics.getEventTotalCount();
             aggregateCoreMetrics.inEps = Double.valueOf(((double) d2) / Math.max(snapshot.period, 1)).longValue();
 
-            long d3 = snapshot.extractorMetrics.getNetIn() -
-                lastSnapshot.extractorMetrics.getNetIn();
+            long d3 = snapshot.extractorMetrics.getNetIn() - lastSnapshot.extractorMetrics.getNetIn();
             aggregateCoreMetrics.netInBps = Double.valueOf(((double) d3) / Math.max(snapshot.period, 1)).longValue();
 
-            long d4 = snapshot.mergeMetrics.getTotalMergePassCount()
-                - lastSnapshot.mergeMetrics.getTotalMergePassCount();
+            long d4 =
+                snapshot.mergeMetrics.getTotalMergePassCount() - lastSnapshot.mergeMetrics.getTotalMergePassCount();
             aggregateCoreMetrics.mergeTps = Double.valueOf(((double) d4) / Math.max(snapshot.period, 1)).longValue();
 
             long d5 = snapshot.mergeMetrics.getTotalMergePass2PCCount()

@@ -1,13 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -26,7 +27,7 @@ import static org.junit.Assert.assertNull;
 import static org.mockito.Mockito.*;
 
 @RunWith(MockitoJUnitRunner.class)
-public class BinlogConsumerMonitorTest extends BaseTestWithGmsTables {
+public class BinlogConsumerMonitorTest extends BaseTest {
 
     private JdbcTemplate polarxJdbcTemplate;
 
@@ -38,18 +39,17 @@ public class BinlogConsumerMonitorTest extends BaseTestWithGmsTables {
     public void setUp() throws NoSuchFieldException, IllegalAccessException {
         polarxJdbcTemplate = Mockito.mock(JdbcTemplate.class);
         metaTemplate = Mockito.mock(JdbcTemplate.class);
-        Field field = SpringContextHolder.class.getDeclaredField("applicationContext");
-        field.setAccessible(true);
-        ApplicationContext applicationContext = (ApplicationContext) field.get(null);
-        DefaultListableBeanFactory listableBeanFactory =
-            (DefaultListableBeanFactory) applicationContext.getAutowireCapableBeanFactory();
-        listableBeanFactory.destroySingleton("polarxJdbcTemplate");
-        listableBeanFactory.registerSingleton("polarxJdbcTemplate", polarxJdbcTemplate);
-        listableBeanFactory.destroySingleton("metaJdbcTemplate");
-        listableBeanFactory.registerSingleton("metaJdbcTemplate", metaTemplate);
+        registerSpringObject("polarxJdbcTemplate", polarxJdbcTemplate);
+        registerSpringObject("metaJdbcTemplate", metaTemplate);
 
         binlogConsumerMonitor = new BinlogConsumerMonitor("1", "BINLOG", "ConsumerChecker",
             1000);
+    }
+
+    @After
+    public void after() {
+        unregisterSpringObject("polarxJdbcTemplate", polarxJdbcTemplate);
+        unregisterSpringObject("metaJdbcTemplate", metaTemplate);
     }
 
     @Test

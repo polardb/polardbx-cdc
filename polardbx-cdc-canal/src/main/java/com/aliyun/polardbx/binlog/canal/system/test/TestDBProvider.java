@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.system.test;
@@ -29,12 +29,16 @@ public class TestDBProvider extends AbstractSystemDBProvider {
      * CDC通用指令表
      */
     String CREATE_CDC_INSTRUCTION_TABLE = String.format(
-        "CREATE TABLE IF NOT EXISTS `%s` (\n" + "  `ID` BIGINT(20) NOT NULL auto_increment,\n"
-            + "  `INSTRUCTION_TYPE` VARCHAR(50) NOT NULL,\n" + "  `INSTRUCTION_CONTENT` MEDIUMTEXT NOT NULL,\n"
-            + "  `GMT_CREATED` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
-            + "  `INSTRUCTION_ID` VARCHAR(50) NOT NULL,\n" + "  PRIMARY KEY (`ID`),\n"
-            + "  UNIQUE KEY `uk_instruction_id_type` (`INSTRUCTION_TYPE`,`INSTRUCTION_ID`) \n"
-            + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 BROADCAST\n", DRDS_CDC_INSTRUCTION);
+        "CREATE TABLE `__cdc_instruction__` (\n"
+            + "        `ID` bigint(20) NOT NULL AUTO_INCREMENT BY GROUP,\n"
+            + "        `INSTRUCTION_TYPE` varchar(50) NOT NULL,\n"
+            + "        `INSTRUCTION_CONTENT` longtext NOT NULL,\n"
+            + "        `GMT_CREATED` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+            + "        `INSTRUCTION_ID` varchar(120) NOT NULL,\n"
+            + "        `CLUSTER_ID` varchar(64) DEFAULT '0',\n"
+            + "        PRIMARY KEY (`ID`),\n"
+            + "        UNIQUE KEY `uk_instruction_id_type` (`INSTRUCTION_TYPE`, `INSTRUCTION_ID`)\n"
+            + ") ENGINE = InnoDB AUTO_INCREMENT = 100000 DEFAULT CHARSET = utf8mb4  broadcast", DRDS_CDC_INSTRUCTION);
     String CREATE_CDC_HEARTBEAT_TABLE = String.format(
         "CREATE TABLE IF NOT EXISTS `%s` (`id` bigint(20) auto_increment primary key , sname varchar(20) ,gmt_modified timestamp) broadcast",
         DRDS_CDC_HEARTBEAT);

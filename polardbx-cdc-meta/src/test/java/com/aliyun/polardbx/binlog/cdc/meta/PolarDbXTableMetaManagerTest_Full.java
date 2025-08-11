@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
@@ -39,26 +39,16 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_EN
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_ENABLED;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_EXACTLY;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_SEMI;
-import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildSnapshotTopology;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isGreaterThan;
 
 @Slf4j
 public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
 
-    interface Callback<K> {
-        void call(K k);
-    }
-
-    private final Supplier<Boolean> hiddenPkSupplier = () -> false;
-    private final Supplier<String> dnVersionSupplier = () -> "5.7";
-    private PolarDbXTableMetaManager metaManager;
-
-    @Before
-    public void before() {
-        setConfig(META_PERSIST_ENABLED, "OFF");
-        setConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
-    }
+    protected final Supplier<Boolean> hiddenPkSupplier = () -> false;
+    protected final Supplier<String> dnVersionSupplier = () -> "5.7";
+    protected PolarDbXTableMetaManager metaManager;
 
     @Test
     public void testRollback_In_Snapshot_Exactly() {
@@ -72,7 +62,7 @@ public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
 
     @Test
     public void testApply() {
-        setConfig(ConfigKeys.META_BUILD_CHECK_CONSISTENCY_ENABLED, "true");
+        mockConfig(ConfigKeys.META_BUILD_CHECK_CONSISTENCY_ENABLED, "true");
         BinlogLogicMetaHistoryMapper logicMapper = SpringContextHolder.getObject(BinlogLogicMetaHistoryMapper.class);
         BinlogPhyDdlHistoryMapper phyMapper = SpringContextHolder.getObject(BinlogPhyDdlHistoryMapper.class);
         List<BinlogLogicMetaHistory> logicSnapshotList = logicMapper.select(
@@ -83,7 +73,7 @@ public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
         executeWithCallback(k -> {
             buildMetaManager(k.getValue());
             metaManager.applyBase(new BinlogPosition(null, logicSnapshot.getTso()),
-                buildTopology(logicSnapshot.getTso(),
+                buildSnapshotTopology(logicSnapshot.getTso(),
                     () -> buildLogicMetaTopology(logicMapper, logicSnapshot.getTso())), null);
 
             List<BinlogLogicMetaHistory> logicList = logicMapper.select(
@@ -120,57 +110,6 @@ public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
         });
     }
 
-    private void buildMetaManager(String storageInstId) {
-        metaManager = new PolarDbXTableMetaManager(storageInstId, hiddenPkSupplier, dnVersionSupplier);
-        metaManager.init();
-        metaManager.getConsistencyChecker().setOriginMetaSupplier(i -> "");
-    }
-
-    private void rollback(String rollbackMode) {
-        setConfig(ConfigKeys.META_RECOVER_ROLLBACK_MODE, rollbackMode);
-        BinlogLogicMetaHistoryMapper logicMapper = SpringContextHolder.getObject(BinlogLogicMetaHistoryMapper.class);
-
-        Optional<BinlogLogicMetaHistory> maxTso = logicMapper.selectOne(s ->
-            s.orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso.descending()).limit(1));
-        long count = logicMapper.count(s -> s.where(BinlogLogicMetaHistoryDynamicSqlSupport.type,
-            isEqualTo((byte) 1)));
-        log.info("logic snapshot count is " + count);
-
-        executeWithCallback((k) -> {
-            log.info("start to rollback with cluster_id {} and with storage_inst_id {}.", k.getKey(), k.getValue());
-            buildMetaManager(k.getValue());
-            metaManager.rollback(new BinlogPosition(null, maxTso.get().getTso()));
-            Map<String, Set<String>> result = metaManager.initDeltaChangeMap(maxTso.get().getTso());
-            Assert.assertTrue(result.isEmpty());
-            Assert.assertTrue(metaManager.getDeltaChangeMap().isEmpty());
-        });
-    }
-
-    private void executeWithCallback(Callback<Pair<String, String>> callback) {
-        JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
-        List<String> storageInstIds =
-            jdbcTemplate.queryForList("select distinct storage_inst_id from binlog_phy_ddl_history", String.class);
-        log.info("storage inst ids for test is " + storageInstIds);
-
-        List<String> clusterIds =
-            jdbcTemplate.queryForList("select distinct cluster_id from binlog_phy_ddl_history", String.class);
-        log.info("cluster ids for test is " + clusterIds);
-
-        for (String clusterId : clusterIds) {
-            setConfig(ConfigKeys.CLUSTER_ID, clusterId);
-            for (String storageInstId : storageInstIds) {
-                callback.call(Pair.of(clusterId, storageInstId));
-            }
-        }
-    }
-
-    private LogicMetaTopology buildLogicMetaTopology(BinlogLogicMetaHistoryMapper logicMapper, String snapshotTso) {
-        long queryStartTime = System.currentTimeMillis();
-        Optional<BinlogLogicMetaHistory> snapshot = logicMapper.selectOne(s -> s
-            .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isEqualTo(snapshotTso)));
-        return JSONObject.parseObject(snapshot.get().getTopology(), LogicMetaTopology.class);
-    }
-
     public static List<Object> mergeSort(List<BinlogLogicMetaHistory> logicList, List<BinlogPhyDdlHistory> phyList) {
         List<Object> mergedList = new ArrayList<>();
         int i = 0, j = 0;
@@ -194,5 +133,66 @@ public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
         }
 
         return mergedList;
+    }
+
+    @Before
+    public void before() {
+        mockConfig(META_PERSIST_ENABLED, "OFF");
+        mockConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
+    }
+
+    protected void buildMetaManager(String storageInstId) {
+        metaManager = new PolarDbXTableMetaManager(storageInstId, hiddenPkSupplier, dnVersionSupplier);
+        metaManager.init();
+        metaManager.getConsistencyChecker().setOriginMetaSupplier(i -> "");
+    }
+
+    protected void rollback(String rollbackMode) {
+        mockConfig(ConfigKeys.META_RECOVER_ROLLBACK_MODE, rollbackMode);
+        BinlogLogicMetaHistoryMapper logicMapper = SpringContextHolder.getObject(BinlogLogicMetaHistoryMapper.class);
+
+        Optional<BinlogLogicMetaHistory> maxTso = logicMapper.selectOne(s ->
+            s.orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso.descending()).limit(1));
+        long count = logicMapper.count(s -> s.where(BinlogLogicMetaHistoryDynamicSqlSupport.type,
+            isEqualTo((byte) 1)));
+        log.info("logic snapshot count is " + count);
+
+        executeWithCallback((k) -> {
+            log.info("start to rollback with cluster_id {} and with storage_inst_id {}.", k.getKey(), k.getValue());
+            buildMetaManager(k.getValue());
+            metaManager.rollback(new BinlogPosition(null, maxTso.get().getTso()));
+            Map<String, Set<String>> result = metaManager.initDeltaChangeMap(maxTso.get().getTso());
+            Assert.assertTrue(result.isEmpty());
+            Assert.assertTrue(metaManager.getDeltaChangeMap().isEmpty());
+        });
+    }
+
+    protected void executeWithCallback(Callback<Pair<String, String>> callback) {
+        JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
+        List<String> storageInstIds =
+            jdbcTemplate.queryForList("select distinct storage_inst_id from binlog_phy_ddl_history", String.class);
+        log.info("storage inst ids for test is " + storageInstIds);
+
+        List<String> clusterIds =
+            jdbcTemplate.queryForList("select distinct cluster_id from binlog_phy_ddl_history", String.class);
+        log.info("cluster ids for test is " + clusterIds);
+
+        for (String clusterId : clusterIds) {
+            mockConfig(ConfigKeys.CLUSTER_ID, clusterId);
+            for (String storageInstId : storageInstIds) {
+                callback.call(Pair.of(clusterId, storageInstId));
+            }
+        }
+    }
+
+    protected LogicMetaTopology buildLogicMetaTopology(BinlogLogicMetaHistoryMapper logicMapper, String snapshotTso) {
+        long queryStartTime = System.currentTimeMillis();
+        Optional<BinlogLogicMetaHistory> snapshot = logicMapper.selectOne(s -> s
+            .where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, SqlBuilder.isEqualTo(snapshotTso)));
+        return JSONObject.parseObject(snapshot.get().getTopology(), LogicMetaTopology.class);
+    }
+
+    interface Callback<K> {
+        void call(K k);
     }
 }

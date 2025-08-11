@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.base;
@@ -24,6 +24,7 @@ import com.github.rholder.retry.Retryer;
 import com.github.rholder.retry.RetryerBuilder;
 import com.github.rholder.retry.StopStrategies;
 import com.github.rholder.retry.WaitStrategies;
+import com.mysql.jdbc.exceptions.jdbc4.MySQLSyntaxErrorException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -70,6 +71,11 @@ public class RplBaseTestCase extends BaseTestCase {
 
     protected static final String TOKEN_TABLE_CREATE_SQL =
         "create table if not exists " + TOKEN_DB + ".`%s` (id bigint not null,primary key(`id`))";
+
+    private static final String TTL_INFO_QUERY =
+        "select * from `ttl_info` where `table_schema` = '%s' and `table_name` = '%s'";
+    private static final String LAB_EVENT_QUERY =
+        "select * from `binlog_lab_event` where `event_type` = %s";
 
     protected Connection polardbxConnection;
     protected Connection cdcSyncDbConnection;
@@ -474,6 +480,78 @@ public class RplBaseTestCase extends BaseTestCase {
             conn.close();
             fetcher.close();
         }
+    }
+
+    protected Connection getDruidConnection(int n) {
+        Connection conn = null;
+        switch (n) {
+        case 0:
+            conn = getPolardbxConnection();
+            break;
+        case 1:
+            conn = getCdcSyncDbConnection();
+            break;
+        case 2:
+            conn = getCdcSyncDbConnectionFirst();
+            break;
+        case 3:
+            conn = getCdcSyncDbConnectionSecond();
+            break;
+        case 4:
+            conn = getCdcSyncDbConnectionThird();
+            break;
+        default:
+            log.error("mysql number is {} not expected", n);
+        }
+        return conn;
+    }
+
+    protected List<String> getTableList(String database, int ds) throws SQLException {
+        try (Connection conn = getDruidConnection(ds)) {
+            return JdbcUtil.showTables(conn, database);
+        }
+    }
+
+    /**
+     * 实验室是否开启了归档表过滤参数
+     *
+     * @return boolean
+     */
+    public boolean isArchiveIgnoreEnabled() {
+        try (Connection c = getMetaConnection()) {
+            ResultSet rs = c.createStatement()
+                .executeQuery(String.format(LAB_EVENT_QUERY, LabEventType.TASK_FILTER_ARCHIVE_ENABLED.ordinal()));
+            if (rs.next()) {
+                return true;
+            }
+        } catch (SQLException e) {
+            if (e instanceof MySQLSyntaxErrorException && e.getMessage()
+                .contains("Table 'polardbx_meta_db.binlog_lab_event' doesn't exist")) {
+                return false;
+            } else {
+                throw new RuntimeException(e);
+            }
+
+        }
+        return false;
+    }
+
+    /**
+     * 该表是否是TTL表
+     *
+     * @return boolean
+     */
+    public boolean isArchiveTable(String database, String table) {
+        try (Connection c = getMetaConnection()) {
+            ResultSet rs = c.createStatement().executeQuery(String.format(TTL_INFO_QUERY, database, table));
+            if (rs.next()) {
+                log.info("{}.{} is ignoreArchiveFiltered", database, table);
+                return true;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return false;
     }
 
     public interface CheckCallback {

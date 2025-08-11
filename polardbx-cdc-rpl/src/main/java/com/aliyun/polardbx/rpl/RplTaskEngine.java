@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl;
@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.IS_REPLICA;
+import static com.aliyun.polardbx.binlog.ConfigKeys.MEMORY_IN_MB;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 
 /**
@@ -38,9 +39,11 @@ public class RplTaskEngine {
             Map<String, String> argsMap = CommonUtil.handleArgs(args[0]);
             String taskId = argsMap.get(RplConstants.TASK_ID);
             String taskName = argsMap.get(RplConstants.TASK_NAME);
+            String memoryInMb = argsMap.get(RplConstants.MEMORY_IN_MB);
             TaskBasedDiscriminator.put(RplConstants.TASK_ID, String.valueOf(taskId));
             TaskBasedDiscriminator.put(RplConstants.TASK_NAME, taskName);
             System.setProperty(TASK_NAME, taskName);
+            System.setProperty(MEMORY_IN_MB, memoryInMb);
             System.setProperty(IS_REPLICA, CommonConstants.TRUE);
 
             // spring context
@@ -70,6 +73,7 @@ public class RplTaskEngine {
             // init storage
             RplStorage.init();
 
+            // 对于非RplTaskRunner也即自定义类型的任务，意味着包括心跳，统计信息，taskcontext等共用能力都需要自行按需实现
             RplTask task = DbTaskMetaManager.getTask(Long.parseLong(taskId));
             if (ServiceType.valueOf(task.getType()) == ServiceType.REC_COMBINE) {
                 FlashbackResultCombiner taskRunner = new FlashbackResultCombiner(Long.parseLong(taskId));

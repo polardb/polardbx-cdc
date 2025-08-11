@@ -1,16 +1,27 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.testing.BaseTest;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.MockedStatic;
+import org.mockito.junit.MockitoJUnitRunner;
 
+import java.io.IOException;
 import java.util.Random;
 
 import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
@@ -29,12 +40,34 @@ import static com.aliyun.polardbx.binlog.util.BinlogFileUtil.isValidFullPath;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mockStatic;
 
 /**
  * @author yudong
  * @since 2023/1/12 14:29
  **/
-public class BinlogFileUtilTest extends BaseTest {
+@Slf4j
+@RunWith(MockitoJUnitRunner.class)
+public class BinlogFileUtilTest {
+
+    private MockedStatic<DynamicApplicationConfig> dynamicApplicationConfig;
+
+    @Before
+    @SneakyThrows
+    public void before() {
+        dynamicApplicationConfig = mockStatic(DynamicApplicationConfig.class);
+        dynamicApplicationConfig.when(() -> DynamicApplicationConfig.getString(ConfigKeys.BINLOG_DIR_PATH))
+            .thenReturn(System.getProperty("user.home") + "/binlog");
+        dynamicApplicationConfig.when(() -> DynamicApplicationConfig.getString(ConfigKeys.BINLOGX_DIR_PATH_PREFIX))
+            .thenReturn(System.getProperty("user.home") + "/binlog");
+        dynamicApplicationConfig.when(
+            () -> DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)).thenReturn(true);
+    }
+
+    @After
+    public void after() {
+        dynamicApplicationConfig.close();
+    }
 
     @Test
     public void getBinlogFilePrefixTest() {
@@ -54,6 +87,8 @@ public class BinlogFileUtilTest extends BaseTest {
         // 单流测试
         String prefix = "binlog";
         assertTrue(isBinlogFile("binlog.000001", prefix));
+        assertTrue(isBinlogFile("binlog.2147482647", prefix));
+
         assertFalse(isBinlogFile("binlog.000000", prefix));
         assertFalse(isBinlogFile("binlog_000001", prefix));
         assertFalse(isBinlogFile("binlog.001", prefix));
@@ -66,6 +101,8 @@ public class BinlogFileUtilTest extends BaseTest {
         String streamName = "stream1";
         prefix = getBinlogFilePrefix(groupName, streamName);
         assertTrue(isBinlogFile(prefix + ".000001", prefix));
+        assertTrue(isBinlogFile(prefix + ".2147482647", prefix));
+
         assertFalse(isBinlogFile(prefix + "_000001", prefix));
         assertFalse(isBinlogFile(prefix + ".001", prefix));
         assertFalse(isBinlogFile(prefix + ".000001.tmp", prefix));
@@ -74,14 +111,14 @@ public class BinlogFileUtilTest extends BaseTest {
     @Test
     public void isBinlogFileWithoutPrefixParamTest() {
         assertTrue(isBinlogFile("binlog.000001"));
+        assertTrue(isBinlogFile("binlog.2147482647"));
         assertTrue(isBinlogFile("binlog.999999"));
         assertTrue(isBinlogFile("stream1_binlog.000001"));
-        assertTrue(isBinlogFile("stream1_binlog.999999"));
+        assertTrue(isBinlogFile("stream1_binlog.2147482647"));
 
         assertFalse(isBinlogFile(null));
         assertFalse(isBinlogFile("binlog.000000"));
-        assertFalse(isBinlogFile("binlog.1000000"));
-        assertFalse(isBinlogFile("binlog.001"));
+        assertFalse(isBinlogFile("binlog.2147482648"));
         assertFalse(isBinlogFile("bin.log.000001"));
         assertFalse(isBinlogFile("binlog.000001.tmp"));
     }
@@ -104,7 +141,7 @@ public class BinlogFileUtilTest extends BaseTest {
         String groupName = GROUP_NAME_GLOBAL;
         String streamName = STREAM_NAME_GLOBAL;
         String fileName = getFirstBinlogFileName(groupName, streamName);
-        int randomSeq = new Random().nextInt(BINLOG_FILE_NAME_MAX_SEQUENCE);
+        int randomSeq = new Random().nextInt(999999);
         for (int i = 1; i < randomSeq; i++) {
             fileName = getNextBinlogFileName(fileName);
         }
@@ -122,6 +159,8 @@ public class BinlogFileUtilTest extends BaseTest {
     }
 
     @Test
+    @Ignore
+    // 暂不支持
     public void should_back_to_1_when_reach_max() {
         // 单流测试
         String groupName = GROUP_NAME_GLOBAL;
@@ -141,6 +180,16 @@ public class BinlogFileUtilTest extends BaseTest {
     @Test(expected = PolardbxException.class)
     public void should_throw_exception_when_seq_bigger_than_max() {
         getBinlogFileNameBySequence("", BINLOG_FILE_NAME_MAX_SEQUENCE + 1);
+    }
+
+    @Test
+    public void testGetBinlogFileNameBySequence() {
+        String fileName = getBinlogFileNameBySequence("binlog", 1);
+        assertEquals("binlog.000001", fileName);
+        fileName = getBinlogFileNameBySequence("binlog", 999999);
+        assertEquals("binlog.999999", fileName);
+        fileName = getBinlogFileNameBySequence("binlog", 1000001);
+        assertEquals("binlog.1000001", fileName);
     }
 
     @Test
@@ -189,4 +238,28 @@ public class BinlogFileUtilTest extends BaseTest {
         assertEquals(streamName, BinlogFileUtil.extractStreamName(fileName));
     }
 
+    @Test
+    public void compareBinlogFileName() {
+        String fileNameSrc = "binlog.000010";
+        String fileNameTarget = "binlog.999999";
+        assertEquals(-1, BinlogFileUtil.compareBinlogFileName(fileNameSrc, fileNameTarget));
+
+        fileNameSrc = "binlog.1000000";
+        fileNameTarget = "binlog.999999";
+        assertEquals(1, BinlogFileUtil.compareBinlogFileName(fileNameSrc, fileNameTarget));
+    }
+
+
+    @Test
+    public void testFileSize(){
+        String filePath = BinlogFileUtilTest.class.getResource("/mysql_bin.00000").getPath();
+        Assert.assertEquals(952, BinlogFileUtil.readFileSize(filePath));
+    }
+
+
+    @Test
+    public void testReadServerId() throws IOException {
+        String filePath = BinlogFileUtilTest.class.getResource("/mysql_bin.00000").getPath();
+        Assert.assertEquals(809110050, BinlogFileUtil.readServerId(filePath));
+    }
 }

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
@@ -397,7 +397,10 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
         DDLRecord cloneObject = new DDLRecord();
         BeanUtils.copyProperties(ddlRecord, cloneObject);
         DDLExtInfo extInfo = cloneObject.getExtInfo();
-        String sqlMode = extInfo.getSqlMode();
+        String sqlMode = null;
+        if (extInfo != null) {
+            sqlMode = extInfo.getSqlMode();
+        }
         if (StringUtils.isNotBlank(sqlMode) && sqlMode.toUpperCase()
             .contains("REAL_AS_FLOAT")) {
             String ddlSql = ddlRecord.getDdlSql();
@@ -409,7 +412,6 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
         }
         return cloneObject;
     }
-
 
     public void applyLogic(BinlogPosition position, DDLRecord record, String cmdId) {
         record = cloneAndProcessBeforeApply(record);

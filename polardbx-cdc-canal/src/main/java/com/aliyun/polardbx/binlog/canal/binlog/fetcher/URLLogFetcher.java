@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.fetcher;
@@ -15,6 +15,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.SocketException;
 import java.util.Arrays;
+import java.util.concurrent.ExecutorService;
 
 public class URLLogFetcher extends LogFetcher {
 
@@ -30,23 +31,35 @@ public class URLLogFetcher extends LogFetcher {
 
     private long fileSize = -1;
 
-    public URLLogFetcher() {
-        super(DEFAULT_INITIAL_CAPACITY, DEFAULT_GROWTH_FACTOR);
+    private String storageInstanceId;
+
+    private String fileName;
+
+    private ExecutorService executorService;
+
+    public URLLogFetcher(String storageInstanceId, String fileName) {
+        this(DEFAULT_INITIAL_CAPACITY, DEFAULT_GROWTH_FACTOR, storageInstanceId, fileName);
+        this.storageInstanceId = storageInstanceId;
+        this.fileName = fileName;
     }
 
-    public URLLogFetcher(final int initialCapacity) {
-        super(initialCapacity, DEFAULT_GROWTH_FACTOR);
+    public URLLogFetcher(final int initialCapacity, String storageInstanceId, String fileName) {
+        this(initialCapacity, DEFAULT_GROWTH_FACTOR, storageInstanceId, fileName);
     }
 
-    public URLLogFetcher(final int initialCapacity, final float growthFactor) {
+    public URLLogFetcher(final int initialCapacity, final float growthFactor, String storageInstanceId,
+                         String fileName) {
         super(initialCapacity, growthFactor);
+        this.storageInstanceId = storageInstanceId;
+        this.fileName = fileName;
     }
 
     /**
      * Open binlog file in local disk to fetch.
      */
-    public void open(String url, long fileSize) throws FileNotFoundException, IOException {
-        open(url, 0L, fileSize);
+    public void open(String url, long fileSize, final ExecutorService executor)
+        throws FileNotFoundException, IOException {
+        open(url, 0L, fileSize, executor);
     }
 
     public long readSize() {
@@ -56,9 +69,11 @@ public class URLLogFetcher extends LogFetcher {
     /**
      * Open binlog file in local disk to fetch.
      */
-    public void open(String url, final long filePosition, final long fileSize) throws IOException {
+    public void open(String url, final long filePosition, final long fileSize, final ExecutorService executor)
+        throws IOException {
         this.url = url;
         this.fileSize = fileSize;
+        this.executorService = executor;
         prepareInputStream();
 
         ensureCapacity(BIN_LOG_HEADER_SIZE);
@@ -68,8 +83,8 @@ public class URLLogFetcher extends LogFetcher {
 
         if (buffer[0] != BINLOG_MAGIC[0] || buffer[1] != BINLOG_MAGIC[1] || buffer[2] != BINLOG_MAGIC[2]
             || buffer[3] != BINLOG_MAGIC[3]) {
-            throw new IOException("Error binlog file header: "
-                + Arrays.toString(Arrays.copyOf(buffer, BIN_LOG_HEADER_SIZE)));
+            throw new IOException(
+                "Error binlog file header: " + Arrays.toString(Arrays.copyOf(buffer, BIN_LOG_HEADER_SIZE)));
         }
 
         limit = 0;
@@ -79,13 +94,13 @@ public class URLLogFetcher extends LogFetcher {
 
         if (filePosition > BIN_LOG_HEADER_SIZE) {
             final int maxFormatDescriptionEventLen = FormatDescriptionLogEvent.LOG_EVENT_MINIMAL_HEADER_LEN
-                + FormatDescriptionLogEvent.ST_COMMON_HEADER_LEN_OFFSET
-                + LogEvent.ENUM_END_EVENT + LogEvent.BINLOG_CHECKSUM_ALG_DESC_LEN
-                + LogEvent.CHECKSUM_CRC32_SIGNATURE_LEN;
+                + FormatDescriptionLogEvent.ST_COMMON_HEADER_LEN_OFFSET + LogEvent.ENUM_END_EVENT
+                + LogEvent.BINLOG_CHECKSUM_ALG_DESC_LEN + LogEvent.CHECKSUM_CRC32_SIGNATURE_LEN;
 
             ensureCapacity(maxFormatDescriptionEventLen);
             limit = fin.read(buffer, 0, maxFormatDescriptionEventLen);
             limit = (int) getUint32(LogEvent.EVENT_LEN_OFFSET);
+            // reset 原因是 skip 包含了上面的读取，所以需要重置
             prepareInputStream();
             fin.skip(filePosition);
             this.readPos = filePosition;
@@ -97,7 +112,7 @@ public class URLLogFetcher extends LogFetcher {
             fin.close();
         }
 
-        fin = new MultiPartInputStream(url, this.fileSize);
+        fin = MultiPartInputStreamFactory.create(url, this.fileSize, storageInstanceId, fileName, executorService);
     }
 
     private int innerRead(int off, int len) throws IOException {
@@ -161,9 +176,9 @@ public class URLLogFetcher extends LogFetcher {
         } else if (limit > 0) {
             if (limit >= FormatDescriptionLogEvent.LOG_EVENT_HEADER_LEN) {
                 int lenPosition = position + 4 + 1 + 4;
-                long eventLen = ((long) (0xff & buffer[lenPosition++])) | ((long) (0xff & buffer[lenPosition++]) << 8)
-                    | ((long) (0xff & buffer[lenPosition++]) << 16)
-                    | ((long) (0xff & buffer[lenPosition++]) << 24);
+                long eventLen =
+                    ((long) (0xff & buffer[lenPosition++])) | ((long) (0xff & buffer[lenPosition++]) << 8) | (
+                        (long) (0xff & buffer[lenPosition++]) << 16) | ((long) (0xff & buffer[lenPosition++]) << 24);
 
                 if (limit >= eventLen) {
                     return true;

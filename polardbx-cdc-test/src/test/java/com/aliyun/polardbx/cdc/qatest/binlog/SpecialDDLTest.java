@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.binlog;
@@ -58,8 +58,9 @@ public class SpecialDDLTest extends RplBaseTestCase {
     }
 
     @Test
-    public void testDropShardKey(){
-        String ddl1 = "create table order_refund_manage(a int primary key, b int ,c int , index auto_shard_key_b(`b`)) dbpartition by hash(c)";
+    public void testDropShardKey() {
+        String ddl1 =
+            "create table order_refund_manage(a int primary key, b int ,c int , index auto_shard_key_b(`b`)) dbpartition by hash(c)";
         String ddl2 = "alter table order_refund_manage drop index auto_shard_key_b";
         String ddl3 = "alter table order_refund_manage change column b b longtext";
 
@@ -68,7 +69,7 @@ public class SpecialDDLTest extends RplBaseTestCase {
         JdbcUtil.executeUpdate(polardbxConnection, ddl3);
     }
 
-    private void testCreateTableLikeAndDropShardKey(String t1, String t2){
+    private void testCreateTableLikeAndDropShardKey(String t1, String t2) {
         String sql1 = String.format("create table %s(id bigint primary key , name varchar(20))", t1);
         String sql2 = String.format("alter table %s dbpartition by hash(name)", t1);
         String sql3 = String.format("create table %s like %s", t2, t1);
@@ -79,7 +80,7 @@ public class SpecialDDLTest extends RplBaseTestCase {
         JdbcUtil.executeUpdate(polardbxConnection, sql4);
     }
 
-    private void testCreateTableLikeAndDropShardKeyV2(String t1, String t2){
+    private void testCreateTableLikeAndDropShardKeyV2(String t1, String t2) {
         String sql1 = String.format("create table %s(`id` bigint primary key , `name` varchar(20))", t1);
         String sql2 = String.format("alter table %s dbpartition by hash(`name`)", t1);
         String sql3 = String.format("create table %s like %s", t2, t1);
@@ -91,16 +92,22 @@ public class SpecialDDLTest extends RplBaseTestCase {
     }
 
     @Test
-    public void testCreateTableLikeAndDropShardKeyWithoutDbName(){
+    public void testCreateTableLikeAndDropShardKeyWithoutDbName() {
         JdbcUtil.useDb(polardbxConnection, DB_NAME);
-        testCreateTableLikeAndDropShardKey(String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)), String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)));
-        testCreateTableLikeAndDropShardKeyV2(String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)), String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)));
+        testCreateTableLikeAndDropShardKey(String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)),
+            String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)));
+        testCreateTableLikeAndDropShardKeyV2(String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)),
+            String.format("`%s`", RandomStringUtils.randomAlphanumeric(10)));
     }
 
     @Test
-    public void testCreateTableLikeAndDropShardKeyWithDbName(){
+    public void testCreateTableLikeAndDropShardKeyWithDbName() {
         JdbcUtil.useDb(polardbxConnection, DB_NAME);
-        testCreateTableLikeAndDropShardKey(String.format("`%s`.`%s`", DB_NAME, RandomStringUtils.randomAlphanumeric(10)), String.format("`%s`.`%s`", DB_NAME1, RandomStringUtils.randomAlphanumeric(10)));
-        testCreateTableLikeAndDropShardKeyV2(String.format("`%s`.`%s`", DB_NAME, RandomStringUtils.randomAlphanumeric(10)), String.format("`%s`.`%s`", DB_NAME1, RandomStringUtils.randomAlphanumeric(10)));
+        testCreateTableLikeAndDropShardKey(
+            String.format("`%s`.`%s`", DB_NAME, RandomStringUtils.randomAlphanumeric(10)),
+            String.format("`%s`.`%s`", DB_NAME1, RandomStringUtils.randomAlphanumeric(10)));
+        testCreateTableLikeAndDropShardKeyV2(
+            String.format("`%s`.`%s`", DB_NAME, RandomStringUtils.randomAlphanumeric(10)),
+            String.format("`%s`.`%s`", DB_NAME1, RandomStringUtils.randomAlphanumeric(10)));
     }
 }

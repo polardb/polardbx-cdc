@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper;
@@ -25,10 +25,12 @@ import com.aliyun.polardbx.binlog.dumper.metrics.MetricsManager;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
-import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
+import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
+import com.aliyun.polardbx.binlog.proc.ProcUtils;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.rpc.cdc.BinaryLog;
+import com.aliyun.polardbx.rpc.cdc.BinlogDumpStatus;
 import com.aliyun.polardbx.rpc.cdc.BinlogEvent;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc;
 import com.aliyun.polardbx.rpc.cdc.ChangeMasterRequest;
@@ -37,10 +39,12 @@ import com.aliyun.polardbx.rpc.cdc.DumpRequest;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.aliyun.polardbx.rpc.cdc.FullBinaryLog;
 import com.aliyun.polardbx.rpc.cdc.FullMasterStatus;
+import com.aliyun.polardbx.rpc.cdc.GetDumperInfoResponse;
 import com.aliyun.polardbx.rpc.cdc.MasterStatus;
 import com.aliyun.polardbx.rpc.cdc.Request;
 import com.aliyun.polardbx.rpc.cdc.ResetSlaveRequest;
 import com.aliyun.polardbx.rpc.cdc.RplCommandResponse;
+import com.aliyun.polardbx.rpc.cdc.ShowBinlogDumpStatusRequest;
 import com.aliyun.polardbx.rpc.cdc.ShowBinlogEventsRequest;
 import com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusRequest;
 import com.aliyun.polardbx.rpc.cdc.ShowSlaveStatusResponse;
@@ -116,10 +120,6 @@ public class CdcServer {
     }
 
     public void start() {
-        if (!RuntimeLeaderElector.isDumperMasterOrX(version, taskType, taskName)) {
-            return;
-        }
-
         CdcServiceGrpc.CdcServiceImplBase svc = new CdcServiceGrpc.CdcServiceImplBase() {
             @Override
             public void showBinaryLogs(Request request, StreamObserver<BinaryLog> responseObserver) {
@@ -131,10 +131,10 @@ public class CdcServer {
                     LogFileManager logFileManager = getLogFileManager(request.getStreamName());
                     List<CdcFile> files;
                     if (request.getExcludeRemoteFiles()) {
-                        files = logFileManager.getAllLocalBinlogFilesOrdered();
+                        files = logFileManager.getAllLocalBinlogFilesOrdered(true);
                     } else {
                         // FIXME: 本地文件file size = 0, binlog_oss_record表中size非0，导致空洞
-                        files = logFileManager.getAllBinlogFilesOrdered();
+                        files = logFileManager.getAllBinlogFilesOrdered(true);
                     }
 
                     for (CdcFile file : files) {
@@ -160,9 +160,9 @@ public class CdcServer {
                     LogFileManager logFileManager = getLogFileManager(request.getStreamName());
                     List<CdcFile> files;
                     if (request.getExcludeRemoteFiles()) {
-                        files = logFileManager.getAllLocalBinlogFilesOrdered();
+                        files = logFileManager.getAllLocalBinlogFilesOrdered(true);
                     } else {
-                        files = logFileManager.getAllBinlogFilesOrdered();
+                        files = logFileManager.getAllBinlogFilesOrdered(true);
                     }
 
                     for (CdcFile file : files) {
@@ -206,8 +206,9 @@ public class CdcServer {
                         BinlogFileUtil.extractStreamName(request.getLogName()) : request.getStreamName();
                     LogFileManager logFileManager = getLogFileManager(streamName);
                     LogFileReader logFileReader = new LogFileReader(logFileManager);
-                    CdcFile cdcFile = StringUtils.isEmpty(request.getLogName()) ? logFileManager.getMinBinlogFile() :
-                        logFileManager.getBinlogFileByName(request.getLogName());
+                    CdcFile cdcFile =
+                        StringUtils.isEmpty(request.getLogName()) ? logFileManager.getMinBinlogFile(false) :
+                            logFileManager.getBinlogFileByName(request.getLogName());
                     logFileReader.showBinlogEvent(cdcFile, request.getPos(), request.getOffset(), request.getRowCount(),
                         serverCallStreamObserver);
                 } finally {
@@ -227,7 +228,7 @@ public class CdcServer {
                         responseObserver.onNext(MasterStatus.newBuilder().setFile(cursor.getFileName())
                             .setPosition(cursor.getFilePosition()).build());
                     } else {
-                        CdcFile maxFile = logFileManager.getMaxBinlogFile();
+                        CdcFile maxFile = logFileManager.getMaxBinlogFile(false);
                         String fileName = maxFile == null ? "" : maxFile.getName();
                         responseObserver.onNext(MasterStatus.newBuilder().setFile(fileName)
                             .setPosition(4).build());
@@ -261,7 +262,7 @@ public class CdcServer {
                         position = cursor.getFilePosition();
                         lastTso = cursor.getTso();
                     } else {
-                        CdcFile maxFile = logFileManager.getMaxBinlogFile();
+                        CdcFile maxFile = logFileManager.getMaxBinlogFile(false);
                         fileName = maxFile.getName();
                         position = 4L;
                     }
@@ -301,7 +302,7 @@ public class CdcServer {
                     LogFileManager logFileManager = getLogFileManager(request.getStreamName());
                     String fileName = request.getFileName();
                     if (StringUtils.isEmpty(fileName)) {
-                        CdcFile cdcFile = logFileManager.getMinBinlogFile();
+                        CdcFile cdcFile = logFileManager.getMinBinlogFile(false);
                         String searchFile = cdcFile != null ? cdcFile.getName() : "";
                         request = DumpRequest.newBuilder()
                             .setFileName(searchFile)
@@ -318,16 +319,31 @@ public class CdcServer {
                     }
 
                     LogFileReader logFileReader = new LogFileReader(logFileManager);
-                    try {
-                        logFileReader.binlogDump(
-                            request.getFileName(),
-                            request.getPosition(),
-                            request.getRegistered(),
-                            ext,
-                            serverCallStreamObserver);
-                    } finally {
-                        DumpClientMetric.stopDump();
-                    }
+                    DumpRequest finalRequest = request;
+                    Map<String, String> finalExt = ext;
+                    String streamName =
+                        StringUtils.isEmpty(request.getStreamName()) ? STREAM_NAME_GLOBAL : request.getStreamName();
+                    StreamMetrics streamMetrics = StreamMetrics.getStreamMetrics(streamName);
+                    DumpClientMetric dumpClientMetric = KEY_CLIENT_METRICS.get();
+                    executor.submit(() -> {
+                        try {
+                            MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
+                            log.info("consumer count before dump: {}", streamMetrics.getConsumerCount().get());
+                            streamMetrics.getConsumerCount().incrementAndGet();
+                            logFileReader.binlogDump(
+                                finalRequest.getFileName(),
+                                finalRequest.getPosition(),
+                                finalRequest.getRegistered(),
+                                finalExt,
+                                dumpClientMetric,
+                                serverCallStreamObserver);
+                        } finally {
+                            log.info("consumer count after dump: {}", streamMetrics.getConsumerCount().get());
+                            MDC.remove(MDC_THREAD_LOGGER_KEY);
+                            streamMetrics.getConsumerCount().decrementAndGet();
+                            DumpClientMetric.stopDump(dumpClientMetric);
+                        }
+                    });
                 } finally {
                     MDC.remove(MDC_THREAD_LOGGER_KEY);
                 }
@@ -343,6 +359,15 @@ public class CdcServer {
                     txnOutputStream.init();
 
                     LogFileManager logFileManager = getLogFileManager(request.getStreamName());
+                    DumpClientMetric dumpClientMetric = KEY_CLIENT_METRICS.get();
+
+                    Map<String, String> ext = new HashMap<>();
+                    if (StringUtils.isNotBlank(request.getExt())) {
+                        ext = JSON.parseObject(request.getExt(), new TypeReference<Map<String, String>>() {
+                        });
+                    }
+                    Map<String, String> finalExt = ext;
+
                     executor.submit(() -> {
                         try {
                             MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_SYNC);
@@ -350,9 +375,10 @@ public class CdcServer {
                             txnOutputStream.setExecutingThead(Thread.currentThread());
                             logFileReader
                                 .binlogSync(request.getFileName(), request.getPosition(), request.getSplitMode(),
-                                    txnOutputStream);
+                                    dumpClientMetric, finalExt, txnOutputStream);
                         } finally {
                             MDC.remove(MDC_THREAD_LOGGER_KEY);
+                            DumpClientMetric.stopDump(dumpClientMetric);
                         }
                     });
                 } finally {
@@ -397,6 +423,77 @@ public class CdcServer {
                                         StreamObserver<ShowSlaveStatusResponse> responseObserver) {
                 metaLogger.info("showSlaveStatus: " + request.getRequest());
                 RplServiceManagerV0.showSlaveStatus(request, responseObserver);
+            }
+
+            @Override
+            public void showBinlogDumpStatus(ShowBinlogDumpStatusRequest request,
+                                             StreamObserver<BinlogDumpStatus> responseObserver) {
+                try {
+                    MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
+                    log.info("CDC Server receive a show binlog dump status request, with stream name: {}",
+                        request.getStreamName());
+                    Map<String, DumpClientMetric> clientMap = metricsManager.getDumpClientMetricsMap();
+                    long now = System.currentTimeMillis();
+                    for (DumpClientMetric clientMetric : clientMap.values()) {
+                        long clientTimestamp = clientMetric.getTimestamp();
+                        long delay = TimeUnit.MILLISECONDS.toSeconds(now) - clientTimestamp;
+                        if (clientTimestamp == -1) {
+                            delay = -1;
+                        }
+                        long alive = TimeUnit.MILLISECONDS.toSeconds(now - clientMetric.getDumpStartTimestamp());
+                        if (StringUtils.isBlank(clientMetric.getFileName())) {
+                            continue;
+                        }
+                        responseObserver.onNext(
+                            BinlogDumpStatus.newBuilder().setIp(clientMetric.getRemoteIp())
+                                .setPort(clientMetric.getRemotePort())
+                                .setFileName(clientMetric.getFileName()).setPosition(clientMetric.getPosition())
+                                .setDelay(delay).setBps(clientMetric.getDumpBps())
+                                .setLastSyncTimeStamp(clientMetric.getLastSyncTimestamp()).setAliveSecond(alive)
+                                .setId(clientMetric.getProcessId()).setTraceId(clientMetric.getTraceId()).build()
+                        );
+                    }
+                    responseObserver.onCompleted();
+                } finally {
+                    MDC.remove(MDC_THREAD_LOGGER_KEY);
+                }
+
+            }
+
+            @Override
+            public void getDumperInfo(ShowBinlogDumpStatusRequest request,
+                                      StreamObserver<GetDumperInfoResponse> responseObserver) {
+                try {
+                    MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
+                    log.info("CDC Server receive a get dumper info request, with stream name: {}",
+                        request.getStreamName());
+                    StreamMetrics streamMetrics = StreamMetrics.getStreamMetrics(request.getStreamName());
+                    LogFileManager logFileManager = getLogFileManager(request.getStreamName());
+                    MetricsManager.StreamMetricsAverage streamMetricsAvg =
+                        metricsManager.getStreamMetricsAvg(request.getStreamName());
+                    BinlogCursor cursor = logFileManager.getLatestFileCursor();
+                    ProcSnapshot procSnapshot = ProcUtils.buildProcSnapshot();
+                    double cpuUsage = 0;
+                    if (procSnapshot != null) {
+                        cpuUsage = procSnapshot.getCpuPercent();
+                    }
+                    long lastEventTimestampSecond = logFileManager.getLastEventTimestamp();
+
+                    responseObserver.onNext(
+                        GetDumperInfoResponse.newBuilder()
+                            .setFile(cursor.getFileName())
+                            .setPosition(cursor.getFilePosition())
+                            .setLastEventTimestamp(lastEventTimestampSecond)
+                            .setSessionCount(streamMetrics.getConsumerCount().get())
+                            .setDelay(logFileManager.getDumperDelay())
+                            .setAvgDumpBpsSum(streamMetricsAvg.getAvgDumpBps())
+                            .setCpuUsage(cpuUsage)
+                            .build()
+                    );
+                    responseObserver.onCompleted();
+                } finally {
+                    MDC.remove(MDC_THREAD_LOGGER_KEY);
+                }
             }
         };
 

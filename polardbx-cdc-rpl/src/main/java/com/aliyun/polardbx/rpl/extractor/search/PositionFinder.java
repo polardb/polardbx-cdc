@@ -1,11 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor.search;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
@@ -22,6 +24,7 @@ import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.TaskContext;
@@ -85,7 +88,7 @@ public class PositionFinder implements SinkFunction {
             if (isPositionValid()) {
                 break;
             }
-            searchFile = preFileName(searchFile);
+            searchFile = BinlogFileUtil.getPrevBinlogFileName(searchFile);
             if (searchFile == null) {
                 // 已经是最小文件了，直接给pos赋值0
                 searchPosition.setRtso(ExecutionConfig.ORIGIN_TSO);
@@ -111,18 +114,6 @@ public class PositionFinder implements SinkFunction {
             return false;
         }
         return true;
-    }
-
-    private String preFileName(String fileName) {
-        int dotIdx = fileName.indexOf(".");
-        String prefix = fileName.substring(0, dotIdx);
-        String suffix = fileName.substring(dotIdx + 1);
-        int suffixLength = suffix.length();
-        int seq = Integer.parseInt(suffix);
-        if (seq == 1) {
-            return null;
-        }
-        return prefix + "." + StringUtils.leftPad(String.valueOf(seq - 1), suffixLength, "0");
     }
 
     private MySQLDBMSEvent parseAndProfilingIfNecessary(LogEvent event) throws Exception {

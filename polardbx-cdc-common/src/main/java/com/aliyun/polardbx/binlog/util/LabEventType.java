@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
@@ -29,7 +29,11 @@ public enum LabEventType {
     SYNC_POINT_UNEXPECTED_LOCAL_SEQ("sync point事务后的单机事务tso小于sync point事务tso"),
     HIDDEN_PK_ENABLE_SWITCH("隐藏主键开关记录"),
     UPLOAD_UNLOCK_FAIL("上传文件后解锁失败"),
-    UPDATE_QUERY_INFO("从binlog解析的update sql变更列");
+    UPDATE_QUERY_INFO("从binlog解析的update sql变更列"),
+    TRANSPARENT_CONSUMING("触发透明消费"),
+    REPLICA_BINLOG_POS_CHECK("检查到rpl接收到的pos无序"),
+    DUMPER_FILE_STATUS_CHECK("检测到dump的文件状态有误"),
+    TASK_FILTER_ARCHIVE_ENABLED("开启task归档表删除event过滤");
 
     private final String desc;
 

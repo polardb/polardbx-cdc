@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.event;
@@ -382,6 +382,11 @@ public class QueryLogEvent extends LogEvent {
     public static final int Q_OPT_INDEX_FORMAT_GPP_ENABLED = 22;
 
     /**
+     * Replicate opt_index_format_panda_enabled.
+     */
+    public static final int Q_OPT_INDEX_FORMAT_PANDA_ENABLED = 255;
+
+    /**
      * From AliSQL 8.0, used for storing snapshot tso or commit tso
      * snapshot tso is stored in XA End Event with Query_log
      * commit tso is stored in XA Commit Event with Query_log
@@ -547,7 +552,7 @@ public class QueryLogEvent extends LogEvent {
         }
     }
 
-    private static final String findCodeName(final int code) {
+    public static final String findCodeName(final int code) {
         switch (code) {
         case Q_FLAGS2_CODE:
             return "Q_FLAGS2_CODE";
@@ -589,6 +594,8 @@ public class QueryLogEvent extends LogEvent {
             return "Q_OPT_FLASHBACK_AREA";
         case Q_OPT_INDEX_FORMAT_GPP_ENABLED:
             return "Q_OPT_INDEX_FORMAT_GPP_ENABLED";
+        case Q_OPT_INDEX_FORMAT_PANDA_ENABLED:
+            return "Q_OPT_INDEX_FORMAT_PANDA_ENABLED";
         }
         return "CODE#" + code;
     }
@@ -697,6 +704,9 @@ public class QueryLogEvent extends LogEvent {
                     buffer.forward(1);
                     break;
                 case Q_OPT_INDEX_FORMAT_GPP_ENABLED:
+                    buffer.forward(1);
+                    break;
+                case Q_OPT_INDEX_FORMAT_PANDA_ENABLED:
                     buffer.forward(1);
                     break;
                 case Q_HRNOW:

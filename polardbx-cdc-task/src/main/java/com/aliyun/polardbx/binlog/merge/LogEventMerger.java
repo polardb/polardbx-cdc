@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.merge;
@@ -9,7 +9,6 @@ package com.aliyun.polardbx.binlog.merge;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.unit.SearchRecorderMetrics;
 import com.aliyun.polardbx.binlog.collect.Collector;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.CollectException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.metrics.MergeMetrics;
@@ -51,7 +50,6 @@ public class LogEventMerger implements Merger {
 
     private static final Logger logger = LoggerFactory.getLogger(LogEventMerger.class);
 
-    private final TaskType taskType;
     private final Collector collector;
     private final String startTso;
     private final boolean dryRun;
@@ -77,9 +75,8 @@ public class LogEventMerger implements Merger {
     private boolean checkHeartbeatWindow;
     private volatile boolean running;
 
-    public LogEventMerger(TaskType taskType, Collector collector, boolean isMergeNoTsoXa, String startTso,
+    public LogEventMerger(Collector collector, boolean isMergeNoTsoXa, String startTso,
                           boolean dryRun, int dryRunMode, Storage storage, String lastScaleTso) {
-        this.taskType = taskType;
         this.collector = collector;
         this.startTso = startTso;
         this.dryRun = dryRun;
@@ -96,10 +93,10 @@ public class LogEventMerger implements Merger {
         this.firstDmlToken = new AtomicReference<>();
         this.mergeSources = new ConcurrentHashMap<>();
         if (dryRun) {
-            this.mergeBarrier = new MergeBarrier(taskType, isMergeNoTsoXa, token -> {
+            this.mergeBarrier = new MergeBarrier(isMergeNoTsoXa, token -> {
             });
         } else {
-            this.mergeBarrier = new MergeBarrier(taskType, isMergeNoTsoXa, collector::push);
+            this.mergeBarrier = new MergeBarrier(isMergeNoTsoXa, collector::push);
         }
         this.executorService = Executors.newSingleThreadExecutor(r -> new Thread(r, "binlog-merger-thread"));
         this.heartBeatWindowAwares = new ArrayList<>();
@@ -202,6 +199,11 @@ public class LogEventMerger implements Merger {
     @Override
     public void addHeartBeatWindowAware(HeartBeatWindowAware windowAware) {
         this.heartBeatWindowAwares.add(windowAware);
+    }
+
+    @Override
+    public Map<String, MergeSource> getMergeSources() {
+        return mergeSources;
     }
 
     private void checkHeartbeatWindow(MergeItem item) {

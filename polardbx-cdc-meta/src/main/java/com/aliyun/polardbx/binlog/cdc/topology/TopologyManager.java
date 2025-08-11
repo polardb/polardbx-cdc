@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.topology;
@@ -24,15 +24,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCase;
-import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCaseTopologyRecord;
-import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.internTopologyRecord;
-import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.needIntern;
-import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.needShareString;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.needShareTopology;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.trySharedRecord;
 
 /**
  * server内核打标时，物理库表名按照Mysql的lower_case_table_names参数进行了大小写处理
@@ -46,8 +43,6 @@ import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.needShar
  */
 @Slf4j
 public class TopologyManager {
-
-    public static final Map<String, TopologyRecord> TOPOLOGY_RECORD_CACHE = new ConcurrentHashMap<>();
     private final Map<Pair<String, String>, LogicBasicInfo> cache = Maps.newHashMap();
     private LogicMetaTopology topology;
 
@@ -66,7 +61,7 @@ public class TopologyManager {
         }
         schema = toLowerCase(schema);
         table = toLowerCase(table);
-        record = tryGetSharedRecord(tso, record);
+        trySharedRecord(record);
 
         Preconditions.checkNotNull(schema);
         Preconditions.checkArgument((StringUtils.isEmpty(table) ^ record.getLogicTableMeta() == null) == false,
@@ -262,29 +257,14 @@ public class TopologyManager {
         if (topology == null) {
             return;
         }
-        if (needShareString() && !topology.isShared()) {
+        if (needShareTopology() && !topology.isShared()) {
             throw new PolardbxException("topology should be shared, but is not!");
+        }
+        if (needShareTopology() && !topology.isInterned()) {
+            throw new PolardbxException("topology should be interned, but is not!");
         }
         if (!topology.isLowerCased()) {
             throw new PolardbxException("topology should be lowerCased, but is not!");
-        }
-        if (needIntern() && !topology.isInterned()) {
-            throw new PolardbxException("topology should be interned, but is not!");
-        }
-    }
-
-    private TopologyRecord tryGetSharedRecord(String tso, TopologyRecord record) {
-        if (needShareString()) {
-            return TOPOLOGY_RECORD_CACHE.computeIfAbsent(tso, k -> {
-                toLowerCaseTopologyRecord(record);
-                if (needIntern()) {
-                    internTopologyRecord(record);
-                }
-                return record;
-            }).copy();
-        } else {
-            toLowerCaseTopologyRecord(record);
-            return record;
         }
     }
 }

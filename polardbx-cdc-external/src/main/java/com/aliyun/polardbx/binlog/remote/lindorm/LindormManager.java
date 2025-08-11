@@ -1,13 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote.lindorm;
 
 import com.aliyun.oss.common.utils.CRC64;
 import com.aliyun.polardbx.binlog.remote.Appender;
+import com.aliyun.polardbx.binlog.remote.DownloadParameter;
 import com.aliyun.polardbx.binlog.remote.IRemoteManager;
 import com.aliyun.polardbx.binlog.remote.lindorm.thrift.fileservice.generated.FileInfo;
 import com.amazonaws.services.s3.AmazonS3;
@@ -47,6 +48,9 @@ public class LindormManager implements IRemoteManager {
         boolean success = false;
         String bucket = getBucket();
         do {
+            if (Thread.interrupted()) {
+                throw new RuntimeException("create bucket failed and thread interrupt!");
+            }
             try (LindormClient client = getLindormClient()) {
                 if (client.doesBucketExist(bucket)) {
                     logger.info("bucket {} create success", bucket);
@@ -166,7 +170,7 @@ public class LindormManager implements IRemoteManager {
     }
 
     @Override
-    public void download(String fileName, String localPath) {
+    public void download(String fileName, String localPath, DownloadParameter downloadParameter) {
         boolean success = true;
         do {
             try (LindormClient client = getLindormClient()) {

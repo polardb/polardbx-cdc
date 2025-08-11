@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.filesys;
@@ -10,19 +10,26 @@ import com.aliyun.polardbx.binlog.CommonConstants;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapperExtend;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * CDC file system架构：
@@ -43,16 +50,15 @@ import java.util.TreeSet;
  **/
 @Slf4j
 public class CdcFileSystem {
+    @Getter
     private final LocalFileSystem localFileSystem;
     private RemoteFileSystem remoteFileSystem;
-    private final BinlogOssRecordService binlogOssRecordService;
 
     public CdcFileSystem(String rootPath, String group, String stream) {
         localFileSystem = new LocalFileSystem(rootPath, group, stream);
         if (RemoteBinlogProxy.getInstance().isBackupOn()) {
             remoteFileSystem = new RemoteFileSystem(group, stream);
         }
-        binlogOssRecordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
     }
 
     public File newLocalFile(String fileName) {
@@ -71,12 +77,20 @@ public class CdcFileSystem {
         }
     }
 
-    public List<CdcFile> listLocalFiles() {
-        return localFileSystem.listFiles();
+    public List<CdcFile> listLocalFiles(boolean needOssRecord) {
+        return getLocalFileMap(needOssRecord).values().stream().sorted(CdcFile::compareTo).collect(Collectors.toList());
     }
 
-    public List<CdcFile> listAllFiles() {
-        Map<String, CdcFile> fileMap = getLocalFileMap();
+    public Set<CdcFile> getLocalFilesSet() {
+        return new HashSet<>(localFileSystem.listFiles());
+    }
+
+    public Set<String> getLocalFileNamesSet() {
+        return localFileSystem.listFiles().stream().map(CdcFile::getName).collect(Collectors.toSet());
+    }
+
+    public List<CdcFile> listAllFiles(boolean needOssRecord) {
+        Map<String, CdcFile> fileMap = getLocalFileMap(remoteFileSystem == null && needOssRecord);
         if (remoteFileSystem != null) {
             List<CdcFile> remoteFiles = listRemoteFiles();
             for (CdcFile f : remoteFiles) {
@@ -90,6 +104,10 @@ public class CdcFileSystem {
         ArrayList<CdcFile> res = new ArrayList<>(fileMap.values());
         res.sort(CdcFile::compareTo);
         return res;
+    }
+
+    public CdcFile getLocalBinlogFile(String fileName) {
+        return localFileSystem.get(fileName);
     }
 
     public CdcFile getBinlogFile(String fileName) {
@@ -156,19 +174,31 @@ public class CdcFileSystem {
         return remoteFile;
     }
 
-    private Map<String, CdcFile> getLocalFileMap() {
-        Map<String, CdcFile> fileMap = new HashMap<>();
-        List<CdcFile> localFiles = listLocalFiles();
-        List<BinlogOssRecord> records =
-            binlogOssRecordService.getRecords(localFileSystem.getGroup(), localFileSystem.getStream(),
-                DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID));
+    /**
+     * @param needOssRecord 是否需要附带有从binlog_oss_record表查出的oss_record信息
+     */
+    private Map<String, CdcFile> getLocalFileMap(boolean needOssRecord) {
+        List<CdcFile> localFiles = localFileSystem.listFiles();
+        Map<String, CdcFile> fileMap = new HashMap<>(localFiles.size());
         for (CdcFile f : localFiles) {
             fileMap.put(f.getName(), f);
         }
-        for (BinlogOssRecord record : records) {
-            String fileName = record.getBinlogFile();
-            if (fileMap.containsKey(fileName)) {
-                fileMap.get(fileName).setRecord(record);
+        if (needOssRecord && !localFiles.isEmpty()) {
+            int startFileSequence =
+                BinlogFileUtil.getBinlogSequence(localFiles.stream().min(CdcFile::compareTo).get().getName());
+            int endFileSequence =
+                BinlogFileUtil.getBinlogSequence(localFiles.stream().max(CdcFile::compareTo).get().getName());
+            BinlogOssRecordMapperExtend mapper = SpringContextHolder.getObject(BinlogOssRecordMapperExtend.class);
+            List<BinlogOssRecord> records =
+                mapper.getRecordsInFileRange(localFileSystem.getGroup(),
+                    localFileSystem.getStream(),
+                    DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID),
+                    startFileSequence, endFileSequence);
+            for (BinlogOssRecord record : records) {
+                String fileName = record.getBinlogFile();
+                if (fileMap.containsKey(fileName)) {
+                    fileMap.get(fileName).setRecord(record);
+                }
             }
         }
         return fileMap;
@@ -181,24 +211,27 @@ public class CdcFileSystem {
         return remoteFileSystem.listFiles();
     }
 
-    public CdcFile getMinFile() {
-        List<CdcFile> files = listAllFiles();
+    public CdcFile getMinFile(boolean needOssRecord) {
+        List<CdcFile> files = listAllFiles(needOssRecord);
         if (files.isEmpty()) {
             return null;
         }
         return files.get(0);
     }
 
-    public CdcFile getLocalMaxFile() {
-        List<CdcFile> files = listLocalFiles();
+    /**
+     * @param needOssRecord 是否需要附带有从binlog_oss_record表查出的oss_record信息
+     */
+    public CdcFile getLocalMaxFile(boolean needOssRecord) {
+        List<CdcFile> files = listLocalFiles(needOssRecord);
         if (files.isEmpty()) {
             return null;
         }
         return files.get(files.size() - 1);
     }
 
-    public CdcFile getMaxFile() {
-        List<CdcFile> files = listAllFiles();
+    public CdcFile getMaxFile(boolean needOssRecord) {
+        List<CdcFile> files = listAllFiles(needOssRecord);
         if (files.isEmpty()) {
             return null;
         }
@@ -214,7 +247,7 @@ public class CdcFileSystem {
      * 用TreeSet保证binlog文件名的有序性
      */
     public static List<String> listFilesInTimeRange(long startTime, long endTime) {
-        TreeSet<String> set = new TreeSet<>();
+        TreeSet<String> set = new TreeSet<>(Comparator.comparing(BinlogFileUtil::getBinlogSequence));
         Date startDate = new Date(startTime);
         Date endDate = new Date(endTime);
         BinlogOssRecordService service = SpringContextHolder.getObject(BinlogOssRecordService.class);

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.taskmeta;
@@ -632,7 +632,9 @@ public class RplServiceManager {
                 replicaMeta.setMasterType(HostType.RDS);
             }
         }
-        replicaMeta.setApplierType(ApplierType.SPLIT);
+
+        replicaMeta.setApplierType(ApplierType.valueOf(DynamicApplicationConfig
+            .getString(ConfigKeys.RPL_DEFAULT_WRITE_TYPE)));
         if (params.containsKey(RplConstants.WRITE_TYPE)) {
             ApplierType type = ApplierType.valueOf(StringUtils.upperCase(params.get(RplConstants.WRITE_TYPE)));
             replicaMeta.setApplierType(type);
@@ -707,7 +709,7 @@ public class RplServiceManager {
         try (Connection connection = DriverManager.getConnection(
             String.format(
                 "jdbc:mysql://%s:%s?allowLoadLocalInfile=false&autoDeserialize=false"
-                    + "&allowLocalInfile=false&allowUrlInLocalInfile=false",
+                    + "&allowLocalInfile=false&allowUrlInLocalInfile=false&useSSL=false",
                 meta.getMasterHost(), meta.getMasterPort()),
             meta.getMasterUser(), meta.getMasterPassword())) {
             List<MutableTriple<String, Integer, String>> masterInfos = CommonUtil.getComputeNodesWithFixedInstId(
@@ -730,7 +732,7 @@ public class RplServiceManager {
         try (Connection connection = DriverManager.getConnection(
             String.format(
                 "jdbc:mysql://%s:%s?allowLoadLocalInfile=false&autoDeserialize=false"
-                    + "&allowLocalInfile=false&allowUrlInLocalInfile=false",
+                    + "&allowLocalInfile=false&allowUrlInLocalInfile=false&useSSL=false",
                 meta.getMasterHost(), meta.getMasterPort()),
             meta.getMasterUser(), meta.getMasterPassword())) {
             List<String> streamPositions;

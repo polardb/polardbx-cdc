@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
@@ -10,8 +10,10 @@ import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.CommonMetrics;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.dao.RplStatMetricsDynamicSqlSupport;
@@ -19,6 +21,7 @@ import com.aliyun.polardbx.binlog.dao.RplStatMetricsMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplStatMetrics;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
+import com.aliyun.polardbx.binlog.error.DdlApplyException;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
@@ -34,7 +37,6 @@ import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.pipeline.BasePipeline;
-import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
@@ -45,6 +47,8 @@ import com.github.rholder.retry.RetryerBuilder;
 import com.github.rholder.retry.StopStrategies;
 import com.github.rholder.retry.WaitStrategies;
 import com.google.common.collect.Lists;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -52,6 +56,7 @@ import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.springframework.util.CollectionUtils;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -74,17 +79,20 @@ public class StatisticalProxy implements FlowLimiter {
     private static final int MAX_RETRY = 4;
     private static final StatisticalProxy INSTANCE = new StatisticalProxy();
     private ScheduledExecutorService executorService;
-    private ApplierConfig applierConfig;
     private final Logger positionLogger = LogUtil.getPositionLogger();
     private final Logger statisticLogger = LogUtil.getStatisticLogger();
+    @Getter
     private String position;
     private long lastEventTimestamp;
+    @Getter
+    @Setter
     private BaseApplier applier;
     private int tpsLimit;
     private volatile FlowLimiter limiter;
-    private Retryer<Void> retryer;
+    protected Retryer<Void> retryer;
     private final AtomicBoolean lastErrorRemoved = new AtomicBoolean(false);
     private final AtomicBoolean running = new AtomicBoolean(false);
+    int flushInterval;
 
     private StatisticalProxy() {
     }
@@ -95,32 +103,28 @@ public class StatisticalProxy implements FlowLimiter {
 
     public void init() {
         BasePipeline pipeline = TaskContext.getInstance().getPipeline();
-        applierConfig = pipeline.getApplier().getApplierConfig();
         executorService = new ScheduledThreadPoolExecutor(1, new NamedThreadFactory("StatisticalProxy"));
         lastEventTimestamp = System.currentTimeMillis();
-
         applier = pipeline.getApplier();
         tpsLimit = pipeline.getPipeLineConfig().getFixedTpsLimit();
         initFlowLimiter();
-        retryer = RetryerBuilder.<Void>newBuilder()
-            .retryIfException()
-            .withWaitStrategy(WaitStrategies.fixedWait(pipeline.getPipeLineConfig().getRetryIntervalMs(),
-                TimeUnit.MILLISECONDS))
-            .withStopStrategy(StopStrategies.stopAfterAttempt(pipeline.getPipeLineConfig().getApplyRetryMaxTime()))
-            .build();
+        retryer = buildRetryer(pipeline.getPipeLineConfig().getRetryIntervalMs(),
+            pipeline.getPipeLineConfig().getApplyRetryMaxTime());
+        flushInterval = DynamicApplicationConfig.getInt(ConfigKeys.RPL_STATE_METRICS_FLUSH_INTERVAL_SECOND);
+        position = TaskContext.getInstance().getTask().getPosition();
         start();
     }
 
     public void start() {
         if (running.compareAndSet(false, true)) {
             executorService.scheduleAtFixedRate(
-                this::flushStatistic, 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
+                this::flushStatistic, 0, flushInterval, TimeUnit.SECONDS);
             executorService.scheduleAtFixedRate(
                 this::flushPosition, 0, 1, TimeUnit.SECONDS);
             executorService.scheduleAtFixedRate(
                 this::checkRunningLock, 0, 1, TimeUnit.SECONDS);
             executorService.scheduleAtFixedRate(
-                this::checkPipelineConfig, 0, applierConfig.getStatisticIntervalSec(), TimeUnit.SECONDS);
+                this::checkPipelineConfig, 0, flushInterval, TimeUnit.SECONDS);
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
@@ -198,44 +202,70 @@ public class StatisticalProxy implements FlowLimiter {
         }
     }
 
+    /*
+     * ddl 不需要、也没必要重试，如果重试的话会影响first ddl的判断
+     * 参见：com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog.getFirstDdl
+     */
     public void innerApply(List<DBMSEvent> events) throws Exception {
         try {
             applier.apply(events);
-        } catch (Exception e1) {
-            log.warn("batch apply events failure, will change to single apply mode ,exception: ", e1);
-            for (DBMSEvent event : events) {
-                try {
-                    applier.apply(Collections.singletonList(event));
-                } catch (Exception e2) {
-                    log.error("stop because of the msg, " + event.toString(), e2);
-                    throw e2;
-                }
+        } catch (Exception e) {
+            if (events.size() == 1 && DdlApplyHelper.isDdl(events.get(0))) {
+                throw new DdlApplyException(e);
+            } else {
+                log.warn("batch apply events failure, will change to single apply mode , exception: ", e);
+                retryApplyEventOneByOne(events);
             }
         }
+
         StatMetrics.getInstance().doStatOut(events);
-        StatMetrics.getInstance().addCommitCount(events.size());
+        StatMetrics.getInstance().addCommitCount(events);
     }
 
+    private void retryApplyEventOneByOne(List<DBMSEvent> events) throws Exception {
+        for (DBMSEvent event : events) {
+            try {
+                applier.apply(Collections.singletonList(event));
+            } catch (Exception e2) {
+                log.error("stop because of the msg, " + event.toString(), e2);
+                throw e2;
+            }
+        }
+    }
+
+    /*
+     * ddl 不需要、也没必要重试，如果重试的话会影响first ddl的判断
+     * 参见：com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog.getFirstDdl
+     */
     public void innerTranApply(List<Transaction> transactions) throws Exception {
         try {
             applier.tranApply(transactions);
-        } catch (Exception e1) {
-            log.warn("batch apply transactions failure, exception: ", e1);
-            for (Transaction transaction : transactions) {
-                try {
-                    applier.tranApply(Collections.singletonList(transaction));
-                } catch (Exception e2) {
-                    log.error("stop because of the msg, " + transaction, e2);
-                    Transaction.RangeIterator it = transaction.rangeIterator();
-                    while (it.hasNext()) {
-                        Transaction.Range range = it.next();
-                        List<DBMSEvent> events = range.getEvents();
-                        for (DBMSEvent event : events) {
-                            log.error("stop because of the msg, " + event);
-                        }
+        } catch (Exception e) {
+            if (transactions.size() == 1 && transactions.get(0).getEventCount() > 0
+                && DdlApplyHelper.isDdl(transactions.get(0).peekFirst())) {
+                throw new DdlApplyException(e);
+            } else {
+                log.warn("batch apply transactions failure, will change to single apply mode, exception: ", e);
+                retryApplyTransOneByOne(transactions);
+            }
+        }
+    }
+
+    private void retryApplyTransOneByOne(List<Transaction> transactions) throws Exception {
+        for (Transaction transaction : transactions) {
+            try {
+                applier.tranApply(Collections.singletonList(transaction));
+            } catch (Exception e2) {
+                log.error("stop because of the msg, " + transaction, e2);
+                Transaction.RangeIterator it = transaction.rangeIterator();
+                while (it.hasNext()) {
+                    Transaction.Range range = it.next();
+                    List<DBMSEvent> events = range.getEvents();
+                    for (DBMSEvent event : events) {
+                        log.error("stop because of the msg, " + event);
                     }
-                    throw e2;
                 }
+                throw e2;
             }
         }
     }
@@ -392,28 +422,43 @@ public class StatisticalProxy implements FlowLimiter {
     public void fill(RplStatMetrics rplStatMetrics, StatMetrics statMetrics, JvmSnapshot jvmSnapshot,
                      ProcSnapshot procSnapshot) {
         int userRatio = (int) (JvmUtils.getTotalUsedRatio() * 100);
-        long applyTotalCount = statMetrics.getApplyCount().getTotalCount();
-        if (applyTotalCount == 0) {
-            applyTotalCount = 1;
+        long periodApplyCount = statMetrics.getApplyCount().getAndSet(0);
+        if (periodApplyCount == 0) {
+            periodApplyCount = 1;
         }
+        long periodInsertCount = statMetrics.getInsertMessageCount().getAndSet(0);
+        long periodUpdateCount = statMetrics.getUpdateMessageCount().getAndSet(0);
+        long periodDeleteMessageCount = statMetrics.getDeleteMessageCount().getAndSet(0);
+        long periodInBytesCount = statMetrics.getInBytesCount().getAndSet(0);
+        long periodOutBytesCount = statMetrics.getOutBytesCount().getAndSet(0);
+        long periodInMessageCount = statMetrics.getInMessageCount().getAndSet(0);
+        long periodOutMessageCount = statMetrics.getOutMessageCount().getAndSet(0);
+        long periodMergeBatchSize = statMetrics.getMergeBatchSize().getAndSet(0);
+        long periodCommitCount = statMetrics.getPeriodCommitCount().getAndSet(0);
+        long periodRt = statMetrics.getRt().getAndSet(0);
+        long lastTotalInCache = statMetrics.getTotalInCache().getAndSet(0);
+        long lastProcessDelay = statMetrics.getProcessDelay().getAndSet(0);
+        long lastReceiveDelay = statMetrics.getReceiveDelay().getAndSet(0);
+        long periodSkipCounter = statMetrics.getSkipCounter().getAndSet(0);
+        long periodSkipExceptionCounter = statMetrics.getSkipExceptionCounter().getAndSet(0);
+        long persistMsgCounter = statMetrics.getPersistentMessageCounter().get();
         rplStatMetrics.setGmtModified(null);
-        rplStatMetrics.setApplyCount(statMetrics.getApplyCount().getSpeed());
-        rplStatMetrics.setOutDeleteRps(statMetrics.getDeleteMessageCount().getSpeed());
-        rplStatMetrics.setOutUpdateRps(statMetrics.getUpdateMessageCount().getSpeed());
-        rplStatMetrics.setOutInsertRps(statMetrics.getInsertMessageCount().getSpeed());
-        rplStatMetrics.setInBps(statMetrics.getInBytesCount().getSpeed());
-        rplStatMetrics.setInEps(statMetrics.getInMessageCount().getSpeed());
-        rplStatMetrics.setOutBps(statMetrics.getOutBytesCount().getSpeed());
-        rplStatMetrics.setOutRps(statMetrics.getOutMessageCount().getSpeed());
-        rplStatMetrics.setMergeBatchSize(
-            statMetrics.getMergeBatchSize().getTotalCount() / applyTotalCount);
-        rplStatMetrics.setMsgCacheSize(statMetrics.getTotalInCache().get());
-        rplStatMetrics.setPersistMsgCounter(statMetrics.getPersistentMessageCounter().get());
-        rplStatMetrics.setProcessDelay(statMetrics.getProcessDelay());
-        rplStatMetrics.setReceiveDelay(statMetrics.getReceiveDelay());
-        rplStatMetrics.setRt(statMetrics.getRt().getTotalCount() / applyTotalCount);
-        rplStatMetrics.setSkipCounter(statMetrics.getSkipCounter().get());
-        rplStatMetrics.setSkipExceptionCounter(statMetrics.getSkipExceptionCounter().get());
+        rplStatMetrics.setApplyCount(periodApplyCount / flushInterval);
+        rplStatMetrics.setOutInsertRps(periodInsertCount / flushInterval);
+        rplStatMetrics.setOutUpdateRps(periodUpdateCount / flushInterval);
+        rplStatMetrics.setOutDeleteRps(periodDeleteMessageCount / flushInterval);
+        rplStatMetrics.setInBps(periodInBytesCount / flushInterval);
+        rplStatMetrics.setInEps(periodInMessageCount / flushInterval);
+        rplStatMetrics.setOutBps(periodOutBytesCount / flushInterval);
+        rplStatMetrics.setOutRps(periodOutMessageCount / flushInterval);
+        rplStatMetrics.setMergeBatchSize(periodMergeBatchSize / periodApplyCount);
+        rplStatMetrics.setMsgCacheSize(lastTotalInCache);
+        rplStatMetrics.setPersistMsgCounter(persistMsgCounter);
+        rplStatMetrics.setProcessDelay(lastProcessDelay);
+        rplStatMetrics.setReceiveDelay(lastReceiveDelay);
+        rplStatMetrics.setRt(periodRt / periodApplyCount);
+        rplStatMetrics.setSkipCounter(periodSkipCounter);
+        rplStatMetrics.setSkipExceptionCounter(periodSkipExceptionCounter);
         rplStatMetrics.setTaskId(TaskContext.getInstance().getTaskId());
         rplStatMetrics.setFsmId(TaskContext.getInstance().getStateMachineId());
         rplStatMetrics.setWorkerIp(CommonUtils.getHostIp());
@@ -421,7 +466,7 @@ public class StatisticalProxy implements FlowLimiter {
         rplStatMetrics.setMemUseRatio(userRatio);
         rplStatMetrics.setFullGcCount(jvmSnapshot == null ? -99 : jvmSnapshot.getOldCollectionCount());
         rplStatMetrics.setTotalCommitCount(
-            statMetrics.getPeriodCommitCount() + (rplStatMetrics.getTotalCommitCount() == null ? 0 :
+            periodCommitCount + (rplStatMetrics.getTotalCommitCount() == null ? 0 :
                 rplStatMetrics.getTotalCommitCount()));
         // receive delay 为 0 说明过去一段时间内未收到event，此时以 pos 与 当前时间的差值作为延迟
         // 否则以 receive delay + process delay 作为延迟
@@ -433,6 +478,16 @@ public class StatisticalProxy implements FlowLimiter {
             rplStatMetrics.setTrueDelayMills(rplStatMetrics.getReceiveDelay() + rplStatMetrics.getProcessDelay());
         }
         statisticLogger.info(LogUtil.generateStatisticLogV2(rplStatMetrics));
+
+    }
+
+    Retryer<Void> buildRetryer(long retryInterval, int retryAttemptCount) {
+        return RetryerBuilder.<Void>newBuilder()
+            .retryIfException(t -> !(t instanceof DdlApplyException))
+            .withWaitStrategy(
+                WaitStrategies.fixedWait(retryInterval, TimeUnit.MILLISECONDS))
+            .withStopStrategy(StopStrategies.stopAfterAttempt(retryAttemptCount))
+            .build();
     }
 
     private void flushInternal() {

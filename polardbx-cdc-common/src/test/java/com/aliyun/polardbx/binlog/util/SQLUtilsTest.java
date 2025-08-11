@@ -1,13 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
 
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCallStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
@@ -19,7 +20,7 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlLockTable
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlUnlockTablesStatement;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
@@ -34,7 +35,7 @@ import static com.aliyun.polardbx.binlog.util.SQLUtils.toSQLStringWithTrueUcase;
 /**
  * created by ziyang.lb
  **/
-public class SQLUtilsTest extends BaseTestWithGmsTables {
+public class SQLUtilsTest extends BaseTest {
 
     @Test
     public void testSubPartitionToString() {
@@ -508,5 +509,12 @@ public class SQLUtilsTest extends BaseTestWithGmsTables {
             + "        FULLTEXT INDEX `test_idx4`(`e`) WITH PARSER ngram\n"
             + ") DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci";
         SQLStatement statement = parseSQLStatement(sql);
+    }
+
+    @Test
+    public void testCallColumnarSetConfig() {
+        String sql = "CALL polardbx.columnar_set_config(256, 'TYPE', 'SNAPSHOT')";
+        SQLCallStatement statement = parseSQLStatement(sql);
+        Assert.assertEquals(statement.getProcedureName().getSimpleName(), "columnar_set_config");
     }
 }

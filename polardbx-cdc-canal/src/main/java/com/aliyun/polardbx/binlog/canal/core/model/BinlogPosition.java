@@ -1,12 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.model;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import org.apache.commons.lang3.StringUtils;
 
 /**
@@ -228,5 +229,23 @@ public class BinlogPosition extends LogPosition {
     @Override
     public String toString() {
         return format2String(10);
+    }
+
+    public static int comparePositionString(String p1, String p2) throws RuntimeException {
+        if (StringUtils.isBlank(p1)) {
+            return -1;
+        }
+        if (StringUtils.isBlank(p2)) {
+            return 1;
+        }
+
+        BinlogPosition o1 = parseFromString(p1);
+        BinlogPosition o2 = parseFromString(p2);
+        if (StringUtils.isNotBlank(o1.getRtso()) && StringUtils.isNotBlank(o2.getRtso())) {
+            return o1.getRtso().compareTo(o2.getRtso());
+        } else {
+            int res = BinlogFileUtil.compareBinlogFileName(o1.getFileName(), o2.getFileName());
+            return res == 0 ? Long.compare(o1.getPosition(), o2.getPosition()) : res;
+        }
     }
 }

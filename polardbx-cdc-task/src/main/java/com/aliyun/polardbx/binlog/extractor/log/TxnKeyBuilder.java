@@ -1,11 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.log;
 
+import com.alibaba.polardbx.druid.util.FnvHash;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
@@ -23,8 +26,22 @@ import static com.aliyun.polardbx.binlog.canal.LogEventUtil.getTranIdFromXid;
 public class TxnKeyBuilder {
     private static final String ENCODING = "UTF-8";
 
+    private static volatile Boolean appendXidFlag;
+
     public static Pair<Long, String> getTransIdGroupIdPair() {
         return getTransIdGroupIdPair(null);
+    }
+
+    public static boolean isAppendXidFlag() {
+        if (appendXidFlag == null) {
+            synchronized (TxnKeyBuilder.class) {
+                if (appendXidFlag == null) {
+                    appendXidFlag =
+                        DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_BUILD_PARTITION_APPEND_HASH_XID);
+                }
+            }
+        }
+        return appendXidFlag;
     }
 
     @SneakyThrows
@@ -39,6 +56,9 @@ public class TxnKeyBuilder {
             if (LogEventUtil.isValidXid(xid)) {
                 transactionId = getTranIdFromXid(xid, ENCODING);
                 groupId = getGroupWithReadViewSeqFromXid(xid, ENCODING);
+                if (isAppendXidFlag()) {
+                    groupId = groupId + "@" + FnvHash.hashCode64(xid);
+                }
             } else {
                 transactionId = Long.MAX_VALUE;
                 groupId = xid;

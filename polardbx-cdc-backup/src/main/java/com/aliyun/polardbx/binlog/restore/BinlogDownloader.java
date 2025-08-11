@@ -1,14 +1,17 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.restore;
 
-import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.remote.DownloadModeEnum;
+import com.aliyun.polardbx.binlog.remote.DownloadParameter;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 
@@ -16,6 +19,10 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MAX_THREAD_NUM;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_DOWNLOAD_PART_SIZE;
 
 /**
  * Binlog下载工具，负责将远端存储的binlog文件下载到本地
@@ -104,7 +111,10 @@ public class BinlogDownloader {
         String remoteFileName = BinlogFileUtil.buildRemoteFilePartName(fileName, group, stream);
         if (RemoteBinlogProxy.getInstance().isObjectsExistForPrefix(remoteFileName)) {
             log.info("start download remote binlog file {}", remoteFileName);
-            RemoteBinlogProxy.getInstance().download(remoteFileName, binlogRootPath);
+            RemoteBinlogProxy.getInstance().download(remoteFileName, binlogRootPath, new DownloadParameter(
+                DownloadModeEnum.valueOf(DynamicApplicationConfig.getString(BINLOG_BACKUP_DOWNLOAD_MODE)),
+                DynamicApplicationConfig.getInt(BINLOG_BACKUP_DOWNLOAD_MAX_THREAD_NUM),
+                DynamicApplicationConfig.getLong(BINLOG_BACKUP_DOWNLOAD_PART_SIZE)));
             log.info("success download remote binlog file {}", remoteFileName);
         } else {
             log.warn("binlog file {} does not exist on remote", remoteFileName);

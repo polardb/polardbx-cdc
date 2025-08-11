@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core;
@@ -184,9 +184,6 @@ public abstract class AbstractEventParser implements BinlogEventParser {
 
                     recorder.dump();
 
-                    //                    if (startPosition.getTso() > 0) {
-                    //                        runtimeContext.setMaxTSO(startPosition.getTso());
-                    //                    }
                     runtimeContext.setVersion(polarxVersion);
                     if (position.getTso() > 0) {
                         runtimeContext.setRecovery(true);

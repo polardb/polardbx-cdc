@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.dbmeta;
@@ -48,7 +48,6 @@ public class DbMetaCache {
     private final int minPoolSize;
     private final int maxPoolSize;
     private final String sqlMode;
-    private boolean enablePolardbxServerId;
     private final boolean longSql;
 
     private final LoadingCache<String, DruidDataSource> dataSources = CacheBuilder.newBuilder()
@@ -88,7 +87,6 @@ public class DbMetaCache {
         this.maxPoolSize = maxPoolSize;
         this.sqlMode = DynamicApplicationConfig.getString(ConfigKeys.RPL_DEFAULT_SQL_MODE);
         this.longSql = longSql;
-        this.enablePolardbxServerId = !DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
     }
 
     public DataSource getDataSource(String schema) {
@@ -136,9 +134,11 @@ public class DbMetaCache {
     private List<String> prepareConnectionInitSqls() {
         List<String> connectionInitSqls = new ArrayList<>();
         connectionInitSqls.add(String.format(SET_SQL_MODE, sqlMode));
+        boolean enablePolardbx1ServerId = hostInfo.getType() == HostType.POLARX1 &&
+            !DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_POLARDBX1_OLD_VERSION_OPTION);
 
-        if (hostInfo.getType() == HostType.POLARX2 || hostInfo.getType() == HostType.POLARX1) {
-            if (enablePolardbxServerId && hostInfo.getServerId() != 0) {
+        if (hostInfo.getType() == HostType.POLARX2 || enablePolardbx1ServerId) {
+            if (hostInfo.getServerId() != 0) {
                 String setServerIdSql = String.format(SET_POLARX_SERVER_ID,
                     Math.abs(Long.valueOf(hostInfo.getServerId()).intValue()));
                 connectionInitSqls.add(setServerIdSql);

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.scheduler.model;
@@ -10,7 +10,10 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import lombok.Builder;
 import lombok.Data;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_ADAPTIVE_USE_RATIO_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_USE_RATIO;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getDouble;
 
 /**
  * Created by ShuGuang
@@ -31,6 +34,11 @@ public class Resource {
         this.used += use;
     }
 
+    public int getBaseAvailableMemMb() {
+        double mem = memory_mb * getAvailableRatio();
+        return Double.valueOf(mem).intValue();
+    }
+
     /**
      * cdc进程最多占用90%的内存，daemon最多占用min（10%内存，256Mb）
      */
@@ -49,16 +57,27 @@ public class Resource {
 
     //如果节点的内存比较小，ratio则不能太大，需要给daemon/rocksdb/grpc预留一部分空间
     private double getAvailableRatio() {
-        double ratio = DynamicApplicationConfig.getDouble(TOPOLOGY_RESOURCE_USE_RATIO);
-        if (memory_mb <= 1024) {
-            ratio = Math.min(0.6, ratio);
-        } else if (memory_mb <= 2048) {
-            ratio = Math.min(0.7, ratio);
-        } else if (memory_mb <= 4096) {
-            ratio = Math.min(0.8, ratio);
-        } else if (memory_mb <= 8192) {
-            ratio = Math.min(0.85, ratio);
+        boolean adaptiveRatio = getBoolean(TOPOLOGY_RESOURCE_ADAPTIVE_USE_RATIO_ENABLED);
+        if (adaptiveRatio) {
+            if (memory_mb <= 1024) {
+                return 0.6;
+            } else if (memory_mb <= 2048) {
+                return 0.65;
+            } else if (memory_mb <= 4096) {
+                return 0.7;
+            } else if (memory_mb <= 8192) {
+                return 0.75;
+            } else if (memory_mb <= 16384) {
+                return 0.8;
+            } else if (memory_mb <= 32768) {
+                return 0.85;
+            } else if (memory_mb <= 65536) {
+                return 0.9;
+            } else {
+                return 0.95;
+            }
+        } else {
+            return getDouble(TOPOLOGY_RESOURCE_USE_RATIO);
         }
-        return ratio;
     }
 }

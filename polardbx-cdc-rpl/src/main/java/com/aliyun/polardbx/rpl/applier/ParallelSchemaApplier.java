@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
@@ -36,11 +36,13 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.dao.RplDdlMapperExt;
 import com.aliyun.polardbx.binlog.domain.po.RplDdl;
 import com.aliyun.polardbx.binlog.domain.po.RplDdlSub;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.google.common.collect.Lists;
@@ -455,10 +457,11 @@ public class ParallelSchemaApplier {
         List<Triple<String, String, Integer>> snapshot = schemaChannels.values().stream()
             .map(s -> Triple.of(s.getSchemaName(), s.getPosition(), s.remaining())).collect(Collectors.toList());
 
+        // position is like group1_stream_2_binlog.999999:0009278440#181818.1733259144.rtso(726981576311072364818008809786551869440000000000000000)
         Optional<Triple<String, String, Integer>> minOptional = snapshot.stream()
-            .min((o1, o2) -> StringUtils.compare(o1.getMiddle(), o2.getMiddle()));
+            .min((o1, o2) -> BinlogPosition.comparePositionString(o1.getMiddle(), o2.getMiddle()));
         Optional<Triple<String, String, Integer>> maxOptional = snapshot.stream()
-            .max((o1, o2) -> StringUtils.compare(o1.getMiddle(), o2.getMiddle()));
+            .max((o1, o2) -> BinlogPosition.comparePositionString(o1.getMiddle(), o2.getMiddle()));
         Pair<String, String> minMaxPair = Pair.of(
             minOptional.map(triple -> triple.getLeft() + ":" + triple.getMiddle()).orElse(""),
             maxOptional.map(triple -> triple.getLeft() + ":" + triple.getMiddle()).orElse(""));
@@ -466,7 +469,7 @@ public class ParallelSchemaApplier {
         printDetail(snapshot, minMaxPair);
 
         if (minOptional.isPresent() && StringUtils.isNotBlank(minOptional.get().getMiddle())) {
-            if (StringUtils.compare(minOptional.get().getMiddle(), lastFlushedPosition) < 0) {
+            if (BinlogPosition.comparePositionString(minOptional.get().getMiddle(), lastFlushedPosition) < 0) {
                 throw new PolardbxException(String.format("new position can`t be less than last position, %s, %s",
                     minOptional.get().getMiddle(), lastFlushedPosition));
             }

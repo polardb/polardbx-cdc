@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.scheduler;
@@ -95,8 +95,11 @@ public class ResourceManager {
                 Integer::valueOf).collect(Collectors.toList());
             LinkedList<Integer> ports = Lists.newLinkedList(portList);
 
-            Container container = Container.builder().containerId(nodeInfo.getContainerId())
-                .ip(nodeInfo.getIp()).daemonPort(nodeInfo.getDaemonPort()).availablePorts(ports)
+            Container container = Container.builder()
+                .containerId(nodeInfo.getContainerId())
+                .ip(nodeInfo.getIp())
+                .daemonPort(nodeInfo.getDaemonPort())
+                .availablePorts(ports)
                 .capability(Resource.builder().cpu(nodeInfo.getCore().intValue())
                     .memory_mb(nodeInfo.getMem().intValue()).build())
                 .hostString(nodeInfo.getIp() + ":" + nodeInfo.getDaemonPort())

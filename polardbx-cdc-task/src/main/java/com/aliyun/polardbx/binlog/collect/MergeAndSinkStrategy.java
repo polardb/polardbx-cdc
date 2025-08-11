@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.collect;
@@ -12,7 +12,6 @@ import com.aliyun.polardbx.binlog.collect.handle.TxnMergeStageHandler;
 import com.aliyun.polardbx.binlog.collect.handle.TxnSinkStageHandler;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.collect.message.MessageEventExceptionHandler;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.CollectException;
 import com.aliyun.polardbx.binlog.merge.HeartBeatWindow;
 import com.aliyun.polardbx.binlog.storage.Storage;
@@ -45,7 +44,8 @@ public class MergeAndSinkStrategy implements CollectStrategy {
     private final Transmitter transmitter;
     private final HandleContext handleContext;
     private final boolean isMergeNoTsoXa;
-    private final TaskType taskType;
+    private final boolean preBuildMessage;
+    private final boolean relayStage;
 
     private RingBuffer<MessageEvent> disruptorMsgBuffer;
     private Storage storage;
@@ -56,11 +56,12 @@ public class MergeAndSinkStrategy implements CollectStrategy {
     private volatile boolean running;
 
     public MergeAndSinkStrategy(Collector collector, Transmitter transmitter, boolean isMergeNoTsoXa,
-                                TaskType taskType) {
+                                boolean preBuildMessage, boolean relayStage) {
         this.collector = collector;
         this.transmitter = transmitter;
         this.isMergeNoTsoXa = isMergeNoTsoXa;
-        this.taskType = taskType;
+        this.preBuildMessage = preBuildMessage;
+        this.relayStage = relayStage;
         this.handleContext = new HandleContext();
     }
 
@@ -83,7 +84,8 @@ public class MergeAndSinkStrategy implements CollectStrategy {
         SequenceBarrier txnMergeSequenceBarrier = disruptorMsgBuffer.newBarrier();
         WorkHandler<MessageEvent>[] workHandlers = new TxnMergeStageHandler[txnMergeThreadCount];
         for (int i = 0; i < txnMergeThreadCount; i++) {
-            workHandlers[i] = new TxnMergeStageHandler(handleContext, storage, isMergeNoTsoXa, taskType);
+            workHandlers[i] = new TxnMergeStageHandler(handleContext, storage,
+                isMergeNoTsoXa, preBuildMessage, relayStage);
         }
         txnMergeWorkerPool = new WorkerPool<>(disruptorMsgBuffer,
             txnMergeSequenceBarrier,

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
@@ -15,8 +15,10 @@ import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.BufferUtil;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -45,6 +47,8 @@ public class BinlogFile {
     public static final byte[] BINLOG_FILE_HEADER = new byte[] {(byte) 0xfe, 0x62, 0x69, 0x6e};
 
     private final File file;
+    @Getter
+    private final int fileSequence;
     private final RandomAccessFile raf;
     private final FileChannel fileChannel;
     private final int seekBufferSize;
@@ -64,6 +68,7 @@ public class BinlogFile {
         throws FileNotFoundException {
         this.checkMode(mode);
         this.file = file;
+        this.fileSequence = BinlogFileUtil.getBinlogSequence(file.getName());
         this.raf = new RandomAccessFile(file, mode);
         this.fileChannel = raf.getChannel();
         this.seekBufferSize = seekBufferSize * 1024 * 1024;
@@ -327,7 +332,11 @@ public class BinlogFile {
         return seekLastTso(mode);
     }
 
-    // rows_query_envent: https://dev.mysql.com/doc/internals/en/rows-query-event.html
+    /**
+     * rows_query_event: https://dev.mysql.com/doc/internals/en/rows-query-event.html
+     *
+     * @return {@link SeekResult }
+     */
     public SeekResult seekLastTso(int mode) {
         log.info("prepare to seek last tso from binlog file " + getFileName());
         long startTime = System.currentTimeMillis();
@@ -345,64 +354,96 @@ public class BinlogFile {
 
             if (fileLength > 4) {
                 long nextEventAbsolutePos = 4;
+                // 该大小会随着event size的增大而增大
                 int bufSize = seekBufferSize > fileLength ? (int) fileLength : seekBufferSize;
-
-                while (!shouldBreak && nextEventAbsolutePos < fileLength) {
-                    RandomAccessFile tempRaf = null;
+                // 配置大小
+                final int rawBufSize = bufSize;
+                double expandFactor = 2.0;
+                ByteBuffer rawbuffer = null;
+                RandomAccessFile tempRaf = null;
+                boolean reAllocateRaw = true;
+                while (!shouldBreak && (nextEventAbsolutePos < fileLength)) {
                     try {
-                        ByteBuffer buffer = ByteBuffer.allocate(bufSize);
                         tempRaf = new RandomAccessFile(file, "r");
-                        tempRaf.getChannel().read(buffer, nextEventAbsolutePos);
-                        buffer.flip();
 
-                        //如果刚刚读取的buffer的remaining小于event header的长度，说明对文件已经读取完，直接break
-                        if (buffer.hasRemaining() && buffer.remaining() < 19 &&
-                            nextEventAbsolutePos + buffer.remaining() >= fileLength) {
+                        if (!reAllocateRaw && rawbuffer.remaining() < 19) {
+                            // 正常处理完一遍buffer内event，如果bufSize相比于配置的bufSize大，则缩小bufSize。
+                            if (bufSize > rawBufSize) {
+                                bufSize = (int) (bufSize / expandFactor);
+                            }
+                            if (bufSize < rawBufSize) {
+                                bufSize = rawBufSize;
+                            }
+                            log.info("[-] raw data consume done, try make buffer smaller to {}.", bufSize);
+                            reAllocateRaw = true;
+                        }
+
+                        if (reAllocateRaw) {
+                            log.info("reallocate raw buffer size to {}", bufSize);
+                            rawbuffer = ByteBuffer.allocate(bufSize);
+                            tempRaf.getChannel().read(rawbuffer, nextEventAbsolutePos);
+                            rawbuffer.flip();
+                            reAllocateRaw = false;
+                        }
+
+                        // 如果刚刚读取的buffer的remaining小于event header的长度，
+                        if (nextEventAbsolutePos + rawbuffer.remaining() >= fileLength
+                            && rawbuffer.hasRemaining() && rawbuffer.remaining() < 19) {
+                            log.info("file read done");
                             break;
                         }
 
+                        ByteBuffer buffer = rawbuffer;
+
                         int nextEventRelativePos = buffer.position();
                         while (buffer.hasRemaining() && buffer.remaining() >= 19) {
-                            lastEventTimestamp = readInt32(buffer);//read timestamp
-                            lastEventType = buffer.get();//read event_type
+
+                            // read timestamp
+                            lastEventTimestamp = readInt32(buffer);
+                            // read event_type
+                            lastEventType = buffer.get();
                             if (!LogEventUtil.validEventType(lastEventType)) {
                                 shouldBreak = true;
                                 break;
                             }
-                            buffer.position(buffer.position() + 4);//skip server_id
-                            long eventSize = readInt32(buffer);//read eventSize
+                            // skip server_id
+                            buffer.position(buffer.position() + 4);
+                            // read eventSize
+                            long eventSize = readInt32(buffer);
                             if (eventSize < 19) {
                                 shouldBreak = true;
                                 break;
                             }
                             // next position需要通过计算获取，不能直接用header中的log_pos字段的值
-                            // 因为对于超大事务(>2G)，log_pos的四个字节已经无法准确表达下个事件的位置
-                            nextEventAbsolutePos += eventSize;
+                            // 因为对于超大事件(>2G)，log_pos的四个字节已经无法准确表达下个事件的位置
                             nextEventRelativePos += eventSize;
+                            nextEventAbsolutePos += eventSize;
                             markInfo = null;
                             if (nextEventRelativePos > buffer.limit()) {
                                 // 如果当前这个Event是ROWS_QUERY_LOG_EVENT，则不能直接跳过，需要将nextEventAbsolutePos进行回调后再break，
-                                // 但保证nextEventAbsolutePos<fileLength，否则会有死循环问题
+                                // 但保证nextEventAbsolutePos < fileLength，否则会有死循环问题
                                 if ((lastEventType == ROWS_QUERY_LOG_EVENT || containsTableId(lastEventType))
                                     && nextEventAbsolutePos < fileLength) {
                                     nextEventAbsolutePos -= eventSize;
+                                    bufSize = (int) (bufSize * expandFactor);
                                 }
+                                reAllocateRaw = true;
                                 break;
                             } else {
                                 if (lastEventType == ROWS_QUERY_LOG_EVENT) {
-                                    //跳过剩余的header
+                                    // 跳过剩余的header
                                     buffer.position(buffer.position() + 6);
-                                    //在之前的版本中，ROWS_QUERY_LOG_EVENT只用来记录tso，这个字段的值并不是1，而是tso的长度
+                                    // 在之前的版本中，ROWS_QUERY_LOG_EVENT只用来记录tso，这个字段的值并不是1，而是tso的长度
                                     byte tsoSize = buffer.get();
-                                    //eventSize减去header长度、checksum的长度和payload的第一个字节，便是query_log的字符串的长度
+                                    // eventSize减去header长度、checksum的长度和payload的第一个字节，便是query_log的字符串的长度
                                     String content = readString(eventSize - 19 - 1 - 4, buffer);
-                                    //只有在历史版本中，tsoSize的值才会大于1，验证一下长度是否合法
+                                    // 只有在历史版本中，tsoSize的值才会大于1，验证一下长度是否合法
                                     if (tsoSize > 1 && tsoSize != 54) {
                                         throw new PolardbxException("invalid tso size " + tsoSize);
                                     }
-                                    //如果tsoSize等于54(历史版本，ROWS_QUERY_LOG_EVENT只用来记录tso)
-                                    //或者content的前缀是CTS(ROWS_QUERY_LOG_EVENT用来记录更多元信息)
-                                    //则说明该Event记录的是一个commit tso
+                                    // 如果tsoSize等于54(历史版本，ROWS_QUERY_LOG_EVENT只用来记录tso)
+                                    // 或者content的前缀是CTS(ROWS_QUERY_LOG_EVENT用来记录更多元信息)
+                                    // 则说明该Event记录的是一个commit tso
                                     if (tsoSize == 54) {
                                         if (isValidTso4Recovery(content, mode)) {
                                             lastTso = content;

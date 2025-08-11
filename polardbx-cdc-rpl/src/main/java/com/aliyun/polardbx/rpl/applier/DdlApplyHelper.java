@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
@@ -172,7 +172,6 @@ public class DdlApplyHelper {
         // process for columnar index
         DdlResult result = DruidDdlParser.parse(sql, queryLog.getSchema());
         if (!getBoolean(RPL_DDL_APPLY_COLUMNAR_ENABLED) && result != null && result.getSqlStatement() != null) {
-            // TODO 增加判断逻辑：目标实例是否开通了columnar
             Pair<Boolean, Boolean> pair = tryRemoveColumnarIndex(result.getSqlStatement(), queryLog.getTableMeta());
             if (pair.getKey()) {
                 if (pair.getValue()) {
@@ -260,7 +259,8 @@ public class DdlApplyHelper {
     }
 
     @VisibleForTesting
-    static void tryWaitCreateOrDropDatabase(DataSource dataSource, String token, long timeoutSecond)
+    static void tryWaitCreateOrDropDatabase(DataSource dataSource, String token, String tso, long timeoutSecond,
+                                            String schemaName)
         throws InterruptedException, SQLException {
         long startTime = System.currentTimeMillis();
         while (true) {
@@ -271,7 +271,7 @@ public class DdlApplyHelper {
                 throw new InterruptedException();
             }
 
-            if (checkCreateOrDropDatabaseRunning(dataSource, token)) {
+            if (checkCreateOrDropDatabaseRunning(dataSource, token, tso, schemaName)) {
                 StatisticalProxy.getInstance().heartbeat();
                 Thread.sleep(1000);
             } else {
@@ -281,7 +281,9 @@ public class DdlApplyHelper {
     }
 
     @VisibleForTesting
-    private static boolean checkCreateOrDropDatabaseRunning(DataSource dataSource, String token) throws SQLException {
+    private static boolean checkCreateOrDropDatabaseRunning(DataSource dataSource, String token, String tso,
+                                                            String schemaName)
+        throws SQLException {
         Connection conn = null;
         Statement stmt = null;
         ResultSet rs = null;
@@ -293,9 +295,16 @@ public class DdlApplyHelper {
                 "show full processlist where info like '%" + token + "%' and info not like 'show full processlist%'");
             if (rs.next()) {
                 return true;
+            } else {
+                try (ResultSet rs2 = stmt.executeQuery(
+                    "select * from metadb.db_info where db_status!=0 and db_name='" + schemaName + "'")) {
+                    if (rs2.next()) {
+                        return true;
+                    }
+                }
             }
         } catch (Throwable e) {
-            log.error("failed in show processlist for create or drop database, tso: {}", token, e);
+            log.error("failed in show processlist for create or drop database, token: {}, tso: {}", token, tso, e);
             throw e;
         } finally {
             DataSourceUtil.closeQuery(rs, stmt, conn);
@@ -644,6 +653,11 @@ public class DdlApplyHelper {
         boolean retry = false;
         int count = 0;
         int retryMaxCount = DynamicApplicationConfig.getInt(RPL_DDL_RETRY_MAX_COUNT);
+        boolean isCreateOrDropDatabase = isCreateOrDropDatabase(rplDdl.getDdlStmt());
+        if (isCreateOrDropDatabase) {
+            AsyncDdlMonitor.getInstance().submitDbDdl(rplDdl);
+            retryMaxCount = 1;
+        }
         while (true) {
             if (Thread.interrupted()) {
                 throw new InterruptedException();
@@ -659,12 +673,15 @@ public class DdlApplyHelper {
             if (asyncDdl) {
                 res = executeDdlInternalAsync(dataSource, sqlContext, firstDdl, tso, rplDdl, needAlign, retry);
             } else {
-                res = executeDdlInternal(dataSource, sqlContext, firstDdl, tso, rplDdl,
-                    needAlign, dbMetaCache, retry);
+                res = executeDdlInternal(dataSource, sqlContext, firstDdl, tso, rplDdl, dbMetaCache, retry,
+                    isCreateOrDropDatabase);
             }
 
             count++;
             if (res) {
+                if (isCreateOrDropDatabase) {
+                    AsyncDdlMonitor.getInstance().removeDbDdl(rplDdl);
+                }
                 return;
             }
 
@@ -761,15 +778,14 @@ public class DdlApplyHelper {
     @SneakyThrows
     private static boolean executeDdlInternal(DataSource dataSource, SqlContext sqlContext,
                                               AtomicBoolean firstDdlProcessing, String tso,
-                                              RplDdl rplDdl, boolean needAlign,
-                                              DbMetaCache dbMetaCache, boolean retry) {
+                                              RplDdl rplDdl, DbMetaCache dbMetaCache, boolean retry,
+                                              boolean isCreateOrDropDatabase) {
         // check if already running in target
-        boolean isCreateOrDropDatabase = isCreateOrDropDatabase(rplDdl.getDdlStmt());
         boolean isRunning = false;
         boolean isSucceed = false;
         if (((firstDdlProcessing != null && firstDdlProcessing.compareAndSet(true, false)) || retry)) {
             if (isCreateOrDropDatabase) {
-                tryWaitCreateOrDropDatabase(dataSource, rplDdl.getToken(), 0);
+                tryWaitCreateOrDropDatabase(dataSource, rplDdl.getToken(), tso, 0, sqlContext.getDdlEventSchema());
             } else {
                 isRunning = checkIfDdlRunning(dataSource, rplDdl.getToken()) != null;
                 isSucceed = !isRunning && checkIfDdlSucceed(
@@ -896,6 +912,12 @@ public class DdlApplyHelper {
         } else if (statement instanceof SQLAlterTableStatement) {
             SQLAlterTableStatement alterTableStatement = (SQLAlterTableStatement) statement;
             return tryRemoveColumnarIndexForAlterTable(alterTableStatement, tableMeta);
+
+        } else if (statement instanceof SQLCallStatement) {
+            if (StringUtils.equalsIgnoreCase("columnar_set_config",
+                ((SQLCallStatement) statement).getProcedureName().getSimpleName())) {
+                return Pair.of(true, false);
+            }
         }
 
         return Pair.of(false, true);

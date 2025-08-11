@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor;
@@ -10,10 +10,10 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RotateLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.fetcher.LogFetcher;
 import com.aliyun.polardbx.binlog.canal.core.handle.ISearchTsoEventHandle;
 import com.aliyun.polardbx.binlog.canal.core.handle.SearchTsoEventHandleV2;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
@@ -23,7 +23,7 @@ import com.aliyun.polardbx.binlog.enums.ClusterRole;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil;
 import com.aliyun.polardbx.binlog.format.utils.generator.CdcGenerateUtil;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
@@ -35,13 +35,13 @@ import org.junit.Test;
  * 1 、 搜索CdcStart
  * 2 、 搜索指定TSO
  */
-public class BinlogSearchPositionTest extends BaseTestWithGmsTables {
+public class BinlogSearchPositionTest extends BaseTest {
 
     @Before
     public void before() {
-        setConfig(ConfigKeys.CLUSTER_ID, "fake_cluster_id");
-        setConfig(ConfigKeys.CLUSTER_TYPE, ClusterType.BINLOG.name());
-        setConfig(ConfigKeys.CLUSTER_ROLE, ClusterRole.master.name());
+        mockConfig(ConfigKeys.CLUSTER_ID, "fake_cluster_id");
+        mockConfig(ConfigKeys.CLUSTER_TYPE, ClusterType.BINLOG.name());
+        mockConfig(ConfigKeys.CLUSTER_ROLE, ClusterRole.master.name());
     }
 
     /**

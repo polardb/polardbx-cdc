@@ -1,14 +1,17 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.model;
 
 import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.domain.DnHost;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.util.List;
 
 /**
  * 数据库认证信息
@@ -16,6 +19,7 @@ import java.net.InetSocketAddress;
  * @author jianghang 2012-7-11 上午11:22:19
  * @version 1.0.0
  */
+@Slf4j
 public class AuthenticationInfo {
 
     private InetSocketAddress address; // 主库信息
@@ -26,6 +30,12 @@ public class AuthenticationInfo {
     private String storageInstId;
     private String uid;
     private String bid;
+
+    private DnHost leader;
+    private List<DnHost> dnNodeList;
+    private int nodeIndex = 0;
+
+    private DnHost currentHost = null;
 
     public AuthenticationInfo() {
         super();
@@ -40,6 +50,45 @@ public class AuthenticationInfo {
     public AuthenticationInfo(InetSocketAddress address, String username, String password, String charset) {
         this(address, username, password);
         this.charset = charset;
+    }
+
+    /**
+     * 切换到另外一个节点(master|follower)
+     */
+    public void switchLeader() {
+        useHost(leader);
+        nodeIndex = 0;
+    }
+
+    public void nextNode() {
+        nodeIndex++;
+        if (dnNodeList == null || dnNodeList.size() <= nodeIndex) {
+            throw new UnsupportedOperationException(
+                "follower is null , not support to connect follower host,  instId : " + storageMasterInstId);
+        }
+        DnHost targetHost = dnNodeList.get(nodeIndex);
+        useHost(targetHost);
+    }
+
+    public boolean isLeader() {
+        return currentHost == leader;
+    }
+
+    public boolean hasNextNode() {
+        return dnNodeList != null && dnNodeList.size() - 1 > nodeIndex;
+    }
+
+    private void useHost(DnHost targetHost) {
+        if (currentHost == targetHost) {
+            return;
+        }
+        setAddress(new InetSocketAddress(targetHost.getIp(), targetHost.getPort()));
+        setCharset(targetHost.getCharset());
+        setUsername(targetHost.getUserName());
+        setPassword(targetHost.getPassword());
+        setStorageInstId(targetHost.getStorageInstId());
+        log.info("reset {} host from {} to target {} ", storageInstId, currentHost, targetHost);
+        currentHost = targetHost;
     }
 
     public String getStorageMasterInstId() {
@@ -64,6 +113,14 @@ public class AuthenticationInfo {
 
     public void setAddress(InetSocketAddress address) {
         this.address = address;
+    }
+
+    public void setLeader(DnHost leader) {
+        this.leader = leader;
+    }
+
+    public void setDnNodeList(List<DnHost> dnNodeList) {
+        this.dnNodeList = dnNodeList;
     }
 
     public String getUsername() {

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation;
@@ -35,6 +35,7 @@ import com.aliyun.polardbx.rpl.validation.common.ValidationStateEnum;
 import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
 import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.RateLimiter;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.util.CollectionUtils;
@@ -46,7 +47,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
@@ -87,7 +87,8 @@ public class Validator {
     private static final String serviceId = Long.toString(TaskContext.getInstance().getServiceId());
     private static final String taskId = Long.toString(TaskContext.getInstance().getTaskId());
 
-    private static final int rpsLimit = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_RECORDS_PER_SECOND);
+    @Getter
+    private static final int rpsLimit = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_MAX_ROW_SIZE_PER_SECOND);
     private static final int parallelism = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_TABLE_PARALLELISM);
 
     private static final boolean skipCollect =
@@ -507,7 +508,7 @@ public class Validator {
                         DiffRecord diffRecord;
                         int cmp = compareKeyVal(srcKeyStr, dstKeyStr, fieldTypes);
                         if (cmp == 0) {
-                            log.info("Found diff rows, srcKey:{}, dstKey:{}, src checksum:{}, dst checksum{}",
+                            log.info("Found diff rows, srcKey:{}, dstKey:{}, src checksum:{}, dst checksum:{}",
                                 srcKeyVal, dstKeyVal, lastSrcCheckSum, lastDstCheckSum);
 
                             diffRecord = DiffRecord.builder().keys(keyNames).srcKeyVal(srcKeyVal).dstKeyVal(dstKeyVal)

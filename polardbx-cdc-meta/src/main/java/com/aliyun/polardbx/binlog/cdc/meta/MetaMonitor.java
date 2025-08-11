@@ -1,22 +1,18 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
 
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
-import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
-import com.aliyun.polardbx.binlog.error.PolardbxException;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -30,19 +26,17 @@ import java.util.stream.Collectors;
 @Slf4j
 public class MetaMonitor {
     private static final MetaMonitor INSTANCE = new MetaMonitor();
-
-    private final ScheduledExecutorService cleaner;
+    private final ScheduledExecutorService timer;
     private final AtomicBoolean startFlag;
     private final Map<String, PolarDbXTableMetaManager> registerMap;
-    private int storageCount;
 
     public static MetaMonitor getInstance() {
         return INSTANCE;
     }
 
     private MetaMonitor() {
-        this.cleaner = Executors.newSingleThreadScheduledExecutor((r) -> {
-            Thread t = new Thread(r, "semi-snapshot-cleaner");
+        this.timer = Executors.newSingleThreadScheduledExecutor((r) -> {
+            Thread t = new Thread(r, "meta-monitor-thread");
             t.setDaemon(true);
             return t;
         });
@@ -61,16 +55,15 @@ public class MetaMonitor {
 
     private void tryStart() {
         if (startFlag.compareAndSet(false, true)) {
-            cleaner.scheduleAtFixedRate(() -> {
+            timer.scheduleAtFixedRate(() -> {
                 try {
                     calculateTableCount();
-                    tryCleanTopologyRecord();
                     collectMetrics();
                 } catch (Throwable t) {
                     log.error("something goes wrong in meta monitor.", t);
                 }
             }, 10, 5, TimeUnit.SECONDS);
-            log.info("semi snapshot cleaner started.");
+            log.info("meta data monitor started!");
         }
     }
 
@@ -114,7 +107,6 @@ public class MetaMonitor {
 
     private void collectMetrics() {
         try {
-            checkStorageCount();
             List<PolarDbXTableMetaManager> list = registerMap.values().stream()
                 .filter(m -> m.getRollbackCostTime() != -1L).collect(Collectors.toList());
             if (!list.isEmpty()) {
@@ -210,49 +202,5 @@ public class MetaMonitor {
         } catch (Throwable t) {
             log.error("collect meta metrics error", t);
         }
-    }
-
-    private void tryCleanTopologyRecord() {
-        try {
-            checkStorageCount();
-            Set<String> keys = registerMap.keySet();
-            if (storageCount == keys.size()) {
-                String minTso = null;
-                for (String k : keys) {
-                    PolarDbXLogicTableMeta logicTableMeta = registerMap.get(k).getPolarDbXLogicTableMeta();
-                    String latestTso = logicTableMeta.getLatestAppliedTopologyTso();
-                    if (minTso == null) {
-                        minTso = latestTso;
-                        continue;
-                    }
-                    if (latestTso.compareTo(minTso) < 0) {
-                        minTso = latestTso;
-                    }
-                }
-
-                if (StringUtils.isNotBlank(minTso)) {
-                    Set<String> recordKeys = TopologyManager.TOPOLOGY_RECORD_CACHE.keySet();
-                    String finalMinTso = minTso;
-                    recordKeys.forEach(k -> {
-                        if (k.compareTo(finalMinTso) < 0) {
-                            TopologyManager.TOPOLOGY_RECORD_CACHE.remove(k);
-                            log.info("topology record is removed from cache for tso " + k);
-                        }
-                    });
-                }
-            }
-        } catch (Throwable t) {
-            log.error("try clean topology record failed.", t);
-        }
-    }
-
-    private void checkStorageCount() {
-        if (storageCount == 0) {
-            throw new PolardbxException("storage count can`t be zero, please set a valid value.");
-        }
-    }
-
-    public void setStorageCount(int storageCount) {
-        this.storageCount = storageCount;
     }
 }

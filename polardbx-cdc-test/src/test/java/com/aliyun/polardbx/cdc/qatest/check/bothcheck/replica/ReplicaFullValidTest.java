@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.check.bothcheck.replica;
@@ -48,6 +48,7 @@ public class ReplicaFullValidTest extends RplBaseTestCase {
     public void baseTest() {
         sendTokenAndWait(CheckParameter.builder().build());
 
+        boolean archiveIgnoreEnabled = isArchiveIgnoreEnabled();
         List<String> databaseList = getDatabaseList();
         String checkDbBlackList = PropertiesUtil.getCdcCheckDbBlackList();
         if (StringUtils.isNotBlank(checkDbBlackList)) {
@@ -64,7 +65,7 @@ public class ReplicaFullValidTest extends RplBaseTestCase {
         for (String db : databaseList) {
             List<String> tables = getTableList(db);
             for (String tb : tables) {
-                if (!filterTable(Pair.of(db, tb))) {
+                if (!filterTable(Pair.of(db, tb), archiveIgnoreEnabled)) {
                     tableList.add(Pair.of(db, tb));
                 }
             }
@@ -178,7 +179,7 @@ public class ReplicaFullValidTest extends RplBaseTestCase {
         return StringUtils.equalsIgnoreCase("SUCCESS", summary);
     }
 
-    private boolean filterTable(Pair<String, String> tablePair) {
+    private boolean filterTable(Pair<String, String> tablePair, boolean archiveIgnoreEnabled) {
         String database = tablePair.getKey();
         String table = tablePair.getValue();
         String fullTable = StringUtils.lowerCase(database + "." + table);
@@ -207,6 +208,10 @@ public class ReplicaFullValidTest extends RplBaseTestCase {
         } catch (SQLException e) {
             log.error("query primary key meet exception", e);
             return true;
+        }
+
+        if (archiveIgnoreEnabled) {
+            return isArchiveTable(database, table);
         }
 
         return false;

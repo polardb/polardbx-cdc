@@ -36,7 +36,7 @@
         <slf4j.version>1.7.26</slf4j.version>
         <jdbc.version>5.1.49</jdbc.version>
         <druid.version>1.0.25.2018030201</druid.version>
-        <polardbx-parser.version>6.21</polardbx-parser.version>
+        <polardbx-parser.version>6.35</polardbx-parser.version>
         <fastjson.version>1.2.50_noneautotype</fastjson.version>
         <lombok.version>1.18.0</lombok.version>
         <spring.version>5.3.20</spring.version>
@@ -66,7 +66,7 @@
         <joda-time.version>2.10.6</joda-time.version>
         <httpclient.version>4.5.13</httpclient.version>
         <dom4j.version>1.6.1</dom4j.version>
-        <jackson.version>2.10.1</jackson.version>
+        <jackson.version>2.12.1</jackson.version>
         <jersey.version>1.19.1</jersey.version>
         <jetty-version>9.4.48.v20220622</jetty-version>
         <prometheus.version>0.10.0</prometheus.version>
@@ -80,9 +80,10 @@
         <mybatis-spring.version>2.0.5</mybatis-spring.version>
         <mybatis-dynamic-sql.version>1.1.4</mybatis-dynamic-sql.version>
         <guava-retrying.version>2.0.0</guava-retrying.version>
-        <aws-java-sdk-s3.version>1.11.655</aws-java-sdk-s3.version>
+        <aws-java-sdk-s3.version>2.31.13</aws-java-sdk-s3.version>
+        <aws-java-sdk-s3-old.version>1.12.261</aws-java-sdk-s3-old.version>
         <maven-surefire-plugin.version>3.0.0-M4</maven-surefire-plugin.version>
-        <cdc.client.version>2.0.33</cdc.client.version>
+        <cdc.client.version>2.0.50</cdc.client.version>
     </properties>
 
     <dependencyManagement>
@@ -379,9 +380,34 @@
                 <version>${zaxxer.version}</version>
             </dependency>
             <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>s3</artifactId>
+                <version>${aws-java-sdk-s3.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>software.amazon.awssdk</groupId>
+                        <artifactId>netty-nio-client</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>software.amazon.awssdk</groupId>
+                        <artifactId>apache-client</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>url-connection-client</artifactId>
+                <version>${aws-java-sdk-s3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>s3-transfer-manager</artifactId>
+                <version>${aws-java-sdk-s3.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>com.amazonaws</groupId>
                 <artifactId>aws-java-sdk-s3</artifactId>
-                <version>${aws-java-sdk-s3.version}</version>
+                <version>${aws-java-sdk-s3-old.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.flywaydb</groupId>
@@ -610,12 +636,13 @@
                     <version>${maven-surefire-plugin.version}</version>
                     <configuration>
                         <!-- 这个argLine会报红，但不能删除jacoco生成报告用的占位符，见jacoco里的propertyName，默认是argLine -->
-                        <argLine>${argLine} -Dfile.encoding=UTF-8 -Xms500M -Xmx6g -Xss2048k -XX:SurvivorRatio=10
+                        <argLine>${argLine} -Dfile.encoding=UTF-8 -Xms256M -Xmx6g -Xss2048k -XX:SurvivorRatio=10
                         </argLine>
                         <includes>
                             <include>**/**</include>
                         </includes>
-                        <reuseForks>false</reuseForks>
+                        <reuseForks>true</reuseForks>
+                        <forkCount>1C</forkCount>
                     </configuration>
                 </plugin>
                 <plugin>
@@ -732,11 +759,11 @@
                         <id>install-external</id>
                         <phase>clean</phase>
                         <configuration>
-                            <file>${basedir}/lib/polardbx-parser-6.21.jar</file>
+                            <file>${basedir}/lib/polardbx-parser-6.35.jar</file>
                             <repositoryLayout>default</repositoryLayout>
                             <groupId>com.alibaba.polardbx</groupId>
                             <artifactId>polardbx-parser</artifactId>
-                            <version>6.21</version>
+                            <version>6.35</version>
                             <packaging>jar</packaging>
                             <generatePom>true</generatePom>
                         </configuration>

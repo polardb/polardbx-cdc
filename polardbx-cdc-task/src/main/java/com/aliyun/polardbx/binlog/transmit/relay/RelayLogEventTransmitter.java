@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.transmit.relay;
@@ -27,6 +27,7 @@ import com.aliyun.polardbx.binlog.dao.XStreamMapper;
 import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
+import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ReformatContext;
 import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
@@ -49,6 +50,7 @@ import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.aliyun.polardbx.binlog.transmit.Transmitter;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.DirectByteOutput;
 import com.google.common.collect.Lists;
@@ -94,11 +96,13 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_BATCH_
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_LOG_DETAIL_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_BATCH_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_WAIT_LATEST_TSO_TIMEOUT_SECOND;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_WAIT_LATEST_TSO_TIMEOUT_STRATEGY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_DRY_RUN;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_TRANSMIT_DRY_RUN_MODE;
 import static com.aliyun.polardbx.binlog.Constants.MDC_STREAM_SEQ;
 import static com.aliyun.polardbx.binlog.Constants.RELAY_DATA_FORCE_CLEAN_FLAG;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.TABLE_MAP_EVENT;
 import static com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet.loadCharactorSetFromCN;
 import static com.aliyun.polardbx.binlog.enums.BinlogUploadStatus.IGNORE;
@@ -155,9 +159,9 @@ public class RelayLogEventTransmitter implements Transmitter {
         this.streamMaxTsoMap = new ConcurrentHashMap<>();
         this.writeBuffer = new WriteBuffer();
         this.dryRun = DynamicApplicationConfig.getBoolean(TASK_TRANSMIT_DRY_RUN);
-        this.dryRunMode = DynamicApplicationConfig.getInt(TASK_TRANSMIT_DRY_RUN_MODE);
+        this.dryRunMode = getInt(TASK_TRANSMIT_DRY_RUN_MODE);
         this.running = new AtomicBoolean(false);
-        this.streamCount = DynamicApplicationConfig.getInt(BINLOGX_STREAM_COUNT);
+        this.streamCount = getInt(BINLOGX_STREAM_COUNT);
         this.hashLogEventCleaner = new RelayLogEventCleaner(this);
         this.parallelDataWriter = new ParallelDataWriter(i -> {
             if (dryRun && dryRunMode == 1) {
@@ -338,7 +342,7 @@ public class RelayLogEventTransmitter implements Transmitter {
 
         final int streamSeq = outputStream.getStreamSeq();
         byte[] searchFromKey = RelayKeyUtil.buildMinRelayKey(startTSO);
-        int transmitReadItemSize = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_READ_BATCH_ITEM_SIZE);
+        int transmitReadItemSize = getInt(BINLOGX_TRANSMIT_READ_BATCH_ITEM_SIZE);
         long transmitReadByteSize = DynamicApplicationConfig.getLong(BINLOGX_TRANSMIT_READ_BATCH_BYTE_SIZE);
         RelayDataReader relayDataReader = storeEngineMap.get(streamSeq).newRelayDataReader(searchFromKey);
 
@@ -424,7 +428,12 @@ public class RelayLogEventTransmitter implements Transmitter {
                 if (System.currentTimeMillis() - start > 1000 * timeout) {
                     log.warn("wait for latest tso timeout with stream " + streamName
                         + " , will switch to get checkpoint tso");
-                    break;
+                    int strategy = getInt(BINLOGX_WAIT_LATEST_TSO_TIMEOUT_STRATEGY);
+                    if (strategy == 0) {
+                        throw new RuntimeException("wait for latest tso timeout for stream " + streamName);
+                    } else {
+                        break;
+                    }
                 }
                 Thread.sleep(1000);
             } catch (InterruptedException ignored) {
@@ -458,7 +467,11 @@ public class RelayLogEventTransmitter implements Transmitter {
     BinlogOssRecord getCheckpointTsoFromBackup(String streamName) {
         List<BinlogOssRecord> list = OSS_RECORD_MAPPER.select(
             s -> s.where(BinlogOssRecordDynamicSqlSupport.streamId, isEqualTo(streamName))
-                .orderBy(BinlogOssRecordDynamicSqlSupport.binlogFile.descending()));
+                .and(BinlogOssRecordDynamicSqlSupport.purgeStatus, isEqualTo(
+                    BinlogPurgeStatus.UN_COMPLETE.getValue())));
+        list = list.stream()
+            .sorted((o1, o2) -> BinlogFileUtil.compareBinlogFileName(o2.getBinlogFile(), o1.getBinlogFile()))
+            .collect(Collectors.toList());
         if (!list.isEmpty()) {
             BinlogOssRecord result = null;
             //获取最后一个没有空洞的、上传状态为SUCCESS或者IGNOGE的记录作为checkpoint
@@ -675,7 +688,7 @@ public class RelayLogEventTransmitter implements Transmitter {
         WriteBuffer() {
             this.bufferMap = new TreeMap<>();
             this.currentTableMapTxnItems = new ArrayList<>();
-            this.batchSize = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_BATCH_SIZE);
+            this.batchSize = getInt(BINLOGX_TRANSMIT_WRITE_BATCH_SIZE);
         }
 
         void putRowEvent(String traceId, TxnItem txnItem) {

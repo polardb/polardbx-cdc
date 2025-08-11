@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.pipeline;
@@ -28,7 +28,6 @@ import com.aliyun.polardbx.rpl.applier.TransactionApplier;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
-import com.aliyun.polardbx.rpl.extractor.MysqlBinlogExtractor;
 import com.aliyun.polardbx.rpl.extractor.full.MysqlFullExtractor;
 import com.aliyun.polardbx.rpl.storage.RplStorage;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
@@ -55,7 +54,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.MEMORY_IN_MB;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DELAY_ALARM_THRESHOLD_SECOND;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_INC_RINGBUFFER_SIZE_FACTOR;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PARALLEL_SCHEMA_APPLY_BATCH_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PARALLEL_SCHEMA_APPLY_ENABLED;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
@@ -96,7 +97,7 @@ public class SerialPipeline extends BasePipeline {
         String eventTso = dbmsEvent.getRtso();
         if (StringUtils.isBlank(eventTso)) {
             // 只在实验室环境下校验tso存在性
-            if (isLabEnv && srcIsPolarx &&  (dbmsEvent instanceof DefaultQueryLog ||
+            if (isLabEnv && srcIsPolarx && (dbmsEvent instanceof DefaultQueryLog ||
                 dbmsEvent instanceof DefaultRowChange)) {
                 log.error("dbms event tso should not be null！ position {}, event content {}",
                     dbmsEvent.getPosition(), dbmsEvent);
@@ -112,6 +113,7 @@ public class SerialPipeline extends BasePipeline {
     @Override
     public void init() throws Exception {
         if (!(extractor instanceof MysqlFullExtractor)) {
+            initBufferSize();
             MessageEventFactory messageEventFactory = new MessageEventFactory();
             offerExecutor = ThreadPoolUtil.createExecutorWithFixedNum(1, "applier");
             // create ringBuffer and set ringBuffer eventFactory
@@ -130,6 +132,26 @@ public class SerialPipeline extends BasePipeline {
             }
             offerProcessor = new BatchEventProcessor<>(msgRingBuffer, sequenceBarrier, eventHandler);
             msgRingBuffer.addGatingSequences(offerProcessor.getSequence());
+        }
+    }
+
+    public void initBufferSize() {
+        if (pipeLineConfig.getBufferSize() == 0) {
+            String memoryInMb = System.getProperty(MEMORY_IN_MB);
+            if (StringUtils.isNotBlank(memoryInMb)) {
+                // 根据内存大小计算bufferSize,默认如下：
+                // 2G -> 2048
+                // 3G -> 4096
+                // 4G -> 4096
+                int bufferSize = 1 << (32 - Integer.numberOfLeadingZeros((int) (Integer.parseInt(memoryInMb) *
+                    DynamicApplicationConfig.getDouble(RPL_INC_RINGBUFFER_SIZE_FACTOR) - 1)));
+                pipeLineConfig.setBufferSize(bufferSize);
+            } else {
+                // 既没有固定配置，也没有传入内存用于计算的情况下，则采取RPL默认设置
+                // 理论上不应该出现
+                log.warn("pipeline buffer size set to default value");
+                pipeLineConfig.setBufferSize(DynamicApplicationConfig.getInt(ConfigKeys.RPL_DEFAULT_RINGBUFFER_SIZE));
+            }
         }
     }
 

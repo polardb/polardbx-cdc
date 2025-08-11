@@ -1,13 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.base;
 
 import com.alibaba.druid.pool.DruidDataSource;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
@@ -1713,22 +1714,12 @@ public class JdbcUtil {
     }
 
     /**
-     * 替换str中的所有单个`为``
-     * 为了防止库名或者表名或者列名是被``包裹的，通过format(如DESC `%s`.`%s`)后，库名或者列名或者表名会
-     * 变成被两对``包裹，从而出现SQL出错
-     */
-    public static String escape(String str) {
-        String regex = "(?<!`)`(?!`)";
-        return str.replaceAll(regex, "``");
-    }
-
-    /**
      * 获得表中所有列的列名
      */
     public static List<Pair<String, String>> getColumnNamesByDesc(Connection conn, String dbName, String tbName)
         throws SQLException {
         List<Pair<String, String>> columns = new ArrayList<>();
-        String sql = String.format("DESC `%s`.`%s`", escape(dbName), escape(tbName));
+        String sql = String.format("DESC `%s`.`%s`", CommonUtils.escape(dbName), CommonUtils.escape(tbName));
         try (ResultSet rs = executeQuerySuccess(conn, sql)) {
             while (rs.next()) {
                 String column = rs.getString(1);
@@ -1746,7 +1737,7 @@ public class JdbcUtil {
     public static Map<String, ColumnType> getColumnTypesByDesc(Connection conn, String dbName, String tbName)
         throws SQLException {
         Map<String, ColumnType> name2Type = new HashMap<>();
-        String sql = String.format("DESC `%s`.`%s`", escape(dbName), escape(tbName));
+        String sql = String.format("DESC `%s`.`%s`", CommonUtils.escape(dbName), CommonUtils.escape(tbName));
         try (ResultSet rs = executeQuerySuccess(conn, sql)) {
             while (rs.next()) {
                 ColumnType columnType = new ColumnType();

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.metrics;
@@ -10,10 +10,13 @@ import com.aliyun.polardbx.binlog.backup.MetricsObserver;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import lombok.Getter;
+import lombok.Setter;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
@@ -92,6 +95,10 @@ public class StreamMetrics implements MetricsObserver {
      */
     private AtomicLong totalDumpBytes = new AtomicLong(0);
     /**
+     * 从dumper启动开始计算，binlogSync发送的总字节数
+     */
+    private AtomicLong totalSyncBytes = new AtomicLong(0);
+    /**
      * 当前最新的延迟时间(on commit)
      */
     private long latestDelayTimeOnCommit;
@@ -103,6 +110,12 @@ public class StreamMetrics implements MetricsObserver {
      * 并行写入RingBuffer队列的大小
      */
     private long writeQueueSize;
+    /**
+     * 下游消费链路的个数
+     */
+    @Setter
+    @Getter
+    private AtomicInteger consumerCount = new AtomicInteger(0);
     /**
      * TxnMessage接收队列的大小
      */
@@ -154,9 +167,11 @@ public class StreamMetrics implements MetricsObserver {
         result.receiveQueueSize = this.receiveQueueSize;
         result.totalUploadBytes = new AtomicLong(this.totalUploadBytes.get());
         result.totalDumpBytes = new AtomicLong(this.totalDumpBytes.get());
+        result.totalSyncBytes = new AtomicLong(this.totalSyncBytes.get());
         result.latestBinlogFile = this.latestBinlogFile;
         result.latestTsoTime = this.latestTsoTime;
         result.kwaySourceQueueSizeSupplier = this.kwaySourceQueueSizeSupplier;
+        result.consumerCount = new AtomicInteger(this.consumerCount.get());
         return result;
     }
 
@@ -217,6 +232,10 @@ public class StreamMetrics implements MetricsObserver {
 
     public void incrementTotalDumpBytes(long byteSize) {
         totalDumpBytes.getAndAdd(byteSize);
+    }
+
+    public void incrementTotalSyncBytes(long byteSize) {
+        totalSyncBytes.getAndAdd(byteSize);
     }
 
     public void setLatestDelayTimeOnCommit(long latestDelayTimeOnCommit) {
@@ -328,6 +347,10 @@ public class StreamMetrics implements MetricsObserver {
 
     public long getTotalDumpBytes() {
         return totalDumpBytes.get();
+    }
+
+    public long getTotalSyncBytes() {
+        return totalSyncBytes.get();
     }
 
     public long getLatestTsoTime() {

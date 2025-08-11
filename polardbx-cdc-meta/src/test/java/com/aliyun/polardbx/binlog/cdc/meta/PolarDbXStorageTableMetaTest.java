@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
@@ -14,7 +14,7 @@ import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.MockData;
 import com.aliyun.polardbx.binlog.cdc.topology.TableType;
 import com.aliyun.polardbx.binlog.cdc.topology.TopologyManager;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.google.common.collect.Lists;
 import org.junit.Assert;
 import org.junit.Before;
@@ -24,21 +24,21 @@ import java.util.Map;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_ENABLED;
-import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildSnapshotTopology;
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 
-public class PolarDbXStorageTableMetaTest extends BaseTestWithGmsTables {
+public class PolarDbXStorageTableMetaTest extends BaseTest {
 
     @Before
     public void before() {
-        setConfig(META_PERSIST_ENABLED, "OFF");
-        setConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
+        mockConfig(META_PERSIST_ENABLED, "OFF");
+        mockConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
     }
 
     @Test
     public void testSameLogicPhyDbName() {
         LogicMetaTopology x =
-            buildTopology(ORIGIN_TSO, () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
+            buildSnapshotTopology(ORIGIN_TSO, () -> JSONObject.parseObject(MockData.BASE, LogicMetaTopology.class));
         PolarDbXLogicTableMeta logicTableMeta = new PolarDbXLogicTableMeta(new TopologyManager(), "5.7");
         logicTableMeta.init("Final");
         logicTableMeta.applyBase(new BinlogPosition(null, "1"), x, "000");
