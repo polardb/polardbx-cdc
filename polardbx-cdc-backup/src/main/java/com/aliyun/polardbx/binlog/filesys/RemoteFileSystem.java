@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.filesys;
@@ -58,7 +58,7 @@ public class RemoteFileSystem implements IFileSystem {
 
     @Override
     public boolean exist(String fileName) {
-        return getFileList().contains(fileName);
+        return recordService.getExistRecordByName(group, stream, clusterId, fileName).isPresent();
     }
 
     @Override

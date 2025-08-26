@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote;
@@ -9,17 +9,27 @@ package com.aliyun.polardbx.binlog.remote;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.dao.BinlogFileStorageInfoDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogFileStorageInfoMapper;
 import com.aliyun.polardbx.binlog.dao.SystemConfigInfoMapper;
+import com.aliyun.polardbx.binlog.domain.po.BinlogFileStorageInfo;
 import com.aliyun.polardbx.binlog.domain.po.SystemConfigInfo;
 import com.aliyun.polardbx.binlog.enums.BinlogBackupType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.remote.channel.LindormBinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.remote.channel.OssBinlogFileReadChannel;
+import com.aliyun.polardbx.binlog.remote.channel.S3BinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.remote.lindorm.LindormConfig;
 import com.aliyun.polardbx.binlog.remote.lindorm.LindormManager;
 import com.aliyun.polardbx.binlog.remote.oss.OssConfig;
 import com.aliyun.polardbx.binlog.remote.oss.OssManager;
+import com.aliyun.polardbx.binlog.remote.s3.S3Manager;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.github.rholder.retry.Retryer;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
+import com.google.common.collect.ImmutableList;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,8 +37,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.channels.Channel;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_TYPE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
+import static com.aliyun.polardbx.binlog.dao.BinlogFileStorageInfoDynamicSqlSupport.priority;
 import static com.aliyun.polardbx.binlog.dao.SystemConfigInfoDynamicSqlSupport.configKey;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
@@ -65,9 +79,10 @@ public class RemoteBinlogProxy {
         return delegate.prepareDownloadLink(fileName, interval);
     }
 
-    public void download(String fileName, String localPath) throws Throwable {
+    public void download(String fileName, String localPath, DownloadParameter downloadParameter)
+        throws Throwable {
         checkDelegator();
-        delegate.download(fileName, localPath);
+        delegate.download(fileName, localPath, downloadParameter);
     }
 
     public String getMd5(String fileName) {
@@ -148,16 +163,22 @@ public class RemoteBinlogProxy {
         doConfig();
     }
 
+    public void configCommon(CommonConfig commonConfig) {
+        configurator = new AsyncConfigurator(null, null, commonConfig);
+        doConfig();
+    }
+
     private void doConfig() {
         configurator.doConfig();
         backSwitch = true;
     }
 
     private void config() {
-        String backupType = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_BACKUP_TYPE);
+        String backupType = DynamicApplicationConfig.getString(BINLOG_BACKUP_TYPE);
         BinlogBackupType backupTypeEnum = BinlogBackupType.typeOf(backupType);
         instId = buildPolarxInstId();
-        if (backupTypeEnum != null) {
+        logger.info("try config ...");
+        if (backupTypeEnum != BinlogBackupType.NULL) {
             if (backupTypeEnum == BinlogBackupType.OSS) {
                 OssConfig ossConfig = new OssConfig();
                 ossConfig.setAccessKeyId(DynamicApplicationConfig.getString(ConfigKeys.OSS_ACCESSKEY_ID));
@@ -180,6 +201,44 @@ public class RemoteBinlogProxy {
                     Integer.valueOf(DynamicApplicationConfig.getString(ConfigKeys.LINDORM_THRIFT_PORT)));
                 lindormConfig.setPolardbxInstance(instId);
                 configLindorm(lindormConfig);
+            } else {
+                logger.info("try config remote other remote storage ...");
+                Retryer<Optional<BinlogFileStorageInfo>> retryer =
+                    RetryerBuilder.<Optional<BinlogFileStorageInfo>>newBuilder()
+                    .retryIfException()
+                    .retryIfResult(s -> !s.isPresent())
+                    .withWaitStrategy(WaitStrategies.fixedWait(1000, TimeUnit.MILLISECONDS))
+                        .withStopStrategy(StopStrategies.stopAfterAttempt(600))
+                    .build();
+                BinlogFileStorageInfoMapper fileStorageInfoMapper =
+                    SpringContextHolder.getObject(BinlogFileStorageInfoMapper.class);
+                Optional<BinlogFileStorageInfo> fileStorageInfo = Optional.empty();
+                try {
+                    fileStorageInfo = retryer.call(() -> fileStorageInfoMapper.selectOne(
+                        s -> s.where(BinlogFileStorageInfoDynamicSqlSupport.instId,
+                                isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID)))
+                            .orderBy(priority.descending())
+                            .limit(1)));
+                } catch (Exception e) {
+                    logger.error("failed to init remote storage from fileStorageInfo.", e);
+                }
+                BinlogFileStorageInfo storageInfo = fileStorageInfo.get();
+                List<String> endpoints =
+                    ImmutableList.of(storageInfo.getExternalEndpoint(), storageInfo.getInternalClassicEndpoint(),
+                        storageInfo.getInternalVpcEndpoint());
+                int ordinal = (int) Math.min(storageInfo.getEndpointOrdinal(), endpoints.size() - 1);
+                String endpoint = endpoints.get(ordinal);
+                CommonConfig commonConfig = new CommonConfig(
+                    storageInfo.getEngine(),
+                    endpoint,
+                    storageInfo.getRegionId(),
+                    storageInfo.getAccessKeyId(),
+                    storageInfo.getAccessKeySecret(),
+                    DynamicApplicationConfig.getString(ConfigKeys.COMMON_BUCKET_NAME).replaceAll("^['\"]|['\"]$", ""),
+                    instId
+                );
+                logger.info("try config remote storage with " + commonConfig);
+                configCommon(commonConfig);
             }
         }
     }
@@ -243,7 +302,17 @@ public class RemoteBinlogProxy {
                 provider.getS3Client(),
                 provider.getBucket(),
                 provider.getLindormFileName(fileName));
+        } else if (delegate instanceof S3Manager) {
+            S3Manager provider = (S3Manager) delegate;
+            return new S3BinlogFileReadChannel(
+                provider.getS3ClientVirtualPath(),
+                provider.getBucket(),
+                BinlogFileUtil.buildRemoteFileFullName(fileName, instId));
         }
         return null;
+    }
+
+    public boolean isS3() {
+        return delegate instanceof S3Manager;
     }
 }

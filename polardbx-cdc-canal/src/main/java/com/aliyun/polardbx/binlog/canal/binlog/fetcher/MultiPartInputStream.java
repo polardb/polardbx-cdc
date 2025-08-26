@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.fetcher;
@@ -11,9 +11,10 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.SearchMode;
 import com.aliyun.polardbx.binlog.canal.binlog.BinlogDumpContext;
 import com.aliyun.polardbx.binlog.canal.binlog.cache.Cache;
-import com.aliyun.polardbx.binlog.canal.binlog.cache.CacheManager;
-import com.aliyun.polardbx.binlog.canal.binlog.cache.CacheMode;
+import com.aliyun.polardbx.binlog.canal.binlog.cache.CacheProgressListener;
+import com.aliyun.polardbx.binlog.canal.binlog.cache.MemoryCache;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.CollectionUtils;
 
@@ -22,63 +23,52 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 public class MultiPartInputStream {
 
-    public static final int DEFAULT_THREAD_SIZE = 3;
     public static final String HEADER_RANGES_SUPPORT = "Accept-Ranges";
     public static final String SUPPORT_RANGE_FLAG = "bytes";
     public static final String HEADER_CONTENT_LENGTH = "Content-Length";
     public static final String CONTENT_RANGE = "Content-Range";
-    private static LinkedList<byte[]> bufferQueue = new LinkedList();
-    public long DEFAULT_BUFFER_SIZE;
-    private String url;
+    public long partSize;
+    private final String url;
     private long fileSize;
     private int partCount;
-    private List<PartStream> partStreamList = new ArrayList<>();
+    private final List<PartStream> partStreamList = new ArrayList<>();
     private int pos = 0;
-    private ExecutorService executorService;
     private InputStream fin;
+    private final String storageInstance;
+    private final String fileName;
+    private final AtomicInteger sequencer = new AtomicInteger(0);
+    ;
+    private final String uuid;
 
-    public MultiPartInputStream(String url) throws IOException {
-        this(url, -1L);
-    }
+    private final ExecutorService executorService;
 
-    public MultiPartInputStream(String url, long fileSize) throws IOException {
+    private final List<Future> futureList = new ArrayList<>();
+
+    public MultiPartInputStream(String url, long fileSize, String storageInstanceId, String fileName,
+                                ExecutorService executorService)
+        throws IOException {
         this.url = url;
         this.fileSize = fileSize;
-        if (SearchMode.isSearchInQuickMode() && BinlogDumpContext.isSearch()) {
-            this.DEFAULT_BUFFER_SIZE = fileSize;
-        } else {
-            CacheMode mode = CacheManager.getInstance().getMode();
-            if (mode == CacheMode.DISK) {
-                this.DEFAULT_BUFFER_SIZE = fileSize / DEFAULT_THREAD_SIZE + DEFAULT_THREAD_SIZE;
-            } else {
-                this.DEFAULT_BUFFER_SIZE =
-                    DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CACHE_UNIT_SIZE);
-            }
-        }
+        this.storageInstance = storageInstanceId;
+        this.fileName = fileName;
+        this.executorService = executorService;
+        this.partSize = DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CACHE_UNIT_SIZE);
 
-        if (this.DEFAULT_BUFFER_SIZE > Integer.MAX_VALUE) {
-            this.DEFAULT_BUFFER_SIZE = Integer.MAX_VALUE;
-        }
-
-        log.info(
-            "init multi part with buffer size : " + DEFAULT_BUFFER_SIZE + ", stage : " + BinlogDumpContext.getStage());
+        uuid = UUID.randomUUID().toString();
+        log.info("init multi part {} with buffer size : {}, stage : {} id : {}", fileName, partSize,
+            BinlogDumpContext.getStage(), uuid);
 
         this.open();
-    }
-
-    public static void main(String[] args) {
-        System.out.println(3 * 1024 * 1024 * 1024);
-        System.out.println(2147483647L);
-        System.out.println(Integer.MAX_VALUE);
     }
 
     private void initMultiPart() throws IOException {
@@ -88,9 +78,9 @@ public class MultiPartInputStream {
         }
         int seq = 0;
         for (; seq < partCount - 1; seq++) {
-            partStreamList.add(new PartStream(seq * DEFAULT_BUFFER_SIZE, (seq + 1) * DEFAULT_BUFFER_SIZE - 1, seq));
+            partStreamList.add(new PartStream(seq * partSize, (seq + 1) * partSize - 1, seq, sequencer));
         }
-        partStreamList.add(new PartStream(seq * DEFAULT_BUFFER_SIZE, -1, seq));
+        partStreamList.add(new PartStream(seq * partSize, fileSize - 1, seq, sequencer));
     }
 
     private HttpURLConnection connect() throws IOException {
@@ -110,11 +100,11 @@ public class MultiPartInputStream {
             connection = connect();
             String messageString = connection.getHeaderField(HEADER_RANGES_SUPPORT);
             if (!SUPPORT_RANGE_FLAG.equals(messageString)) {
-                // 不支持分段下载
+                //   不支持分段下载
                 return 1;
             }
             this.fileSize = Long.parseLong(connection.getHeaderField(HEADER_CONTENT_LENGTH));
-            return (int) ((fileSize / DEFAULT_BUFFER_SIZE) + (fileSize % DEFAULT_BUFFER_SIZE > 0 ? 1 : 0));
+            return (int) ((fileSize / partSize) + (fileSize % partSize > 0 ? 1 : 0));
         } finally {
             if (connection != null) {
                 connection.disconnect();
@@ -123,19 +113,24 @@ public class MultiPartInputStream {
 
     }
 
-    private void open() throws IOException {
+    protected void open() throws IOException {
         initMultiPart();
         if (partCount == 1) {
             HttpURLConnection connection = connect();
             fin = connection.getInputStream();
         } else {
-            executorService = Executors.newFixedThreadPool(DEFAULT_THREAD_SIZE, r -> {
-                Thread t = new Thread(r, "multi-input-stream");
-                t.setDaemon(true);
-                return t;
+            AtomicInteger finishCounter = new AtomicInteger();
+            MultiPartStreamMetrics metrics = new MultiPartStreamMetrics(fileName, url, storageInstance, finishCounter);
+            partStreamList.forEach(p -> {
+                PartStreamMetrics partStreamMetrics = new PartStreamMetrics(p.seq, p.end - p.begin);
+                p.setMetrics(partStreamMetrics);
+                partStreamMetrics.setFinishCounter(finishCounter);
+                metrics.addPartMetrics(partStreamMetrics);
+                p.setUuid(uuid);
             });
+            metrics.startMetrics();
             for (PartStream p : partStreamList) {
-                executorService.execute(p);
+                futureList.add(executorService.submit(p));
             }
         }
     }
@@ -149,14 +144,7 @@ public class MultiPartInputStream {
             return -1;
         }
         PartStream ps = this.partStreamList.get(pos);
-        int readLen = 0;
-        while ((readLen = ps.read(b, off, len)) == 0) {
-            try {
-                Thread.sleep(1L);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
+        int readLen = ps.read(b, off, len);
         if (readLen == -1) {
             ps.close();
             pos++;
@@ -173,29 +161,59 @@ public class MultiPartInputStream {
         if (this.partCount == 1) {
             fin.skip(n);
         } else {
-            int skipPartNum = (int) (n / DEFAULT_BUFFER_SIZE);
+            int skipPartNum = (int) (n / partSize);
             for (int i = pos; i < skipPartNum; i++) {
                 this.partStreamList.get(i).close();
             }
             this.pos += skipPartNum;
+            int seq = sequencer.get();
+            while (seq < pos && !sequencer.compareAndSet(seq, pos)) {
+                seq = sequencer.get();
+            }
+            log.warn("reset {} {} sequence from {} to {} , current sequencer is {} id {}", storageInstance, fileName,
+                seq, pos, sequencer.get(), uuid);
             PartStream ps = this.partStreamList.get(pos);
             ps.skip(n - ps.begin);
         }
     }
 
-    public void close() throws IOException {
+    public boolean isClosed() {
+        if (!CollectionUtils.isEmpty(this.partStreamList)) {
+            for (PartStream p : this.partStreamList) {
+                if (!p.isClosed()) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    public void closePartStream() throws IOException {
         if (!CollectionUtils.isEmpty(this.partStreamList)) {
             for (PartStream p : this.partStreamList) {
                 p.close();
             }
         }
-        if (this.executorService != null) {
-            this.executorService.shutdown();
+    }
+
+    public void close() throws IOException {
+
+        closePartStream();
+
+        while (!isClosed()) {
+            log.warn("close multi part stream failed for {} seq : {} , will retry", fileName, uuid);
+            closePartStream();
         }
+
         if (fin != null) {
             try {
                 fin.close();
             } catch (IOException e) {
+            }
+        }
+        for (Future f : futureList) {
+            if (!f.isDone() && !f.isCancelled()) {
+                f.cancel(true);
             }
         }
     }
@@ -204,19 +222,31 @@ public class MultiPartInputStream {
         private static final int STATE_INIT = 0;
         private static final int STATE_FETCH = 1;
         private static final int STATE_FINISH = 2;
+        private static final int STATE_CLOSE = 3;
         private final long begin;
         private final long end;
         private final int seq;
-        private volatile Cache cache;
+        private final Cache cache;
         private Throwable t;
-        private boolean running = true;
+        private volatile boolean running = true;
         private volatile byte state = STATE_INIT;
         private int readCount = 0;
+        private InputStream in;
 
-        public PartStream(long begin, long end, int seq) {
+        @Setter
+        private PartStreamMetrics metrics;
+
+        public PartStream(long begin, long end, int seq, AtomicInteger sequencer) {
             this.begin = begin;
             this.end = end;
             this.seq = seq;
+            long cacheSize = end - begin + 1;
+            this.cache = new MemoryCache(storageInstance, url, seq, cacheSize, sequencer);
+            ;
+        }
+
+        public void setUuid(String uuid) {
+            ((MemoryCache) this.cache).setUuid(uuid);
         }
 
         private void check() {
@@ -227,10 +257,8 @@ public class MultiPartInputStream {
 
         public int read(byte[] data, int offset, int length) throws IOException {
             check();
-            if (cache == null) {
-                return 0;
-            }
             int len = cache.read(data, offset, length);
+            check();
             if (len != -1) {
                 readCount += len;
             } else {
@@ -250,12 +278,6 @@ public class MultiPartInputStream {
         }
 
         public void skip(long bytes) {
-            while (running && cache == null) {
-                try {
-                    Thread.sleep(1000L);
-                } catch (InterruptedException e) {
-                }
-            }
             if (!running) {
                 return;
             }
@@ -264,38 +286,43 @@ public class MultiPartInputStream {
         }
 
         public void close() throws IOException {
+            if (log.isDebugEnabled()) {
+                log.debug("dn {} close part stream seq : {} from {} uuid : {}", storageInstance, seq, fileName, uuid);
+            }
             running = false;
+            try {
+                if (this.in != null) {
+                    this.in.close();
+                }
+            } catch (Exception ignored) {
+            }
+
+            this.cache.interrupt();
             tryRelease();
         }
 
         private void tryRelease() throws IOException {
-            if (state == STATE_FINISH && !running) {
-                if (cache != null) {
-                    cache.close();
+            if ((state == STATE_FINISH || state == STATE_CLOSE) && !running) {
+                cache.close();
+                state = STATE_CLOSE;
+            } else {
+                if (log.isDebugEnabled()) {
+                    log.debug("{} close {} part : {} , uuid {} failed for state {} or running {} , has buffer {} ",
+                        storageInstance, fileName, seq, uuid, state, running, metrics.isAllocateBuffer());
                 }
             }
         }
 
-        private void checkRange(String rangeString) {
-            if (rangeString != null && rangeString.startsWith("bytes")) {
-                String ranges[] = rangeString.substring(6).split("/")[0].split("-");
-                long tBegin = Long.parseLong(ranges[0]);
-                long tEnd = Long.parseLong(ranges[1]);
-                if (tBegin == begin && tEnd == end) {
-                    log.info("begin and end match");
-                } else {
-                    log.info("begin and end  not match");
-                }
-            } else {
-                System.out.println(rangeString);
-            }
+        public boolean isClosed() {
+            return state == STATE_CLOSE;
         }
 
         @Override
         public void run() {
-            InputStream in = null;
             HttpURLConnection connection = null;
+            metrics.setStartTimestamp(System.currentTimeMillis());
             if (!running) {
+                state = STATE_CLOSE;
                 return;
             }
             try {
@@ -326,25 +353,82 @@ public class MultiPartInputStream {
                 }
                 in = connection.getInputStream();
                 long cacheSize = end - begin + 1;
-                if (cacheSize > DEFAULT_BUFFER_SIZE) {
-                    log.warn("part cache size =" + cacheSize + ", end = " + this.end + " , fileSize = " + fileSize);
+                if (cacheSize > partSize) {
+                    log.warn("part cache size ={}, end = {} , fileSize = {}", cacheSize, this.end, fileSize);
                 }
-                cache = CacheManager.getInstance().allocate(in, cacheSize);
-                cache.fetchData();
+                if (!running) {
+                    try {
+                        in.close();
+                    } catch (Exception ignore) {
+                    }
+                    state = STATE_CLOSE;
+                    return;
+                }
+                cache.setProgressListener(new CacheProgressListener() {
+
+                    private long lastReceiveTimestamp;
+                    private long lastReceiveBytes;
+
+                    @Override
+                    public void onStart() {
+                        lastReceiveTimestamp = System.currentTimeMillis();
+                    }
+
+                    @Override
+                    public void onAllocateBuffer() {
+                        metrics.setAllocateBuffer(true);
+                    }
+
+                    @Override
+                    public void onProgress(long bytesRead) {
+                        metrics.setBytesRead(bytesRead);
+                        long now = System.currentTimeMillis();
+                        long timeUsed = now - lastReceiveTimestamp;
+                        if (timeUsed == 0) {
+                            timeUsed = 1;
+                        }
+                        metrics.setBps((bytesRead - lastReceiveBytes) * 1000 / timeUsed);
+                        lastReceiveTimestamp = System.currentTimeMillis();
+                        lastReceiveBytes = bytesRead;
+                    }
+
+                    @Override
+                    public void onFinish() {
+                        metrics.setFinishTimestamp(System.currentTimeMillis());
+                        metrics.getFinishCounter().incrementAndGet();
+                    }
+                });
+                cache.fetchData(in);
             } catch (Exception e) {
-                log.error("read data failed!", e);
+                if (!running) {
+                    try {
+                        in.close();
+                    } catch (Exception ignore) {
+                    }
+                    state = STATE_CLOSE;
+                    if (log.isDebugEnabled()) {
+                        log.debug("close stream ignore exception ! dn {} fileName : {} seq : {} uuid : {}",
+                            storageInstance, fileName, seq, uuid, e);
+                    }
+                    return;
+                }
+                log.error("read data failed from file : {} , seq {} : uuid : {}", fileName, seq, uuid, e);
                 this.t = e;
+                this.running = false;
             } finally {
-                this.state = STATE_FINISH;
+                if (this.state == STATE_FETCH || this.state == STATE_INIT) {
+                    this.state = STATE_FINISH;
+                }
+                metrics.setFinishTimestamp(System.currentTimeMillis());
                 try {
                     tryRelease();
-                } catch (IOException e) {
+                } catch (IOException ignored) {
 
                 }
                 if (in != null) {
                     try {
                         in.close();
-                    } catch (IOException e) {
+                    } catch (IOException ignored) {
                     }
                 }
                 if (connection != null) {

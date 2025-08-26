@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.transmit.relay;
@@ -9,6 +9,7 @@ package com.aliyun.polardbx.binlog.transmit.relay;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.metrics.RelayStreamMetrics;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.DirectByteOutput;
 import com.aliyun.polardbx.relay.Message;
 import com.aliyun.polardbx.relay.MetaInfo;
@@ -89,7 +90,8 @@ public class RelayFileDataReader extends RelayDataReaderBase {
 
     private void tryRotate() {
         String currentWritingFile = fileStoreEngine.getCurrentWritingFile();
-        if (fileReader.file.getName().compareTo(currentWritingFile) < 0 && fileReader.isReadEnd()) {
+        if (BinlogFileUtil.compareBinlogFileName(fileReader.file.getName(), currentWritingFile) < 0
+            && fileReader.isReadEnd()) {
             String nextFileName = fileStoreEngine.getRelayFileManager().nextFileName(fileReader.file.getName());
             fileReader.close();
             fileReader = createFileReader(nextFileName, 0);

@@ -1,12 +1,11 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.topology;
 
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import org.apache.commons.lang3.StringUtils;
 
@@ -15,20 +14,34 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_ENABLED;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SHARE_TOPOLOGY_WITH_INTERN;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCaseLogicMetaTopology;
+import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCaseTopologyRecord;
 
 /**
  * created by ziyang.lb
  **/
 public class TopologyShareUtil {
-    private static final boolean NEED_SHARE_FLAG = parseSwitch();
 
-    private static final ConcurrentHashMap<String, LogicMetaTopology> snapshotCache = new ConcurrentHashMap<>();
+    private static volatile Boolean needShareTopology;
 
-    public static LogicMetaTopology buildTopology(String tso, Supplier<LogicMetaTopology> supplier) {
-        if (needShareString()) {
-            return snapshotCache.computeIfAbsent(tso, k -> toShare(supplier.get())).copy();
+    public static boolean needShareTopology() {
+        if (needShareTopology == null) {
+            synchronized (TopologyShareUtil.class) {
+                if (needShareTopology == null) {
+                    needShareTopology = getBoolean(META_BUILD_SHARE_TOPOLOGY_ENABLED);
+                }
+            }
+        }
+        return needShareTopology;
+    }
+
+    private static final ConcurrentHashMap<String, LogicMetaTopology> SNAPSHOT_TOPOLOGY_CACHE =
+        new ConcurrentHashMap<>();
+
+    public static LogicMetaTopology buildSnapshotTopology(String tso, Supplier<LogicMetaTopology> supplier) {
+        if (needShareTopology()) {
+            return SNAPSHOT_TOPOLOGY_CACHE.computeIfAbsent(tso, k -> toShare(supplier.get())).copy();
         } else {
             LogicMetaTopology topology = supplier.get();
             toLowerCaseLogicMetaTopology(topology);
@@ -36,24 +49,19 @@ public class TopologyShareUtil {
         }
     }
 
-    private static boolean parseSwitch() {
-        return DynamicApplicationConfig.getBoolean(META_BUILD_SHARE_TOPOLOGY_ENABLED);
-    }
-
-    public static boolean needShareString() {
-        return NEED_SHARE_FLAG;
-    }
-
-    public static boolean needIntern() {
-        return needShareString() && DynamicApplicationConfig.getBoolean(META_BUILD_SHARE_TOPOLOGY_WITH_INTERN);
+    public static void trySharedRecord(TopologyRecord record) {
+        if (needShareTopology()) {
+            toLowerCaseTopologyRecord(record);
+            internTopologyRecord(record);
+        } else {
+            toLowerCaseTopologyRecord(record);
+        }
     }
 
     public static LogicMetaTopology toShare(LogicMetaTopology topology) {
         topology.setShared(true);
         toLowerCaseLogicMetaTopology(topology);
-        if (needIntern()) {
-            internTopology(topology);
-        }
+        internTopology(topology);
         return topology;
     }
 

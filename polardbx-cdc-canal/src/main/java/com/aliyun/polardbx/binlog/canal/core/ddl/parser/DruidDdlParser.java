@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.parser;
@@ -46,6 +46,7 @@ import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatementList;
  * @since 3.2.5
  */
 public class DruidDdlParser {
+    private static final String COLUMNAR_SET_CONFIG_PROCEDURE_NAME = "columnar_set_config";
 
     public static DdlResult parse(String queryString, String schemaName) {
         DdlResult ddlResult = null;
@@ -162,7 +163,8 @@ public class DruidDdlParser {
                 ddlResult.setHasIfExistsOrNotExists(createRole.isIfNotExists());
             } else if (statement instanceof SQLCallStatement) {
                 SQLCallStatement stmt = (SQLCallStatement) statement;
-                if (SYNC_POINT_PROCEDURE_NAME.equals(stmt.getProcedureName().getSimpleName())) {
+                if (SYNC_POINT_PROCEDURE_NAME.equals(stmt.getProcedureName().getSimpleName())
+                    || COLUMNAR_SET_CONFIG_PROCEDURE_NAME.equalsIgnoreCase(stmt.getProcedureName().getSimpleName())) {
                     ddlResult = new DdlResult();
                     ddlResult.setType(DBMSAction.OTHER);
                 }

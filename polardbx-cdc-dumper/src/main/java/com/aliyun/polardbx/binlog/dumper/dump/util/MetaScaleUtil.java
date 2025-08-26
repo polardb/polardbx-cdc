@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.util;
@@ -32,18 +32,23 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryDetailInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
+import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
 import com.aliyun.polardbx.binlog.enums.BinlogUploadStatus;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.service.StorageHistoryService;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Sets;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.joda.time.DateTime;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -53,16 +58,20 @@ import java.util.stream.Collectors;
 import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_FILE_PRESERVE_DAYS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.EXPECTED_STORAGE_TSO_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_REPAIR_STORAGE_WITH_SCALE_ENABLE;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.util.StorageUtil.buildExpectedStorageTso;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
+import static org.mybatis.dynamic.sql.SqlBuilder.isGreaterThanOrEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isIn;
 import static org.mybatis.dynamic.sql.SqlBuilder.isLessThanOrEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
+import static org.mybatis.dynamic.sql.SqlBuilder.isNotIn;
 
 /**
  * created by ziyang.lb
@@ -78,7 +87,6 @@ public class MetaScaleUtil {
         waitOriginTsoReady(runningSupplier);
 
         StorageHistoryInfoMapper storageHistoryMapper = getObject(StorageHistoryInfoMapper.class);
-        StorageHistoryDetailInfoMapper historyDetailMapper = getObject(StorageHistoryDetailInfoMapper.class);
         TransactionTemplate transactionTemplate = getObject("metaTransactionTemplate");
         transactionTemplate.execute((o) -> {
             // 幂等判断
@@ -115,28 +123,7 @@ public class MetaScaleUtil {
 
             // 多流特殊逻辑
             if (isBinlogXStream(streamNameParam)) {
-                List<StorageHistoryDetailInfo> detailInfos = historyDetailMapper.select(
-                    s -> s.where(StorageHistoryDetailInfoDynamicSqlSupport.tso, isEqualTo(tsoParam))
-                        .and(StorageHistoryDetailInfoDynamicSqlSupport.clusterId, isEqualTo(getString(CLUSTER_ID)))
-                        .and(StorageHistoryDetailInfoDynamicSqlSupport.streamName, isEqualTo(streamNameParam)));
-
-                if (detailInfos.isEmpty()) {
-                    try {
-                        StorageHistoryDetailInfo detailInfo = new StorageHistoryDetailInfo();
-                        detailInfo.setStatus(-1);
-                        detailInfo.setClusterId(getString(CLUSTER_ID));
-                        detailInfo.setTso(tsoParam);
-                        detailInfo.setStreamName(streamNameParam);
-                        detailInfo.setInstructionId(instructionIdParam);
-                        historyDetailMapper.insert(detailInfo);
-                    } catch (DuplicateKeyException e) {
-                        log.warn("storage history detail info is already existing, tso {}, stream name {}.",
-                            tsoParam, streamNameParam);
-                    }
-                } else {
-                    log.info("storage history detail info with tso {} and stream name {} is already exist, ignored.",
-                        tsoParam, streamNameParam);
-                }
+                StorageHistoryService.saveStorageHistoryDetail(tsoParam, streamNameParam, instructionIdParam);
             }
             return null;
         });
@@ -261,11 +248,14 @@ public class MetaScaleUtil {
         BinlogOssRecordMapper mapper = getObject(BinlogOssRecordMapper.class);
         while (true) {
             List<BinlogOssRecord> list = mapper.select(s -> s.where(BinlogOssRecordDynamicSqlSupport.uploadStatus,
-                    isIn(BinlogUploadStatus.SUCCESS.getValue(), BinlogUploadStatus.IGNORE.getValue()))
-                .and(BinlogOssRecordDynamicSqlSupport.binlogFile, isLessThanOrEqualTo(fileName))
+                    isNotIn(BinlogUploadStatus.SUCCESS.getValue(), BinlogUploadStatus.IGNORE.getValue()))
                 .and(BinlogOssRecordDynamicSqlSupport.streamId, isEqualTo(streamName))
-                .and(BinlogOssRecordDynamicSqlSupport.clusterId, isEqualTo(getString(CLUSTER_ID))));
-            if (!list.isEmpty()) {
+                .and(BinlogOssRecordDynamicSqlSupport.clusterId, isEqualTo(getString(CLUSTER_ID)))
+                .and(BinlogOssRecordDynamicSqlSupport.purgeStatus, isEqualTo(BinlogPurgeStatus.UN_COMPLETE.getValue()))
+                .and(BinlogOssRecordDynamicSqlSupport.gmtCreated, isGreaterThanOrEqualTo(buildQueryBaseDate())));
+            list = list.stream().filter(r -> BinlogFileUtil.compareBinlogFileName(r.getBinlogFile(), fileName) <= 0)
+                .collect(Collectors.toList());
+            if (list.isEmpty()) {
                 break;
             } else {
                 try {
@@ -274,6 +264,10 @@ public class MetaScaleUtil {
                 }
             }
         }
+    }
+
+    static Date buildQueryBaseDate() {
+        return DateTime.now().minusDays(getInt(BINLOG_BACKUP_FILE_PRESERVE_DAYS) + 1).toDate();
     }
 
     private static void updateExpectedStorageTso(String streamNameInput, String expectedStorageTsoInput) {

@@ -16,7 +16,7 @@
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
         <license.dir>${project.parent.basedir}</license.dir>
-        <canal.version>1.1.7</canal.version>
+        <canal.version>1.1.8</canal.version>
     </properties>
 
     <dependencies>
@@ -169,6 +169,8 @@
                             <value>com.aliyun.polardbx.cdc.qatest.base.JunitListener</value>
                         </property>
                     </properties>
+                    <reuseForks>false</reuseForks>
+                    <forkCount>1</forkCount>
                 </configuration>
             </plugin>
         </plugins>

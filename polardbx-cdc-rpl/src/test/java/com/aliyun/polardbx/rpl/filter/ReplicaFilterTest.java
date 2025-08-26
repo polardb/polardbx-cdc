@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.filter;
@@ -67,7 +67,7 @@ public class ReplicaFilterTest {
         ReplicaMeta replicaMeta = new ReplicaMeta();
         replicaMeta.setDoDb("full_src_1, rpl");
         replicaMeta.setIgnoreDb("full_src_1, rpl");
-        replicaMeta.setDoTable("full_src_1.t1, full_src_1.t2");
+        replicaMeta.setDoTable(" full_src_1.t1  , full_src_1.t2 ");
         replicaMeta.setIgnoreTable("full_src_1.t2, full_src_1.t3");
         replicaMeta.setWildDoTable("d%.tb\\_charset%, d%.col\\_charset%");
         replicaMeta.setWildIgnoreTable("d%.tb\\_charset%, d%.col\\_charset%");
@@ -748,4 +748,152 @@ public class ReplicaFilterTest {
         filter.init();
         Assert.assertTrue(filter.ignoreEventByTso("1109"));
     }
+
+    @Test
+    public void doDbWithSpecialCharacterTest() {
+        String sql = "`db1`,  ```db2.with.dot`, db3, `db4,with.dot``and,comma`";
+        ReplicaMeta replicaMeta = new ReplicaMeta();
+        replicaMeta.setDoDb(sql);
+        ReplicaFilter filter = new ReplicaFilter(replicaMeta);
+        filter.init();
+        DefaultRowChange rowChange = new DefaultRowChange();
+        rowChange.setAction(DBMSAction.INSERT);
+
+        rowChange.setSchema("`db1`");
+        rowChange.setTable("tb");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db1");
+        rowChange.setTable("tb");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("`db2.with.dot");
+        rowChange.setTable("tb");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("`db3`");
+        rowChange.setTable("tb");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db3");
+        rowChange.setTable("tb");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db4,with.dot`and,comma");
+        rowChange.setTable("tb");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+    }
+
+    @Test
+    public void ignoreDbWithSpecialCharacterTest() {
+        String sql = "`db1`,  ```db2.with.dot`, db3, `db4,with.dot``and,comma`";
+        ReplicaMeta replicaMeta = new ReplicaMeta();
+        replicaMeta.setIgnoreDb(sql);
+        ReplicaFilter filter = new ReplicaFilter(replicaMeta);
+        filter.init();
+        DefaultRowChange rowChange = new DefaultRowChange();
+        rowChange.setAction(DBMSAction.INSERT);
+
+        rowChange.setSchema("`db1`");
+        rowChange.setTable("tb");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db1");
+        rowChange.setTable("tb");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("`db2.with.dot");
+        rowChange.setTable("tb");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("`db3`");
+        rowChange.setTable("tb");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db3");
+        rowChange.setTable("tb");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db4,with.dot`and,comma");
+        rowChange.setTable("tb");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+    }
+
+    @Test
+    public void doTableWithSpecialCharacterTest() {
+        String sql = "db1.`table,with,comma`,  `db2`.```table.with.dot`, `db3`.`table,with.dot``and,comma`";
+        ReplicaMeta replicaMeta = new ReplicaMeta();
+        replicaMeta.setDoTable(sql);
+        ReplicaFilter filter = new ReplicaFilter(replicaMeta);
+        filter.init();
+        DefaultRowChange rowChange = new DefaultRowChange();
+        rowChange.setAction(DBMSAction.INSERT);
+
+        rowChange.setSchema("db1");
+        rowChange.setTable("table,with,comma");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db2");
+        rowChange.setTable("table,with,comma");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db2");
+        rowChange.setTable("`table.with.dot");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db3");
+        rowChange.setTable("table,with.dot`and,comma");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+    }
+
+    @Test
+    public void ignoreServerId() {
+        ReplicaMeta replicaMeta = new ReplicaMeta();
+        replicaMeta.setIgnoreServerIds("2121,21212");
+        replicaMeta.setDoTable(" db1.table1  ");
+        ReplicaFilter filter = new ReplicaFilter(replicaMeta);
+        filter.init();
+        DefaultRowChange rowChange = new DefaultRowChange();
+        rowChange.setAction(DBMSAction.INSERT);
+
+        Assert.assertTrue(filter.ignoreEvent("db1", "table1", DBMSAction.INSERT, 2121));
+        Assert.assertFalse(filter.ignoreEvent("db1", "table1", DBMSAction.INSERT, 1212));
+    }
+
+    @Test
+    public void ignoreTableWithSpecialCharacterTest() {
+        String sql = "`db1`.`table,with,comma`, `db2`.```table.with.dot`, `db3`.`table,with.dot``and,comma`,"
+            + "db4.`1.1`";
+        ReplicaMeta replicaMeta = new ReplicaMeta();
+        replicaMeta.setIgnoreTable(sql);
+        ReplicaFilter filter = new ReplicaFilter(replicaMeta);
+        filter.init();
+        DefaultRowChange rowChange = new DefaultRowChange();
+        rowChange.setAction(DBMSAction.INSERT);
+
+        rowChange.setSchema("db1");
+        rowChange.setTable("table,with,comma");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db2");
+        rowChange.setTable("table,with,comma");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db2");
+        rowChange.setTable("`table.with.dot");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db3");
+        rowChange.setTable("table,with.dot`and,comma");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db4");
+        rowChange.setTable("1.1");
+        Assert.assertTrue(filter.ignoreEvent(rowChange));
+
+        rowChange.setSchema("db4.1");
+        rowChange.setTable("1");
+        Assert.assertFalse(filter.ignoreEvent(rowChange));
+    }
+
 }

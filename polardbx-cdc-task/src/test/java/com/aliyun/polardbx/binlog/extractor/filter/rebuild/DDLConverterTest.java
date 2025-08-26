@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
@@ -9,8 +9,9 @@ package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
@@ -29,7 +30,8 @@ import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql
 /**
  * created by ziyang.lb
  **/
-public class DDLConverterTest extends BaseTestWithGmsTables {
+@Slf4j
+public class DDLConverterTest extends BaseTest {
 
     @Test
     public void testTryRemoveDropImplicitPk() {
@@ -80,7 +82,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
             + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
         buildDdlEventSqlForMysqlPart(sb, "zqhz0kzsecxfgdf", "utf8mb4", "utf8_general_cs", ddl);
         Assert.assertEquals(
-            "CREATE TABLE `zqhz0kzsecxfgdf` ( `zsjzmjsoidxxtr` int(6) UNSIGNED ZEROFILL DEFAULT NULL, `7jg0ekks` int(6) UNSIGNED ZEROFILL DEFAULT NULL, `3pf6xdowmaf` int(6) UNSIGNED ZEROFILL DEFAULT NULL, `hkqh6gd` int(6) UNSIGNED ZEROFILL DEFAULT NULL ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8_general_cs",
+            "CREATE TABLE `zqhz0kzsecxfgdf` ( `zsjzmjsoidxxtr` int(6) UNSIGNED ZEROFILL DEFAULT NULL, `7jg0ekks` int(6) UNSIGNED ZEROFILL DEFAULT NULL, `3pf6xdowmaf` int(6) UNSIGNED ZEROFILL DEFAULT NULL, `hkqh6gd` int(6) UNSIGNED ZEROFILL DEFAULT NULL ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4",
             sb.toString());
 
         /*
@@ -94,7 +96,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
         sb = new StringBuilder();
         buildDdlEventSqlForMysqlPart(sb, "bt", "utf8mb4", "utf8_general_cs", ddl);
         Assert.assertEquals(
-            "CREATE TABLE `bt` ( `id` int(11) NOT NULL AUTO_INCREMENT, `name` varchar(20) DEFAULT NULL, PRIMARY KEY (`id`) ) ENGINE = InnoDB AUTO_INCREMENT = 200006 DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8_general_cs",
+            "CREATE TABLE `bt` ( `id` int(11) NOT NULL AUTO_INCREMENT, `name` varchar(20) DEFAULT NULL, PRIMARY KEY (`id`) ) ENGINE = InnoDB AUTO_INCREMENT = 200006 DEFAULT CHARSET = utf8mb4",
             sb.toString());
 
         /*
@@ -314,7 +316,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
             + "TBPARTITION BY hash(JOB_ID) TBPARTITIONS 16";
         buildDdlEventSqlForMysqlPart(sb, "t_ddl_test_normal", "utf8mb4", "utf8_general_cs", ddl);
         Assert.assertEquals(
-            "CREATE TABLE IF NOT EXISTS `t_ddl_test_normal` ( `ID` BIGINT(20) NOT NULL AUTO_INCREMENT, `JOB_ID` BIGINT(20) NOT NULL DEFAULT 0, `EXT_ID` BIGINT(20) NOT NULL DEFAULT 0, `TV_ID` BIGINT(20) NOT NULL DEFAULT 0, `SCHEMA_NAME` VARCHAR(200) NOT NULL, `TABLE_NAME` VARCHAR(200) NOT NULL, `GMT_CREATED` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, `DDL_SQL` TEXT NOT NULL, PRIMARY KEY (`ID`), KEY `idx1` (`SCHEMA_NAME`), INDEX `auto_shard_key_job_id` USING BTREE(`JOB_ID`) ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8_general_cs",
+            "CREATE TABLE IF NOT EXISTS `t_ddl_test_normal` ( `ID` BIGINT(20) NOT NULL AUTO_INCREMENT, `JOB_ID` BIGINT(20) NOT NULL DEFAULT 0, `EXT_ID` BIGINT(20) NOT NULL DEFAULT 0, `TV_ID` BIGINT(20) NOT NULL DEFAULT 0, `SCHEMA_NAME` VARCHAR(200) NOT NULL, `TABLE_NAME` VARCHAR(200) NOT NULL, `GMT_CREATED` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, `DDL_SQL` TEXT NOT NULL, PRIMARY KEY (`ID`), KEY `idx1` (`SCHEMA_NAME`), INDEX `auto_shard_key_job_id` USING BTREE(`JOB_ID`) ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4",
             sb.toString());
 
         /*
@@ -538,7 +540,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testPrivateDDLSwitch() {
-        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
         String sql1 =
             "ALTER TABLE t_order ADD UNIQUE GLOBAL INDEX `g_i_buyer` (`buyer_id`) COVERING (`order_snapshot`) PARTITION BY KEY (`buyer_id`) PARTITIONS 4";
         String sql2 = buildDdlEventSql("", sql1, null, "", "",
@@ -546,7 +548,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
         Assert.assertTrue(sql2.contains("# POLARX_ORIGIN_SQL="));
         Assert.assertTrue(sql2.contains("# POLARX_TSO="));
 
-        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "false");
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "false");
         String sql3 = "alter table nnn change column b bb bigint ALGORITHM=XXX";
         String sql4 = buildDdlEventSql(sql3, null, null, "");
         Assert.assertFalse(sql4.contains("# POLARX_ORIGIN_SQL="));
@@ -608,8 +610,9 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testHintsFilter() {
-        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
-        setConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST, "GSI_BACKFILL_POSITION_MARK,GSI_BACKFILL_BATCH_SIZE,ALLOW_ADD_GSI");
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        mockConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST,
+            "GSI_BACKFILL_POSITION_MARK,GSI_BACKFILL_BATCH_SIZE,ALLOW_ADD_GSI");
         String sql =
             "/*+TDDL:CMD_EXTRA(GSI_BACKFILL_BATCH_SIZE=2, gsi_backfill_position_mark = \"[{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100001\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_0\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100002\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_1\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_2\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_3\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_4\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100000\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_5\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"}]\", ALLOW_ADD_GSI=TRUE)*/ "
                 + "CREATE GLOBAL INDEX g_resume_id ON gsi_backfill_resume_primary (id) COVERING (c_bit_1, c_bit_8, c_bit_16, c_bit_32, c_bit_64, c_tinyint_1, c_tinyint_1_un, c_tinyint_4, c_tinyint_4_un, c_tinyint_8, c_tinyint_8_un, c_smallint_1, c_smallint_16, c_smallint_16_un, c_mediumint_1, c_mediumint_24, c_mediumint_24_un, c_int_1, c_int_32, c_int_32_un, c_bigint_1, c_bigint_64, c_bigint_64_un, c_decimal, c_decimal_pr, c_float, c_float_pr, c_float_un, c_double, c_double_pr, c_double_un, c_date, c_datetime, c_datetime_1, c_datetime_3, c_datetime_6, c_timestamp_1, c_timestamp_3, c_timestamp_6, c_time, c_time_1, c_time_3, c_time_6, c_year, c_year_4, c_char, c_varchar, c_binary, c_varbinary, c_blob_tiny, c_blob, c_blob_medium, c_blob_long, c_text_tiny, c_text, c_text_medium, c_text_long, c_enum, c_set, c_json, c_geometory, c_point, c_linestring, c_polygon, c_multipoint, c_multilinestring, c_multipolygon) DBPARTITION BY HASH(id) TBPARTITION BY HASH(id) TBPARTITIONS 7";
@@ -621,7 +624,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
                 + "# POLARX_DDL_ID=0\n";
         Assert.assertEquals(expectSql, sb.toString());
 
-        setConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST,
+        mockConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST,
             "GSI_BACKFILL_POSITION_MARK,FP_PAUSE_AFTER_DDL_TASK_EXECUTION,FP_STATISTIC_SAMPLE_ERROR");
         sql = "/*+TDDL:cmd_extra(FP_PAUSE_AFTER_DDL_TASK_EXECUTION='AlterTablePhyDdlTask')*/ "
             + "ALTER TABLE wumu_test DROP COLUMN b";
@@ -645,7 +648,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testRemoveLocalityForCreateTableGroup() {
-        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
         String sql = "CREATE TABLEGROUP tg1 "
             + "LOCALITY = 'dn=xgdn-ddl-230916222943-5eb4-xv8f-dn-0, xgdn-ddl-230916222943-5eb4-xv8f-dn-1'";
         StringBuilder sb = new StringBuilder();
@@ -672,7 +675,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testRemoveLocalityForGlobalIndex() {
-        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
 
         // create index
         String sql = "CREATE UNIQUE GLOBAL INDEX `W9H4uo` ON `8f6` (`Du3z` DESC)"
@@ -726,7 +729,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testRemoveLocalityForPartitionBy() {
-        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
 
         String sql = "ALTER TABLE t1 PARTITION BY HASH (a) "
             + "PARTITIONS 16 LOCALITY = 'DN=ZIYANG-128-DO-NOT-DELETE-JCCK-DN-1' WITH TABLEGROUP=tg3588 IMPLICIT";
@@ -747,7 +750,7 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testProcedure() {
-        setConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
         String ddl = "CREATE PROCEDURE `dkpt`.`report_Turnover_List1_copy1` (\n"
             + "        IN `sTime` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,\n"
             + "        IN `eTime` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci,\n"
@@ -1178,5 +1181,51 @@ public class DDLConverterTest extends BaseTestWithGmsTables {
                 + "# POLARX_TSO=\n"
                 + "# POLARX_DDL_ID=0\n"
                 + "# POLARX_DDL_TYPES=CCI\n", sb.toString());
+    }
+
+    /**
+     * 测试在创建表时，如果传入的tbCollation与原本表中的charSet冲突，则不会将其补全到表中
+     */
+    @Test
+    public void testCreateTableDoubleTimes() {
+        String sql = "create table if not exists `test_charset` (\n"
+            + "        `table_name` varchar(45) not null CHARACTER SET 'latin1' COLLATE 'latin1_swedish_ci',\n"
+            + "        `table_version` varchar(45) not null default '',\n"
+            + "        `data_version` varchar(45) not null default '',\n"
+            + "        `last_update_time` bigint,\n"
+            + "        primary key (`table_name`)\n"
+            + ") engine = 'innodb' default character set = 'utf8'";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForPolarPart(sb, sql, "utf8mb4", "utf8mb4_general_ci", "", true, null);
+        Assert.assertFalse(sb.toString().contains("utf8mb4_general_ci"));
+        sb = new StringBuilder();
+        buildDdlEventSqlForPolarPart(sb, sql, "utf8", "utf8_general_ci", "", true, null);
+        Assert.assertTrue(sb.toString().contains("utf8_general_ci"));
+    }
+
+    @Test
+    public void testRebuildCci() {
+        String sql1 =
+            "/*DDL_ID=7335922456495915072*//*EXTRA_DDL=CREATE CLUSTERED COLUMNAR INDEX `cc22c777-cd7f-4783-8d6f-833bc6c00140` ON `accounts` (`balance`) PARTITION BY HASH (`ID`) PARTITIONS 4 ENGINE = `OSS` COMMENT 'Created by transfer-test'*/";
+        String sql2 =
+            "/*DDL_ID=7335922456533663808*//*EXTRA_DDL=DROP INDEX `cc22c777-cd7f-4783-8d6f-833bc6c00140` ON `accounts`*/";
+        StringBuilder sb1 = new StringBuilder();
+        StringBuilder sb2 = new StringBuilder();
+        buildDdlEventSqlForPolarPart(sb1, sql1, "utf8mb4", "utf8_general_cs", "", true, null);
+        Assert.assertEquals(
+            "# POLARX_ORIGIN_SQL=\n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=7335922456495915072\n"
+                + "# POLARX_DDL_TYPES=CCI\n"
+                + "# POLARX_EXTRA_DDL=CREATE CLUSTERED COLUMNAR INDEX `cc22c777-cd7f-4783-8d6f-833bc6c00140` ON `accounts` (`balance`) PARTITION BY HASH (`ID`) PARTITIONS 4 ENGINE = `OSS` COMMENT 'Created by transfer-test'\n",
+            sb1.toString());
+        buildDdlEventSqlForPolarPart(sb2, sql2, "utf8mb4", "utf8_general_cs", "", true, null);
+        Assert.assertEquals(
+            "# POLARX_ORIGIN_SQL=\n"
+                + "# POLARX_TSO=\n"
+                + "# POLARX_DDL_ID=7335922456533663808\n"
+                + "# POLARX_DDL_TYPES=CCI\n"
+                + "# POLARX_EXTRA_DDL=DROP INDEX `cc22c777-cd7f-4783-8d6f-833bc6c00140` ON `accounts`\n",
+            sb2.toString());
     }
 }

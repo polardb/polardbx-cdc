@@ -1,20 +1,19 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.common;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
 import org.junit.Test;
 
-
 import java.util.concurrent.TimeUnit;
 
-public class DruidDataSourceWrapperTest extends BaseTestWithGmsTables {
+public class DruidDataSourceWrapperTest extends BaseTest {
 
     private static final int timeoutInSec = 30;
 

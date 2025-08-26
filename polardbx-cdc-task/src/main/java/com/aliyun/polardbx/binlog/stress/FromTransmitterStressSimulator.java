@@ -1,16 +1,16 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.stress;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.metrics.MetricsManager;
+import com.aliyun.polardbx.binlog.protocol.DumpRequest;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.rpc.TxnMessageProvider;
@@ -72,23 +72,14 @@ public class FromTransmitterStressSimulator extends BaseStressSimulator {
         TxnBufferItems = buildTxnBufferItems(eventSize, useRandomSize);
 
         final MetricsManager metricsManager = new MetricsManager();
-        final Storage storage = new LogEventStorage(null);
-        final Transmitter transmitter = new LogEventTransmitter(TaskType.Final, 8192, storage, ChunkMode.MEMSIZE,
+        final Storage storage = new LogEventStorage("", null);
+        final Transmitter transmitter = new LogEventTransmitter(false, 8192, storage, ChunkMode.MEMSIZE,
             messageItemSize, 1073741824, false, "");
         final TxnStreamRpcServer rpcServer = new TxnStreamRpcServer(9999, new TxnMessageProvider() {
 
             @Override
-            public boolean checkTSO(String startTSO, TxnOutputStream outputStream, boolean keepWaiting) {
-                return true;
-            }
-
-            @Override
-            public void dump(String startTSO, TxnOutputStream outputStream) throws InterruptedException {
-                transmitter.dump(startTSO, outputStream);
-            }
-
-            @Override
-            public void restart(String startTSO) {
+            public void dump(DumpRequest request, TxnOutputStream outputStream) throws InterruptedException {
+                transmitter.dump(request.getTso(), outputStream);
             }
         });
 

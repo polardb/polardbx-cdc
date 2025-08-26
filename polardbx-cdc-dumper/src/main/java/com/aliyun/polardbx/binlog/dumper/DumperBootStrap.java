@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper;
@@ -79,7 +79,7 @@ public class DumperBootStrap {
                     DynamicApplicationConfig.getClusterType(), taskName,
                     DynamicApplicationConfig.getInt(TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS),
                     taskConfigProvider.getTaskRuntimeConfig().getBinlogTaskConfig());
-            taskHeartbeat.setCursorProviderMap(controller.getLogFileManagerCollection().getCursorProviders());
+            taskHeartbeat.setDumperStatisticProviderMap(controller.getLogFileManagerCollection().getCursorProviders());
             taskHeartbeat.start();
             controller.start();
 

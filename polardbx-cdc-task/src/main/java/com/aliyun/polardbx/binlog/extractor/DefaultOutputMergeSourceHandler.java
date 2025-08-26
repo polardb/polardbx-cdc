@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor;
@@ -118,7 +118,7 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
             txnTokenBuilder.setType(TxnType.META_HEARTBEAT);
         } else if (transaction.isSyncPoint()) {
             log.info("set txn type to sync point");
-            txnTokenBuilder.setType(TxnType.SYNC_POINT);
+            process4SyncPoint(txnTokenBuilder, transaction);
         } else if (transaction.isDDL()) {
             process4Ddl(txnTokenBuilder, transaction);
         } else if (transaction.isStorageChangeCommand()) {
@@ -142,6 +142,16 @@ public class DefaultOutputMergeSourceHandler implements LogEventHandler<Transact
         txnTokenBuilder.setPayload(ByteString.copyFrom(transaction.getDescriptionLogEventData()));
         log.info("output format description  : " + transaction.getPartitionId()
             + " for : " + transaction.getVirtualTsoStr());
+    }
+
+    public void process4SyncPoint(TxnToken.Builder txnTokenBuilder, Transaction transaction) {
+        try {
+            byte[] extra = transaction.getSyncPointExtra().getBytes();
+            txnTokenBuilder.setPayload(ByteString.copyFrom(extra));
+        } catch (Exception e) {
+            log.warn("process4SyncPoint exception when parsing extra", e);
+        }
+        txnTokenBuilder.setType(TxnType.SYNC_POINT);
     }
 
     private void process4Ddl(TxnToken.Builder txnTokenBuilder, Transaction transaction) {

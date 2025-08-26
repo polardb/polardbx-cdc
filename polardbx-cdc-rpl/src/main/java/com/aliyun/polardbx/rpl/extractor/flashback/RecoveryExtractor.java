@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor.flashback;
@@ -28,6 +28,7 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
 import com.aliyun.polardbx.binlog.error.RetryableException;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
@@ -153,41 +154,33 @@ public class RecoveryExtractor extends BaseExtractor {
         String preFileName = preFileName(fileName);
         BinlogOssRecordMapper recordMapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
         String rtso = null;
-        if (preFileName != null){
-            Optional<BinlogOssRecord> preRecord = recordMapper.selectOne(s ->s.where(
+        if (preFileName != null) {
+            Optional<BinlogOssRecord> preRecord = recordMapper.selectOne(s -> s.where(
                 BinlogOssRecordDynamicSqlSupport.binlogFile, SqlBuilder.isEqualTo(preFileName)));
-            if (preRecord.isPresent()){
+            if (preRecord.isPresent()) {
                 rtso = preRecord.get().getLastTso();
             }
-        }else {
+        } else {
             rtso = ExecutionConfig.ORIGIN_TSO;
         }
-        if (StringUtils.isBlank(rtso)){
-            Optional<BinlogOssRecord> curRecord = recordMapper.selectOne(s ->s.where(
+        if (StringUtils.isBlank(rtso)) {
+            Optional<BinlogOssRecord> curRecord = recordMapper.selectOne(s -> s.where(
                 BinlogOssRecordDynamicSqlSupport.binlogFile, SqlBuilder.isEqualTo(fileName)));
-            if (curRecord.isPresent()){
+            if (curRecord.isPresent()) {
                 long logBegin = curRecord.get().getLogBegin().getTime();
                 rtso = CommonUtils.generateTSO(logBegin, StringUtils.leftPad("0", 29, "0"), null);
-                log.info("generate tso "+rtso+" from log begin : "+logBegin + " by file : "+fileName);
+                log.info("generate tso " + rtso + " from log begin : " + logBegin + " by file : " + fileName);
             }
         }
         BinlogPosition position = new BinlogPosition(binlogList.get(0), 0, -1, -1);
-        if (StringUtils.isNotBlank(rtso)){
+        if (StringUtils.isNotBlank(rtso)) {
             position.setRtso(rtso);
         }
         return position;
     }
 
-    public String preFileName(String curFileName){
-        int dotIdx = curFileName.indexOf(".");
-        String prefix = curFileName.substring(0, dotIdx);
-        String suffix = curFileName.substring(dotIdx + 1);
-        int suffixLength = suffix.length();
-        int seq = Integer.parseInt(suffix);
-        if (seq == 1) {
-            return null;
-        }
-        return prefix + "." + StringUtils.leftPad(String.valueOf(seq - 1), suffixLength, "0");
+    public String preFileName(String curFileName) {
+        return BinlogFileUtil.getPrevBinlogFileName(curFileName);
     }
 
     @Override

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.service;
@@ -10,7 +10,7 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.google.common.collect.Sets;
 import org.joda.time.DateTime;
 import org.junit.Assert;
@@ -20,7 +20,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public class NodeInfoServiceTest extends BaseTestWithGmsTables {
+public class NodeInfoServiceTest extends BaseTest {
 
     @Test
     public void testGetOneNode() {
@@ -41,63 +41,68 @@ public class NodeInfoServiceTest extends BaseTestWithGmsTables {
 
     @Test
     public void testGetAllNodes() {
+
         insertNodeInfo();
         NodeInfoService nodeInfoService = SpringContextHolder.getObject(NodeInfoService.class);
 
-        setConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[]");
+        mockConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[]");
         List<NodeInfo> nodeInfoList = nodeInfoService.getAllNodes("cluster1");
         Assert.assertEquals(Sets.newHashSet("1", "2"),
             nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toSet()));
 
-        setConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[1]");
+        mockConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[1]");
         nodeInfoList = nodeInfoService.getAllNodes("cluster1");
         Assert.assertEquals(Sets.newHashSet("2"),
             nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toSet()));
+
     }
 
     @Test
     public void testGetAliveNodes() {
+
         insertNodeInfo();
         NodeInfoService nodeInfoService = SpringContextHolder.getObject(NodeInfoService.class);
+        mockConfig(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS, String.valueOf(10000));
 
-        setConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[]");
-        setConfig(ConfigKeys.INST_ID, "2");
+        mockConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[]");
+        mockConfig(ConfigKeys.INST_ID, "2");
         List<NodeInfo> nodeInfoList = nodeInfoService.getAliveNodes("cluster1");
         Assert.assertEquals(Sets.newHashSet("2"),
             nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toSet()));
 
-        setConfig(ConfigKeys.INST_ID, "1");
+        mockConfig(ConfigKeys.INST_ID, "1");
         nodeInfoList = nodeInfoService.getAliveNodes("cluster1");
         Assert.assertEquals(Sets.newHashSet("1", "2"),
             nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toSet()));
 
-        setConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[2]");
+        mockConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[2]");
         nodeInfoList = nodeInfoService.getAliveNodes("cluster1");
         Assert.assertEquals(Sets.newHashSet("1"),
             nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toSet()));
+
     }
 
     @Test
     public void testGetDeadNodes() {
         insertNodeInfo();
         NodeInfoService nodeInfoService = SpringContextHolder.getObject(NodeInfoService.class);
+        mockConfig(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS, String.valueOf(10000));
 
-        setConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[]");
-        setConfig(ConfigKeys.INST_ID, "2");
+        mockConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[]");
+        mockConfig(ConfigKeys.INST_ID, "2");
         List<NodeInfo> nodeInfoList = nodeInfoService.getDeadNodes("cluster1");
         Assert.assertEquals(Sets.newHashSet("1"),
             nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toSet()));
 
-        setConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[1]");
+        mockConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[1]");
         nodeInfoList = nodeInfoService.getDeadNodes("cluster1");
         Assert.assertEquals(Sets.newHashSet(),
             nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toSet()));
 
-        setConfig(ConfigKeys.INST_ID, "1");
+        mockConfig(ConfigKeys.INST_ID, "1");
         nodeInfoList = nodeInfoService.getDeadNodes("cluster1");
         Assert.assertEquals(Sets.newHashSet(),
             nodeInfoList.stream().map(NodeInfo::getContainerId).collect(Collectors.toSet()));
-
     }
 
     private void insertNodeInfo() {

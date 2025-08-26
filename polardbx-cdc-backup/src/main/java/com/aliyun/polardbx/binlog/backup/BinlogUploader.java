@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.backup;
@@ -47,6 +47,7 @@ public class BinlogUploader {
      * 文件是否已经写完
      */
     private final BinlogOssRecord record;
+    private final long checkInterval;
 
     public BinlogUploader(IFileReader fetcher, String remoteFileName, MetricsObserver observer,
                           BinlogOssRecord record) {
@@ -55,6 +56,7 @@ public class BinlogUploader {
         this.observer = observer;
         this.buffer = new byte[DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_UPLOAD_BUFFER_SIZE)];
         this.record = record;
+        this.checkInterval = DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_BACKUP_UPLOAD_CHECK_FILE_COMPLETE_MS);
     }
 
     public void upload() throws IOException {
@@ -63,6 +65,7 @@ public class BinlogUploader {
         boolean shouldUseMultiMode = RemoteBinlogProxy.getInstance().needSwitchMultiUpload(fetcher.length());
         shouldUseMultiMode |= (uploadMode == UPLOAD_MODE.MULTI_PART && fetcher.isComplete()
             && record.getLogEnd() != null);
+        shouldUseMultiMode |= RemoteBinlogProxy.getInstance().isS3();
 
         if (supportMultiUpload && shouldUseMultiMode) {
             doMultiUpload();
@@ -72,7 +75,7 @@ public class BinlogUploader {
     }
 
     private void doAppend() throws IOException {
-        logger.info("begin to append binlog:{} to remote", fetcher.getName());
+        logger.info("begin to append binlog:{} to remote {}", fetcher.getName(), remoteFileName);
         int len;
         final Appender appender = RemoteBinlogProxy.getInstance().providerAppender(remoteFileName);
         appender.begin();
@@ -89,13 +92,14 @@ public class BinlogUploader {
     }
 
     /**
-     * 文件大于4G时，切换为此模式
+     * 文件大于4G或远程存储是S3时，切换为此模式
      */
     private void doMultiUpload() throws IOException {
         // 分片上传模式需要等该文件写入完成之后，根据文件大小计算出需要分片的个数
+        // 之前isComplete()函数内部字符串比较10ms一次可能有性能问题，因此内部实现换成了int比较
         while (!fetcher.isComplete()) {
             try {
-                Thread.sleep(TimeUnit.SECONDS.toMillis(10));
+                Thread.sleep(checkInterval);
                 logger.warn("wait for file " + fetcher.getName() + " complete!");
             } catch (InterruptedException e) {
             }

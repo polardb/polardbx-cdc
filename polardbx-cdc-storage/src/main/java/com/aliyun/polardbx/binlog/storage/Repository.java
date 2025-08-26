@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.storage;
@@ -30,6 +30,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_CHECK_INTERV
  **/
 @Slf4j
 public class Repository {
+    private static final AtomicBoolean loaded = new AtomicBoolean(false);
     private final String basePath;
     private final PersistMode persistMode;
     private final Double persistNewThreshold;
@@ -62,16 +63,8 @@ public class Repository {
     public void open() {
         if (isStarted.compareAndSet(false, true)) {
             try {
-                clearTempLibFiles();
-                RocksDB.loadLibrary();
-                FileUtils.forceMkdir(new File(basePath));
-                FileUtils.cleanDirectory(new File(basePath));
-
-                for (int i = 0; i < repoUnitCount; i++) {
-                    RepoUnit unit = new RepoUnit(basePath + "/" + UUID.randomUUID().toString(), true, true, true);
-                    repoUnits.add(unit);
-                    unit.open();
-                }
+                load();
+                prepare();
             } catch (Throwable e) {
                 releaseResource();
                 throw new PolardbxException("Open Repository failed.", e);
@@ -163,7 +156,7 @@ public class Repository {
         }
     }
 
-    private void releaseResource() {
+    private synchronized void releaseResource() {
         repoUnits.forEach(u -> {
             try {
                 u.close();
@@ -171,6 +164,23 @@ public class Repository {
                 //do nothing
             }
         });
+    }
+
+    private synchronized void load() {
+        if (loaded.compareAndSet(false, true)) {
+            clearTempLibFiles();
+            RocksDB.loadLibrary();
+        }
+    }
+
+    private synchronized void prepare() throws Throwable {
+        FileUtils.forceMkdir(new File(basePath));
+        FileUtils.cleanDirectory(new File(basePath));
+        for (int i = 0; i < repoUnitCount; i++) {
+            RepoUnit unit = new RepoUnit(basePath + "/" + UUID.randomUUID(), true, true, true);
+            repoUnits.add(unit);
+            unit.open();
+        }
     }
 
     // RocksDB会在临时目录生成临时的lib文件，当通过kill命令的方式终止进程时，临时文件可以被释放掉

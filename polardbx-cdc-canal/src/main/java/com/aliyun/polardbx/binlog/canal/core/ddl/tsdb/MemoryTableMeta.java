@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
@@ -88,7 +88,6 @@ public class MemoryTableMeta implements TableMetaTSDB {
     @Setter
     private boolean ignoreImplicitPrimaryKey;
     @Getter
-    @Setter
     private boolean forceReplace;
 
     @Getter
@@ -282,7 +281,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
                             SQLBinaryOpExpr binaryOpExpr = (SQLBinaryOpExpr) tableOption.getValue();
                             tableMeta.setCharset(binaryOpExpr.getLeft().toString());
                         } else {
-                            tableMeta.setCharset(((SQLIdentifierExpr) tableOption.getValue()).getName());
+                            tableMeta.setCharset(tableOption.getValue().toString());
                         }
                         break;
                     }
@@ -544,6 +543,11 @@ public class MemoryTableMeta implements TableMetaTSDB {
     public boolean isSchemaExists(String schema) {
         Schema schemaRep = repository.findSchema(schema);
         return schemaRep != null;
+    }
+
+    public void setForceReplace(boolean forceReplace) {
+        this.forceReplace = forceReplace;
+        this.repository.setForceReplace(forceReplace);
     }
 
     private void tryRemoveSchema(BinlogPosition position, String ddlSql, String schema) throws IllegalAccessException {

@@ -1,12 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.fetcher;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.DirectByteOutput;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
 import com.google.protobuf.ByteString;
 import io.grpc.stub.StreamObserver;
@@ -40,19 +41,21 @@ public class StreamObserverLogFetcher extends LogFetcher implements StreamObserv
     public static final int BINLOG_DUMP_NON_BLOCK = 1;
     public static final int BINLOG_SEND_ANNOTATE_ROWS_EVENT = 2;
     private static final Logger logger = LoggerFactory.getLogger(StreamObserverLogFetcher.class);
-    private AtomicLong receiveBytesCount = new AtomicLong(0);
-    private StreamPipe pipe;
-    private long lastReceiveTimestamp = 0;
+    protected AtomicLong receiveBytesCount = new AtomicLong(0);
+    protected StreamPipe pipe;
+    protected long lastReceiveTimestamp = 0;
 
-    private ErrorHandle errorHandle;
+    protected ErrorHandle errorHandle;
 
-    private boolean activate = true;
+    protected boolean activate = true;
+
+    public static int LOG_INTERVAL = 15;
 
     public StreamObserverLogFetcher() throws IOException {
         pipe = new StreamPipe();
     }
 
-    private final boolean fetch0(final int off, final int len) throws IOException {
+    protected final boolean fetch0(final int off, final int len) throws IOException {
         ensureCapacity(off + len);
 
         for (int count, n = 0; n < len; n += count) {
@@ -158,7 +161,7 @@ public class StreamObserverLogFetcher extends LogFetcher implements StreamObserv
             return;
         }
         final ByteString payload = dumpStream.getPayload();
-        byte[] packets = payload.toByteArray();
+        byte[] packets = DirectByteOutput.unsafeFetch(payload);
         long counter = receiveBytesCount.addAndGet(packets.length);
         try {
             pipe.write(packets);
@@ -167,7 +170,7 @@ public class StreamObserverLogFetcher extends LogFetcher implements StreamObserv
         }
         long now = System.currentTimeMillis();
         long diff = TimeUnit.MILLISECONDS.toSeconds(now - lastReceiveTimestamp);
-        if (diff > 30) {
+        if (diff > LOG_INTERVAL) {
             logger.info("receive from dumper bytes : " + (counter) / diff + " b/s");
             lastReceiveTimestamp = now;
             receiveBytesCount.set(0);

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
@@ -754,7 +754,7 @@ public class MemoryTableMetaTest_CreateTable extends MemoryTableMetaBase {
     }
 
     @Test
-    public void testCreateTableLikeShardKey(){
+    public void testCreateTableLikeShardKey() {
         String sql1 = "create table t1(id bigint primary key , name varchar(20))";
         String sql2 = "alter table t1 partition by hash(`name`)";
         String sql3 = "create table t2 like d1.t1";

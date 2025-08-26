@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.cluster;
@@ -25,10 +25,12 @@ import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
@@ -40,15 +42,27 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SUSPEND_TOPOLOGY_REBUILDING;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
-public class GlobalBinlogTopologyServiceTest extends BaseTestWithGmsTables {
-    static MockedStatic<RuntimeLeaderElector> runtimeLeaderElector;
-    static MockedStatic<ServerConfigUtil> serverConfigUtil;
+public class GlobalBinlogTopologyServiceTest extends BaseTest {
+    private MockedStatic<RuntimeLeaderElector> runtimeLeaderElector;
+    private MockedStatic<ServerConfigUtil> serverConfigUtil;
 
-    private StorageInfo storageInfo1 = new StorageInfo();
-    private StorageInfo storageInfo2 = new StorageInfo();
+    private final StorageInfo storageInfo1 = new StorageInfo();
+    private final StorageInfo storageInfo2 = new StorageInfo();
 
-    private NodeInfo nodeInfo1 = new NodeInfo();
-    private NodeInfo nodeInfo2 = new NodeInfo();
+    private final NodeInfo nodeInfo1 = new NodeInfo();
+    private final NodeInfo nodeInfo2 = new NodeInfo();
+
+    @Before
+    public void before() {
+        runtimeLeaderElector = Mockito.mockStatic(RuntimeLeaderElector.class);
+        serverConfigUtil = Mockito.mockStatic(ServerConfigUtil.class);
+    }
+
+    @After
+    public void after() {
+        runtimeLeaderElector.close();
+        serverConfigUtil.close();
+    }
 
     private void mockNodeInfo() {
         NodeInfo nodeInfo = nodeInfo1;
@@ -121,23 +135,20 @@ public class GlobalBinlogTopologyServiceTest extends BaseTestWithGmsTables {
 
     @Test
     public void testBuildTopology() throws Throwable {
-        setConfig(ConfigKeys.TOPOLOGY_NODE_MINSIZE, "1");
-        setConfig(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS, "10000000");
-        setConfig(ConfigKeys.CLUSTER_ID, "cluster-1");
-        setConfig(ConfigKeys.INST_ID, "mock-inst");
-        setConfig(ConfigKeys.DAEMON_PORT, "3007");
-        setConfig(ConfigKeys.CPU_CORES, "32");
-        setConfig(ConfigKeys.MEM_SIZE, "2048");
-        setConfig(ConfigKeys.POLARX_INST_ID, "mock-inst");
-        setConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[]");
+        mockConfig(ConfigKeys.TOPOLOGY_NODE_MINSIZE, "1");
+        mockConfig(ConfigKeys.DAEMON_WATCH_CLUSTER_HEARTBEAT_TIMEOUT_MS, "10000000");
+        mockConfig(ConfigKeys.CLUSTER_ID, "cluster-1");
+        mockConfig(ConfigKeys.INST_ID, "mock-inst");
+        mockConfig(ConfigKeys.DAEMON_PORT, "3007");
+        mockConfig(ConfigKeys.CPU_CORES, "32");
+        mockConfig(ConfigKeys.MEM_SIZE, "2048");
+        mockConfig(ConfigKeys.POLARX_INST_ID, "mock-inst");
+        mockConfig(ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES, "[]");
 
         mockNodeInfo();
         mockStorageInfo();
 
-        runtimeLeaderElector = Mockito.mockStatic(RuntimeLeaderElector.class);
         Mockito.when(RuntimeLeaderElector.isDaemonLeader()).thenReturn(true);
-
-        serverConfigUtil = Mockito.mockStatic(ServerConfigUtil.class);
         Mockito.when(ServerConfigUtil.getGlobalNumberVarDirect(Mockito.anyString())).thenReturn(1L);
 
         TopologyWatcher topologyWatcher =

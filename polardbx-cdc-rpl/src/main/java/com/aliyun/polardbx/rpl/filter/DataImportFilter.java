@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.filter;
@@ -120,7 +120,7 @@ public class DataImportFilter extends BaseFilter {
 
     @Override
     protected Set<Long> initIgnoreServerIds(String filterStr) {
-        Set<String> tmpIgnoreServerIds = initFilterSet(filterStr);
+        Set<String> tmpIgnoreServerIds = initFilterNums(filterStr);
         Set<Long> ignoreServerIds = new HashSet<>();
         for (String serverId : tmpIgnoreServerIds) {
             ignoreServerIds.add((long) Math.abs(Long.valueOf(serverId).intValue()));

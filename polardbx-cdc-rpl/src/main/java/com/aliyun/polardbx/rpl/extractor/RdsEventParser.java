@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor;
@@ -12,6 +12,7 @@ import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import lombok.extern.slf4j.Slf4j;
@@ -93,7 +94,8 @@ public class RdsEventParser extends MysqlEventParser {
             if (entryPosition.getPosition() >= 0L) {
                 BinlogPosition position = findStartPosition(mysqlConnection);
                 // 对应的binlog被备份至oss
-                if (entryPosition.getFileName().compareTo(position.getFileName()) < 0) {
+
+                if (BinlogFileUtil.compareBinlogFileName(entryPosition.getFileName(), position.getFileName()) < 0) {
                     return null;
                 }
                 // 如果指定binlogName + offest，直接返回

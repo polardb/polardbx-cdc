@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.filesys;
@@ -9,8 +9,10 @@ package com.aliyun.polardbx.binlog.filesys;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.enums.BinlogUploadStatus;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,6 +23,7 @@ import java.text.SimpleDateFormat;
  * @author yudong
  * @since 2022/8/29
  **/
+@Slf4j
 public class CdcFile implements Comparable<CdcFile> {
     /**
      * file name, without any prefix path
@@ -115,7 +118,7 @@ public class CdcFile implements Comparable<CdcFile> {
 
     @Override
     public int compareTo(CdcFile o) {
-        return this.name.compareTo(o.name);
+        return BinlogFileUtil.compareBinlogFileName(this.name, o.name);
     }
 
     public boolean exist() {

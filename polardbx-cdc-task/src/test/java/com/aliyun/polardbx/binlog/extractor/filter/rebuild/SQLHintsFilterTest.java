@@ -1,13 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
 import org.junit.Assert;
 import org.junit.Test;
@@ -19,11 +19,11 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_DDL_HINT_BLACK
  * author: ziyang.lb
  * create: 2023-09-13 19:12
  **/
-public class SQLHintsFilterTest extends BaseTestWithGmsTables {
+public class SQLHintsFilterTest extends BaseTest {
 
     @Test
     public void testFilter() {
-        setConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST, "GSI_BACKFILL_POSITION_MARK,FP_PAUSE_AFTER_DDL_TASK_EXECUTION");
+        mockConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST, "GSI_BACKFILL_POSITION_MARK,FP_PAUSE_AFTER_DDL_TASK_EXECUTION");
 
         // in last position
         String sql = "/*DDL_SUBMIT_TOKEN=3a748e60-881e-4bff-b2ed-a421b3e11006*/"
@@ -81,7 +81,8 @@ public class SQLHintsFilterTest extends BaseTestWithGmsTables {
         Assert.assertEquals(expectSql, stmt.toString());
 
         // multi filter
-        setConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST, "GSI_BACKFILL_POSITION_MARK,GSI_BACKFILL_BATCH_SIZE,ALLOW_ADD_GSI");
+        mockConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST,
+            "GSI_BACKFILL_POSITION_MARK,GSI_BACKFILL_BATCH_SIZE,ALLOW_ADD_GSI");
         sql = "/*DDL_SUBMIT_TOKEN=3a748e60-881e-4bff-b2ed-a421b3e11006*/"
             + "/*+TDDL:CMD_EXTRA(GSI_BACKFILL_BATCH_SIZE=2, gsi_backfill_position_mark = \"[{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100001\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_0\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100002\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_1\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000000_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_2\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_3\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"-1\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_4\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"},{\\\"columnIndex\\\":0,\\\"endTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"extra\\\":\\\"{\\\\\\\"testCaseName\\\\\\\":\\\\\\\"GsiBackfillResumeTest\\\\\\\"}\\\",\\\"id\\\":-1,\\\"indexName\\\":\\\"g_resume_id\\\",\\\"indexSchema\\\":\\\"cp1_ddl1_3343801\\\",\\\"jobId\\\":-1,\\\"lastValue\\\":\\\"100000\\\",\\\"message\\\":\\\"\\\",\\\"parameterMethod\\\":\\\"setString\\\",\\\"physicalDb\\\":\\\"CP1_DDL1_3343801_000001_GROUP\\\",\\\"physicalTable\\\":\\\"gsi_backfill_resume_primary_Khjv_5\\\",\\\"startTime\\\":\\\"2023-09-12 21:07:51\\\",\\\"status\\\":-1,\\\"successRowCount\\\":0,\\\"tableName\\\":\\\"gsi_backfill_resume_primary\\\",\\\"tableSchema\\\":\\\"cp1_ddl1_3343801\\\"}]\", ALLOW_ADD_GSI=TRUE)*/ "
             + "CREATE GLOBAL INDEX g_resume_id ON gsi_backfill_resume_primary (id) COVERING (c_bit_1, c_bit_8, c_bit_16, c_bit_32, c_bit_64, c_tinyint_1, c_tinyint_1_un, c_tinyint_4, c_tinyint_4_un, c_tinyint_8, c_tinyint_8_un, c_smallint_1, c_smallint_16, c_smallint_16_un, c_mediumint_1, c_mediumint_24, c_mediumint_24_un, c_int_1, c_int_32, c_int_32_un, c_bigint_1, c_bigint_64, c_bigint_64_un, c_decimal, c_decimal_pr, c_float, c_float_pr, c_float_un, c_double, c_double_pr, c_double_un, c_date, c_datetime, c_datetime_1, c_datetime_3, c_datetime_6, c_timestamp_1, c_timestamp_3, c_timestamp_6, c_time, c_time_1, c_time_3, c_time_6, c_year, c_year_4, c_char, c_varchar, c_binary, c_varbinary, c_blob_tiny, c_blob, c_blob_medium, c_blob_long, c_text_tiny, c_text, c_text_medium, c_text_long, c_enum, c_set, c_json, c_geometory, c_point, c_linestring, c_polygon, c_multipoint, c_multilinestring, c_multipolygon) DBPARTITION BY HASH(id) TBPARTITION BY HASH(id) TBPARTITIONS 7";
@@ -110,7 +111,7 @@ public class SQLHintsFilterTest extends BaseTestWithGmsTables {
         Assert.assertEquals(sql, stmt.toString());
 
         // FP_PAUSE_AFTER_DDL_TASK_EXECUTION
-        setConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST, "GSI_BACKFILL_POSITION_MARK,FP_PAUSE_AFTER_DDL_TASK_EXECUTION");
+        mockConfig(TASK_REFORMAT_DDL_HINT_BLACKLIST, "GSI_BACKFILL_POSITION_MARK,FP_PAUSE_AFTER_DDL_TASK_EXECUTION");
         expectSql = "/*DDL_SUBMIT_TOKEN=4488de65-0b1c-4c14-91f2-2e9d69f631eb*/\n"
             + "/*+TDDL:cmd_extra()*/\n"
             + "ALTER TABLE wumu_test\n"

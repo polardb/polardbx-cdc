@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.random;
@@ -500,7 +500,7 @@ public class DmlSqlBuilder {
         return Pair.of(RandomUtils.nextInt(minId, maxId), maxId);
     }
 
-    private Integer doGetMinId() throws Exception{
+    private Integer doGetMinId() throws Exception {
         try (Connection connection = ConnectionManager.getInstance().getDruidPolardbxConnection()) {
             JdbcUtil.executeQuery("use " + dbName, connection);
             Statement stmt = connection.createStatement();
@@ -521,8 +521,9 @@ public class DmlSqlBuilder {
             withRetryListener(new RetryListener() {
                 @Override
                 public <V> void onRetry(Attempt<V> attempt) {
-                    if (attempt.hasException()){
-                        log.error("random range failed! attempt times : "+attempt.getAttemptNumber(), attempt.getExceptionCause());
+                    if (attempt.hasException()) {
+                        log.error("random range failed! attempt times : " + attempt.getAttemptNumber(),
+                            attempt.getExceptionCause());
                     }
                 }
             }).build();

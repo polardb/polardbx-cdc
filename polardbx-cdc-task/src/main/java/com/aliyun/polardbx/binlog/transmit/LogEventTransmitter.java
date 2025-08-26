@@ -1,15 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.transmit;
 
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.metrics.TransmitMetrics;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
@@ -27,6 +25,7 @@ import com.aliyun.polardbx.binlog.storage.Storage;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.protobuf.ByteString;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -64,7 +63,7 @@ public class LogEventTransmitter implements Transmitter {
     private static final int CHUNK_MEM_UNIT = 1024;// memsize的单位，默认为1kb大小
     private static final int FLUSH_TIME_THRESHOLD = 500;//ms
 
-    private final TaskType taskType;
+    private final boolean relayStage;
     private final Storage storage;
     private final ArrayBlockingQueue<MessageEvent> transmitQueue;
     private final ArrayBlockingQueue<DumpReply> dumpingQueue;
@@ -82,9 +81,9 @@ public class LogEventTransmitter implements Transmitter {
     private volatile TxnToken latestFormatDescToken;
     private volatile boolean running;
 
-    public LogEventTransmitter(TaskType taskType, int transmitBufferSize, Storage storage, ChunkMode chunkMode,
+    public LogEventTransmitter(boolean relayStage, int transmitBufferSize, Storage storage, ChunkMode chunkMode,
                                int chunkItemSize, int maxMessageSize, boolean dryRun, String startTso) {
-        this.taskType = taskType;
+        this.relayStage = relayStage;
         this.storage = storage;
         this.transmitQueue = new ArrayBlockingQueue<>(transmitBufferSize);
         this.dumpingQueue = new ArrayBlockingQueue<>(DynamicApplicationConfig.getInt(TASK_TRANSMIT_DUMPING_QUEUE_SIZE));
@@ -227,8 +226,8 @@ public class LogEventTransmitter implements Transmitter {
 
             TxnToken txnToken = messageEvent.getToken();
             if (txnToken.getType() != TxnType.FORMAT_DESC &&
-                ((taskType == TaskType.Final && txnToken.getTso().compareTo(startTso) <= 0) ||
-                    (taskType == TaskType.Relay && txnToken.getTso().compareTo(startTso) < 0))) {
+                ((!relayStage && txnToken.getTso().compareTo(startTso) <= 0) ||
+                    (relayStage && txnToken.getTso().compareTo(startTso) < 0))) {
                 logger.info("Received Token`s tso {} is equal or lower than startTso {} , will skip.",
                     txnToken.getTso(), startTso);
                 checkIfFlushChunk(null, false);
@@ -335,8 +334,8 @@ public class LogEventTransmitter implements Transmitter {
             if (messageEvent.isAlreadyBuild()) {
                 addTxnMessage(builder, messageEvent);
             } else {
-                TxnMessage message = MessageBuilder.buildTxnMessage(messageEvent.getToken(), taskType,
-                    messageEvent.getTxnBuffers().get(0));
+                TxnMessage message = MessageBuilder.buildTxnMessage(messageEvent.getToken(),
+                    messageEvent.getTxnBuffers().get(0), relayStage);
                 if (packetMode == PacketMode.OBJECT) {
                     builder.addTxnMessage(message);
                 } else {
@@ -363,7 +362,7 @@ public class LogEventTransmitter implements Transmitter {
     private void sendBegin(TxnToken token) throws InterruptedException {
         TxnMessage message = TxnMessage.newBuilder()
             .setType(MessageType.BEGIN)
-            .setTxnBegin(buildTxnBegin(token, taskType))
+            .setTxnBegin(buildTxnBegin(token, relayStage))
             .build();
         addToDumpingQueue(buildDumpReply(message));
     }
@@ -418,7 +417,7 @@ public class LogEventTransmitter implements Transmitter {
 
     private void sendTag(TxnToken token, TxnOutputStream<DumpReply> txnOutputStream) throws InterruptedException {
         TxnTag txnTag;
-        if (taskType == TaskType.Relay) {
+        if (relayStage) {
             txnTag = TxnTag.newBuilder().setTxnToken(token).build();
         } else {
             txnTag = TxnTag.newBuilder().setTxnMergedToken(buildTxnMergedToken(token)).build();

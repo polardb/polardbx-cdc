@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation.reconciliation;
@@ -116,6 +116,7 @@ public class Repairer {
         TableInfo srcTableInfo =
             DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, HostType.POLARX1, false);
         while (true) {
+            StatisticalProxy.getInstance().heartbeat();
             List<ValidationDiff> diffList = ValidationTaskRepository.getValDiffListWithLimit(srcDbName, tableName);
             if (diffList.isEmpty()) {
                 break;
@@ -143,6 +144,7 @@ public class Repairer {
 
     private void repairOneRecord(String dstDbName, String tableName, TableInfo tableInfo, ValidationDiff diff) {
         try {
+            StatisticalProxy.getInstance().heartbeat();
             DiffRecord.DiffType diffType = DiffRecord.DiffType.valueOf(diff.getType());
 
             List<Object> keyVal;

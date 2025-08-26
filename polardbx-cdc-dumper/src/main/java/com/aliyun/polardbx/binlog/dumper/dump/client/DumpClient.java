@@ -1,11 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.client;
 
+import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
@@ -26,7 +27,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -113,9 +116,12 @@ public class DumpClient {
                 }
             };
             CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
+            Map<String, String> ext = new HashMap<>(1);
+            ext.put("client_type", "SLAVE");
             cdcServiceStub.sync(DumpRequest.newBuilder()
                 .setFileName(fileName)
                 .setPosition(pos)
+                .setExt(JSON.toJSONString(ext))
                 .setSplitMode(splitMode).build(), observer);
 
             while (connected.get()) {

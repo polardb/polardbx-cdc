@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.taskmeta;
@@ -39,5 +39,9 @@ public enum ServiceType {
     public static boolean supportRunningCheck(ServiceType type) {
         return type != REPLICA_FULL && type != REPLICA_INC &&
             type != FULL_COPY && type != FULL_VALIDATION && type != REPLICA_FULL_VALIDATION;
+    }
+
+    public static boolean alarmWhenNoResource(ServiceType type) {
+        return type != REC_SEARCH;
     }
 }

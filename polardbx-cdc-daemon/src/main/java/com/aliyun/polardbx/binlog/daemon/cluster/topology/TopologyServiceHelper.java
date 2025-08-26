@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.cluster.topology;
@@ -9,7 +9,6 @@ package com.aliyun.polardbx.binlog.daemon.cluster.topology;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.constant.ClusterRebalanceInstruction;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
@@ -18,8 +17,6 @@ import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
-import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.XStreamMapper;
 import com.aliyun.polardbx.binlog.domain.StorageContent;
 import com.aliyun.polardbx.binlog.domain.po.StorageHistoryInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
@@ -46,7 +43,6 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_FORCE_REFRESH_TOPOLOGY_INTERVAL;
@@ -56,6 +52,7 @@ import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.status;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.storageInstId;
+import static com.aliyun.polardbx.binlog.service.XStreamService.getXStreamsInCurrentCluster;
 import static com.aliyun.polardbx.binlog.util.ServerConfigUtil.SERVER_ID;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isIn;
@@ -103,8 +100,11 @@ public class TopologyServiceHelper {
     }
 
     public static String buildExpectedStorageTso4BinlogX() {
-        List<XStream> streamList = getStreamConfig();
-        Optional<String> optional = streamList.stream().map(XStream::getExpectedStorageTso).min(String::compareTo);
+        List<XStream> streamList = getXStreamsInCurrentCluster();
+        Optional<String> optional = streamList.stream()
+            .filter(x -> x.getStatus() == 0)
+            .map(XStream::getExpectedStorageTso)
+            .min(String::compareTo);
         if (optional.isPresent() && StringUtils.isNotBlank(optional.get())) {
             return optional.get();
         } else {
@@ -143,7 +143,7 @@ public class TopologyServiceHelper {
             return true;
         }
 
-        if (preClusterSnapshot.isNew()) {
+        if (preClusterSnapshot.isOrigin()) {
             log.info("cluster snapshot is new, topology will rebuild.");
             return true;
         }
@@ -151,6 +151,13 @@ public class TopologyServiceHelper {
         if (preClusterSnapshot.getServerId() == null
             || ServerConfigUtil.getGlobalNumberVarDirect(SERVER_ID) != preClusterSnapshot.getServerId()) {
             return true;
+        }
+
+        if (storageHistoryInfo != null
+            && StringUtils.compare(storageHistoryInfo.getTso(), preClusterSnapshot.getStorageHistoryTso()) < 0) {
+            throw new PolardbxException(
+                String.format("latest storage history tso can`t be less than previous storage history tso, %s : %s",
+                    storageHistoryInfo.getTso(), preClusterSnapshot.getStorageHistoryTso()));
         }
 
         int forceRefreshInterval = DynamicApplicationConfig.getInt(DAEMON_FORCE_REFRESH_TOPOLOGY_INTERVAL);
@@ -168,7 +175,8 @@ public class TopologyServiceHelper {
             !(latestStorages.equals(preClusterSnapshot.getStorages())
                 && StringUtils.equals(storageHistoryInfo.getTso(), preClusterSnapshot.getStorageHistoryTso()));
         if (isStorageChange) {
-            log.info("detected storage changing ,will rebuild topology.");
+            log.info("detected storage changing ,will rebuild topology, previous list is {}, latest list is {}",
+                preClusterSnapshot.getStorages(), latestStorages);
             return true;
         }
 
@@ -216,7 +224,7 @@ public class TopologyServiceHelper {
                 CLUSTER_SNAPSHOT_VERSION_KEY), String.class);
         ClusterSnapshot snapshotInDb = JSONObject.parseObject(snapshotInDbStr, ClusterSnapshot.class);
 
-        if (preClusterSnapshot.getVersion() != snapshotInDb.getVersion()) {
+        if (snapshotInDb != null && preClusterSnapshot.getVersion() != snapshotInDb.getVersion()) {
             log.info("Topology persisting is ignored because of mismatching versions,"
                     + " old version is {},latest version in db is {} ",
                 preClusterSnapshot.getVersion(), snapshotInDb.getVersion());
@@ -252,24 +260,23 @@ public class TopologyServiceHelper {
                 }
             }
         } else {
-            storageInfos = storageInfoMapper.select(c ->
-                c.where(instKind, isEqualTo(0))
-                    .and(status, isNotEqualTo(2))
-                    .orderBy(id)
-            );
-            storageInfos = Lists.newArrayList(storageInfos.stream().collect(
-                Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1,
-                    (s1, s2) -> s1)).values());
-
+            storageInfos = getAllStorageInfo();
         }
 
         return storageInfos;
     }
 
-    public static List<XStream> getStreamConfig() {
-        String streamGroupName = DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME);
-        XStreamMapper mapper = SpringContextHolder.getObject(XStreamMapper.class);
-        return mapper.select(s -> s.where(XStreamDynamicSqlSupport.groupName, isEqualTo(streamGroupName))
-            .orderBy(XStreamDynamicSqlSupport.streamName));
+    public static List<StorageInfo> getAllStorageInfo() {
+        final StorageInfoMapper storageInfoMapper = getObject(StorageInfoMapper.class);
+        List<StorageInfo> storageInfos;
+        storageInfos = storageInfoMapper.select(c ->
+            c.where(instKind, isEqualTo(0))
+                .and(status, isNotEqualTo(2))
+                .orderBy(id)
+        );
+        storageInfos = Lists.newArrayList(storageInfos.stream().collect(
+            Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1,
+                (s1, s2) -> s1)).values());
+        return storageInfos;
     }
 }

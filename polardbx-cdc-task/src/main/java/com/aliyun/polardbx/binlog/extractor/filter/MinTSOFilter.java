@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
@@ -98,9 +98,8 @@ public class MinTSOFilter implements LogEventFilter<TransactionGroup> {
         lastTransaction = transaction;
 
         if (!processingEvent) {
-            logger
-                .info("****--- ready to push event start with tso " + transaction.getVirtualTsoStr() + ", at position "
-                    + transaction.getBinlogFileName() + ":" + transaction.getStartLogPos());
+            logger.info("****--- ready to push event start with tso " + transaction.getVirtualTsoStr() +
+                ", at position " + transaction.getBinlogFileName() + ":" + transaction.getStartLogPos());
         }
         processingEvent = true;
     }

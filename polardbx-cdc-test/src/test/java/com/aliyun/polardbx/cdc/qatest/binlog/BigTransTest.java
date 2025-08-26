@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.binlog;
@@ -91,7 +91,6 @@ public class BigTransTest extends RplBaseTestCase {
     }
 
     @Test
-    @Ignore
     public void testBigTrans() throws SQLException, InterruptedException {
         JdbcUtil.executeUpdate(polardbxConnection, CREATE_TABLE_SQL);
         JdbcUtil.executeSuccess(polardbxConnection, INSERT_SINGLE_SQL);

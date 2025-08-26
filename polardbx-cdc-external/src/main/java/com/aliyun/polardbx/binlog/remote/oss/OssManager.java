@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote.oss;
@@ -36,15 +36,15 @@ import com.aliyun.oss.model.PartETag;
 import com.aliyun.oss.model.UploadPartRequest;
 import com.aliyun.oss.model.UploadPartResult;
 import com.aliyun.oss.model.VersionListing;
-import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
-import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.remote.Appender;
 import com.aliyun.polardbx.binlog.remote.DownloadModeEnum;
+import com.aliyun.polardbx.binlog.remote.DownloadParameter;
 import com.aliyun.polardbx.binlog.remote.IRemoteManager;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.LoopRetry;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
@@ -97,6 +97,9 @@ public class OssManager implements IRemoteManager {
         ListBucketsRequest request = new ListBucketsRequest(ossConfig.bucketName, null, null);
         OSS oss = getOssClient();
         do {
+            if (Thread.interrupted()) {
+                throw new RuntimeException("thread interrupted in create bucket " + ossConfig.bucketName);
+            }
             BucketList bucketObj = oss.listBuckets(request);
             List<Bucket> bucketList = bucketObj.getBucketList();
             boolean find = false;
@@ -148,23 +151,18 @@ public class OssManager implements IRemoteManager {
     public String getMd5(String fileName) {
         OSS ossClient = getOssClient();
         String ossFileName = BinlogFileUtil.buildRemoteFileFullName(fileName, ossConfig.polardbxInstance);
-        OSSObject ossObject = ossClient.getObject(ossConfig.bucketName, ossFileName);
+        ObjectMetadata ossObjectMetadata = ossClient.getObjectMetadata(ossConfig.bucketName, ossFileName);
         ossClient.shutdown();
-        return ossObject.getObjectMetadata().getETag();
+        return ossObjectMetadata.getETag();
     }
 
     @Override
     public long getSize(String fileName) {
         OSS ossClient = getOssClient();
         String ossFileName = BinlogFileUtil.buildRemoteFileFullName(fileName, ossConfig.polardbxInstance);
-        OSSObject ossObject = ossClient.getObject(ossConfig.bucketName, ossFileName);
-        try {
-            ossObject.close();
-        } catch (Exception e) {
-
-        }
+        ObjectMetadata ossObjectMetaData = ossClient.getObjectMetadata(ossConfig.bucketName, ossFileName);
         ossClient.shutdown();
-        return ossObject.getObjectMetadata().getContentLength();
+        return ossObjectMetaData.getContentLength();
     }
 
     @Override
@@ -232,11 +230,10 @@ public class OssManager implements IRemoteManager {
     }
 
     @Override
-    public void download(String fileName, String localPath) throws Throwable {
-        DownloadModeEnum downloadMode =
-            DownloadModeEnum.valueOf(DynamicApplicationConfig.getString(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MODE));
+    public void download(String fileName, String localPath, DownloadParameter downloadParameter) throws Throwable {
+        DownloadModeEnum downloadMode = downloadParameter.getDownloadMode();
         if (downloadMode == DownloadModeEnum.PARALLEL) {
-            parallelDownload(fileName, localPath);
+            parallelDownload(fileName, localPath, downloadParameter);
         } else {
             serialDownload(fileName, localPath);
         }
@@ -252,15 +249,14 @@ public class OssManager implements IRemoteManager {
         }
     }
 
-    private void parallelDownload(String fileName, String localPath) throws Throwable {
+    private void parallelDownload(String fileName, String localPath, DownloadParameter downloadParameter)
+        throws Throwable {
         OSS client = getOssClient();
         String ossFileName = BinlogFileUtil.buildRemoteFileFullName(fileName, ossConfig.polardbxInstance);
-        Long partSize = DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_PART_SIZE);
-        Integer taskNum = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MAX_THREAD_NUM);
         DownloadFileRequest downloadFileRequest = new DownloadFileRequest(ossConfig.bucketName, ossFileName);
         downloadFileRequest.setDownloadFile(new File(localPath, fileName).getPath());
-        downloadFileRequest.setPartSize(partSize);
-        downloadFileRequest.setTaskNum(taskNum);
+        downloadFileRequest.setPartSize(downloadParameter.getParallelPartSize());
+        downloadFileRequest.setTaskNum(downloadParameter.getParallelism());
         try {
             client.downloadFile(downloadFileRequest);
         } finally {
@@ -540,6 +536,7 @@ public class OssManager implements IRemoteManager {
                 innerAppend(bos.toByteArray(), bos.size());
                 bos.reset();
                 if (currentAppendSize != fileLength) {
+                    abort();
                     throw new PolardbxException(
                         String.format(
                             "partNum has equal to partCount, but currentAppend size %s is not equal to fileLength %s.",
@@ -564,6 +561,10 @@ public class OssManager implements IRemoteManager {
             // 设置分片号。每一个上传的分片都有一个分片号，取值范围是1~10000，如果超出这个范围，OSS将返回InvalidArgument的错误码。
             uploadPartRequest.setPartNumber(partNum + 1);
             do {
+                if (Thread.interrupted()) {
+                    abort();
+                    throw new RuntimeException("upload " + binlogFileName + " interrupted");
+                }
                 try {
                     CRC64 crc64 = new CRC64(buffer, readLen);
                     // 每个分片不需要按顺序上传，甚至可以在不同客户端上传，OSS会按照分片号排序组成完整的文件。
@@ -579,14 +580,7 @@ public class OssManager implements IRemoteManager {
                     break;
                 } catch (OSSException e) {
                     logger.error("upload failed, will terminal upload " + binlogFileName, e);
-                    try {
-                        AbortMultipartUploadRequest abortMultipartUploadRequest = new AbortMultipartUploadRequest(
-                            ossConfig.bucketName,
-                            binlogFileName,
-                            uploadId);
-                        oss.abortMultipartUpload(abortMultipartUploadRequest);
-                    } catch (Exception se) {
-                    }
+                    abort();
                     throw e;
                 } catch (ClientException e) {
                     logger.error("upload failed , will retry ", e);
@@ -607,6 +601,7 @@ public class OssManager implements IRemoteManager {
         public void end() {
             if (partCount != partNum) {
                 logger.error("partCount is not equal to partNum, partCount {}, parNum {}", partCount, partNum);
+                abort();
                 throw new PolardbxException(
                     String.format("partCount is not equal to partNum, partCount %s, parNum %s.", partCount, partNum));
             }
@@ -624,6 +619,17 @@ public class OssManager implements IRemoteManager {
             this.success = true;
             // 关闭OSSClient。
             oss.shutdown();
+        }
+
+        private void abort() {
+            try {
+                AbortMultipartUploadRequest abortMultipartUploadRequest = new AbortMultipartUploadRequest(
+                    BinlogFileUtil.buildRemoteFileFullName(binlogFileName, ossConfig.polardbxInstance),
+                    binlogFileName,
+                    uploadId);
+                oss.abortMultipartUpload(abortMultipartUploadRequest);
+            } catch (Exception se) {
+            }
         }
     }
 }

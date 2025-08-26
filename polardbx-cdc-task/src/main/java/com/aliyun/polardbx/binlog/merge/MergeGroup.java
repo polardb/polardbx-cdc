@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.merge;
@@ -11,14 +11,19 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.storage.PersistAllChecker;
 import com.aliyun.polardbx.binlog.storage.Storage;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,6 +43,7 @@ public class MergeGroup {
     private final AtomicBoolean running;
 
     /// variables for none leaf node
+    @Getter
     private final Map<String, MergeGroup> mergeGroupMap;
     private final MergeController mergeController;
     private final ArrayBlockingQueue<MergeItem> queue;
@@ -45,6 +51,7 @@ public class MergeGroup {
     private ExecutorService executorService;
 
     /// variables for leaf node
+    @Getter
     private final MergeSource directMergeSource;
 
     MergeGroup(String identifier, Storage storage) {
@@ -86,7 +93,7 @@ public class MergeGroup {
     public void start() {
         if (running.compareAndSet(false, true)) {
             if (directMergeSource == null) {
-                this.mergeGroupMap.values().forEach(MergeGroup::start);
+                this.parallelStartMergeGroup();
                 this.executorService =
                     Executors.newSingleThreadExecutor(r -> new Thread(r, "binlog-merger-group-thread-" + identifier));
                 this.executorService.execute(() -> {
@@ -145,6 +152,20 @@ public class MergeGroup {
                 directMergeSource.start();
             }
             log.info("merge group with identifier {} started.", identifier);
+        }
+    }
+
+    protected void parallelStartMergeGroup() {
+        ExecutorService service = Executors.newCachedThreadPool();
+        Map<String, Future<?>> futureList = new HashMap<>();
+        this.mergeGroupMap.forEach((key, value) -> futureList.put(key, service.submit(value::start)));
+        for (Map.Entry<String, Future<?>> item : futureList.entrySet()) {
+            try {
+                item.getValue().get();
+            } catch (InterruptedException | ExecutionException e) {
+                log.error("start merge group failed, with identifier " + identifier, e);
+                throw new PolardbxException("start merge group failed, with identifier " + identifier, e);
+            }
         }
     }
 

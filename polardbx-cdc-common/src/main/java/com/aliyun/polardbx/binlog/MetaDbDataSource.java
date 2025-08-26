@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog;
@@ -65,7 +65,8 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
 
     private static final String METADB_URL_SCAN_SQL = "SHOW STORAGE";
 
-    private static final String CN_URL_TEMPLATE = "jdbc:mysql://%s/__cdc__?useSSL=false";
+    private static final String CN_URL_TEMPLATE =
+        "jdbc:mysql://%s/__cdc__?useSSL=false&socketTimeout=30000&connectTimeout=2000";
 
     private boolean bootstrap = true;
 
@@ -646,6 +647,9 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
 
     @Override
     public void setUrl(String s) {
+        if (!StringUtils.contains(s, "socketTimeout")) {
+            s = s + "&socketTimeout=30000";
+        }
         this.metaDbUrl = s;
         this.poolProperties.setUrl(s);
     }

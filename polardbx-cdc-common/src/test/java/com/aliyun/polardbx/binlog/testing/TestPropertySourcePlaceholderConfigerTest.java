@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.testing;
@@ -12,7 +12,7 @@ import com.aliyun.polardbx.binlog.util.PropertyChangeListener;
 import org.junit.Assert;
 import org.junit.Test;
 
-public class TestPropertySourcePlaceholderConfigerTest extends BaseTestWithGmsTables implements PropertyChangeListener {
+public class TestPropertySourcePlaceholderConfigerTest extends BaseTest implements PropertyChangeListener {
 
     private boolean isModify = false;
     private int count = 0;

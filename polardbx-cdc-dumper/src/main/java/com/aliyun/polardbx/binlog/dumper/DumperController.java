@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper;
@@ -25,6 +25,8 @@ import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.FlushPolicy;
+import com.aliyun.polardbx.binlog.lock.LogFileLockManager;
+import com.aliyun.polardbx.binlog.lock.LogFileLockManagerCollection;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManager;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileManagerCollection;
 import com.aliyun.polardbx.binlog.dumper.metrics.MetricsManager;
@@ -76,6 +78,7 @@ public class DumperController {
     private final TaskRuntimeConfig taskRuntimeConfig;
     private final ExecutionConfig executionConfig;
     private LogFileManagerCollection logFileManagerCollection;
+    private LogFileLockManagerCollection logFileLockManagerCollection;
     private CdcServer cdcServer;
     private MetricsManager metricsManager;
     private String role;
@@ -97,6 +100,8 @@ public class DumperController {
             return;
         }
         running = true;
+        // 暂时这个start()将会几乎啥都不干
+        this.logFileLockManagerCollection.start();
         this.cleanManager.start();
         this.logFileManagerCollection.start();
         // 需要保证logFileManager启动之后再启动backupManager
@@ -142,13 +147,14 @@ public class DumperController {
     private void build() {
         setGroupAndStream();
         tryRenameBinlogRootPath();
+        buildLogFileLockManagerCollection();
         buildLogFileManagerCollection();
         Map<String, MetricsObserver> metrics = new HashMap<>();
         streamList.forEach(streamId -> metrics.put(streamId, StreamMetrics.getStreamMetrics(streamId)));
         this.backupManager = new BinlogBackupManager(buildStreamContext(), metrics);
-        this.cleanManager = new BinlogCleanManager(buildStreamContext());
         this.metricsManager = new MetricsManager(executionConfig.getRuntimeVersion(), taskRuntimeConfig.getName(),
             taskRuntimeConfig.getType());
+        this.cleanManager = new BinlogCleanManager(buildStreamContext(), logFileLockManagerCollection);
         this.cdcServer =
             new CdcServer(executionConfig.getRuntimeVersion(), taskRuntimeConfig.getType(), taskRuntimeConfig.getName(),
                 logFileManagerCollection, taskRuntimeConfig.getServerPort(), taskRuntimeConfig.getBinlogTaskConfig(),
@@ -164,11 +170,13 @@ public class DumperController {
         ExecutionConfig config = buildExecutionConfig(taskRuntimeConfig);
         this.logFileManagerCollection = new LogFileManagerCollection();
         streamList.forEach(streamName -> {
-            logFileManagerCollection.add(streamName, buildLogFileManager(config, streamName));
+            logFileManagerCollection.add(streamName,
+                buildLogFileManager(config, streamName, logFileLockManagerCollection.get(streamName)));
         });
     }
 
-    private LogFileManager buildLogFileManager(ExecutionConfig executionConfig, String streamName) {
+    private LogFileManager buildLogFileManager(ExecutionConfig executionConfig, String streamName,
+                                               LogFileLockManager logFileLockManager) {
         LogFileManager logFileManager = new LogFileManager();
         logFileManager.setTaskName(taskRuntimeConfig.getName());
         logFileManager.setTaskType(taskRuntimeConfig.getType());
@@ -183,7 +191,17 @@ public class DumperController {
         logFileManager.setFlushInterval(DynamicApplicationConfig.getInt(BINLOG_WRITE_FLUSH_INTERVAL));
         logFileManager.setWriteBufferSize(DynamicApplicationConfig.getInt(BINLOG_WRITE_BUFFER_SIZE));
         logFileManager.setStreamName(streamName);
+        logFileManager.setLogFileLockManager(logFileLockManager);
         return logFileManager;
+    }
+
+    private void buildLogFileLockManagerCollection() {
+        StreamContext streamContext = buildStreamContext();
+        this.logFileLockManagerCollection = new LogFileLockManagerCollection();
+        streamList.forEach(
+            streamName ->
+                logFileLockManagerCollection.add(streamName, new LogFileLockManager(streamName, streamContext))
+        );
     }
 
     private void buildRole() {

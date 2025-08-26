@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.dump;
@@ -21,6 +21,9 @@ import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.MySQLConnectionException;
 import com.aliyun.polardbx.binlog.canal.exception.SQLExecuteException;
+import com.aliyun.polardbx.binlog.util.AddressUtil;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import lombok.Getter;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
@@ -29,11 +32,13 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 /**
@@ -57,6 +62,7 @@ public class MysqlConnection implements ErosaConnection {
      * 16k
      */
     protected int bufferSize = 16 * 1024;
+    @Getter
     private AuthenticationInfo authInfo;
     private Connection conn;
     private BinlogFormat binlogFormat;
@@ -81,11 +87,10 @@ public class MysqlConnection implements ErosaConnection {
         info.put("password", authInfo.getPassword());
         info.put("connectTimeout", String.valueOf(connTimeout));
         info.put("socketTimeout", String.valueOf(soTimeout));
-        String url = "jdbc:mysql://" + authInfo.getAddress().getHostName() + ":"
-            + authInfo.getAddress().getPort() + "?allowMultiQueries=true&allowPublicKeyRetrieval=true&useSSL=false";
+        String url = "jdbc:mysql://" + authInfo.getAddress().getHostName() + ":" + authInfo.getAddress().getPort()
+            + "?allowMultiQueries=true&allowPublicKeyRetrieval=true&useSSL=false";
         try {
-            com.mysql.jdbc.Driver driver = new com.mysql.jdbc.Driver();
-            conn = driver.connect(url, info);
+            conn = DriverManager.getConnection(url, info);
         } catch (SQLException e) {
             throw new MySQLConnectionException(e);
         }
@@ -108,6 +113,14 @@ public class MysqlConnection implements ErosaConnection {
 
             conn = null;
         }
+    }
+
+    public boolean hasMoreNode() {
+        return getAuthInfo().hasNextNode();
+    }
+
+    public void switchNextFollower() {
+        getAuthInfo().nextNode();
     }
 
     /**
@@ -162,8 +175,8 @@ public class MysqlConnection implements ErosaConnection {
     }
 
     @Override
-    public void dump(String binlogfilename, Long binlogPosition, Long startTimestampMills,
-                     SinkFunction func) throws Exception {
+    public void dump(String binlogfilename, Long binlogPosition, Long startTimestampMills, SinkFunction func)
+        throws Exception {
         loadBinlogChecksum();
         getDefaultDatabaseCharset();
         reconnect();
@@ -485,22 +498,26 @@ public class MysqlConnection implements ErosaConnection {
     @Override
     public String preFileName(String currentFileName) {
         // 继续往前找
-        int split = currentFileName.indexOf(".");
-        int binlogSeqNum = Integer
-            .parseInt(currentFileName.substring(split + 1));
-        binlogSeqNum--;
-        if (binlogSeqNum < 1) {
-            return null;
-        }
-        currentFileName = currentFileName.substring(0, split) + "." + StringUtils
-            .leftPad(binlogSeqNum + "", currentFileName.length() - split - 1, "0");
-        return currentFileName;
+        return BinlogFileUtil.getPrevBinlogFileName(currentFileName);
+    }
+
+    @Override
+    public List<String> binlogList() {
+        return query("show binary logs", rs -> {
+            List<String> filelist = new ArrayList<>();
+            while (rs.next()) {
+                String fileName = rs.getString(1);
+                filelist.add(fileName);
+            }
+            filelist.sort(BinlogFileUtil::compareBinlogFileName);
+            return filelist;
+        });
     }
 
     /**
      * Generate an unique server-id for binlog dump.
      */
-    private final long generateUniqueServerId() {
+    public final long generateUniqueServerId() {
         try {
             // a=`echo $masterip|cut -d\. -f1`
             // b=`echo $masterip|cut -d\. -f2`
@@ -509,13 +526,13 @@ public class MysqlConnection implements ErosaConnection {
             // #server_id=`expr $a \* 256 \* 256 \* 256 + $b \* 256 \* 256 + $c \* 256 + $d `
             // #server_id=$b$c$d
             // server_id=`expr $b \* 256 \* 256 + $c \* 256 + $d `
-            InetAddress localHost = InetAddress.getLocalHost();
+            InetAddress localHost = AddressUtil.getHostAddress();
             byte[] addr = localHost.getAddress();
             int salt = 0;
             return ((0x7f & salt) << 24) + ((0xff & (int) addr[1]) << 16) // NL
                 + ((0xff & (int) addr[2]) << 8) // NL
                 + (0xff & (int) addr[3]);
-        } catch (UnknownHostException e) {
+        } catch (Exception e) {
             throw new RuntimeException("Unknown host", e);
         }
     }

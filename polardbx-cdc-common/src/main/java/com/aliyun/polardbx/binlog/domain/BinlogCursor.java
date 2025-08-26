@@ -1,11 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.domain;
 
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.Getter;
 import lombok.ToString;
 
@@ -27,8 +28,10 @@ public class BinlogCursor implements Comparable<BinlogCursor> {
     private final String tso;
     private final Long version;
     private final long timestamp;
+    private final int fileSequence;
 
-    public BinlogCursor(String fileName, Long filePosition, String group, String stream, String tso, Long version) {
+    public BinlogCursor(String fileName, Long filePosition, String group, String stream, String tso, Long version,
+                        int fileSequence) {
         this.fileName = fileName;
         this.filePosition = filePosition;
         this.group = group;
@@ -36,10 +39,19 @@ public class BinlogCursor implements Comparable<BinlogCursor> {
         this.tso = tso;
         this.version = version;
         this.timestamp = System.currentTimeMillis();
+        this.fileSequence = fileSequence;
+    }
+
+    public BinlogCursor(String fileName, Long filePosition, String group, String stream, String tso, Long version) {
+        this(fileName, filePosition, group, stream, tso, version, 0);
     }
 
     public BinlogCursor(String fileName, Long filePosition) {
         this(fileName, filePosition, null, null, null, null);
+    }
+
+    public BinlogCursor(String fileName, Long filePosition, int fileSequence) {
+        this(fileName, filePosition, null, null, null, null, fileSequence);
     }
 
     @Override
@@ -65,7 +77,7 @@ public class BinlogCursor implements Comparable<BinlogCursor> {
         if (o == null) {
             return 1;
         } else {
-            int flag = fileName.compareTo(o.fileName);
+            int flag = BinlogFileUtil.compareBinlogFileName(fileName, o.fileName);
             if (flag != 0) {
                 return flag;
             } else {

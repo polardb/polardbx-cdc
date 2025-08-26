@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.clean;
@@ -10,6 +10,7 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.backup.StreamContext;
 import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.lock.LogFileLockManagerCollection;
 import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,10 +37,10 @@ public class BinlogCleanManager {
     private final List<BinlogCleaner> cleaners;
     private OldVersionBinlogCleaner oldVersionBinlogCleaner;
 
-    public BinlogCleanManager(StreamContext context) {
+    public BinlogCleanManager(StreamContext context, LogFileLockManagerCollection lockManagerCollection) {
         this.cleaners = new ArrayList<>();
         for (String stream : context.getStreamList()) {
-            this.cleaners.add(new BinlogCleaner(stream, context));
+            this.cleaners.add(new BinlogCleaner(stream, context, lockManagerCollection.get(stream)));
         }
 
         if (context.getTaskType() == TaskType.DumperX) {

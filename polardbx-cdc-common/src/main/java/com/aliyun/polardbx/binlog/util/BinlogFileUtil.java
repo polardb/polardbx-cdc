@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
@@ -17,11 +17,14 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Pattern;
+
+import static java.util.Comparator.comparingInt;
 
 /**
  * @author yudong
@@ -42,27 +45,36 @@ public class BinlogFileUtil {
      */
     public static final int BINLOG_FILE_NAME_SEQUENCE_LEN = 6;
     /**
+     * binlog文件名后缀数字串的最大长度
+     */
+    public static final int BINLOG_FILE_NAME_MAX_SEQUENCE_LEN = 10;
+    /**
      * 第一个binlog文件的序号
      */
     public static final int BINLOG_FILE_NAME_START_SEQUENCE = 1;
+
     /**
-     * binlog文件名的最大序号
+     * binlog文件名的最大序号（与mysql开始报警binlog编号过大的序号保持一致，另外，mysql的最大编号是2147483647）
      */
-    public static final int BINLOG_FILE_NAME_MAX_SEQUENCE = 999999;
+    public static final int BINLOG_FILE_NAME_MAX_SEQUENCE = 2147482647;
     /**
      * binlog文件后缀格式
      */
     public static final String BINLOG_FILE_NAME_SUFFIX_FORMAT = "%0" + BINLOG_FILE_NAME_SEQUENCE_LEN + "d";
     /**
      * pattern，用于判定一个本地文件是否是binlog文件
+     * 以某个固定前缀开始，后缀必须是长度大于等于BINLOG_FILE_NAME_SEQUENCE_LEN,小于等于BINLOG_FILE_NAME_MAX_SEQUENCE_LEN的数字字符串
      */
     public static final String BINLOG_FILE_NAME_PATTERN_FORMAT =
-        "^%s\\.(?!0{" + BINLOG_FILE_NAME_SEQUENCE_LEN + "})\\d{" + BINLOG_FILE_NAME_SEQUENCE_LEN + "}$";
+        "^%s\\.(?!0{" + BINLOG_FILE_NAME_SEQUENCE_LEN + "})\\d{" + BINLOG_FILE_NAME_SEQUENCE_LEN + ","
+            + BINLOG_FILE_NAME_MAX_SEQUENCE_LEN + "}$";
     /**
      * pattern，用于判定一个文件是否是binlog文件
+     * 以不固定前缀开始，后缀必须是长度大于等于BINLOG_FILE_NAME_SEQUENCE_LEN，小于等于BINLOG_FILE_NAME_MAX_SEQUENCE_LEN的数字字符串
      */
     public static final String BINLOG_FILE_NAME_PATTERN =
-        "^\\w+\\.(?!0{" + BINLOG_FILE_NAME_SEQUENCE_LEN + "})\\d{" + BINLOG_FILE_NAME_SEQUENCE_LEN + "}$";
+        "^\\w+\\.(?!0{" + BINLOG_FILE_NAME_SEQUENCE_LEN + "})\\d{" + BINLOG_FILE_NAME_SEQUENCE_LEN + ","
+            + BINLOG_FILE_NAME_MAX_SEQUENCE_LEN + "}$";
 
     // ============== binlog file name related method ==============
 
@@ -102,14 +114,20 @@ public class BinlogFileUtil {
             return false;
         }
         String pattern = String.format(BINLOG_FILE_NAME_PATTERN_FORMAT, prefix);
-        return Pattern.matches(pattern, fileName);
+        if (Pattern.matches(pattern, fileName)) {
+            return Long.parseLong(fileName.split(("\\."))[1]) <= BINLOG_FILE_NAME_MAX_SEQUENCE;
+        }
+        return false;
     }
 
     public static boolean isBinlogFile(String fileName) {
         if (fileName == null) {
             return false;
         }
-        return Pattern.matches(BINLOG_FILE_NAME_PATTERN, fileName);
+        if (Pattern.matches(BINLOG_FILE_NAME_PATTERN, fileName)) {
+            return Long.parseLong(fileName.split(("\\."))[1]) <= BINLOG_FILE_NAME_MAX_SEQUENCE;
+        }
+        return false;
     }
 
     /**
@@ -130,6 +148,12 @@ public class BinlogFileUtil {
             log.warn("binlog file seq has reached to max, will start from 1");
             currentSequence = 0;
         }
+        // 测试binlog后缀长度是否能正常超过BINLOG_FILE_NUMBER_EXPAND_TARGET
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)) {
+            if (currentSequence == DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_FILE_NUMBER_EXPAND_THRESHOLD)) {
+                currentSequence = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_FILE_NUMBER_EXPAND_TARGET) - 1;
+            }
+        }
         String newSuffix = String.format(BINLOG_FILE_NAME_SUFFIX_FORMAT, ++currentSequence);
         return pair.getLeft() + BINLOG_FILE_NAME_SEPARATOR + newSuffix;
     }
@@ -140,6 +164,13 @@ public class BinlogFileUtil {
         if (currentSequence == BINLOG_FILE_NAME_START_SEQUENCE) {
             return null;
         }
+        // 测试binlog后缀长度是否能正常超过BINLOG_FILE_NUMBER_EXPAND_TARGET
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)) {
+            if (currentSequence == DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_FILE_NUMBER_EXPAND_TARGET)) {
+                currentSequence = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_FILE_NUMBER_EXPAND_THRESHOLD) + 1;
+            }
+        }
+
         String newSuffix = String.format(BINLOG_FILE_NAME_SUFFIX_FORMAT, --currentSequence);
         return pair.getLeft() + BINLOG_FILE_NAME_SEPARATOR + newSuffix;
     }
@@ -246,6 +277,7 @@ public class BinlogFileUtil {
         String prefix = getBinlogFilePrefix(groupName, streamName);
         File[] localFiles = new File(binlogFullPath).listFiles(((dir, name) -> isBinlogFile(name, prefix)));
         if (localFiles != null) {
+            Arrays.sort(localFiles, comparingInt(o -> getBinlogSequence(o.getName())));
             result.addAll(Arrays.asList(localFiles));
         }
         return result;
@@ -272,6 +304,50 @@ public class BinlogFileUtil {
         } else {
             return String.format("polardbx_cdc/%s/%s", instId, partName);
         }
+    }
+
+    public static int compareBinlogFileName(String fileNameSrc, String fileNameTarget) {
+        Integer fileNumberSrc = Integer.parseInt(fileNameSrc.split("\\.")[1]);
+        Integer fileNumberTarget = Integer.parseInt(fileNameTarget.split("\\.")[1]);
+        return fileNumberSrc.compareTo(fileNumberTarget);
+    }
+
+    /**
+     * @return 两个位点之间相差的bytes size
+     */
+    public static long compareBinlogPosition(String fileNameSrc, long posSrc, String fileNameTarget, long posTarget,
+                                             long fileSize) {
+        int fileNumberSrc = Integer.parseInt(fileNameSrc.split("\\.")[1]);
+        int fileNumberTarget = Integer.parseInt(fileNameTarget.split("\\.")[1]);
+        int fileNumberDiff = fileNumberSrc - fileNumberTarget;
+        long posDiff = posSrc - posTarget;
+        return fileNumberDiff * fileSize + posDiff;
+    }
+
+    public static int getBinlogSequence(String fileName) {
+        return Integer.parseInt(fileName.split("\\.")[1]);
+    }
+
+    public static long readServerId(String absFile) throws IOException {
+        byte[] buf = new byte[20];
+        int len = 0;
+        int totalRead = 0;
+        File f = new File(absFile);
+        try(FileInputStream fis = new FileInputStream(f)){
+            while ((len = fis.read(buf, totalRead, 20 - totalRead)) != -1) {
+                totalRead += len;
+                if (totalRead >= 20) {
+                    break;
+                }
+            }
+        }
+        int position = 9;
+        return ((long) (0xff & buf[position++])) | ((long) (0xff & buf[position++]) << 8) | (
+            (long) (0xff & buf[position++]) << 16) | ((long) (0xff & buf[position++]) << 24);
+    }
+
+    public static long readFileSize(String absFile){
+        return new File(absFile).length();
     }
 
 }

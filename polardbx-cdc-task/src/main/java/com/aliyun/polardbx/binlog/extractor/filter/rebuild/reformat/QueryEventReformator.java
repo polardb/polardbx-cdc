@@ -1,13 +1,17 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat;
 
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDisableKeys;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableEnableKeys;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTruncateStatement;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
@@ -84,12 +88,12 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
         map.put(LogEvent.QUERY_EVENT, this);
     }
 
-    public String processQueryDDL(QueryLogEvent event){
+    public String processQueryDDL(QueryLogEvent event) {
         String query = event.getQuery();
         long sqlMode = event.getSqlMode();
-        if ((sqlMode & SqlModeUtil.MODE_REAL_AS_FLOAT) == SqlModeUtil.MODE_REAL_AS_FLOAT){
+        if ((sqlMode & SqlModeUtil.MODE_REAL_AS_FLOAT) == SqlModeUtil.MODE_REAL_AS_FLOAT) {
             SQLStatement statement = SQLUtils.parseSQLStatement(query);
-            if (statement != null && com.aliyun.polardbx.binlog.util.SQLUtils.reWriteRealTypeBySqlMode(statement)){
+            if (statement != null && com.aliyun.polardbx.binlog.util.SQLUtils.reWriteRealTypeBySqlMode(statement)) {
                 return statement.toString();
             }
         }
@@ -158,6 +162,16 @@ public class QueryEventReformator implements EventReformater<QueryLogEvent> {
             SQLStatement st = SQLUtils.parseSQLStatement(query);
             if (st instanceof SQLTruncateStatement) {
                 return true;
+            }
+
+            if (st instanceof SQLAlterTableStatement) {
+                SQLAlterTableStatement alterTableStatement = (SQLAlterTableStatement) st;
+                if (alterTableStatement.getItems().size() == 1) {
+                    SQLAlterTableItem item = alterTableStatement.getItems().get(0);
+                    if (item instanceof SQLAlterTableDisableKeys || item instanceof SQLAlterTableEnableKeys) {
+                        return true;
+                    }
+                }
             }
         } catch (Throwable t) {
             logger.error("parser physical ddl errory for " + query, t);

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.domain;
@@ -20,7 +20,13 @@ import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
 import static com.aliyun.polardbx.binlog.ConfigKeys.ASSIGNED_DN_IP;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 
 /**
  * master正常的找流程：
@@ -47,15 +53,34 @@ public class DnHost {
     private final String charset;
     private final String storageInstId;
 
-    public static DnHost buildHostForExtractor(String storageInstId) {
-        DnHost result;
+    public static List<DnHost> buildHostForExtractor(String storageInstId) {
+        List<DnHost> resultList = new ArrayList<>();
+        String polarxInstId = DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID);
+
         if (CommonUtils.isGlobalBinlogSlave()) {
-            Boolean sameRegion = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_SAME_REGION_STORAGE_BINLOG);
-            result = sameRegion ? DnHost.getLocalDnHost(storageInstId) : DnHost.getNormalDnHost(storageInstId);
+            Boolean sameRegion = getBoolean(ConfigKeys.TASK_DUMP_SAME_REGION_STORAGE_BINLOG);
+            if (sameRegion) {
+                DnHost localDnHost = getLocalDnHost(storageInstId);
+                resultList.add(localDnHost);
+            } else {
+                DnHost result = getNormalDnHost(storageInstId);
+                resultList.add(result);
+                List<DnHost> followerResult = getFollowerDnHost(storageInstId,
+                    storageInfo -> !StringUtils.equalsIgnoreCase(storageInfo.getInstId(), polarxInstId));
+                if (followerResult != null) {
+                    resultList.addAll(followerResult);
+                }
+            }
         } else {
-            result = DnHost.getNormalDnHost(storageInstId);
+            DnHost result = getNormalDnHost(storageInstId);
+            resultList.add(result);
+            List<DnHost> followerResult = getFollowerDnHost(storageInstId,
+                storageInfo -> StringUtils.equalsIgnoreCase(storageInfo.getInstId(), polarxInstId));
+            if (followerResult != null) {
+                resultList.addAll(followerResult);
+            }
         }
-        return result;
+        return resultList;
     }
 
     public static DnHost getNormalDnHost(String storageInstId) {
@@ -66,6 +91,16 @@ public class DnHost {
             throw new PolardbxException("cannot get storage info from metaDB!");
         }
         return fromStorageInfo(storageInfo);
+    }
+
+    static List<DnHost> getFollowerDnHost(String storageInstId, Function<StorageInfo, Boolean> nodeFilter) {
+        StorageInfoService service = SpringContextHolder.getObject(StorageInfoService.class);
+        List<StorageInfo> storageInfoList = service.getFollowerStorageInfo(storageInstId, nodeFilter);
+        if (storageInfoList == null || storageInfoList.isEmpty()) {
+            log.error("failed to get follower dn host, storage inst id:{}", storageInstId);
+            return null;
+        }
+        return storageInfoList.stream().map(DnHost::fromStorageInfo).collect(Collectors.toList());
     }
 
     public static DnHost getLocalDnHost(String storageMasterInstId) {

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core;
@@ -18,6 +18,8 @@ import com.aliyun.polardbx.binlog.canal.core.dump.ErosaConnection;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.dump.OssConnection;
 import com.aliyun.polardbx.binlog.canal.core.handle.EventHandle;
+import com.aliyun.polardbx.binlog.canal.core.handle.ISearchTsoEventHandle;
+import com.aliyun.polardbx.binlog.canal.core.handle.SearchTsoEventHandleV2;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.canal.unit.SearchRecorder;
 import org.slf4j.Logger;
@@ -52,8 +54,7 @@ public class BinlogEventProcessor {
     }
 
     public void init(ErosaConnection connection, String binlogFileName, long position, boolean search,
-                     ServerCharactorSet serverCharactorSet, Long serverId, int binlogChecksum)
-        throws IOException {
+                     ServerCharactorSet serverCharactorSet, Long serverId, int binlogChecksum) throws IOException {
         init(connection, binlogFileName, position, search, serverCharactorSet, serverId, binlogChecksum, false);
     }
 
@@ -69,9 +70,10 @@ public class BinlogEventProcessor {
         this.fetcher = connection.providerFetcher(binlogFileName, position, search);
         if (connection instanceof OssConnection) {
             this.binlogFileName = ((OssConnection) connection).getLastConnectFile();
+        } else {
+            this.binlogFileName = binlogFileName;
         }
         this.binlogChecksum = binlogChecksum;
-        this.binlogFileName = binlogFileName;
         this.serverCharactorSet = serverCharactorSet;
         if (!test) {
             this.binlogFileSizeFetcher = new DefaultBinlogFileInfoFetcher(connection);
@@ -119,6 +121,9 @@ public class BinlogEventProcessor {
         for (Integer flag : ie) {
             decoder.handle(flag);
         }
+        if (handle instanceof ISearchTsoEventHandle){
+            decoder.setNeedFixRotate(false);
+        }
         decoder.setBinlogFileSizeFetcher(binlogFileSizeFetcher);
         LogContext context = new LogContext();
         LogPosition logPosition = new LogPosition(binlogFileName, 0);
@@ -141,6 +146,9 @@ public class BinlogEventProcessor {
             if (searchRecorder != null) {
                 searchRecorder.setPosition(event.getLogPos());
                 searchRecorder.setTimestamp(event.getWhen());
+                if (handle instanceof SearchTsoEventHandleV2) {
+                    searchRecorder.setUnCompleteTran(((SearchTsoEventHandleV2) handle).unCompleteTran());
+                }
             }
             if (handle.interrupt()) {
                 logger.warn(" handler interrupt");

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote;
@@ -12,9 +12,13 @@ import com.aliyun.polardbx.binlog.remote.lindorm.LindormConfig;
 import com.aliyun.polardbx.binlog.remote.lindorm.LindormManager;
 import com.aliyun.polardbx.binlog.remote.oss.OssManager;
 import com.aliyun.polardbx.binlog.remote.oss.OssConfig;
+import com.aliyun.polardbx.binlog.remote.s3.S3Manager;
+import lombok.Getter;
+import lombok.Setter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 public class AsyncConfigurator implements IConfigurator, Runnable {
@@ -22,13 +26,23 @@ public class AsyncConfigurator implements IConfigurator, Runnable {
     private static final Logger logger = LoggerFactory.getLogger(AsyncConfigurator.class);
     private final OssConfig ossConfig;
     private final LindormConfig lindormConfig;
+    @Setter
+    private CommonConfig commonConfig;
     private IRemoteManager remoteManager;
+    @Getter
     private volatile boolean configSuccess;
 
     // todo @yudong 这种配置方式非常不妥，后续可能需要支持更多的存储类型
     public AsyncConfigurator(OssConfig ossConfig, LindormConfig lindormConfig) {
         this.ossConfig = ossConfig;
         this.lindormConfig = lindormConfig;
+        this.commonConfig = null;
+    }
+
+    public AsyncConfigurator(OssConfig ossConfig, LindormConfig lindormConfig, CommonConfig commonConfig) {
+        this.ossConfig = ossConfig;
+        this.lindormConfig = lindormConfig;
+        this.commonConfig = commonConfig;
     }
 
     @Override
@@ -70,6 +84,25 @@ public class AsyncConfigurator implements IConfigurator, Runnable {
         configSuccess = true;
     }
 
+    public void configCommon() {
+        if (!commonConfig.isAvailable()) {
+            logger.warn("common config is not available");
+            return;
+        }
+        logger.info("config {} manager", commonConfig.engine);
+
+        switch (commonConfig.engine.toUpperCase()) {
+        case "S3":
+            remoteManager = new S3Manager(commonConfig);
+            break;
+        default:
+            logger.warn("unknown engine {}", commonConfig.engine);
+            return;
+        }
+
+        configSuccess = true;
+    }
+
     @Override
     public IRemoteManager prepare() {
         while (!configSuccess) {
@@ -90,6 +123,8 @@ public class AsyncConfigurator implements IConfigurator, Runnable {
                     configOss();
                 } else if (lindormConfig != null) {
                     configLindorm();
+                } else if (commonConfig != null) {
+                    configCommon();
                 }
                 break;
             } catch (Exception e) {

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.model;
@@ -166,7 +166,14 @@ public class TranPosition implements IXaTransaction<TranPosition> {
 
     @Override
     public int compareTo(TranPosition o) {
-        return (int) (tso - o.getTso());
+        long diff = tso - o.getTso();
+        if (diff < 0) {
+            return -1;
+        } else if (diff == 0) {
+            return 0;
+        } else {
+            return 1;
+        }
     }
 
     @Override

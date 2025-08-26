@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.merge;
@@ -64,6 +64,10 @@ public class MergeSource {
         this.extractor.stop();
         this.running = false;
         logger.info("Merge source {} Stopped.", sourceId);
+    }
+
+    public boolean isRunning() {
+        return running;
     }
 
     public void push(TxnToken txnToken) throws InterruptedException {

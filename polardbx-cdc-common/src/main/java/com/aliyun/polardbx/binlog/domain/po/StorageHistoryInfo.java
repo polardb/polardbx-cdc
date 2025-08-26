@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.domain.po;
@@ -10,35 +10,46 @@ import java.util.Date;
 import javax.annotation.Generated;
 
 public class StorageHistoryInfo {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.538+08:00", comments="Source field: binlog_storage_history.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.538+08:00",
+        comments = "Source field: binlog_storage_history.id")
     private Long id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.539+08:00", comments="Source field: binlog_storage_history.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.539+08:00",
+        comments = "Source field: binlog_storage_history.gmt_created")
     private Date gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.539+08:00", comments="Source field: binlog_storage_history.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.539+08:00",
+        comments = "Source field: binlog_storage_history.gmt_modified")
     private Date gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.tso")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.tso")
     private String tso;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.status")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.status")
     private Integer status;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.instruction_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.instruction_id")
     private String instructionId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.cluster_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.cluster_id")
     private String clusterId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.group_name")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.group_name")
     private String groupName;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.541+08:00", comments="Source field: binlog_storage_history.storage_content")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.541+08:00",
+        comments = "Source field: binlog_storage_history.storage_content")
     private String storageContent;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.534+08:00", comments="Source Table: binlog_storage_history")
-    public StorageHistoryInfo(Long id, Date gmtCreated, Date gmtModified, String tso, Integer status, String instructionId, String clusterId, String groupName, String storageContent) {
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.534+08:00",
+        comments = "Source Table: binlog_storage_history")
+    public StorageHistoryInfo(Long id, Date gmtCreated, Date gmtModified, String tso, Integer status,
+                              String instructionId, String clusterId, String groupName, String storageContent) {
         this.id = id;
         this.gmtCreated = gmtCreated;
         this.gmtModified = gmtModified;
@@ -50,97 +61,116 @@ public class StorageHistoryInfo {
         this.storageContent = storageContent;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.537+08:00", comments="Source Table: binlog_storage_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.537+08:00",
+        comments = "Source Table: binlog_storage_history")
     public StorageHistoryInfo() {
         super();
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.539+08:00", comments="Source field: binlog_storage_history.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.539+08:00",
+        comments = "Source field: binlog_storage_history.id")
     public Long getId() {
         return id;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.539+08:00", comments="Source field: binlog_storage_history.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.539+08:00",
+        comments = "Source field: binlog_storage_history.id")
     public void setId(Long id) {
         this.id = id;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.539+08:00", comments="Source field: binlog_storage_history.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.539+08:00",
+        comments = "Source field: binlog_storage_history.gmt_created")
     public Date getGmtCreated() {
         return gmtCreated;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.539+08:00", comments="Source field: binlog_storage_history.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.539+08:00",
+        comments = "Source field: binlog_storage_history.gmt_created")
     public void setGmtCreated(Date gmtCreated) {
         this.gmtCreated = gmtCreated;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.539+08:00", comments="Source field: binlog_storage_history.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.539+08:00",
+        comments = "Source field: binlog_storage_history.gmt_modified")
     public Date getGmtModified() {
         return gmtModified;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.539+08:00", comments="Source field: binlog_storage_history.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.539+08:00",
+        comments = "Source field: binlog_storage_history.gmt_modified")
     public void setGmtModified(Date gmtModified) {
         this.gmtModified = gmtModified;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.tso")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.tso")
     public String getTso() {
         return tso;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.tso")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.tso")
     public void setTso(String tso) {
         this.tso = tso == null ? null : tso.trim();
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.status")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.status")
     public Integer getStatus() {
         return status;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.status")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.status")
     public void setStatus(Integer status) {
         this.status = status;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.instruction_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.instruction_id")
     public String getInstructionId() {
         return instructionId;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.instruction_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.instruction_id")
     public void setInstructionId(String instructionId) {
         this.instructionId = instructionId == null ? null : instructionId.trim();
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.cluster_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.cluster_id")
     public String getClusterId() {
         return clusterId;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.54+08:00", comments="Source field: binlog_storage_history.cluster_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.54+08:00",
+        comments = "Source field: binlog_storage_history.cluster_id")
     public void setClusterId(String clusterId) {
         this.clusterId = clusterId == null ? null : clusterId.trim();
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.541+08:00", comments="Source field: binlog_storage_history.group_name")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.541+08:00",
+        comments = "Source field: binlog_storage_history.group_name")
     public String getGroupName() {
         return groupName;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.541+08:00", comments="Source field: binlog_storage_history.group_name")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.541+08:00",
+        comments = "Source field: binlog_storage_history.group_name")
     public void setGroupName(String groupName) {
         this.groupName = groupName == null ? null : groupName.trim();
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.541+08:00", comments="Source field: binlog_storage_history.storage_content")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.541+08:00",
+        comments = "Source field: binlog_storage_history.storage_content")
     public String getStorageContent() {
         return storageContent;
     }
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.541+08:00", comments="Source field: binlog_storage_history.storage_content")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.541+08:00",
+        comments = "Source field: binlog_storage_history.storage_content")
     public void setStorageContent(String storageContent) {
         this.storageContent = storageContent == null ? null : storageContent.trim();
     }

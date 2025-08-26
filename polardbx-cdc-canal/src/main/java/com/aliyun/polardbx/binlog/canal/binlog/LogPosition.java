@@ -1,10 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog;
+
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 
 /**
  * Implements binlog position.
@@ -78,10 +80,17 @@ public class LogPosition implements Cloneable, Comparable<LogPosition> {
      * Compares with the specified fileName and position.
      */
     public final int compareTo(String fileName, final long position) {
-        final int val = this.fileName.compareTo(fileName);
+        final int val = BinlogFileUtil.compareBinlogFileName(this.fileName, fileName);
 
         if (val == 0) {
-            return (int) (this.position - position);
+            long diff = this.position - position;
+            if (diff > 0){
+                return 1;
+            }else if (diff == 0){
+                return 0;
+            }else {
+                return -1;
+            }
         }
         return val;
     }
@@ -92,12 +101,7 @@ public class LogPosition implements Cloneable, Comparable<LogPosition> {
      * @see Comparable#compareTo(Object)
      */
     public int compareTo(LogPosition o) {
-        final int val = fileName.compareTo(o.fileName);
-
-        if (val == 0) {
-            return (int) (position - o.position);
-        }
-        return val;
+        return compareTo(o.fileName, o.position);
     }
 
     /**

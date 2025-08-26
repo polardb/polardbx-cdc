@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal;
@@ -45,10 +45,16 @@ public class LogEventUtil {
     private static final String COMMIT = "COMMIT";
     public static final String SYNC_POINT_PROCEDURE_NAME = "trigger_sync_point_trx";
     public static final String SYNC_POINT_PRIVATE_DDL_SQL =
-        "CALL " + SYNC_POINT_PROCEDURE_NAME + "()";
+        "CALL " + SYNC_POINT_PROCEDURE_NAME;
 
     private static final String XID_FLAG_NORMAL = "1";
     private static final String XID_FLAG_ARCHIVE = "3";
+    //普通事务，使用新的 share read view 机制
+    private static final String XID_NEW_FLAG_10001 = "10001";
+    //事务日志下沉的事务，使用新的 share read view 机制
+    private static final String XID_NEW_FLAG_10002 = "10002";
+    //异步提交事务，使用新的 share read view 机制
+    private static final String XID_NEW_FLAG_10003 = "10003";
 
     public static boolean isTransactionEvent(QueryLogEvent event) {
         String query = event.getQuery();
@@ -78,7 +84,8 @@ public class LogEventUtil {
 
     public static boolean isValidXid(String xid) {
         String flag = StringUtils.substringAfterLast(xid, ",");
-        return XID_FLAG_NORMAL.equals(flag) || XID_FLAG_ARCHIVE.equals(flag);
+        return XID_FLAG_NORMAL.equals(flag) || XID_FLAG_ARCHIVE.equals(flag) || XID_NEW_FLAG_10001.equals(flag)
+            || XID_NEW_FLAG_10002.equals(flag) || XID_NEW_FLAG_10003.equals(flag);
     }
 
     public static boolean isArchiveXid(String xid) {

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
@@ -20,6 +20,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +48,7 @@ public class AsyncDdlMonitor {
     private final ExecutorService executorService;
     private final AtomicBoolean running;
     private final ConcurrentHashMap<Long, RplDdl> runningAsyncDdlTasks;
+    private final ConcurrentHashMap<Long, RplDdl> runningDbDdlTasks;
     private final boolean isDdlMasterRole;
     @Setter
     @Getter
@@ -53,6 +58,7 @@ public class AsyncDdlMonitor {
         this.executorService = Executors.newFixedThreadPool(1);
         this.running = new AtomicBoolean(false);
         this.runningAsyncDdlTasks = new ConcurrentHashMap<>();
+        this.runningDbDdlTasks = new ConcurrentHashMap<>();
         this.isDdlMasterRole = buildDdlMasterRole();
     }
 
@@ -66,6 +72,14 @@ public class AsyncDdlMonitor {
                 + TaskContext.getInstance().getTaskId());
         }
         runningAsyncDdlTasks.put(rplDdl.getId(), rplDdl);
+    }
+
+    public void submitDbDdl(RplDdl rplDdl) {
+        runningDbDdlTasks.put(rplDdl.getId(), rplDdl);
+    }
+
+    public void removeDbDdl(RplDdl rplDdl) {
+        runningDbDdlTasks.remove(rplDdl.getId());
     }
 
     public void start() {
@@ -105,12 +119,40 @@ public class AsyncDdlMonitor {
 
     public void stop() {
         if (running.compareAndSet(true, false)) {
+            stopDbTasks();
             runningAsyncDdlTasks.clear();
             if (this.executorService != null) {
                 this.executorService.shutdownNow();
             }
 
             log.info("async ddl monitor stopped, master: {}", isDdlMasterRole);
+        }
+    }
+
+    void stopDbTasks() {
+        for (RplDdl rplDdl : runningDbDdlTasks.values()) {
+            try {
+                killConnectionByToken(rplDdl.getToken());
+            } catch (Throwable t) {
+                log.error("process db ddl failed !!", t);
+            }
+        }
+    }
+
+    public void killConnectionByToken(String token) throws SQLException {
+        DataSource defaultDataSource = dbMetaCache.getBuiltInDefaultDataSource();
+        try (Connection conn = defaultDataSource.getConnection();
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(
+                "show full processlist where info like '%" + token
+                    + "%' and info not like 'show full processlist%'")) {
+            while (rs.next()) {
+                int id = rs.getInt("Id");
+                String info = rs.getString("Info");
+                // Kill the connection
+                stmt.execute("KILL " + id);
+                System.out.printf("Killed connection with ID:" + id + " INFO:" + info);
+            }
         }
     }
 

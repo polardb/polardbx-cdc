@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.taskmeta;
@@ -25,15 +25,17 @@ import com.aliyun.polardbx.binlog.dao.RplStatMetricsDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RplStatMetricsMapper;
 import com.aliyun.polardbx.binlog.dao.RplStateMachineDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RplStateMachineMapper;
-import com.aliyun.polardbx.binlog.dao.RplTablePositionMapper;
 import com.aliyun.polardbx.binlog.dao.RplTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RplTaskConfigMapper;
+import com.aliyun.polardbx.binlog.dao.RplTaskConfigMapperExtend;
 import com.aliyun.polardbx.binlog.dao.RplTaskDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RplTaskMapper;
 import com.aliyun.polardbx.binlog.dao.ValidationDiffDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.ValidationDiffMapper;
 import com.aliyun.polardbx.binlog.dao.ValidationTaskDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.ValidationTaskMapper;
+import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.XStreamMapper;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.domain.po.PolarxCNodeInfo;
 import com.aliyun.polardbx.binlog.domain.po.RplDbFullPosition;
@@ -43,16 +45,20 @@ import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
+import com.aliyun.polardbx.binlog.domain.po.XStream;
 import com.aliyun.polardbx.rpl.common.fsmutil.AbstractFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
 import com.aliyun.polardbx.rpl.validation.common.ValidationStateEnum;
 import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.joda.time.DateTime;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.mybatis.dynamic.sql.render.RenderingStrategies;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -86,8 +92,9 @@ public class DbTaskMetaManager {
     private static final PolarxCNodeInfoMapper polarxCNodeInfoMapper =
         SpringContextHolder.getObject(PolarxCNodeInfoMapper.class);
 
-    private static final RplTablePositionMapper tablePositionMapper =
-        SpringContextHolder.getObject(RplTablePositionMapper.class);
+    @Setter
+    @Getter
+    private static XStreamMapper xStreamMapper = SpringContextHolder.getObject(XStreamMapper.class);
 
     private static final ValidationTaskMapper valTaskMapper =
         SpringContextHolder.getObject(ValidationTaskMapper.class);
@@ -100,6 +107,9 @@ public class DbTaskMetaManager {
 
     private static final RplTaskConfigMapper taskConfigMapper =
         SpringContextHolder.getObject(RplTaskConfigMapper.class);
+
+    private static final RplTaskConfigMapperExtend taskConfigMapperExtend =
+        SpringContextHolder.getObject(RplTaskConfigMapperExtend.class);
 
     private static final RplStatMetricsMapper RPL_STAT_METRICS_MAPPER =
         SpringContextHolder.getObject(RplStatMetricsMapper.class);
@@ -309,13 +319,6 @@ public class DbTaskMetaManager {
         return record;
     }
 
-    public static RplTask addTask(long stateMachineId, long serviceId,
-                                  String extractorConfig, String pipelineConfig, String applierConfig,
-                                  ServiceType type, int sequenceId, String clusterId) {
-        return addTaskWithMemory(stateMachineId, serviceId, extractorConfig, pipelineConfig, applierConfig, type,
-            sequenceId, clusterId, DynamicApplicationConfig.getInt(ConfigKeys.RPL_DEFAULT_MEMORY));
-    }
-
     public static RplTaskConfig addTaskConfig(long taskId, String extractorConfig,
                                               String pipelineConfig, String applierConfig, int memory) {
         RplTaskConfig config = new RplTaskConfig();
@@ -491,12 +494,8 @@ public class DbTaskMetaManager {
         taskConfigMapper.updateByPrimaryKeySelective(record);
     }
 
-    public static void updateTaskMemory(long taskId, int memoryInMb) {
-        RplTaskConfig record = new RplTaskConfig();
-        RplTaskConfig oldRecord = getTaskConfig(taskId);
-        record.setId(oldRecord.getId());
-        record.setMemory(memoryInMb);
-        taskConfigMapper.updateByPrimaryKeySelective(record);
+    public static int getTaskMemory(long taskId) {
+        return taskConfigMapperExtend.getMemory(taskId);
     }
 
     public static RplTask updateTaskWorker(long id, String worker) {
@@ -644,4 +643,33 @@ public class DbTaskMetaManager {
             .and(NodeInfoDynamicSqlSupport.clusterType, SqlBuilder.isEqualTo(clusterType)));
     }
 
+    public static List<XStream> listChosenXStreams() {
+        if (!DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_BACK_FLOW_X_STREAM_OPTION)) {
+            return new ArrayList<>();
+        }
+        String groupName = DynamicApplicationConfig.getString(ConfigKeys.RPL_BACK_FLOW_X_STREAM_GROUP_NAME);
+        if (StringUtils.isNotBlank(groupName)) {
+            List<XStream> xStreams = xStreamMapper.select(s -> s.where(XStreamDynamicSqlSupport.groupName,
+                SqlBuilder.isEqualTo(groupName)));
+            if (!xStreams.isEmpty()) {
+                return xStreams;
+            }
+        }
+
+        // use first active xstream
+        List<XStream> activeXStreams = xStreamMapper.select(s -> s.where(XStreamDynamicSqlSupport.gmtModified,
+            SqlBuilder.isGreaterThan(DateTime.now().minusMinutes(3).toDate())));
+        if (activeXStreams.isEmpty()) {
+            return activeXStreams;
+        }
+        String firstGroupName = activeXStreams.get(0).getGroupName();
+        return xStreamMapper.select(s -> s.where(XStreamDynamicSqlSupport.groupName,
+            SqlBuilder.isEqualTo(firstGroupName)));
+    }
+
+    public static XStream getXStreamByStreamName(String streamName) {
+        Optional<XStream> xStream = xStreamMapper.selectOne(s -> s.where(XStreamDynamicSqlSupport.streamName,
+            SqlBuilder.isEqualTo(streamName)));
+        return xStream.orElse(null);
+    }
 }

@@ -1,14 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.collect;
 
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.collect.message.MessageEventFactory;
-import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.merge.HeartBeatWindow;
 import com.aliyun.polardbx.binlog.metrics.MergeMetrics;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
@@ -32,22 +31,24 @@ public class LogEventCollector implements Collector {
     private static final int MAX_FULL_TIMES = 10;
 
     private final int ringBufferSize;
-    private final TaskType taskType;
     private final Storage storage;
     private final Transmitter transmitter;
     private final boolean isMergeNoTsoXa;
+    private final boolean preBuildMessage;
+    private final boolean relayStage;
     private AtomicLong eventsPushBlockingTime;
     private RingBuffer<MessageEvent> disruptorMsgBuffer;
     private CollectStrategy collectStrategy;
     private volatile boolean running;
 
-    public LogEventCollector(Storage storage, Transmitter transmitter, int ringBufferSize, TaskType taskType,
-                             boolean isMergeNoTsoXa) {
+    public LogEventCollector(Storage storage, Transmitter transmitter, int ringBufferSize,
+                             boolean isMergeNoTsoXa, boolean preBuildMessage, boolean relayStage) {
         this.storage = storage;
         this.transmitter = transmitter;
         this.ringBufferSize = ringBufferSize;
-        this.taskType = taskType;
         this.isMergeNoTsoXa = isMergeNoTsoXa;
+        this.preBuildMessage = preBuildMessage;
+        this.relayStage = relayStage;
     }
 
     @Override
@@ -60,7 +61,7 @@ public class LogEventCollector implements Collector {
         this.eventsPushBlockingTime = new AtomicLong(0L);
         this.disruptorMsgBuffer = RingBuffer
             .createSingleProducer(new MessageEventFactory(), ringBufferSize, new BlockingWaitStrategy());
-        this.collectStrategy = new MergeAndSinkStrategy(this, transmitter, isMergeNoTsoXa, taskType);
+        this.collectStrategy = new MergeAndSinkStrategy(this, transmitter, isMergeNoTsoXa, preBuildMessage, relayStage);
         this.collectStrategy.setRingBuffer(disruptorMsgBuffer);
         this.collectStrategy.setStorage(storage);
         this.collectStrategy.start();

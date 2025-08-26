@@ -140,6 +140,8 @@
         <table schema="polardbx_meta_db_polardbx" tableName="columnar_task" domainObjectName="ColumnarTask"/>
         <table schema="polardbx_meta_db_polardbx" tableName="columnar_task_config" domainObjectName="ColumnarTaskConfig"/>
         <table schema="polardbx_meta_db_polardbx" tableName="columnar_checkpoints" domainObjectName="ColumnarCheckpoints"/>
+        <table schema="polardbx_meta_db_polardbx" tableName="binlog_file_storage_info"
+               domainObjectName="BinlogFileStorageInfo"/>
         -->
 
     </context>

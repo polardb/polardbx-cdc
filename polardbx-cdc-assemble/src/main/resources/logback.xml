@@ -488,8 +488,8 @@
         <appender-ref ref="FILE_TEST"/>
     </logger>
 
-    <logger name="console" level="INFO" additivity="false">
-        <appender-ref ref="console"/>
+    <logger name="consoleLogger" level="INFO" additivity="false">
+        <appender-ref ref="consoleAppender"/>
     </logger>
 
     <logger name="metaLogger" level="INFO">

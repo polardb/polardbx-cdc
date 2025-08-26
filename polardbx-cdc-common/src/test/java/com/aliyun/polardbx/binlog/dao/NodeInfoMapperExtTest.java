@@ -1,14 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dao;
 
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -18,7 +18,7 @@ import java.util.List;
  * @author yudong
  * @since 2023/7/3 11:56
  **/
-public class NodeInfoMapperExtTest extends BaseTestWithGmsTables {
+public class NodeInfoMapperExtTest extends BaseTest {
 
     @Test
     public void testGetAliveNodes() {

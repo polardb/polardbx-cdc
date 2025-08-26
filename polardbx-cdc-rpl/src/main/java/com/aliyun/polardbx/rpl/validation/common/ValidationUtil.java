@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation.common;
@@ -40,6 +40,7 @@ public class ValidationUtil {
 
     public static long getTableRowsFromInformationSchema(Connection conn, String dbName, String tbName)
         throws SQLException {
+        // 注：这里不需要escape
         String infoSql = String.format("SELECT `TABLE_ROWS` FROM `INFORMATION_SCHEMA`.`TABLES` "
             + "WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'", dbName, tbName);
         try (Statement stmt = conn.createStatement();
@@ -48,6 +49,21 @@ public class ValidationUtil {
                 return rs.getLong("TABLE_ROWS");
             } else {
                 throw new SQLException("failed to fetch table rows count!");
+            }
+        }
+    }
+
+    public static long getAvgTableLengthFromInformationSchema(Connection conn, String dbName, String tbName)
+        throws SQLException {
+        // 注：这里不需要escape
+        String infoSql = String.format("SELECT `AVG_ROW_LENGTH` FROM `INFORMATION_SCHEMA`.`TABLES` "
+            + "WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'", dbName, tbName);
+        try (Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(infoSql)) {
+            if (rs.next()) {
+                return rs.getLong("AVG_ROW_LENGTH");
+            } else {
+                return 0;
             }
         }
     }

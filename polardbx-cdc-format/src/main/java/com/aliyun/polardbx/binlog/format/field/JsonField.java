@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.format.field;
@@ -16,7 +16,9 @@ import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * MYSQL_TYPE_JSON
@@ -24,10 +26,13 @@ import java.util.Map;
 public class JsonField extends BlobField {
 
     private static final int SMALL_OFFSET_SIZE = 2;
+    private static final int LARGE_OFFSET_SIZE = 4;
 
     private static final int KEY_ENTRY_SIZE_SMALL = 2 + SMALL_OFFSET_SIZE;
+    private static final int KEY_ENTRY_SIZE_LARGE = 2 + LARGE_OFFSET_SIZE;
 
     private static final int VALUE_ENTRY_SIZE_SMALL = 1 + SMALL_OFFSET_SIZE;
+    private static final int VALUE_ENTRY_SIZE_LARGE = 1 + LARGE_OFFSET_SIZE;
 
     public JsonField(CreateField createField) throws InvalidInputDataException {
         super(createField);
@@ -70,6 +75,13 @@ public class JsonField extends BlobField {
         return MySQLType.MYSQL_TYPE_JSON;
     }
 
+    /**
+     *  直接简单用short的最大值来评估是否是大对象,大对象会对属性长度使用4个字节记录长度，比小对象多2个字节，不会影响数据正确性
+     **/
+    private boolean isLargeTest(long len){
+        return len >= Short.MAX_VALUE;
+    }
+
     private void serialJsonValue(AutoExpandBuffer buffer, int typeOffset, Object o) {
 
         if (o instanceof Long) {
@@ -88,12 +100,26 @@ public class JsonField extends BlobField {
             }
         }
 
+        boolean isLarge = isLargeTest(Objects.toString(o).getBytes(charset).length);
+
         if (o instanceof JSONObject) {
-            buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_SMALL_OBJECT);
-            serialJsonObject(buffer, (JSONObject) o);
+            byte type;
+            if (isLarge){
+                type = (byte) JsonConversion.JSONB_TYPE_LARGE_OBJECT;
+            } else {
+                type = (byte) JsonConversion.JSONB_TYPE_SMALL_OBJECT;
+            }
+            buffer.put(typeOffset, type);
+            serialJsonObject(buffer, (JSONObject) o, isLarge);
         } else if (o instanceof JSONArray) {
-            buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_SMALL_ARRAY);
-            serialJsonArray(buffer, (JSONArray) o);
+            byte type;
+            if (isLarge){
+                type = (byte) JsonConversion.JSONB_TYPE_LARGE_ARRAY;
+            } else {
+                type = (byte) JsonConversion.JSONB_TYPE_SMALL_ARRAY;
+            }
+            buffer.put(typeOffset, type);
+            serialJsonArray(buffer, (JSONArray) o, isLarge);
         } else if (o instanceof String) {
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_STRING);
             String variableString = (String) o;
@@ -131,39 +157,67 @@ public class JsonField extends BlobField {
         }
     }
 
-    private void serialJsonObject(AutoExpandBuffer buffer, JSONObject object) {
-        int size = object.values().size();
+    private void serialJsonObject(AutoExpandBuffer buffer, JSONObject object, boolean large) {
+        int elementCount = object.values().size();
         int startPosition = buffer.position();
-        buffer.putShort((short) size);
-        int sizePos = buffer.position();
-        buffer.putShort((short) 0);
+        int sizePos;
+        if (large){
+            buffer.putInt(elementCount);
+            sizePos = buffer.position();
+            buffer.putInt( 0);
+        } else {
+            buffer.putShort((short) elementCount);
+            sizePos = buffer.position();
+            buffer.putShort((short) 0);
+        }
+
+        int KEY_ENTRY_SIZE = large ? KEY_ENTRY_SIZE_LARGE : KEY_ENTRY_SIZE_SMALL;
+        int VALUE_ENTRY_SIZE = large ? VALUE_ENTRY_SIZE_LARGE : VALUE_ENTRY_SIZE_SMALL;
 
         int first_key_offset =
-            buffer.position() + size * (KEY_ENTRY_SIZE_SMALL + VALUE_ENTRY_SIZE_SMALL) - startPosition;
+            buffer.position() + elementCount * (KEY_ENTRY_SIZE + VALUE_ENTRY_SIZE) - startPosition;
+        // value entry OFFSET_SIZE + 2
         for (Map.Entry<String, Object> entry : object.entrySet()) {
             int len = entry.getKey().getBytes(charset).length;
-            buffer.putShort((short) first_key_offset);
+            if (large){
+                buffer.putInt( first_key_offset);
+            } else {
+                buffer.putShort((short) first_key_offset);
+            }
             buffer.putShort((short) len);
             first_key_offset += len;
         }
         int mark = buffer.position();
-        // value entry
+        // value entry 1 + OFFSET_SIZE
         for (Map.Entry<String, Object> entry : object.entrySet()) {
             buffer.put((byte) 0);
-            buffer.putShort((short) 0);
+            if (large){
+                buffer.putInt( 0);
+            }else {
+                buffer.putShort((short) 0);
+            }
+
         }
         for (Map.Entry<String, Object> entry : object.entrySet()) {
             buffer.put(entry.getKey().getBytes(charset));
         }
         int i = 0;
         for (Map.Entry<String, Object> entry : object.entrySet()) {
-            int typeOffset = mark + i++ * VALUE_ENTRY_SIZE_SMALL;
+            int typeOffset = mark + i++ * VALUE_ENTRY_SIZE;
             if (!attemptInlineValue(entry.getValue(), buffer, typeOffset)) {
-                buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
+                if (large){
+                    buffer.putInt(typeOffset + 1, buffer.position() - startPosition);
+                }else {
+                    buffer.putShort(typeOffset + 1,  buffer.position() - startPosition);
+                }
                 serialJsonValue(buffer, typeOffset, entry.getValue());
             }
         }
-        buffer.putShort(sizePos, (byte) (buffer.position() - startPosition));
+        if (large){
+            buffer.putInt(sizePos, buffer.position() - startPosition);
+        }else {
+            buffer.putShort(sizePos,  buffer.position() - startPosition);
+        }
     }
 
     private static boolean attemptInlineValue(Object o, AutoExpandBuffer buffer,
@@ -200,28 +254,49 @@ public class JsonField extends BlobField {
         return true;
     }
 
-    private void serialJsonArray(AutoExpandBuffer buffer, JSONArray array) {
+    private void serialJsonArray(AutoExpandBuffer buffer, JSONArray array, boolean large) {
         int size = array.size();
         int startPosition = buffer.position();
-        buffer.putShort((short) size);
-        int sizePos = buffer.position();
-        buffer.putShort((short) 0);
-
-        int mark = buffer.position();
-        for (int i = 0; i < size; i++) {
-            buffer.put((byte) 0);
+        int sizePos;
+        if (large){
+            buffer.putInt(size);
+            sizePos = buffer.position();
+            buffer.putInt( 0);
+        }else {
+            buffer.putShort((short) size);
+            sizePos = buffer.position();
             buffer.putShort((short) 0);
         }
 
+        int mark = buffer.position();
+        for (int i = 0; i < size; i++) {
+            if (large){
+                buffer.putInt( 0);
+            }else {
+                buffer.putShort((short) 0);
+            }
+            buffer.put((byte) 0);
+        }
+
+        int VALUE_ENTRY_SIZE = large ? VALUE_ENTRY_SIZE_LARGE : VALUE_ENTRY_SIZE_SMALL;
+
         for (int i = 0; i < size; i++) {
             Object o = array.get(i);
-            int typeOffset = mark + i * VALUE_ENTRY_SIZE_SMALL;
+            int typeOffset = mark + i * VALUE_ENTRY_SIZE;
             if (!attemptInlineValue(o, buffer, typeOffset)) {
-                buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
+                if (large){
+                    buffer.putInt(typeOffset + 1,  buffer.position() - startPosition);
+                } else {
+                    buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
+                }
                 serialJsonValue(buffer, typeOffset, o);
             }
         }
-        buffer.putShort(sizePos, (short) (buffer.position() - startPosition));
+        if (large) {
+            buffer.putInt(sizePos, buffer.position() - startPosition);
+        }else {
+            buffer.putShort(sizePos, (short) (buffer.position() - startPosition));
+        }
     }
 
 }

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote.lindorm;
@@ -9,6 +9,8 @@ package com.aliyun.polardbx.binlog.remote.lindorm;
 import com.aliyun.oss.common.utils.CRC64;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.remote.Appender;
+import com.aliyun.polardbx.binlog.remote.DownloadModeEnum;
+import com.aliyun.polardbx.binlog.remote.DownloadParameter;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.ListUtils;
@@ -114,7 +116,7 @@ public class LindormManagerTest extends BaseTest {
         appender.begin();
         appender.append(expectContent.getBytes(), expectContent.getBytes().length);
         appender.end();
-        manager.download(fileName, ".");
+        manager.download(fileName, ".", new DownloadParameter(DownloadModeEnum.PARALLEL, 1, 1024L));
         String actualContent = new String(Files.readAllBytes(Paths.get(destFile)));
         Assert.assertEquals(expectContent, actualContent);
         new File(destFile).deleteOnExit();

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.check.bothcheck.binlog;
@@ -18,6 +18,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.sql.Connection;
@@ -44,6 +45,8 @@ public class BinlogDumpTest extends BaseTestCase {
     private static final String SHOW_BINARY_LOGS = "show binary logs";
     private static final String SHOW_BINARY_LOGS_WITH_STREAM = "show binary logs with '%s'";
     private static final String SHOW_BINARY_STREAMS = "show binary streams";
+    private static final String SHOW_BINLOG_DUMP_STATUS = "show binlog dump status";
+    private static final String SHOW_DUMP_LIST = "show processlist where Command = 'Binlog dump'";
     private static final int nJobs = 10;
     private static final int nWorkers = 5;
     private static final int MAX_FILES_NUM = 20;
@@ -164,4 +167,17 @@ public class BinlogDumpTest extends BaseTestCase {
         return res;
     }
 
+    @SneakyThrows
+    private void testShowBinlogDumpStatus() {
+        try (Connection conn = getPolardbxConnection()) {
+            ResultSet resultSet = executeQuery(SHOW_BINLOG_DUMP_STATUS, conn);
+            Set<Integer> ids = new HashSet<>();
+            while (resultSet.next()) {
+                int id = resultSet.getInt("Process_Id");
+                ids.add(id);
+            }
+            log.info("show binlog dump status: {}", ids);
+            Assert.assertFalse(ids.isEmpty());
+        }
+    }
 }

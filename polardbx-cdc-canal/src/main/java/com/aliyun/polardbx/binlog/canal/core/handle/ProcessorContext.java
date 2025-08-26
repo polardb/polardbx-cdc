@@ -1,12 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.handle;
 
 import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
@@ -15,11 +17,17 @@ import com.aliyun.polardbx.binlog.canal.core.model.TranPosition;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.Maps;
+import lombok.Getter;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RECOVER_SEARCH_TSO_AUTO_QUICK_MODE_SWITCH_PUSH_BACKWARD_SECOND;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_RECOVER_SEARCH_TSO_AUTO_QUICK_MODE_THRESHOLD_SECOND;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 
 public class ProcessorContext {
 
@@ -32,6 +40,7 @@ public class ProcessorContext {
     private final SortTranMap unCompleteTranMap;
     /**
      * 收到的 commit event
+     * 只有在find pos 设定的文件和之前搜索过的文件记录，之后的文件不会记录，避免死循环
      */
     private final Map<String, Long> commitXidMap = Maps.newHashMap();
     /**
@@ -50,7 +59,9 @@ public class ProcessorContext {
      * 最近一次收到的TSO/GCN
      */
     private Long lastTSO;
+    @Getter
     private Long searchTSO;
+    private final Long originalSearchTSO;
     private Long baseTSO;
     /**
      * 读取到了cdc 的物理DB 建表语句？ 估计是打标漏掉了
@@ -61,13 +72,16 @@ public class ProcessorContext {
     private boolean interrupt = false;
     private BinlogPosition findPos;
     private String currentFile;
+    @Getter
     private boolean inQuickMode = false;
+    private long startTime = 0;
 
     public ProcessorContext(AuthenticationInfo authenticationInfo, Long searchTSO, Long baseTSO) {
         this.authenticationInfo = authenticationInfo;
         this.searchTSO = searchTSO;
+        this.originalSearchTSO = searchTSO;
         this.baseTSO = baseTSO;
-        this.unCompleteTranMap = new SortTranMap(baseTSO);
+        this.unCompleteTranMap = new SortTranMap();
     }
 
     public BinlogPosition getPosition() {
@@ -116,7 +130,7 @@ public class ProcessorContext {
 
     }
 
-    private void searchTSO(TranPosition tranPosition) {
+    public void searchTSO(TranPosition tranPosition) {
         Long curTso = tranPosition.getTso();
         if (baseTSO != null && baseTSO > 0 && curTso < baseTSO) {
             return;
@@ -139,6 +153,7 @@ public class ProcessorContext {
         } else {
             //收到 cdc DDL 还没有找到command 或者tso ，可能是情况4， 直接返回。
             if (isReceivedCreateCdcPhyDbEvent()) {
+                // find pos 至少会有一个当前事物，不会为空
                 setFind(rtso);
                 onFileComplete();
                 log.info("find receive crate cdc db position, start pos @ " + getPosition());
@@ -173,8 +188,8 @@ public class ProcessorContext {
             log.warn("remove tso less than  commit TSO , commit size : + " + commitXidMap.size());
             StringBuilder sb = new StringBuilder();
             for (Map.Entry<String, Long> stringLongEntry : commitXidMap.entrySet()) {
-                sb.append("xid:").append(stringLongEntry.getKey()).append(",tso:")
-                    .append(stringLongEntry.getValue()).append("\n");
+                sb.append("xid:").append(stringLongEntry.getKey()).append(",tso:").append(stringLongEntry.getValue())
+                    .append("\n");
             }
             log.warn("block transaction: " + sb);
             log.info("find cdc start pos @ " + getPosition());
@@ -242,26 +257,20 @@ public class ProcessorContext {
 
         if (find) {
             // 已经找到位点了，到这里可能只是匹配大事务， 需要更新pos为当前Pos
-            // 如果tso有值，说明肯定是夸文件了，这里匹配下，commit集合空了可以直接返回
+            // 如果tso有值，说明肯定是夸文件了，这里匹配下，并且取小值做位点
             if (tso != null) {
-                if (commitXidMap.isEmpty()) {
-                    // 匹配上了，可以退出搜索位点。
-                    BinlogPosition beginPos = tranPosition.getBegin();
-                    beginPos.setTso(tso);
-                    try {
-                        beginPos.setRtso(CommonUtils.generateTSO(tso, StringUtils
-                            .rightPad(
-                                LogEventUtil.getTranIdFromXid(tranPosition.getXid(), authenticationInfo.getCharset())
-                                    + "",
-                                29,
-                                "0"), null));
-                    } catch (Exception e) {
-                        throw new PolardbxException("build begin pos error", e);
-                    }
-                    this.setFindPos(beginPos);
-                    this.setInterrupt(true);
-                    return;
+                // 使用和当前事物匹配的tso，构造position
+                BinlogPosition beginPos = tranPosition.getBegin();
+                beginPos.setTso(tso);
+                try {
+                    beginPos.setRtso(CommonUtils.generateTSO(tso, StringUtils.rightPad(
+                        LogEventUtil.getTranIdFromXid(tranPosition.getXid(), authenticationInfo.getCharset()) + "",
+                        29, "0"), null));
+                } catch (Exception e) {
+                    throw new PolardbxException("build begin pos error", e);
                 }
+                this.setFindPos(beginPos);
+                return;
             }
         }
         this.currentTran = tranPosition;
@@ -308,8 +317,10 @@ public class ProcessorContext {
         return isReceivedCreateCdcPhyDbEvent;
     }
 
-    public void setReceivedCreateCdcPhyDbEvent(boolean receivedCreateCdcPhyDbEvent) {
+    public void setReceivedCreateCdcPhyDbEvent(boolean receivedCreateCdcPhyDbEvent, BinlogPosition position) {
         isReceivedCreateCdcPhyDbEvent = receivedCreateCdcPhyDbEvent;
+        this.findPos = position;
+        this.preSelected = true;
     }
 
     public boolean isFind() {
@@ -332,6 +343,9 @@ public class ProcessorContext {
     }
 
     public void setPreSelected(String rtso) {
+        if (find) {
+            return;
+        }
         this.findPos = unCompleteTranMap.getMinPos(rtso);
         preSelected = true;
     }
@@ -353,6 +367,9 @@ public class ProcessorContext {
             this.findPos.getRtso().compareTo(findPos.getRtso()) < 0 ? this.findPos.getRtso() : findPos.getRtso();
         // 取最小值
         if (this.findPos.compareTo(findPos) > 0) {
+            if (log.isDebugEnabled()) {
+                log.debug("set new find pos : {}, old pos is {}", findPos, this.findPos);
+            }
             this.findPos = findPos;
         }
         this.findPos.setRtso(rTso);
@@ -368,6 +385,46 @@ public class ProcessorContext {
 
     public void setInQuickMode(boolean inQuickMode) {
         this.inQuickMode = inQuickMode;
+        if (inQuickMode) {
+            this.pushBackwardSearchTso();
+        }
     }
 
+    public void pushBackwardSearchTso() {
+        if (originalSearchTSO > 0) {
+            long pushBackwardSec = getInt(TASK_RECOVER_SEARCH_TSO_AUTO_QUICK_MODE_SWITCH_PUSH_BACKWARD_SECOND);
+            // 如果切换到quick search模式， 往前多推进一段时间，默认一分钟
+            searchTSO = originalSearchTSO - CommonUtils.convertToTsoUnit(pushBackwardSec, TimeUnit.SECONDS);
+            if (baseTSO != null && searchTSO <= baseTSO) {
+                log.warn(
+                    "try push forward search tso failed, because new search tso {} < base tso {}, will reuse old search tso {}",
+                    searchTSO, baseTSO, originalSearchTSO);
+                searchTSO = originalSearchTSO;
+            }
+        }
+    }
+
+    public void tryAutoQuickSearch() {
+        if (inQuickMode) {
+            return;
+        }
+        if (startTime == 0) {
+            startTime = System.currentTimeMillis();
+        } else {
+            if (find || preSelected) {
+                return;
+            }
+            int thresholdSec = getInt(TASK_RECOVER_SEARCH_TSO_AUTO_QUICK_MODE_THRESHOLD_SECOND);
+            if (thresholdSec <= 0) {
+                return;
+            }
+            long costTime = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - startTime);
+            if (costTime > thresholdSec) {
+                log.warn("search position use {} sec, reach Threshold value {}, will try quick search!", costTime,
+                    thresholdSec);
+                setInQuickMode(true);
+                commitXidMap.clear();
+            }
+        }
+    }
 }

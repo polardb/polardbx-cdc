@@ -1,12 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.rpc;
 
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
+import com.aliyun.polardbx.binlog.protocol.DumpRequest;
 import com.aliyun.polardbx.binlog.protocol.MessageType;
 import com.aliyun.polardbx.binlog.protocol.TxnBegin;
 import com.aliyun.polardbx.binlog.protocol.TxnData;
@@ -28,12 +29,7 @@ public class TxnStreamRpcServerTest {
         TxnStreamRpcServer server = new TxnStreamRpcServer(8980, new TxnMessageProvider() {
 
             @Override
-            public boolean checkTSO(String startTSO, TxnOutputStream outputStream, boolean keepWaiting) {
-                return false;
-            }
-
-            @Override
-            public void dump(String startTso, TxnOutputStream outputStream) throws InterruptedException {
+            public void dump(DumpRequest request, TxnOutputStream outputStream) throws InterruptedException {
                 int traceIdSeed = 0;
                 int tsoSeed = 0;
                 for (int j = 0; j < 200000; j++) {
@@ -70,11 +66,6 @@ public class TxnStreamRpcServerTest {
                     }
                 }
                 outputStream.onNext(DumpReply.newBuilder().build());
-            }
-
-            @Override
-            public void restart(String startTSO) {
-
             }
         });
         server.start();

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.base.canal;
@@ -20,6 +20,7 @@ import org.junit.Assert;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -54,6 +55,7 @@ public class CanalBaseTest extends RplBaseTestCase {
         sendTokenAndWait(CheckParameter.builder().build());
 
         long start = System.currentTimeMillis();
+        Set<String> actualFiles = new HashSet<>();
         String latestPosition = "";
         String latestFileName = "";
         while (true) {
@@ -64,6 +66,7 @@ public class CanalBaseTest extends RplBaseTestCase {
                 CanalEntry.Entry entry = message.getEntries().get(message.getEntries().size() - 1);
                 latestPosition = entry.getHeader().getLogfileName() + ":" + entry.getHeader().getLogfileOffset();
                 latestFileName = entry.getHeader().getLogfileName();
+                actualFiles.add(latestFileName);
 
                 if (System.currentTimeMillis() - lastPrintTime > 1000 * 10) {
                     log.info("latest dump position for destination {} is {}", destination, latestPosition);
@@ -84,12 +87,15 @@ public class CanalBaseTest extends RplBaseTestCase {
         }
 
         if (lastStopPosition != null) {
-            LogPosition beginPos = (LogPosition) lastStopPosition.getClientDatas().get(0).getCursor();
-            Integer beginIndex = Integer.parseInt(
-                StringUtils.substringAfter(beginPos.getPostion().getJournalName(), "."));
-            Integer endIndex = Integer.parseInt(
-                StringUtils.substringAfter(latestFileName, "."));
-            Assert.assertTrue(dumpFiles.size() >= (endIndex - beginIndex));
+            log.info("expectFiles:{}, actualFiles:{}", dumpFiles, actualFiles);
+            log.info("expectSize:{}. actualSize:{}", dumpFiles.size(), actualFiles.size());
+            Assert.assertTrue(dumpFiles.size() >= actualFiles.size());
+            //            LogPosition beginPos = (LogPosition) lastStopPosition.getClientDatas().get(0).getCursor();
+            //            Integer beginIndex = Integer.parseInt(
+            //                StringUtils.substringAfter(beginPos.getPostion().getJournalName(), "."));
+            //            Integer endIndex = Integer.parseInt(
+            //                StringUtils.substringAfter(latestFileName, "."));
+            //            Assert.assertTrue(dumpFiles.size() >= (endIndex - beginIndex));
         }
     }
 

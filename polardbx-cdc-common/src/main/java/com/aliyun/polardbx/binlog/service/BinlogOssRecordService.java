@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.service;
@@ -9,16 +9,19 @@ package com.aliyun.polardbx.binlog.service;
 import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.binlogFile;
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.clusterId;
@@ -60,9 +63,11 @@ public class BinlogOssRecordService {
      * 已经从远端存储上删除的，获得编号最大的binlog record
      */
     public Optional<BinlogOssRecord> getMaxPurgedRecord(String gid, String sid, String cid) {
-        return mapper.selectOne(s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid))
-            .and(clusterId, isEqualTo(cid)).and(purgeStatus, isEqualTo(COMPLETE.getValue()))
-            .orderBy(binlogFile.descending()).limit(1));
+        List<BinlogOssRecord> records =
+            mapper.select(s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid))
+                .and(clusterId, isEqualTo(cid)).and(purgeStatus, isEqualTo(COMPLETE.getValue())));
+        return records.stream()
+            .max(Comparator.comparingInt(o -> BinlogFileUtil.getBinlogSequence(o.getBinlogFile())));
     }
 
     /**
@@ -81,10 +86,15 @@ public class BinlogOssRecordService {
         long startTimestamp = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(hourLimit);
         List<BinlogOssRecord> records = mapper.select(
             s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid))
-                .and(gmtModified, isGreaterThanOrEqualTo(new Date(startTimestamp))).orderBy(binlogFile));
+                .and(gmtModified, isGreaterThanOrEqualTo(new Date(startTimestamp))).and(purgeStatus, isEqualTo(
+                    UN_COMPLETE.getValue())));
         if (records.isEmpty() || records.get(0).getLastTso() == null) {
             log.info("records is empty or the first record's last_tso is null");
             return Optional.empty();
+        } else {
+            records = records.stream()
+                .sorted((o1, o2) -> BinlogFileUtil.compareBinlogFileName(o1.getBinlogFile(), o2.getBinlogFile()))
+                .collect(Collectors.toList());
         }
 
         // 当选出来的这一批记录中，有某个记录的last tso字段为空，称之为空洞
@@ -125,10 +135,13 @@ public class BinlogOssRecordService {
      * 获得last_tso字段非空且文件编号最大的一个record
      */
     public Optional<BinlogOssRecord> getLastTsoRecord(String gid, String sid, String cid) {
-        return mapper.selectOne(
+        List<BinlogOssRecord> records = mapper.select(
             s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid))
-                .and(lastTso, isNotNull()).and(uploadStatus, isIn(SUCCESS.getValue(), IGNORE.getValue()))
-                .orderBy(binlogFile.descending()).limit(1));
+                .and(lastTso, isNotNull())
+                .and(uploadStatus, isIn(SUCCESS.getValue(), IGNORE.getValue())));
+
+        return records.stream()
+            .max(Comparator.comparingInt(o -> BinlogFileUtil.getBinlogSequence(o.getBinlogFile())));
     }
 
     public Optional<BinlogOssRecord> getRecordByTso(String gid, String sid, String cid, String tso) {
@@ -167,6 +180,16 @@ public class BinlogOssRecordService {
                 .and(uploadStatus, isEqualTo(SUCCESS.getValue())).and(purgeStatus, isEqualTo(UN_COMPLETE.getValue())));
     }
 
+    /**
+     * 根据文件名获取一个完整的记录
+     */
+    public Optional<BinlogOssRecord> getExistRecordByName(String gid, String sid, String cid, String name) {
+        return mapper.selectOne(
+            s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid))
+                .and(binlogFile, isEqualTo(name)).and(uploadStatus, isEqualTo(SUCCESS.getValue()))
+                .and(purgeStatus, isEqualTo(UN_COMPLETE.getValue())));
+    }
+
     public Optional<BinlogOssRecord> getRecordByName(String gid, String sid, String cid, String name) {
         return mapper.selectOne(
             s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid))
@@ -198,31 +221,24 @@ public class BinlogOssRecordService {
     }
 
     public Optional<BinlogOssRecord> getFirstUploadingRecord(String gid, String sid, String cid) {
-        return mapper.selectOne(
+        List<BinlogOssRecord> records = mapper.select(
             s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid))
-                .and(uploadStatus, isIn(CREATE.getValue(), UPLOADING.getValue())).orderBy(binlogFile).limit(1));
+                .and(uploadStatus, isIn(CREATE.getValue(), UPLOADING.getValue())));
+
+        return records.stream()
+            .min(Comparator.comparingInt(o -> BinlogFileUtil.getBinlogSequence(o.getBinlogFile())));
     }
 
-    public List<BinlogOssRecord> getLastUploadSuccessRecords(String gid, String sid, String cid, int n) {
-        return mapper.select(
+    public List<BinlogOssRecord> getRecordsForClean(String gid, String sid, String cid, String fileName, Date endDate) {
+        List<BinlogOssRecord> records = mapper.select(
             s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid))
-                .and(uploadStatus, isEqualTo(SUCCESS.getValue())).and(purgeStatus, isEqualTo(UN_COMPLETE.getValue()))
-                .orderBy(binlogFile.descending()).limit(n));
+                .and(purgeStatus, isEqualTo(COMPLETE.getValue()))
+                .and(gmtModified, isLessThan(endDate)));
+        if (!records.isEmpty()) {
+            records = records.stream()
+                .filter(r -> BinlogFileUtil.compareBinlogFileName(r.getBinlogFile(), fileName) <= 0)
+                .collect(Collectors.toList());
+        }
+        return records;
     }
-
-    public List<BinlogOssRecord> getRecordsBefore(String gid, String sid, String cid, String fileName, int n) {
-        return mapper.select(
-            s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid))
-                .and(binlogFile, isLessThanOrEqualTo(fileName)).and(uploadStatus, isEqualTo(SUCCESS.getValue()))
-                .and(purgeStatus, isEqualTo(UN_COMPLETE.getValue())).orderBy(binlogFile.descending()).limit(n));
-    }
-
-    public List<BinlogOssRecord> getRecordsForBinlogDump(String gid, String sid, String cid, String fileName) {
-        return mapper.select(
-            s -> s.where(groupId, isEqualTo(gid)).and(streamId, isEqualTo(sid)).and(clusterId, isEqualTo(cid))
-                .and(binlogFile, isGreaterThanOrEqualTo(fileName)).and(uploadStatus, isEqualTo(SUCCESS.getValue()))
-                .and(purgeStatus, isEqualTo(UN_COMPLETE.getValue()))
-                .orderBy(binlogFile));
-    }
-
 }

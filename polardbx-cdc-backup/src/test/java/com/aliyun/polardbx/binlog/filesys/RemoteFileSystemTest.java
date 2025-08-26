@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.filesys;
@@ -13,8 +13,9 @@ import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
 import com.aliyun.polardbx.binlog.enums.BinlogUploadStatus;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.util.Date;
@@ -25,20 +26,17 @@ import java.util.concurrent.TimeUnit;
  * @author yudong
  * @since 2023/11/15 14:32
  **/
-public class RemoteFileSystemTest extends BaseTestWithGmsTables {
+public class RemoteFileSystemTest extends BaseTest {
     private final String group = "test_group";
     private final String stream = "test_stream";
     private final String clusterId = "test_cluster";
 
-    @Test
-    public void testListFiles() {
-        setConfig(ConfigKeys.CLUSTER_ID, clusterId);
-
+    @Before
+    public void prepareData() {
+        mockConfig(ConfigKeys.CLUSTER_ID, clusterId);
         BinlogOssRecordMapper mapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
-
         int preserveDays = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_FILE_PRESERVE_DAYS);
         Date expireTime = new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(preserveDays));
-
         BinlogOssRecord record1 = new BinlogOssRecord();
         record1.setBinlogFile("binlog.000001");
         record1.setGmtModified(expireTime);
@@ -56,11 +54,21 @@ public class RemoteFileSystemTest extends BaseTestWithGmsTables {
         record2.setUploadStatus(BinlogUploadStatus.SUCCESS.getValue());
         record2.setPurgeStatus(BinlogPurgeStatus.UN_COMPLETE.getValue());
         mapper.insertSelective(record2);
+    }
 
+    @Test
+    public void testListFiles() {
         RemoteFileSystem fileSystem = new RemoteFileSystem(group, stream);
         List<CdcFile> cdcFiles = fileSystem.listFiles();
         Assert.assertEquals(1, cdcFiles.size());
         Assert.assertEquals("binlog.000002", cdcFiles.get(0).getName());
+    }
+
+    @Test
+    public void testExist() {
+        RemoteFileSystem fileSystem = new RemoteFileSystem(group, stream);
+        Assert.assertTrue(fileSystem.exist("binlog.000002"));
+        Assert.assertFalse(fileSystem.exist("binlog.000003"));
     }
 
 }

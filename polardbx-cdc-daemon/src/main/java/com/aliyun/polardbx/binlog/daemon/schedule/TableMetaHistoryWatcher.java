@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
@@ -39,7 +39,7 @@ public class TableMetaHistoryWatcher extends AbstractBinlogTimerTask {
             if (CnInstConfigUtil.getBoolean(ENABLE_CDC_META_BUILD_SNAPSHOT) &&
                 RuntimeLeaderElector.isLeader(
                     TABLE_META_REBUILD_LOCK)) {
-                tableMetaHistoryDbHelper.tryClean();
+                tableMetaHistoryDbHelper.process();
             }
         } catch (Throwable th) {
             log.error("tableMetaHistoryWatcher.process fail {} {} {}", clusterId, name, interval, th);

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog;
@@ -152,6 +152,8 @@ public class ServerVariables {
         variables.add("topology_recover_tso_binlog_num_limit");
         variables.add("topology_force_use_recover_tso_enabled");
         variables.add("columnar_process_heartbeat_timeout_ms");
+        variables.add("columnar_process_latency_timeout_ms");
+        variables.add("columnar_no_alarm_without_cci");
         variables.add("task_engine_auto_start");
         variables.add("task_merge_xa_without_tso");
         variables.add("task_merge_dry_run");
@@ -210,7 +212,7 @@ public class ServerVariables {
         variables.add("task_recover_check_previous_dn_change");
         variables.add("task_recover_search_tso_in_quick_mode");
         variables.add("task_recover_force_quick_search_when_loss_backup");
-        variables.add("task_recover_search_tso_with_v1_algorithm");
+        variables.add("task_dump_dn_default_binlog_file_size");
         variables.add("task_reformat_no_foreign_key_check");
         variables.add("alarm_nodata_threshold_second");
         variables.add("alarm_delay_threshold_second");
@@ -236,7 +238,6 @@ public class ServerVariables {
         variables.add("meta_build_logic_ddl_table_blacklist");
         variables.add("meta_build_logic_ddl_tso_blacklist");
         variables.add("meta_build_share_topology_enabled");
-        variables.add("meta_build_share_topology_with_intern");
         variables.add("meta_build_ignore_apply_error");
         variables.add("meta_build_snapshot_error_inject");
         variables.add("meta_build_record_ignored_ddl_enabled");
@@ -292,7 +293,6 @@ public class ServerVariables {
         variables.add("binlogx_kway_source_queue_size");
 
         variables.add("rpl_task_support_running_check");
-        variables.add("rpl_single_task_memory_when_distribute");
         variables.add("rpl_random_compare_all");
         variables.add("rpl_rocksdb_deserialize_parallelism");
         variables.add("rpl_validation_per_db_parallelism");

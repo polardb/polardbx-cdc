@@ -1,12 +1,11 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.taskmeta;
 
-import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.daemon.pipeline.CommandPipeline;
@@ -24,10 +23,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,18 +36,20 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_PORT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.INST_IP;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DELAY_ALARM_THRESHOLD_SECOND;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_RESOURCE_USE_RATIO;
 
 @Slf4j
 public class TaskDistributor {
 
-    private static final ResourceManager RESOURCE_MANAGER =
+    public static ResourceManager RESOURCE_MANAGER =
         new ResourceManager(DynamicApplicationConfig.getString(CLUSTER_ID));
     private static final CommandPipeline COMMAND_PIPELINE = new CommandPipeline();
     private static final String GREP_RPL_TASK_COUNT_COMMAND = "ps -ef | grep 'RplTaskEngine' | grep -v grep | wc -l";
     private static final String GREP_RPL_TASK_COMMAND = "ps -ef | grep 'RplTaskEngine' | grep -v grep";
 
     // todo 后续考虑持久化和增加版本号
-    private static Set<String> containers = new HashSet<>();
+    public static Map<String, Integer> containerMemory = new HashMap<>();
+    private static String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
 
     /**
      * For Leader
@@ -60,95 +61,105 @@ public class TaskDistributor {
                 log.error("distributeTasks, no running workers");
                 return;
             }
-            Set<String> nowContainers = workers.stream().map(Container::getHostString)
-                .collect(Collectors.toSet());
-            // 重启不进行rebalance
-            // 历史container列表和当前container列表不一致时，触发rebalance
-            boolean needRebalance = !containers.isEmpty() && !nowContainers.equals(containers);
 
-            Map<String, Integer> workerLoads = new HashMap<>();
-            for (Container worker : workers) {
-                workerLoads.put(worker.getHostString(), 0);
-            }
-            int maxRunningTaskNum = computeMaxRunningTaskNum(workers);
-            String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
-            List<RplTask> runningTasks = DbTaskMetaManager.listClusterTask(TaskStatus.RUNNING, clusterId);
-            List<RplTask> readyTasks = DbTaskMetaManager.listClusterTask(TaskStatus.READY, clusterId);
-            List<RplTask> restartTasks = DbTaskMetaManager.listClusterTask(TaskStatus.RESTART, clusterId);
-            List<RplTask> toDistributeTasks = new ArrayList<>();
+            // 判断是否要 rebalance:历史container列表和当前container列表的内存不一致时，触发rebalance
+            // 默认占用95%的pod内存
+            double ratio = DynamicApplicationConfig.getDouble(RPL_RESOURCE_USE_RATIO);
+            Map<String, Integer> nowContainers = workers.stream().collect(Collectors.toMap(Container::getHostString,
+                c -> (int) (c.getCapability().getMemory_mb() * ratio)));
+            boolean needRebalance = !nowContainers.equals(containerMemory);
+            Map<String, Integer> workerResiMemory = new HashMap<>(nowContainers);
 
-            // restart状态的任务，如果没有worker或者worker不在container列表里，直接视为ready task
-            for (RplTask task : restartTasks) {
-                if (StringUtils.isBlank(task.getWorker()) || !workerLoads.containsKey(task.getWorker())) {
-                    readyTasks.add(task);
-                }
+            // 优先调度 running task
+            // running task 调度失败，不继续进行后续调度
+            if (distributeRunningTasks(workerResiMemory, needRebalance)) {
+                distributeReadyTasks(workerResiMemory);
             }
 
-            for (RplTask task : runningTasks) {
-                // 如果需要rebalance，那么直接全部放入待调度列表
-                if (StringUtils.isBlank(task.getWorker()) || !isTaskRunning(task)
-                    || !workerLoads.containsKey(task.getWorker()) || needRebalance) {
-                    toDistributeTasks.add(task);
-                    log.info("distributeTasks, need distribute running task: {}", task.getId());
-                } else {
-                    log.info("distributeTasks, task: {} no need to distribute, worker: {}, gmtModified: {}",
-                        task.getId(),
-                        task.getWorker(),
-                        task.getGmtHeartbeat());
-                    workerLoads.put(task.getWorker(), workerLoads.get(task.getWorker()) + 1);
-                }
-            }
-
-            // the only way to set task to running state
-            int readyToRunningTaskNum = Math.min(maxRunningTaskNum - runningTasks.size(), readyTasks.size());
-            if (readyToRunningTaskNum > 0) {
-                for (int i = 0; i < readyToRunningTaskNum; i++) {
-                    DbTaskMetaManager.updateTaskStatus(readyTasks.get(i).getId(), TaskStatus.RUNNING);
-                    // 优化历史调度亲和性，如果ready的task存在历史worker，则直接调度至该worker
-                    // todo: 亲和性导致存在调度不均衡的可能，暂不处理
-                    // 如果需要rebalance，那么直接全部放入待调度列表
-                    if (StringUtils.isBlank(readyTasks.get(i).getWorker()) || needRebalance) {
-                        log.info("distributeTasks, need distribute ready task: {}",
-                            readyTasks.get(i).getId());
-                        toDistributeTasks.add(readyTasks.get(i));
-                    } else {
-                        workerLoads.put(readyTasks.get(i).getWorker(),
-                            workerLoads.get(readyTasks.get(i).getWorker()) + 1);
-                    }
-                }
-            }
-
-            log.info("distributeTasks, workerLoads before: {}", JSON.toJSONString(workerLoads));
-            List<Map.Entry<String, Integer>> sortedWorkLoad = new ArrayList<>(workerLoads.entrySet());
-            sortedWorkLoad.sort(Comparator.comparingInt(Map.Entry::getValue));
-
-            for (RplTask task : toDistributeTasks) {
-                Map.Entry<String, Integer> entry = sortedWorkLoad.get(0);
-                DbTaskMetaManager.updateTaskWorker(task.getId(), entry.getKey());
-                log.info("distributeTasks, task: {}, to worker: {}", task.getId(), entry.getKey());
-                entry.setValue(entry.getValue() + 1);
-                sortedWorkLoad.sort(Comparator.comparingInt(Map.Entry::getValue));
-            }
-            workerLoads = sortedWorkLoad.stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-            // TODO by jiyue resource check and alarm
-            containers = nowContainers;
-            log.info("distributeTasks end, workerLoads after: {}", JSON.toJSONString(workerLoads));
+            // 记录当前container列表
+            containerMemory = nowContainers;
         } catch (Exception e) {
             log.error("distributeTasks error:", e);
             throw e;
         }
     }
 
-    public static int computeMaxRunningTaskNum(List<Container> workers) {
-        int totalCpu = 0;
-        int totalMem = 0;
-        for (Container worker : workers) {
-            totalCpu = totalCpu + worker.getCapability().getCpu();
-            totalMem = totalMem + worker.getCapability().getMemory_mb();
+    public static boolean distributeRunningTasks(Map<String, Integer> workerResiMemory, boolean needRebalance) {
+        List<RplTask> runningTasks = DbTaskMetaManager.listClusterTask(TaskStatus.RUNNING, clusterId);
+        for (RplTask task : runningTasks) {
+            if (!distributeOneTask(task, workerResiMemory, !isTaskRunning(task) || needRebalance)) {
+                return false;
+            }
         }
-        // sql flashback任务cpu占用率高，全量迁移cpu和内存占用率高
-        // 综合下来，这里暂时以内存作为单任务所需资源
-        return totalMem / DynamicApplicationConfig.getInt(ConfigKeys.RPL_SINGLE_TASK_MEMORY_WHEN_DISTRIBUTE);
+        return true;
+    }
+
+    public static void distributeReadyTasks(Map<String, Integer> workerResiMemory) {
+        List<RplTask> readyTasks = DbTaskMetaManager.listClusterTask(TaskStatus.READY, clusterId);
+        List<RplTask> restartTasks = DbTaskMetaManager.listClusterTask(TaskStatus.RESTART, clusterId);
+
+        // restart状态的任务，如果有在container列表里的worker，那么等待local worker kill后设置为ready再调度
+        // 如果没有worker或者worker不在container列表里，直接视为ready task
+        for (RplTask task : restartTasks) {
+            if (StringUtils.isBlank(task.getWorker()) || !workerResiMemory.containsKey(task.getWorker())) {
+                readyTasks.add(task);
+            }
+        }
+
+        // the only way to set task to running state
+        for (RplTask task : readyTasks) {
+            if (!distributeOneTask(task, workerResiMemory, true)) {
+                return;
+            }
+            DbTaskMetaManager.updateTaskStatus(task.getId(), TaskStatus.RUNNING);
+        }
+    }
+
+    public static boolean distributeOneTask(RplTask task, Map<String, Integer> workerResiMemory,
+                                            boolean needRebalance) {
+        int memory = DbTaskMetaManager.getTaskMemory(task.getId());
+
+        // 正常运行的任务，优先考虑亲和性，防止频繁调度
+        if (!needRebalance) {
+            String originalWorker = task.getWorker();
+            if (StringUtils.isNotBlank(originalWorker) && workerResiMemory.containsKey(originalWorker)) {
+                int resiMemory = workerResiMemory.get(originalWorker);
+                if (memory <= resiMemory) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("distributeTasks, task: {} no need to distribute, worker: {}", task.getId(),
+                            originalWorker);
+                    }
+                    workerResiMemory.put(originalWorker, resiMemory - memory);
+                    return true;
+                }
+                log.info("distributeTasks, task: {} need to re distribute due to insufficient memory", task.getId());
+            }
+        }
+
+        log.info("distributeTasks, task: {} need to distribute", task.getId());
+
+        // 运行但非正常的任务 & 资源不够的正常运行任务 & ready状态的任务 & rebalance场景
+        List<Map.Entry<String, Integer>> sortedWorkResiMemory = new ArrayList<>(workerResiMemory.entrySet());
+        sortedWorkResiMemory.sort(Comparator.comparingInt(Map.Entry::getValue));
+        Collections.reverse(sortedWorkResiMemory);
+        Map.Entry<String, Integer> maxResiMemoryWorker = sortedWorkResiMemory.get(0);
+
+        String workerName = maxResiMemoryWorker.getKey();
+        int maxResiMemory = maxResiMemoryWorker.getValue();
+        if (memory > maxResiMemory) {
+            DbTaskMetaManager.updateTaskWorker(task.getId(), "");
+            // 针对特定类型的任务，资源不足需要报警
+            log.warn("distributeTasks, task: {} need to re distribute due to insufficient memory,"
+                + " need {}, max resi {}", task.getId(), memory, maxResiMemory);
+            if (ServiceType.alarmWhenNoResource(ServiceType.valueOf(task.getType()))) {
+                MonitorManager.getInstance().triggerAlarm(MonitorType.RPL_RESOURCE_NOT_ENOUGH_ERROR, task.getId());
+            }
+            return false;
+        }
+        log.info("distributeTasks, task: {}, to worker: {}", task.getId(), workerName);
+        workerResiMemory.put(workerName, maxResiMemory - memory);
+        DbTaskMetaManager.updateTaskWorker(task.getId(), workerName);
+        return true;
     }
 
     /**

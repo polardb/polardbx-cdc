@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.extractor;
@@ -449,7 +449,7 @@ public class LogEventConvert {
             TableMapLogEvent table = event.getTable();
             if (table == null) {
                 // tableId对应的记录不存在
-                throw new TableIdNotFoundException("not found tableId:" + event.getTableId());
+                throw new TableIdNotFoundException("not found tableId:" + event.getTableId() + " " + event.getLogPos());
             }
 
             DBMSAction action = null;

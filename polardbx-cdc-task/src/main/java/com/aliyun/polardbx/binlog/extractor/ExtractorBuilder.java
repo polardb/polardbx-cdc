@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor;
@@ -13,9 +13,10 @@ import com.aliyun.polardbx.binlog.storage.Storage;
 public class ExtractorBuilder {
 
     public static BinlogExtractor buildExtractor(BinlogParameter parameter, Storage storage, MergeSource mergeSource,
-                                                 String rdsBinlogPath, long serverId) {
+                                                 String rdsBinlogPath, long serverId, boolean deepDecodeEvent) {
         BinlogExtractor extractor = new BinlogExtractor();
-        extractor.init(parameter, rdsBinlogPath, serverId);
+        extractor.init(parameter, rdsBinlogPath, serverId, storage, deepDecodeEvent);
+
         DefaultOutputMergeSourceHandler logEventHandler = new DefaultOutputMergeSourceHandler(mergeSource, storage);
         extractor.setLogEventHandler(logEventHandler);
         return extractor;

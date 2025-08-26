@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal;
@@ -62,7 +62,7 @@ public class MySqlInfo {
     /**
      * 查询当前的binlog位置
      */
-    protected BinlogPosition findEndPosition(MysqlConnection mysqlConnection) {
+    private BinlogPosition findEndPosition(MysqlConnection mysqlConnection) {
         return mysqlConnection.query("show master status", new MysqlConnection.ProcessJdbcResult<BinlogPosition>() {
 
             @Override
@@ -84,9 +84,9 @@ public class MySqlInfo {
     /**
      * 查询当前的binlog位置
      */
-    protected BinlogPosition findStartPosition(MysqlConnection mysqlConnection) {
-        return mysqlConnection
-            .query("show binlog events limit 1", new MysqlConnection.ProcessJdbcResult<BinlogPosition>() {
+    private BinlogPosition findStartPosition(MysqlConnection mysqlConnection) {
+        return mysqlConnection.query("show binlog events limit 1",
+            new MysqlConnection.ProcessJdbcResult<BinlogPosition>() {
 
                 @Override
                 public BinlogPosition process(ResultSet rs) throws SQLException {

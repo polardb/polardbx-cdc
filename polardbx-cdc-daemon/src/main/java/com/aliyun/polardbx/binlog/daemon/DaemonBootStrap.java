@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon;
@@ -59,8 +59,11 @@ public class DaemonBootStrap {
             String clusterType = DynamicApplicationConfig.getClusterType();
 
             // 初始化表
-            CdcMetaManager cdcMetaManager = new CdcMetaManager();
-            cdcMetaManager.init();
+            // 如果是Columnar Daemon，不需要初始化系统表，防止与cdc版本不对齐
+            if (!clusterType.equals(ClusterType.COLUMNAR.name())) {
+                CdcMetaManager cdcMetaManager = new CdcMetaManager();
+                cdcMetaManager.init();
+            }
 
             // Node Reporter
             if (!clusterType.equals(ClusterType.COLUMNAR.name())) {

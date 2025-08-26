@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
@@ -41,8 +41,6 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -86,10 +84,9 @@ public class HttpHelper {
         HttpGet httpGet = null;
         try {
             URI uri = new URIBuilder(url).build();
-            RequestConfig config = RequestConfig.custom().setConnectTimeout(timeout)
-                .setConnectionRequestTimeout(timeout)
-                .setSocketTimeout(timeout)
-                .build();
+            RequestConfig config =
+                RequestConfig.custom().setConnectTimeout(timeout).setConnectionRequestTimeout(timeout)
+                    .setSocketTimeout(timeout).build();
             httpGet = new HttpGet(uri);
             HttpClientContext context = HttpClientContext.create();
             context.setRequestConfig(config);
@@ -99,8 +96,9 @@ public class HttpHelper {
                 return EntityUtils.toString(response.getEntity());
             } else {
                 String errorMsg = EntityUtils.toString(response.getEntity());
-                throw new PolardbxException("requestGet remote error, url=" + uri.toString() + ", code=" + statusCode
-                    + ", error msg=" + errorMsg);
+                throw new PolardbxException(
+                    "requestGet remote error, url=" + uri.toString() + ", code=" + statusCode + ", error msg="
+                        + errorMsg);
             }
         } catch (Throwable t) {
             long end = System.currentTimeMillis();
@@ -135,10 +133,9 @@ public class HttpHelper {
             CloseableHttpClient httpClient = getHttpClient();
 
             URI uri = new URIBuilder(url).build();
-            RequestConfig config = RequestConfig.custom().setConnectTimeout(timeout)
-                .setConnectionRequestTimeout(timeout)
-                .setSocketTimeout(timeout)
-                .build();
+            RequestConfig config =
+                RequestConfig.custom().setConnectTimeout(timeout).setConnectionRequestTimeout(timeout)
+                    .setSocketTimeout(timeout).build();
             httpGet = new HttpGet(uri);
             HttpClientContext context = HttpClientContext.create();
             context.setRequestConfig(config);
@@ -148,8 +145,9 @@ public class HttpHelper {
                 return EntityUtils.toString(response.getEntity());
             } else {
                 String errorMsg = EntityUtils.toString(response.getEntity());
-                throw new PolardbxException("requestGet remote error, url=" + uri.toString() + ", code=" + statusCode
-                    + ", error msg=" + errorMsg);
+                throw new PolardbxException(
+                    "requestGet remote error, url=" + uri.toString() + ", code=" + statusCode + ", error msg="
+                        + errorMsg);
             }
         } catch (Throwable t) {
             long end = System.currentTimeMillis();
@@ -184,10 +182,9 @@ public class HttpHelper {
             CloseableHttpClient httpClient = getHttpClient();
 
             URI uri = new URIBuilder(url).build();
-            RequestConfig config = RequestConfig.custom().setConnectTimeout(timeout)
-                .setConnectionRequestTimeout(timeout)
-                .setSocketTimeout(timeout)
-                .build();
+            RequestConfig config =
+                RequestConfig.custom().setConnectTimeout(timeout).setConnectionRequestTimeout(timeout)
+                    .setSocketTimeout(timeout).build();
             httpPost = new HttpPost(uri);
             List<NameValuePair> parameters = Lists.newArrayList();
             for (String key : params.keySet()) {
@@ -246,10 +243,9 @@ public class HttpHelper {
         try {
             CloseableHttpClient httpclient = builder.build();
             URI uri = new URIBuilder(url).build();
-            RequestConfig config = RequestConfig.custom().setConnectTimeout(timeout)
-                .setConnectionRequestTimeout(timeout)
-                .setSocketTimeout(timeout)
-                .build();
+            RequestConfig config =
+                RequestConfig.custom().setConnectTimeout(timeout).setConnectionRequestTimeout(timeout)
+                    .setSocketTimeout(timeout).build();
             httpPost = new HttpPost(uri);
             List<NameValuePair> parameters = Lists.newArrayList();
             for (String key : params.keySet()) {
@@ -272,8 +268,9 @@ public class HttpHelper {
                 long end = System.currentTimeMillis();
                 long cost = end - start;
                 String curlRequest = getCurlRequest(url, cookieStore, params, cost);
-                throw new PolardbxException("requestPost remote error, request : " + curlRequest + ", statusCode="
-                    + statusCode + ";" + EntityUtils.toString(response.getEntity()));
+                throw new PolardbxException(
+                    "requestPost remote error, request : " + curlRequest + ", statusCode=" + statusCode + ";"
+                        + EntityUtils.toString(response.getEntity()));
             }
         } catch (Throwable t) {
             long end = System.currentTimeMillis();
@@ -329,6 +326,10 @@ public class HttpHelper {
     }
 
     public static String doGet(String url, Map<String, String> params, Map<String, String> headers) {
+        return doGet(url, params, headers, true);
+    }
+
+    public static String doGet(String url, Map<String, String> params, Map<String, String> headers, boolean logger) {
         long start = System.currentTimeMillis();
         HttpClientBuilder builder = HttpClientBuilder.create();
         builder.setMaxConnPerRoute(50);
@@ -347,10 +348,9 @@ public class HttpHelper {
                 url += "?" + param;
             }
             URI uri = new URIBuilder(url).build();
-            RequestConfig config = RequestConfig.custom().setConnectTimeout(CONNECT_TIMEOUT)
-                .setConnectionRequestTimeout(CONNECT_TIMEOUT)
-                .setSocketTimeout(READ_TIMEOUT)
-                .build();
+            RequestConfig config =
+                RequestConfig.custom().setConnectTimeout(CONNECT_TIMEOUT).setConnectionRequestTimeout(CONNECT_TIMEOUT)
+                    .setSocketTimeout(READ_TIMEOUT).build();
             httpGet = new HttpGet(uri);
             if (headers != null && headers.size() > 0) {
                 for (Entry<String, String> header : headers.entrySet()) {
@@ -365,8 +365,9 @@ public class HttpHelper {
                 return EntityUtils.toString(response.getEntity());
             } else {
                 String errorMsg = EntityUtils.toString(response.getEntity());
-                throw new PolardbxException("requestGet remote error, url=" + uri.toString() + ", code=" + statusCode
-                    + ", error msg=" + errorMsg);
+                throw new PolardbxException(
+                    "requestGet remote error, url=" + uri.toString() + ", code=" + statusCode + ", error msg="
+                        + errorMsg);
             }
         } catch (Throwable t) {
             long end = System.currentTimeMillis();
@@ -374,9 +375,11 @@ public class HttpHelper {
             String curlRequest = getCurlRequest(url, null, params, cost);
             throw new PolardbxException("requestPost(Https) remote error, request : " + curlRequest, t);
         } finally {
-            long end = System.currentTimeMillis();
-            long cost = end - start;
-            printCurlRequest(url, null, null, cost);
+            if (logger){
+                long end = System.currentTimeMillis();
+                long cost = end - start;
+                printCurlRequest(url, null, null, cost);
+            }
             if (response != null) {
                 try {
                     response.close();
@@ -404,10 +407,9 @@ public class HttpHelper {
         try {
             CloseableHttpClient httpClient = getHttpClient();
             URI uri = new URIBuilder(url).build();
-            RequestConfig config = RequestConfig.custom().setConnectTimeout(connectTimeout)
-                .setConnectionRequestTimeout(connectTimeout)
-                .setSocketTimeout(readTimeout)
-                .build();
+            RequestConfig config =
+                RequestConfig.custom().setConnectTimeout(connectTimeout).setConnectionRequestTimeout(connectTimeout)
+                    .setSocketTimeout(readTimeout).build();
             if ("POST".equalsIgnoreCase(method)) {
                 httpRequest = new HttpPost(uri);
                 ((HttpPost) httpRequest).setEntity(new StringEntity(paramStr));
@@ -463,22 +465,14 @@ public class HttpHelper {
         cmd.execute();
     }
 
-    private static void doDownload(String urlStr, String targetName) throws IOException, URISyntaxException {
-        BufferedOutputStream bw = new BufferedOutputStream(new FileOutputStream(targetName));
-        download(urlStr, bw);
-    }
-
-    public static void download(String urlStr, OutputStream os) throws IOException,
-        URISyntaxException {
+    public static void download(String urlStr, OutputStream os) throws IOException, URISyntaxException {
         urlStr = urlStr.trim();
         URL url = new URL(urlStr);
         CloseableHttpClient httpClient = HttpClientBuilder.create().setMaxConnPerRoute(50).setMaxConnTotal(100).build();
         HttpGet httpGet = new HttpGet(url.toURI());
-        RequestConfig requestConfig = RequestConfig.custom()
-            .setConnectTimeout(100000)
-            .setConnectionRequestTimeout(10000)
-            .setSocketTimeout(10000)
-            .build();
+        RequestConfig requestConfig =
+            RequestConfig.custom().setConnectTimeout(100000).setConnectionRequestTimeout(10000).setSocketTimeout(10000)
+                .build();
         httpGet.setConfig(requestConfig);
         HttpResponse response = httpClient.execute(httpGet);
         int statusCode = response.getStatusLine().getStatusCode();
@@ -507,20 +501,18 @@ public class HttpHelper {
         }
     }
 
-    private static CloseableHttpClient getHttpClient() throws CertificateException, NoSuchAlgorithmException,
-        KeyStoreException, IOException, UnrecoverableKeyException,
-        KeyManagementException {
+    private static CloseableHttpClient getHttpClient()
+        throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException,
+        UnrecoverableKeyException, KeyManagementException {
         DefaultHttpClient httpclient = new DefaultHttpClient();
         SSLContext ctx = SSLContext.getInstance("TLS");
         X509TrustManager tm = new X509TrustManager() {
             @Override
-            public void checkClientTrusted(X509Certificate[] chain,
-                                           String authType) throws CertificateException {
+            public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
             }
 
             @Override
-            public void checkServerTrusted(X509Certificate[] chain,
-                                           String authType) throws CertificateException {
+            public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
             }
 
             @Override

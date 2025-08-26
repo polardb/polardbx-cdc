@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
@@ -14,6 +14,7 @@ import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistCleanPointDynamicSqlSuppor
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistCleanPointMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogSemiSnapshotMapper;
 import com.aliyun.polardbx.binlog.dao.SemiSnapshotInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.SemiSnapshotInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
@@ -21,7 +22,6 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistCleanPoint;
 import com.aliyun.polardbx.binlog.domain.po.SemiSnapshotInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
-import com.aliyun.polardbx.binlog.dao.BinlogSemiSnapshotMapper;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.task.IScheduleJob;
@@ -45,8 +45,11 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_HISTORY_RESOURC
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_ALARM_LOGIC_DDL_COUNT_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_ALARM_PHYSICAL_DDL_COUNT_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SEMI_SNAPSHOT_PRESERVE_HOURS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_PURGE_BATCH_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_PURGE_ENV_CONFIG_HISTORY_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PURGE_MARK_DDL_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PURGE_PHYSICAL_DDL_THRESHOLD;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_PURGE_SCHEDULE_HISTORY_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_RETRIEVE_INSTANT_CREATE_TABLE_MODES;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
@@ -63,8 +66,12 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
 public class MetaDataMonitor implements IScheduleJob {
     private static final String HISTORY_MONITOR_LOCK = "CDC_HISTORY_MONITOR_LOCK";
     private final ScheduledExecutorService monitor;
-    private final JdbcTemplate polarxJdbcTemplate;
-    private final JdbcTemplate metaJdbcTemplate;
+    JdbcTemplate polarxJdbcTemplate;
+    JdbcTemplate metaJdbcTemplate;
+
+    String purgeCdcDdlRecordSql = "delete from __cdc_ddl_record__ order by `gmt_created` asc limit ?";
+    String purgeScheduleHistorySql = "delete from binlog_schedule_history order by id asc limit ?";
+    String purgeEvnConfigHistorySql = "delete from binlog_env_config_history order by id asc limit ?";
 
     public MetaDataMonitor() {
         this.monitor = Executors.newSingleThreadScheduledExecutor((r) -> {
@@ -72,14 +79,14 @@ public class MetaDataMonitor implements IScheduleJob {
             t.setDaemon(true);
             return t;
         });
-        this.polarxJdbcTemplate = getObject("polarxJdbcTemplate");
-        this.metaJdbcTemplate = getObject("metaJdbcTemplate");
     }
 
     @Override
     public void start() {
         long period = DynamicApplicationConfig.getLong(DAEMON_WATCH_HISTORY_RESOURCE_INTERVAL_MINUTE);
-        monitor.scheduleAtFixedRate(() -> {
+        this.polarxJdbcTemplate = getObject("polarxJdbcTemplate");
+        this.metaJdbcTemplate = getObject("metaJdbcTemplate");
+        this.monitor.scheduleAtFixedRate(() -> {
             try {
                 if (!RuntimeLeaderElector.isDaemonLeader()) {
                     return;
@@ -118,19 +125,17 @@ public class MetaDataMonitor implements IScheduleJob {
             //未触发阈值，不予清理；触发阈值后，后续会一直维持这个阈值对应的数据量
             String cdcPhyTableName = getCdcPhyTableName();
             long threshold = DynamicApplicationConfig.getLong(META_PURGE_MARK_DDL_THRESHOLD);
-            Long count = polarxJdbcTemplate.queryForObject("/!+TDDL:node(0)*/select count(id) from __cdc___000000." +
-                cdcPhyTableName, Long.class);
-
-            if (count > threshold) {
-                Long minId = polarxJdbcTemplate.queryForObject(String.format(
-                    "/!+TDDL:node(0)*/select min(id) from (select id from __cdc___000000.%s order by id desc limit %s) t",
-                    cdcPhyTableName, threshold), Long.class);
-                polarxJdbcTemplate.execute("delete from __cdc_ddl_record__ where id < " + minId);
-                log.info("cdc ddl records is cleaned, ");
-            }
+            long totalCount = polarxJdbcTemplate.queryForObject(
+                "/!+TDDL:node(0)*/select count(id) from __cdc___000000." + cdcPhyTableName, Long.class);
+            doCleanCdcDdlRecord(totalCount, threshold, polarxJdbcTemplate);
         } catch (Throwable t) {
             log.error("check cdc ddl record count for clean failed.", t);
         }
+    }
+
+    int doCleanCdcDdlRecord(long totalCount, long threshold, JdbcTemplate polarxJdbcTemplate) {
+        return loopDelete(purgeCdcDdlRecordSql, totalCount, threshold, polarxJdbcTemplate,
+            "cdc ddl records is cleaned, delete count is {}, with execute count {}");
     }
 
     private String getCdcPhyTableName() {
@@ -167,40 +172,52 @@ public class MetaDataMonitor implements IScheduleJob {
         }
     }
 
-    private void tryCleanScheduleHistory() {
+    int tryCleanScheduleHistory() {
         try {
             //未触发阈值，不予清理；触发阈值后，后续会一直维持这个阈值对应的数据量
-            long threshold = 1000;
-            Long count = metaJdbcTemplate.queryForObject("select count(id) from binlog_schedule_history", Long.class);
-
-            if (count > threshold) {
-                Long minId = metaJdbcTemplate.queryForObject(String.format(
-                    "select min(id) from (select id from binlog_schedule_history order by id desc limit %s) t",
-                    threshold), Long.class);
-                metaJdbcTemplate.execute("delete from binlog_schedule_history where id < " + minId);
-                log.info("binlog schedule history is cleaned, ");
-            }
+            long threshold = DynamicApplicationConfig.getInt(META_PURGE_SCHEDULE_HISTORY_THRESHOLD);
+            long count = metaJdbcTemplate.queryForObject("select count(id) from binlog_schedule_history", Long.class);
+            return loopDelete(purgeScheduleHistorySql, count, threshold, metaJdbcTemplate,
+                "binlog schedule history is cleaned, delete count is {}, with execution count {}");
         } catch (Throwable t) {
             log.error("check binlog schedule history count for clean failed.", t);
         }
+        return 0;
     }
 
-    private void tryCleanEnvConfigHistory() {
+    int tryCleanEnvConfigHistory() {
         try {
             //未触发阈值，不予清理；触发阈值后，后续会一直维持这个阈值对应的数据量
-            long threshold = 1000;
-            Long count = metaJdbcTemplate.queryForObject("select count(id) from binlog_env_config_history", Long.class);
-
-            if (count > threshold) {
-                Long minId = metaJdbcTemplate.queryForObject(String.format(
-                    "select min(id) from (select id from binlog_env_config_history order by id desc limit %s) t",
-                    threshold), Long.class);
-                metaJdbcTemplate.execute("delete from binlog_env_config_history where id < " + minId);
-                log.info("binlog env config history is cleaned, ");
-            }
+            long threshold = DynamicApplicationConfig.getInt(META_PURGE_ENV_CONFIG_HISTORY_THRESHOLD);
+            long count = metaJdbcTemplate.queryForObject("select count(id) from binlog_env_config_history", Long.class);
+            return loopDelete(purgeEvnConfigHistorySql, count, threshold, metaJdbcTemplate,
+                "binlog env config history is cleaned, delete count is {}, with execution count {}.");
         } catch (Throwable t) {
             log.error("check binlog env config history count for clean failed.", t);
         }
+        return 0;
+    }
+
+    private int loopDelete(String purgeSql, long count, long threshold, JdbcTemplate jdbcTemplate,
+                           String logStr) {
+        int deleteCount = 0;
+        int executeCount = 0;
+        while (count > threshold) {
+            long purgeBatchSize = DynamicApplicationConfig.getInt(META_PURGE_BATCH_SIZE);
+            long limitSize = Math.min(purgeBatchSize, count - threshold);
+            int c = jdbcTemplate.update(purgeSql, limitSize);
+            if (c > 0) {
+                count -= c;
+                deleteCount += c;
+                executeCount++;
+            } else {
+                break;
+            }
+        }
+        if (executeCount > 0) {
+            log.info(logStr, deleteCount, executeCount);
+        }
+        return deleteCount;
     }
 
     private void tryCleanExpiredSemiSnapshot() {

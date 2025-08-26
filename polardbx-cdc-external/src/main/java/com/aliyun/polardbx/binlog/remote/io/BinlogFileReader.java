@@ -1,13 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.remote.io;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
@@ -27,6 +28,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_UPLOAD_WAIT_DA
 public class BinlogFileReader implements IFileReader {
     private final String binlogFileName;
     private final String binlogFullPath;
+    private final int fileSequence;
     private final BinlogFileStatusChecker checker;
     private final File localFile;
     private RandomAccessFile io;
@@ -37,6 +39,7 @@ public class BinlogFileReader implements IFileReader {
         this.binlogFullPath = binlogFullPath;
         this.checker = checker;
         this.localFile = new File(binlogFullPath, binlogFileName);
+        this.fileSequence = BinlogFileUtil.getBinlogSequence(binlogFileName);
     }
 
     @Override
@@ -93,7 +96,7 @@ public class BinlogFileReader implements IFileReader {
 
     @Override
     public boolean isComplete() {
-        return checker.isCompleteFile(binlogFileName);
+        return checker.isCompleteFile(fileSequence);
     }
 
     private void debug() {
@@ -105,7 +108,7 @@ public class BinlogFileReader implements IFileReader {
     //进行超时检测，避免死循环
     private void checkTimeOut(long start) {
         int timeout = DynamicApplicationConfig.getInt(BINLOG_BACKUP_UPLOAD_WAIT_DATA_TIMEOUT_MS);
-        if (checker.isCompleteFile(binlogFileName) && System.currentTimeMillis() - start > timeout) {
+        if (checker.isCompleteFile(fileSequence) && System.currentTimeMillis() - start > timeout) {
             throw new PolardbxException("wait file data [" + binlogFileName + "] timeout!");
         }
     }

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
@@ -10,9 +10,9 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
+import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -22,6 +22,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.Optional;
 
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.util.BinlogFileUtil.getFirstBinlogFileName;
 
 /**
  * created by ziyang.lb
@@ -36,8 +37,7 @@ public class BinlogFileRecoverBuilder {
 
         if (StringUtils.isBlank(recoverTso) || recoverTso.equals(ExecutionConfig.ORIGIN_TSO)) {
             log.info("build recover tso from origin tso");
-            fileName =
-                BinlogFileUtil.getFirstBinlogFileName(logFileManager.getGroupName(), logFileManager.getStreamName());
+            fileName = getFirstBinlogFileName(logFileManager.getGroupName(), logFileManager.getStreamName());
             startTso = "";
         } else {
             String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
@@ -59,8 +59,10 @@ public class BinlogFileRecoverBuilder {
                     throw new PolardbxException(
                         String.format("file name can`t be empty for recover tso %s.", recoverTso));
                 }
-                fileName = recoverFileName;
-                log.info("build recover tso by middle tso:{}, from binlog file{}", recoverTso, fileName);
+                fileName = StringUtils.equals(ExecutionConfig.ORIGIN_BINLOG_FILE, recoverFileName) ?
+                    getFirstBinlogFileName(logFileManager.getGroupName(),
+                        logFileManager.getStreamName()) : recoverFileName;
+                log.info("build recover tso by middle tso:{}, from binlog file: {}", recoverTso, fileName);
             }
             startTso = recoverTso;
         }

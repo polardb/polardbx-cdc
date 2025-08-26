@@ -15,6 +15,7 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpc.cdc.CdcServiceGrpc;
 import com.aliyun.polardbx.rpc.cdc.DumpRequest;
 import com.aliyun.polardbx.rpc.cdc.DumpStream;
+import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.aliyun.polardbx.rpc.cdc.MasterStatus;
 import com.aliyun.polardbx.rpc.cdc.Request;
 import io.grpc.ConnectivityState;
@@ -45,11 +46,13 @@ public class DumperDataSource {
     private int port;
     private MySqlInfo mySqlInfo;
     private MetaDbHelper metaDbHelper;
+    private final boolean useSyncProtocol;
 
     private IExceptionHandler exceptionHandler;
 
-    public DumperDataSource(MetaDbHelper metaDbHelper) {
+    public DumperDataSource(MetaDbHelper metaDbHelper, boolean useSyncProtocol) {
         this.metaDbHelper = metaDbHelper;
+        this.useSyncProtocol = useSyncProtocol;
         NameResolverRegistry.getDefaultRegistry().register(new DnsNameResolverProvider());
     }
 
@@ -60,9 +63,13 @@ public class DumperDataSource {
     public void stop() {
     }
 
-    public BinlogPosition findStartPosition() throws Exception {
+    public boolean isUseSyncProtocol() {
+        return useSyncProtocol;
+    }
+
+    public BinlogPosition findStartPosition(int flowControlWindow) throws Exception {
         CountDownLatch countDownLatch = new CountDownLatch(1);
-        reConnect();
+        reConnect(flowControlWindow);
         CdcServiceGrpc.CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
         AtomicReference<BinlogPosition> reference = new AtomicReference<>();
         cdcServiceStub.showMasterStatus(Request.newBuilder().build(), new StreamObserver<MasterStatus>() {
@@ -122,7 +129,7 @@ public class DumperDataSource {
         return new CdcMasterDumperNode(cdcServerIp, cdcPort);
     }
 
-    public void reConnect() throws Exception {
+    public void reConnect(int flowControlWindow) throws Exception {
         synchronized (this) {
             releaseChannel();
             CdcMasterDumperNode newDumperNode = getCdcMasterDumperNode();
@@ -133,6 +140,7 @@ public class DumperDataSource {
             channel = NettyChannelBuilder
                 .forAddress(ip, port)
                 .usePlaintext()
+                .flowControlWindow(flowControlWindow)
                 .maxInboundMessageSize(0xFFFFFF + 0xFF)
                 .build();
         }
@@ -141,14 +149,28 @@ public class DumperDataSource {
     public void dump(BinlogPosition position, StreamObserver<DumpStream> target) {
         checkChannelState();
         CdcServiceGrpc.CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
-        Map<String, String> ext = new HashMap<>();
-        ext.put("master_binlog_checksum", "CRC32");
-        ext.put("client_type", "COLUMNAR");
-        cdcServiceStub.dump(DumpRequest.newBuilder()
-            .setExt(JSON.toJSONString(ext))
-            .setRegistered(true)
-            .setFileName(position.getFileName())
-            .setPosition(position.getPosition()).build(), new ObserverProxy(target));
+        final String fileName = position.getFileName();
+        final long pos = position.getPosition();
+        if (useSyncProtocol){
+            logger.info("use sync protocol");
+            Map<String, String> ext = new HashMap<>(1);
+            ext.put("client_type", "COLUMNAR");
+            cdcServiceStub.sync(DumpRequest.newBuilder()
+                .setFileName(fileName)
+                .setPosition(pos)
+                .setExt(JSON.toJSONString(ext))
+                .setSplitMode(EventSplitMode.CLIENT).build(), target);
+        }else {
+            logger.info("use dump protocol");
+            Map<String, String> ext = new HashMap<>(2);
+            ext.put("master_binlog_checksum", "CRC32");
+            ext.put("client_type", "COLUMNAR");
+            cdcServiceStub.dump(DumpRequest.newBuilder()
+                .setExt(JSON.toJSONString(ext))
+                .setRegistered(true)
+                .setFileName(fileName)
+                .setPosition(pos).build(), new ObserverProxy(target));
+        }
         logger.warn(
             "connect to " + ip + ":" + port + " success with pos[" + position.getFileName() + ":"
                 + position.getPosition() + "]");

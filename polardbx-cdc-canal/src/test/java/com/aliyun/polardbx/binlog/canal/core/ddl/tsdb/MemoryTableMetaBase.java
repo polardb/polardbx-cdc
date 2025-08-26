@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
@@ -160,5 +160,22 @@ public class MemoryTableMetaBase extends BaseTest {
         tableMeta = memoryTableMeta.find("d1", "default_as_expr_value_test_auto");
         Assert.assertNotNull(tableMeta.getFieldMetaByName(" cx_1"));
         Assert.assertNull(tableMeta.getFieldMetaByName("cx_1", true));
+    }
+
+    @Test
+    public void testCreateTableWithCharSet() {
+        String sql = "create table `test_charset` (\n"
+            + "        `table_name` varchar(45) not null CHARACTER SET 'latin1' COLLATE 'latin1_swedish_ci',\n"
+            + "        `table_version` varchar(45) not null default '',\n"
+            + "        `data_version` varchar(45) not null default '',\n"
+            + "        `last_update_time` bigint,\n"
+            + "        primary key (`table_name`)\n"
+            + ") engine = 'innodb' default character set = 'utf8mb4' default collate = 'utf8mb4_general_ci'";
+
+        MemoryTableMeta memoryTableMeta = newMemoryTableMeta();
+        memoryTableMeta.apply(null, "d1", sql, null);
+        TableMeta tableMeta = memoryTableMeta.find("d1", "test_charset");
+        Assert.assertEquals(tableMeta.getCharset(), "utf8mb4");
+        Assert.assertEquals(tableMeta.getFieldMetaByName("table_name").getCharset(), "latin1");
     }
 }

@@ -1,15 +1,15 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.stress;
 
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.protocol.DumpReply;
+import com.aliyun.polardbx.binlog.protocol.DumpRequest;
 import com.aliyun.polardbx.binlog.protocol.MessageType;
 import com.aliyun.polardbx.binlog.protocol.TxnBegin;
 import com.aliyun.polardbx.binlog.protocol.TxnData;
@@ -22,6 +22,7 @@ import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.rpc.TxnMessageProvider;
 import com.aliyun.polardbx.binlog.rpc.TxnOutputStream;
 import com.aliyun.polardbx.binlog.rpc.TxnStreamRpcServer;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
 import lombok.extern.slf4j.Slf4j;
@@ -57,12 +58,7 @@ public class FromRpcServerStressSimulator {
         TxnStreamRpcServer rpcServer = new TxnStreamRpcServer(9999, new TxnMessageProvider() {
 
             @Override
-            public boolean checkTSO(String startTSO, TxnOutputStream outputStream, boolean keepWaiting) {
-                return true;
-            }
-
-            @Override
-            public void dump(String startTSO, TxnOutputStream outputStream) {
+            public void dump(DumpRequest request, TxnOutputStream outputStream) {
 
                 sendFormatDesc(outputStream, TxnMergedToken.newBuilder()
                     .setTso("0000000000000000000.01601362878_000000_178094002")
@@ -86,11 +82,6 @@ public class FromRpcServerStressSimulator {
                     //发送
                     send(outputStream, tokens, null);
                 }
-            }
-
-            @Override
-            public void restart(String startTSO) {
-
             }
         });
         rpcServer.start();

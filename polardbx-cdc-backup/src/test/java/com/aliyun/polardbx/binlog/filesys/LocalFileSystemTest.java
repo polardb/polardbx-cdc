@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.filesys;
@@ -22,8 +22,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author yudong
@@ -78,10 +79,13 @@ public class LocalFileSystemTest extends BaseTest {
         Assert.assertFalse(actual);
     }
 
+    /**
+     * 现在并不保证有序，如果需要有序的list用CdcFileSystem.listLocalFiles
+     */
     @Test
     public void listFilesTest() throws IOException {
-        List<String> expect = new ArrayList<>();
-        List<String> actual = new ArrayList<>();
+        Set<String> expect = new HashSet<>();
+        Set<String> actual = new HashSet<>();
         int n = 11;
         for (int i = 1; i < n; i++) {
             String fileName = BinlogFileUtil.getBinlogFilePrefix(group, stream) + String.format(".%06d", i);
@@ -106,8 +110,9 @@ public class LocalFileSystemTest extends BaseTest {
         for (CdcFile cdcFile : fileList) {
             actual.add(cdcFile.getName());
         }
-        boolean res = ListUtils.isEqualList(expect, actual);
-        Assert.assertTrue(res);
+        log.info(expect.toString());
+        log.info(actual.toString());
+        Assert.assertTrue(ListUtils.isEqualList(expect, actual));
     }
 
     @Test

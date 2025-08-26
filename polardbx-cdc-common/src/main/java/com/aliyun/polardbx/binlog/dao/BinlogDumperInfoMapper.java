@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dao;
@@ -25,6 +25,11 @@ public interface BinlogDumperInfoMapper {
         "update binlog_dumper_info set gmt_heartbeat = now() , role = #{role}, status = 0 where cluster_id = #{clusterId} and task_name = #{taskName}")
     int updateDumperHeartbeat(@Param("taskName") String taskName, @Param("role") String role,
                               @Param("clusterId") String clusterId);
+
+    @Update(
+        "update binlog_dumper_info set gmt_heartbeat = now() , role = #{role}, status = 0, delay = #{delay} where cluster_id = #{clusterId} and task_name = #{taskName}")
+    int updateDumperHeartbeatWithInfo(@Param("taskName") String taskName, @Param("role") String role,
+                                      @Param("clusterId") String clusterId, @Param("delay") long delay);
 
     @Select(
         "select timestampdiff(MICROSECOND, gmt_heartbeat, now())/1000 from binlog_dumper_info where cluster_id= #{clusterId} and task_name = #{taskName}")

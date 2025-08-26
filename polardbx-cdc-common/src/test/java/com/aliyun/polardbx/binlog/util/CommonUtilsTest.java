@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
@@ -13,9 +13,9 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.Scanner;
-import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.util.CommonUtils.convertToTsoUnit;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.getActualTso;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.getCurrentStackTrace;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.getTsoPhysicalTime;
@@ -28,29 +28,25 @@ public class CommonUtilsTest {
     public void testEscape() {
         String s1 = "ab``ab";
         String s2 = "ab`ab";
-        String s3 = "ab```ab";
-        String s4 = "ab````ab";
         String s5 = "abab";
 
-        Assert.assertEquals(CommonUtils.escape(s1), s1);
+        Assert.assertEquals(CommonUtils.escape(s1), "ab````ab");
         Assert.assertEquals(CommonUtils.escape(s2), "ab``ab");
-        Assert.assertEquals(CommonUtils.escape(s3), s3);
-        Assert.assertEquals(CommonUtils.escape(s4), s4);
         Assert.assertEquals(CommonUtils.escape(s5), s5);
     }
 
     @Test
     @Ignore
     public void testTso2Datetime() {
-        long seconds = tso2physicalTime(6829959026120614912L, TimeUnit.SECONDS);
+        long seconds = tso2physicalTime(7294554800564207680L, TimeUnit.SECONDS);
         System.out.println("seconds is :" + DateFormatUtils
-            .format(seconds * 1000, "yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone("utc")));
+            .format(seconds * 1000, "yyyy-MM-dd HH:mm:ss"));
     }
 
     @Test
     @Ignore
     public void testGetTsoDatetime() {
-        long seconds = getTsoPhysicalTime("713564074829204691216667059638448988160000000000000000", TimeUnit.SECONDS);
+        long seconds = getTsoPhysicalTime("729455479969598675218256200089951436880000000000000000", TimeUnit.SECONDS);
         System.out.println("seconds is :" + DateFormatUtils.format(seconds * 1000, "yyyy-MM-dd HH:mm:ss"));
     }
 
@@ -100,4 +96,14 @@ public class CommonUtilsTest {
             + "jdbc:mysql://172.0.0.1:3306?allowPublicKeyRetrieval=true&useSSL=false,"
             + " user : polardbx, passwd : *****");
     }
+
+    @Test
+    public void testConvertToTsoUnit() {
+        long tso = getTsoTimestamp("70098412997380670081540906515290918912");
+        long tsoMill = getTsoPhysicalTime("70098412997380670081540906515290918912", TimeUnit.MILLISECONDS);
+        Assert.assertNotEquals(tsoMill, tso);
+        long convertTso = convertToTsoUnit(tsoMill, TimeUnit.MILLISECONDS);
+        Assert.assertEquals(convertTso, tso & ~0x3FFFFF);
+    }
+
 }

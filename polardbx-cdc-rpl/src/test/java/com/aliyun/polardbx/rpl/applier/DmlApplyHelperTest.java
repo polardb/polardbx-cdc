@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
@@ -271,19 +271,19 @@ public class DmlApplyHelperTest extends RplWithGmsTablesBaseTest {
         boolean isLabEnv = getIsLabEnv();
         setIsLabEnv(true);
         // on update 模式更新列是：所有变更列 + on update 列
-        setConfig(ConfigKeys.RPL_COLS_UPDATE_MODE, "ONUPDATE");
+        mockConfig(ConfigKeys.RPL_COLS_UPDATE_MODE, "ONUPDATE");
         List<DBMSColumn> changeColumns = getUpdateChangeColumns(rowChange, tableInfo);
         Set<String> colNames = changeColumns.stream().map(DBMSColumn::getName).collect(Collectors.toSet());
         Assert.assertEquals(changeColumns.size(), 2);
         Assert.assertTrue(colNames.contains("c1") && colNames.contains("t"));
 
         // all 模式更新列是：所有列
-        setConfig(ConfigKeys.RPL_COLS_UPDATE_MODE, "ALL");
+        mockConfig(ConfigKeys.RPL_COLS_UPDATE_MODE, "ALL");
         changeColumns = getUpdateChangeColumns(rowChange, tableInfo);
         Assert.assertEquals(changeColumns.size(), 4);
 
         // timestamp 模式更新列是：所有变更列 + timestamp 类型列
-        setConfig(ConfigKeys.RPL_COLS_UPDATE_MODE, "TIMESTAMP");
+        mockConfig(ConfigKeys.RPL_COLS_UPDATE_MODE, "TIMESTAMP");
         changeColumns = getUpdateChangeColumns(rowChange, tableInfo);
         colNames = changeColumns.stream().map(DBMSColumn::getName).collect(Collectors.toSet());
         Assert.assertEquals(changeColumns.size(), 2);

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.storage;
@@ -57,7 +57,7 @@ public class TxnBuffer implements Serializable {
     private static final AtomicLong entitySequenceGenerator = new AtomicLong(0L);
     private static final int beginKeySubSequence = 1;
     private static final String entityKeyPrefix = "TXN_BUFFER_ENTITY_";
-    private static Repository repository;
+    private Repository repository;
 
     private long entityPersistKey;
     private boolean entityPersisted;
@@ -68,7 +68,7 @@ public class TxnBuffer implements Serializable {
     }
 
     TxnBuffer(TxnKey txnKey, Repository repository) {
-        TxnBuffer.repository = repository;
+        this.repository = repository;
         this.entity = new TxnBufferEntity();
         this.entity.txnKey = txnKey;
         this.entity.refList = new LinkedList<>();

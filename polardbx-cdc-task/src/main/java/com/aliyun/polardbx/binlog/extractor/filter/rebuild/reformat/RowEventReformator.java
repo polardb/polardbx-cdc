@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild.reformat;
@@ -57,12 +57,11 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
 
     private static final Logger log = LoggerFactory.getLogger("rebuildEventLogger");
     private final RowDataRebuildLogger rebuildLogger = new RowDataRebuildLogger();
-    private final boolean binlogx;
+    private final boolean deepDecodeEvent;
     private final PolarDbXTableMetaManager tableMetaManager;
 
-    public RowEventReformator(boolean binlogx,
-                              PolarDbXTableMetaManager tableMetaManager) {
-        this.binlogx = binlogx;
+    public RowEventReformator(boolean deepDecodeEvent, PolarDbXTableMetaManager tableMetaManager) {
+        this.deepDecodeEvent = deepDecodeEvent;
         this.tableMetaManager = tableMetaManager;
     }
 
@@ -97,7 +96,7 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
      * 需要整形或者多流情况
      */
     boolean needReformat(LogicTableMeta tableMeta) {
-        return !tableMeta.isCompatible() || binlogx;
+        return !tableMeta.isCompatible() || deepDecodeEvent;
     }
 
     private void doReformat(RowsLogEvent rle, LogicTableMeta tableMeta, TxnItemRef txnItemRef,
@@ -105,7 +104,7 @@ public class RowEventReformator implements EventReformater<RowsLogEvent> {
 
         boolean splitRow = false;
         boolean extractPk = false;
-        if (binlogx) {
+        if (deepDecodeEvent) {
             splitRow = true;
             extractPk = true;
         }

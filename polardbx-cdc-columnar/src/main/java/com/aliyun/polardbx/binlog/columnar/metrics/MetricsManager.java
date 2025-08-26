@@ -1,32 +1,27 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.columnar.metrics;
 
 import com.aliyun.polardbx.binlog.CommonMetrics;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.MetaDbDataSource;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
-import com.aliyun.polardbx.binlog.metrics.format.TableFormat;
 import com.aliyun.polardbx.binlog.proc.ProcSnapshot;
 import com.aliyun.polardbx.binlog.proc.ProcUtils;
 import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
 import com.aliyun.polardbx.binlog.util.MetricsReporter;
+import com.aliyun.polardbx.binlog.util.format.TableFormat;
 import com.google.common.collect.Lists;
 import lombok.SneakyThrows;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.CollectionUtils;
 
-import java.io.IOException;
 import java.lang.reflect.Field;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.SQLException;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -34,7 +29,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.PRINT_METRICS;
-import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.util.CommonMetricsHelper.addJvmMetrics;
 import static com.aliyun.polardbx.binlog.util.CommonMetricsHelper.addProcMetrics;
 
@@ -156,93 +150,37 @@ public class MetricsManager {
     private void contactColumnarMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
         ColumnarMetrics columnarMetrics = snapshot.columnarMetrics;
         TableFormat columnarFormat = new TableFormat("Columnar Metrics");
-        columnarFormat.addColumn(
-            "getIndexCount",
-            "getPartitionCount",
-            "getGroupCommitLatency",
-            "getGroupCommitThroughput",
-            "getGroupCommitRow",
-            "getBinlogQueueLatency",
-            "getOssWriteLatency",
-            "getDataConsistencyLockGroupCommit",
-            "getOrcCount",
-            "getOrcSize",
-            "getDelCount",
-            "getDelSize",
-            "getCsvCount",
-            "getCsvSize",
-            "getCompactionTaskCount",
-            "getCompactionFileSize",
-            "getDataConsistencyLockCompaction",
-            "getCompactionReadOssBandWidth",
-            "getCompactionWriteOssBandWidth",
-            "getPkIdxWriteCount",
-            "getPkIdxReadCount",
-            "getPkIdxLogBytes",
-            "getPkIdxSstReadCount",
-            "getPkIdxSstMemGetCount",
-            "getPkIdxSstMemMissCount",
-            "getPkIdxLocalReadCount",
-            "getPkIdxLocalReadBytes",
-            "getPkIdxRemoteReadCount",
-            "getPkIdxRemoteReadBytes",
-            "getPkIdxSstWriteCount",
-            "getPkIdxSstWriteBytes",
-            "getPkIdxLogFixCount",
-            "getBinlogNetThroughput",
-            "getBinlogEventThroughput",
-            "getBinlogEventInsert",
-            "getBinlogEventDelete",
-            "getBinlogEventUpdate",
-            "getBinlogEventDDL",
-            "getBinlogEventInsertRows",
-            "getBinlogEventDeleteRows",
-            "getBinlogEventUpdateRows",
-            "getBinlogTrxCount",
-            "getBinlogReadLatency");
-        columnarFormat.addRow(
-            columnarMetrics.getIndexCount(),
-            columnarMetrics.getPartitionCount(),
-            columnarMetrics.getGroupCommitLatency(),
-            columnarMetrics.getGroupCommitThroughput(),
-            columnarMetrics.getGroupCommitRow(),
-            columnarMetrics.getBinlogQueueLatency(),
-            columnarMetrics.getOssWriteLatency(),
-            columnarMetrics.getDataConsistencyLockGroupCommit(),
-            columnarMetrics.getOrcCount(),
-            columnarMetrics.getOrcSize(),
-            columnarMetrics.getDelCount(),
-            columnarMetrics.getDelSize(),
-            columnarMetrics.getCsvCount(),
-            columnarMetrics.getCsvSize(),
-            columnarMetrics.getCompactionTaskCount(),
-            columnarMetrics.getCompactionFileSize(),
-            columnarMetrics.getDataConsistencyLockCompaction(),
-            columnarMetrics.getCompactionReadOssBandWidth(),
-            columnarMetrics.getCompactionWriteOssBandWidth(),
-            columnarMetrics.getPkIdxWriteCount(),
-            columnarMetrics.getPkIdxReadCount(),
-            columnarMetrics.getPkIdxLogBytes(),
-            columnarMetrics.getPkIdxSstReadCount(),
-            columnarMetrics.getPkIdxSstMemGetCount(),
-            columnarMetrics.getPkIdxSstMemMissCount(),
-            columnarMetrics.getPkIdxLocalReadCount(),
-            columnarMetrics.getPkIdxLocalReadBytes(),
-            columnarMetrics.getPkIdxRemoteReadCount(),
-            columnarMetrics.getPkIdxRemoteReadBytes(),
-            columnarMetrics.getPkIdxSstWriteCount(),
-            columnarMetrics.getPkIdxSstWriteBytes(),
-            columnarMetrics.getPkIdxLogFixCount(),
-            columnarMetrics.getBinlogNetThroughput(),
-            columnarMetrics.getBinlogEventThroughput(),
-            columnarMetrics.getBinlogEventInsert(),
-            columnarMetrics.getBinlogEventDelete(),
-            columnarMetrics.getBinlogEventUpdate(),
-            columnarMetrics.getBinlogEventDDL(),
-            columnarMetrics.getBinlogEventInsertRows(),
-            columnarMetrics.getBinlogEventDeleteRows(),
-            columnarMetrics.getBinlogEventUpdateRows(),
-            columnarMetrics.getBinlogTrxCount(),
+        columnarFormat.addColumn("getIndexCount", "getPartitionCount", "getGroupCommitLatency",
+            "getGroupCommitThroughput", "getGroupCommitRow", "getBinlogQueueLatency", "getOssWriteLatency",
+            "getDataConsistencyLockGroupCommit", "getOrcCount", "getOrcSize", "getDelCount", "getDelSize",
+            "getCsvCount", "getCsvSize", "getCompactionTaskCount", "getCompactionFileSize",
+            "getDataConsistencyLockCompaction", "getCompactionReadOssBandWidth", "getCompactionWriteOssBandWidth",
+            "getPkIdxWriteCount", "getPkIdxReadCount", "getPkIdxLogBytes", "getPkIdxSstReadCount",
+            "getPkIdxSstMemGetCount", "getPkIdxSstMemMissCount", "getPkIdxLocalReadCount", "getPkIdxLocalReadBytes",
+            "getPkIdxRemoteReadCount", "getPkIdxRemoteReadBytes", "getPkIdxSstWriteCount", "getPkIdxSstWriteBytes",
+            "getPkIdxLogFixCount", "getBinlogNetThroughput", "getBinlogEventThroughput", "getBinlogEventInsert",
+            "getBinlogEventDelete", "getBinlogEventUpdate", "getBinlogEventDDL", "getBinlogEventInsertRows",
+            "getBinlogEventDeleteRows", "getBinlogEventUpdateRows", "getBinlogTrxCount", "getBinlogReadLatency");
+        columnarFormat.addRow(columnarMetrics.getIndexCount(), columnarMetrics.getPartitionCount(),
+            columnarMetrics.getGroupCommitLatency(), columnarMetrics.getGroupCommitThroughput(),
+            columnarMetrics.getGroupCommitRow(), columnarMetrics.getBinlogQueueLatency(),
+            columnarMetrics.getOssWriteLatency(), columnarMetrics.getDataConsistencyLockGroupCommit(),
+            columnarMetrics.getOrcCount(), columnarMetrics.getOrcSize(), columnarMetrics.getDelCount(),
+            columnarMetrics.getDelSize(), columnarMetrics.getCsvCount(), columnarMetrics.getCsvSize(),
+            columnarMetrics.getCompactionTaskCount(), columnarMetrics.getCompactionFileSize(),
+            columnarMetrics.getDataConsistencyLockCompaction(), columnarMetrics.getCompactionReadOssBandWidth(),
+            columnarMetrics.getCompactionWriteOssBandWidth(), columnarMetrics.getPkIdxWriteCount(),
+            columnarMetrics.getPkIdxReadCount(), columnarMetrics.getPkIdxLogBytes(),
+            columnarMetrics.getPkIdxSstReadCount(), columnarMetrics.getPkIdxSstMemGetCount(),
+            columnarMetrics.getPkIdxSstMemMissCount(), columnarMetrics.getPkIdxLocalReadCount(),
+            columnarMetrics.getPkIdxLocalReadBytes(), columnarMetrics.getPkIdxRemoteReadCount(),
+            columnarMetrics.getPkIdxRemoteReadBytes(), columnarMetrics.getPkIdxSstWriteCount(),
+            columnarMetrics.getPkIdxSstWriteBytes(), columnarMetrics.getPkIdxLogFixCount(),
+            columnarMetrics.getBinlogNetThroughput(), columnarMetrics.getBinlogEventThroughput(),
+            columnarMetrics.getBinlogEventInsert(), columnarMetrics.getBinlogEventDelete(),
+            columnarMetrics.getBinlogEventUpdate(), columnarMetrics.getBinlogEventDDL(),
+            columnarMetrics.getBinlogEventInsertRows(), columnarMetrics.getBinlogEventDeleteRows(),
+            columnarMetrics.getBinlogEventUpdateRows(), columnarMetrics.getBinlogTrxCount(),
             columnarMetrics.getBinlogReadLatency());
         sb.append(columnarFormat);
     }

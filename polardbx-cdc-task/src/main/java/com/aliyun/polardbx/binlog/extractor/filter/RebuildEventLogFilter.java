@@ -1,19 +1,14 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
 
-import com.alibaba.polardbx.druid.sql.SQLUtils;
-import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLTruncateStatement;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.LogEventFilter;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
@@ -25,7 +20,6 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.meta.PolarDbXTableMetaManager;
-import com.aliyun.polardbx.binlog.dao.DdlEngineArchiveMapper;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.EventReformater;
 import com.aliyun.polardbx.binlog.extractor.filter.rebuild.LogicDDLHandler;
@@ -40,8 +34,8 @@ import com.aliyun.polardbx.binlog.protocol.EventData;
 import com.aliyun.polardbx.binlog.storage.IteratorBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.util.DirectByteOutput;
+import com.aliyun.polardbx.binlog.util.LabEventType;
 import org.apache.commons.lang.math.RandomUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.rocksdb.RocksDBException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,10 +43,7 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
-
-import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
 /**
  * @author chengjin.lyf on 2020/8/7 3:13 下午
@@ -71,8 +62,9 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
     private final Map<Integer, EventReformater> reformaterMap = new HashMap<>();
     private long injectErrorTimestamp = -1;
     private final LogicDDLHandler logicDDLHandler;
+    private final boolean archiveFilterEnabled;
 
-    public RebuildEventLogFilter(long instanceServerId, EventAcceptFilter acceptFilter, boolean binlogx,
+    public RebuildEventLogFilter(long instanceServerId, EventAcceptFilter acceptFilter, boolean deepDecodeEvent,
                                  PolarDbXTableMetaManager tableMetaManager) {
         this.instanceServerId = instanceServerId;
         this.acceptFilter = acceptFilter;
@@ -85,14 +77,18 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         logDecoder.handle(LogEvent.DELETE_ROWS_EVENT);
         logDecoder.handle(LogEvent.DELETE_ROWS_EVENT_V1);
         logDecoder.handle(LogEvent.TABLE_MAP_EVENT);
+        logDecoder.setNeedFixBigBinlogFileLogPos(false);
         logContext = new LogContext();
         logContext.setFormatDescription(fde);
         logContext.setLogPosition(new LogPosition(""));
         new QueryEventReformator(tableMetaManager).register(reformaterMap);
-        new RowEventReformator(binlogx, tableMetaManager).register(reformaterMap);
+        new RowEventReformator(deepDecodeEvent, tableMetaManager).register(reformaterMap);
         new TableMapEventReformator(tableMetaManager).register(reformaterMap);
         logicDDLHandler = new LogicDDLHandler(instanceServerId, acceptFilter, tableMetaManager);
-
+        archiveFilterEnabled = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_FILTER_ARCHIVE_ENABLED);
+        if (archiveFilterEnabled && DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)) {
+            LabEventManager.logEvent(LabEventType.TASK_FILTER_ARCHIVE_ENABLED);
+        }
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -133,7 +129,7 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
 
             if (!transaction.isDescriptionEvent() &&
                 baseVTSO != null &&
-                transaction.getVirtualTSOModel().compareTo(baseVTSO) <= 0) {
+                transaction.getVirtualTSOModel().compareTo(baseVTSO) < 0) {
                 transaction.release();
                 tranIt.remove();
                 logger.info("ignore event for : " + transaction.getVirtualTsoStr());
@@ -153,6 +149,13 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
                     tranIt.remove();
                     continue;
                 }
+            }
+
+            if (archiveFilterEnabled && transaction.isArchive()) {
+                logger.info("ignore archive event for : {}", transaction.getVirtualTsoStr());
+                transaction.release();
+                tranIt.remove();
+                continue;
             }
 
             if (transaction.isDDL()) {

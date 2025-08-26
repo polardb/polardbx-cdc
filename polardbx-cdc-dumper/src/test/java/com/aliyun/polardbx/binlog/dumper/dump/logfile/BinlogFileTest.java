@@ -1,30 +1,32 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.testing.BaseTest;
+import lombok.SneakyThrows;
 import org.apache.commons.io.FileUtils;
 import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 
 @Ignore
 public class BinlogFileTest extends BaseTest {
 
     @Test
-    @Ignore
-    public void testSeekLast() throws FileNotFoundException {
-        File file = new File("/Users/lubiao/Downloads/binlog.000273");
-        BinlogFile binlogFile = new BinlogFile(file, "r", 1024, 256, true, null);
+    @SneakyThrows
+    public void testSeekLast() {
+        File file = new File(BinlogFileTest.class.getClassLoader().getResource("binlog/big_event_bin.000001").toURI());
+        BinlogFile binlogFile = new BinlogFile(file, "r", 1024, 8, true, null);
         BinlogFile.SeekResult seekResult = binlogFile.seekLastTso();
+        String lastTso = "728519316193096505618162583768085299210000000003417494";
+        Assert.assertEquals(seekResult.getLastTso(), lastTso);
         System.out.println(seekResult);
     }
 

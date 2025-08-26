@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.constants;
@@ -32,4 +32,10 @@ public class DumpUserVariableName {
      * 后续如有需要可以添加新的 enum 类型，并新增对应的处理逻辑
      */
     public static final String CLIENT_TYPE = "client_type";
+
+    /**
+     * 用于和show processlist进行关联
+     */
+    public static final String TRACE_ID = "trace_id";
+    public static final String PROCESS_ID = "id";
 }

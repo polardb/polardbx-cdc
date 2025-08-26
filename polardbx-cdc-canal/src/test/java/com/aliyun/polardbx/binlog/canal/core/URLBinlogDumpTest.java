@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core;
@@ -30,15 +30,15 @@ import java.net.URL;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Ignore
 public class URLBinlogDumpTest extends BaseTest {
 
     @Test
     public void testRange() throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(
-            "")
-            .openConnection();
+        HttpURLConnection connection = (HttpURLConnection) new URL("").openConnection();
         connection.connect();
         String messageString = connection.getHeaderField("Accept-Ranges");
         connection.disconnect();
@@ -51,17 +51,15 @@ public class URLBinlogDumpTest extends BaseTest {
         System.setProperty("taskName", "Final");
         LinkedList<BinlogFile> fileList = new LinkedList<>();
         BinlogFile first = new BinlogFile();
-        first.setIntranetDownloadLink(
-            "");
+        first.setIntranetDownloadLink("");
         first.setLogname("mysql-bin.000300");
         fileList.add(first);
 
-        URLLogFetcher fetcher = new URLLogFetcher();
-        fetcher.open(
-            first.getIntranetDownloadLink(),
-            503315890,
-            409596450);
-        ContinuesURLLogFetcher fetcherWrapper = new ContinuesURLLogFetcher("", fetcher, first, fileList);
+        URLLogFetcher fetcher = new URLLogFetcher("mock", "mysql-bin.000300");
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        fetcher.open(first.getIntranetDownloadLink(), 503315890, 409596450, executorService);
+        ContinuesURLLogFetcher fetcherWrapper =
+            new ContinuesURLLogFetcher("", fetcher, first, fileList, executorService);
         AuthenticationInfo authenticationInfo = new AuthenticationInfo();
         authenticationInfo.setCharset("utf-8");
 

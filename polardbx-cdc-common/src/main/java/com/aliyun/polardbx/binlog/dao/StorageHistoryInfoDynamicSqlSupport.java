@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dao;
@@ -9,41 +9,53 @@ package com.aliyun.polardbx.binlog.dao;
 import java.sql.JDBCType;
 import java.util.Date;
 import javax.annotation.Generated;
+
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class StorageHistoryInfoDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.546+08:00", comments="Source Table: binlog_storage_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.546+08:00",
+        comments = "Source Table: binlog_storage_history")
     public static final StorageHistoryInfo storageHistoryInfo = new StorageHistoryInfo();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.546+08:00", comments="Source field: binlog_storage_history.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.546+08:00",
+        comments = "Source field: binlog_storage_history.id")
     public static final SqlColumn<Long> id = storageHistoryInfo.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.547+08:00", comments="Source field: binlog_storage_history.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.547+08:00",
+        comments = "Source field: binlog_storage_history.gmt_created")
     public static final SqlColumn<Date> gmtCreated = storageHistoryInfo.gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.547+08:00", comments="Source field: binlog_storage_history.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.547+08:00",
+        comments = "Source field: binlog_storage_history.gmt_modified")
     public static final SqlColumn<Date> gmtModified = storageHistoryInfo.gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.547+08:00", comments="Source field: binlog_storage_history.tso")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.547+08:00",
+        comments = "Source field: binlog_storage_history.tso")
     public static final SqlColumn<String> tso = storageHistoryInfo.tso;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.547+08:00", comments="Source field: binlog_storage_history.status")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.547+08:00",
+        comments = "Source field: binlog_storage_history.status")
     public static final SqlColumn<Integer> status = storageHistoryInfo.status;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.547+08:00", comments="Source field: binlog_storage_history.instruction_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.547+08:00",
+        comments = "Source field: binlog_storage_history.instruction_id")
     public static final SqlColumn<String> instructionId = storageHistoryInfo.instructionId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.547+08:00", comments="Source field: binlog_storage_history.cluster_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.547+08:00",
+        comments = "Source field: binlog_storage_history.cluster_id")
     public static final SqlColumn<String> clusterId = storageHistoryInfo.clusterId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.548+08:00", comments="Source field: binlog_storage_history.group_name")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.548+08:00",
+        comments = "Source field: binlog_storage_history.group_name")
     public static final SqlColumn<String> groupName = storageHistoryInfo.groupName;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.548+08:00", comments="Source field: binlog_storage_history.storage_content")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.548+08:00",
+        comments = "Source field: binlog_storage_history.storage_content")
     public static final SqlColumn<String> storageContent = storageHistoryInfo.storageContent;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2022-11-08T17:00:59.546+08:00", comments="Source Table: binlog_storage_history")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2022-11-08T17:00:59.546+08:00",
+        comments = "Source Table: binlog_storage_history")
     public static final class StorageHistoryInfo extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

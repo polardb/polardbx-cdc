@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.handle;
@@ -36,18 +36,13 @@ import java.util.Set;
  * 消费端 会使用tso rollback 或者 apply tableMeta信息，
  */
 public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
-    private static final Logger logger = LoggerFactory.getLogger("searchLogger");
 
+    private static final Logger logger = LoggerFactory.getLogger(SearchTsoEventHandleV2.class);
     private final Map<Integer, ILogEventProcessor> processorMap = new HashMap<>();
     private final long searchTSO;
     private final String clusterId;
     private ProcessorContext context;
     private BinlogPosition endPosition;
-    private long totalSize;
-    private boolean test = false;
-    private boolean quickMode = false;
-    //no need reset variables
-    private long lastPrintTimestamp = System.currentTimeMillis();
     private long startTSO = -1;
     private long endTSO = -1;
     private long startCmdTSO;
@@ -56,7 +51,6 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
                                   boolean quickMode, String clusterId) {
         this.searchTSO = searchTSO;
         this.startCmdTSO = startCmdTSO;
-        this.quickMode = quickMode;
         this.context = new ProcessorContext(authenticationInfo, searchTSO, startCmdTSO);
         this.context.setInQuickMode(quickMode);
         this.clusterId = clusterId;
@@ -90,20 +84,21 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
         this.initProcessor();
         this.startTSO = -1;
         this.endTSO = -1;
+        this.context.tryAutoQuickSearch();
     }
 
     private void initProcessor() {
         // 已经找到位点，还来搜索，说明有大事务只搜索到了complete，那么只搜索start事务就好
+        this.processorMap.clear();
         if (this.context.isFind()) {
             logger.warn("already find pos , but may be has big tran with different files!");
             this.processorMap.put(LogEvent.QUERY_EVENT,
-                new QueryLogEventProcessor(searchTSO, new XAStartEventProcessor(), null,
-                    null));
+                new QueryLogEventProcessor(searchTSO, new XAStartEventProcessor(), null, null));
+            this.processorMap.put(LogEvent.XA_PREPARE_LOG_EVENT, new XAPrepareEventProcessor());
         } else {
             this.processorMap.put(LogEvent.QUERY_EVENT,
                 new QueryLogEventProcessor(searchTSO, new XAStartEventProcessor(),
-                    new XACommitEventProcessor(searchTSO, startCmdTSO),
-                    new XARollbackEventProcessor()));
+                    new XACommitEventProcessor(searchTSO, startCmdTSO), new XARollbackEventProcessor()));
             this.processorMap.put(LogEvent.XID_EVENT, new XACommitEventProcessor(searchTSO, startCmdTSO));
             this.processorMap.put(LogEvent.XA_PREPARE_LOG_EVENT, new XAPrepareEventProcessor());
             this.processorMap.put(LogEvent.WRITE_ROWS_EVENT, new WriteRowEventProcessor(searchTSO == -1, clusterId));
@@ -129,7 +124,6 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
     @Override
     public void setEndPosition(BinlogPosition endPosition) {
         this.endPosition = endPosition;
-        this.totalSize = endPosition.getPosition();
         this.context.setCurrentFile(endPosition.getFileName());
     }
 
@@ -140,14 +134,14 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
             if (context.isPreSelected()) {
                 context.setFind(null);
             }
-            logger.info(
-                " finish search binlog : " + context.getCurrentFile() + " result : " + context.printDetail());
+            logger.info(" finish search binlog : " + context.getCurrentFile() + " result : " + context.printDetail());
             context.setInterrupt(true);
             return;
         }
         context.setLogPosition(logPosition);
 
-        if (context.isFind()) {
+        if (context.isFind() && isInQuickMode()) {
+            // 只有quick mode才可以提前终止退出,否则需要搜索完整个文件
             if (context.getPosition() != null) {
                 context.setInterrupt(true);
                 return;
@@ -165,10 +159,8 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
 
             // 找到位点了，清理processor
             processorMap.clear();
-            processorMap.put(LogEvent.QUERY_EVENT,
-                new QueryLogEventProcessor(searchTSO, new XAStartEventProcessor(),
-                    new XACommitEventProcessor(searchTSO, startCmdTSO),
-                    new XARollbackEventProcessor()));
+            processorMap.put(LogEvent.QUERY_EVENT, new QueryLogEventProcessor(searchTSO, new XAStartEventProcessor(),
+                new XACommitEventProcessor(searchTSO, startCmdTSO), new XARollbackEventProcessor()));
             this.processorMap.put(LogEvent.XID_EVENT, new XACommitEventProcessor(searchTSO, startCmdTSO));
             this.processorMap.put(LogEvent.XA_PREPARE_LOG_EVENT, new XAPrepareEventProcessor());
             this.processorMap.put(LogEvent.SEQUENCE_EVENT, new SequenceEventProcessor());
@@ -181,27 +173,11 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
             this.endTSO = context.getLastTSO();
         }
 
-        printProgress(logPosition);
-
     }
 
     private boolean endOfFile(LogPosition position) {
         return !StringUtils.equals(endPosition.getFileName(), position.getFileName())
             || position.getPosition() >= endPosition.getPosition();
-    }
-
-    public void setTest(boolean test) {
-        this.test = test;
-    }
-
-    private void printProgress(LogPosition logPosition) {
-        long logPos = logPosition.getPosition();
-        String fileName = logPosition.getFileName();
-        long now = System.currentTimeMillis();
-        if (now - lastPrintTimestamp > 5000L) {
-            logger.info(" search pos progress : " + (logPos * 100 / totalSize) + "% : " + fileName);
-            lastPrintTimestamp = now;
-        }
     }
 
     @Override
@@ -212,6 +188,16 @@ public class SearchTsoEventHandleV2 implements ISearchTsoEventHandle {
     @Override
     public String region() {
         return "[" + startTSO + " , " + endTSO + "]";
+    }
+
+    @Override
+    public boolean isInQuickMode() {
+        return context.isInQuickMode();
+    }
+
+    @Override
+    public String unCompleteTran() {
+        return context.printDetail();
     }
 
     @Override

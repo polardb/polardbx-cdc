@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
@@ -49,10 +49,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_ROCKSDB_BASE_PATH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_FORCE_KILL_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_BLACKLIST;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_BASE_PATH;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.daemon.constant.ClusterExecutionInstruction.START_EXECUTION_INSTRUCTION;
 import static com.aliyun.polardbx.binlog.daemon.constant.ClusterExecutionInstruction.STOP_EXECUTION_INSTRUCTION;
 
@@ -204,27 +206,43 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             }
 
             CommonInfo info = infoOptional.get();
-            int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
-            long heartbeatInterval =
-                GmsTimeUtil.getHeartbeatInterval(config.getRole(), config.getClusterId(), config.getTaskName());
-            if (heartbeatInterval > heartbeatTimeout) {
-                //心跳超时，但进程还在，一个典型的场景：大数据量场景下GC很频繁，导致cpu使用率很高，Task进程的心跳会出现超时
-                if (!isTaskProcessAlive(config.getTaskName())) {
-                    MonitorManager.getInstance().triggerAlarm(MonitorType.PROCESS_HEARTBEAT_TIMEOUT_WARNING, info.name);
-                    log.info("detected heartbeat timeout, and task is already down, prepare to restart, task name {}.",
-                        config.getTaskName());
-                    restartTask(config, config.getTaskName(), config.getMem());
-                } else {
-                    log.info("detected heartbeat timeout, but task is still alive, will not restart, task name {}.",
-                        config.getTaskName());
-                }
+            if (shouldRestartTask(config)) {
+                MonitorManager.getInstance().triggerAlarm(MonitorType.PROCESS_HEARTBEAT_TIMEOUT_WARNING, info.name);
+                restartTask(config, config.getTaskName(), config.getMem());
             }
+
             if (info.version < config.getVersion()) {
                 restartTask(config, config.getTaskName(), config.getMem());
             }
         } else {
             startTask(config.getTaskName(), config.getMem(), false);
         }
+    }
+
+    boolean shouldRestartTask(BinlogTaskConfig config) throws Exception {
+        int heartbeatTimeout = getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
+        int forceKillTimeout = getInt(DAEMON_FORCE_KILL_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
+        long heartbeatInterval = GmsTimeUtil.getHeartbeatInterval(
+            config.getRole(), config.getClusterId(), config.getTaskName());
+
+        if (heartbeatInterval > heartbeatTimeout) {
+            //心跳超时，但进程还在，一个典型的场景：大数据量场景下GC很频繁，导致cpu使用率很高，Task进程的心跳会出现超时
+            if (!isTaskProcessAlive(config.getTaskName())) {
+                log.info("detect heartbeat timeout {} ms, task is already down, prepare to restart, task name {}.",
+                    heartbeatTimeout, config.getTaskName());
+                return true;
+            } else {
+                if (heartbeatInterval > forceKillTimeout) {
+                    log.info("detect heartbeat timeout {} ms, task is still alive but exceed the force kill threshold, "
+                        + "prepare to force restart, task name {}.", heartbeatInterval, config.getTaskName());
+                    return true;
+                } else {
+                    log.info("detect heartbeat timeout {} ms, task is still alive, will not restart, task name {}.",
+                        heartbeatInterval, config.getTaskName());
+                }
+            }
+        }
+        return false;
     }
 
     private void updateTaskStatus(String clusterId, String taskName, String taskType, BinlogTaskStatus status) {
@@ -258,7 +276,7 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private boolean isTaskProcessAlive(String takName) throws Exception {
+    boolean isTaskProcessAlive(String takName) throws Exception {
         CommandResult result = getAllTaskProcess();
         if (result.getCode() == 0) {
             String[] runningTasks = StringUtils.split(result.getMsg(), System.getProperty("line.separator"));

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.taskmeta;
@@ -37,8 +37,8 @@ public class DynamicEndpointWatcher {
             List<MutableTriple<String, Integer, String>> currentMasterHostList = replicaMeta.getMasterHostList();
             for (MutableTriple<String, Integer, String> master : currentMasterHostList) {
                 try (Connection connection = DriverManager.getConnection(String.format(
-                        "jdbc:mysql://%s:%s?allowLoadLocalInfile="
-                            + "false&autoDeserialize=false&allowLocalInfile=false&allowUrlInLocalInfile=false",
+                        "jdbc:mysql://%s:%s?allowLoadLocalInfile=false"
+                            + "&autoDeserialize=false&allowLocalInfile=false&allowUrlInLocalInfile=false&useSSL=false",
                         master.getLeft(), master.getMiddle()), replicaMeta.getMasterUser(),
                     replicaMeta.getMasterPassword())) {
                     validMasterInfoList =

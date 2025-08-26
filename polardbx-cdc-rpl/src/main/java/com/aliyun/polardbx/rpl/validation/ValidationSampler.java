@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation;
@@ -93,8 +93,7 @@ public class ValidationSampler {
         }
 
         double percentage = calculateSamplePercentage(totalCount);
-        long batchSize = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_BATCH_SIZE);
-        long batchNum = totalCount / batchSize;
+        long batchNum = totalCount / calculateBatchRowSize(conn, dbName, tbName);
         int pickUpInterval = (int) ((totalCount * percentage) / (batchNum * 100));
 
         log.info(
@@ -147,6 +146,17 @@ public class ValidationSampler {
             calSamplePercentage = maxSamplePercentage;
         }
         return calSamplePercentage;
+    }
+
+    static long calculateBatchRowSize(Connection conn, String dbName, String tbName) throws SQLException {
+        long avgRowSize = ValidationUtil.getAvgTableLengthFromInformationSchema(conn, dbName, tbName);
+        long batchRowSize = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_BATCH_ROW_SIZE);
+        long batchByteSize = DynamicApplicationConfig.getLong(ConfigKeys.RPL_FULL_VALID_BATCH_BYTE_SIZE);
+        if (avgRowSize > 0) {
+            // 根据预期单批次行数和预期单批次大小以及平均行大小，双重上限，计算batch row size
+            batchRowSize = Math.min(batchRowSize, batchByteSize / avgRowSize);
+        }
+        return batchRowSize;
     }
 
 }

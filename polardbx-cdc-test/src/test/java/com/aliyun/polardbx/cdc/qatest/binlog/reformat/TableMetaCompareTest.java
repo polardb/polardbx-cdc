@@ -1,28 +1,29 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.binlog.reformat;
 
-import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.IConfigDataProvider;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.cdc.meta.LogicTableMeta;
 import com.aliyun.polardbx.binlog.cdc.meta.RollbackMode;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
-import org.junit.BeforeClass;
+import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_RECOVER_ROLLBACK_MODE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_COLUMN_TYPE_ENABLED;
+
 @Ignore
-public class TableMetaCompareTest {
+public class TableMetaCompareTest extends BaseTest {
 
     private static final Logger logger = LoggerFactory.getLogger(TableMetaCompareTest.class);
 
@@ -57,19 +58,10 @@ public class TableMetaCompareTest {
         + "        KEY `idx_member_info_mobile_sha` (`mobile_sha`)\n"
         + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '全域会员主表'";
 
-    @BeforeClass
-    public static void beforeClass() throws Exception {
-        DynamicApplicationConfig.setConfigDataProvider(new IConfigDataProvider() {
-            @Override
-            public String getValue(String key) {
-                if (key.equals(ConfigKeys.TASK_REFORMAT_COLUMN_TYPE_ENABLED)) {
-                    return "true";
-                } else if (key.equals(ConfigKeys.META_RECOVER_ROLLBACK_MODE)) {
-                    return RollbackMode.SNAPSHOT_EXACTLY.name();
-                }
-                return "";
-            }
-        });
+    @Before
+    public void before() {
+        mockConfig(TASK_REFORMAT_COLUMN_TYPE_ENABLED, "true");
+        mockConfig(META_RECOVER_ROLLBACK_MODE, RollbackMode.SNAPSHOT_EXACTLY.name());
     }
 
     /**
@@ -78,7 +70,7 @@ public class TableMetaCompareTest {
      * 2、 drop logic
      */
     @Test
-    public void testCompoareDropColumn() {
+    public void testCompareDropColumn() {
 
         MemoryTableMeta memoryTableMeta = new MemoryTableMeta(logger, false);
 
@@ -114,7 +106,7 @@ public class TableMetaCompareTest {
      * 2、 add logic
      */
     @Test
-    public void testCompoareAddColumn() {
+    public void testCompareAddColumn() {
 
         MemoryTableMeta memoryTableMeta = new MemoryTableMeta(logger, false);
 
@@ -144,7 +136,7 @@ public class TableMetaCompareTest {
      * 2、 add logic
      */
     @Test
-    public void testCompoareModifyColumnType() {
+    public void testCompareModifyColumnType() {
 
         MemoryTableMeta memoryTableMeta = new MemoryTableMeta(logger, false);
 

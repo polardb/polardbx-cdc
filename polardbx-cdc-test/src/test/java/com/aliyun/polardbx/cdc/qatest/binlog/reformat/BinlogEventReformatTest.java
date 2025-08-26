@@ -1,12 +1,11 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.binlog.reformat;
 
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LocalBinlogParser;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.LogPosition;
@@ -36,7 +35,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.RandomUtils;
 import org.junit.Assert;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.io.File;
@@ -61,11 +59,6 @@ public class BinlogEventReformatTest {
 
     private final long serverId = RandomUtils.nextInt();
     private final LocalBinlogParser localBinlogParser = new LocalBinlogParser(filePath);
-
-    @BeforeClass
-    public static void beforeClass() {
-        DynamicApplicationConfig.setConfigDataProvider(key -> "");
-    }
 
     public void generateFDE() throws Exception {
         FormatDescriptionEvent event = BinlogGenerateUtil.buildFormatDescriptionEvent(serverId, "5.6.29-TDDL-5.x");

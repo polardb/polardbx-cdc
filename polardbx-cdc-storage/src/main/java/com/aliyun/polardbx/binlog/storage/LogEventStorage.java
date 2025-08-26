@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.storage;
@@ -47,6 +47,7 @@ public class LogEventStorage implements Storage {
     private static final int DEFAULT_WORKER_COUNT = 4;
     private static final int FLUSH_INTERVAL = 2000;//毫秒
 
+    private final String identifier;
     private final ThreadPoolExecutor cleanBoss;
     private final CleanWorker[] cleanWorkers;
     private ScheduledExecutorService cleanTimer;
@@ -57,14 +58,15 @@ public class LogEventStorage implements Storage {
     private final Repository repository;
     private volatile boolean running;
 
-    public LogEventStorage(Repository repository) {
-        this(repository, DEFAULT_WORKER_COUNT);
+    public LogEventStorage(String identifier, Repository repository) {
+        this(identifier, repository, DEFAULT_WORKER_COUNT);
     }
 
-    public LogEventStorage(Repository repository, int cleanWorkerCount) {
+    public LogEventStorage(String identifier, Repository repository, int cleanWorkerCount) {
+        this.identifier = identifier;
         this.cleanBoss = new ThreadPoolExecutor(1, 1, 0L,
             TimeUnit.MILLISECONDS,
-            new LinkedBlockingQueue<>(), r -> new Thread(r, "Storage-cleaner-boss-thread"),
+            new LinkedBlockingQueue<>(), r -> new Thread(r, "storage-cleaner-boss-" + identifier),
             new ThreadPoolExecutor.CallerRunsPolicy());
 
         this.cleanWorkers = new CleanWorker[cleanWorkerCount];
@@ -94,12 +96,12 @@ public class LogEventStorage implements Storage {
 
         repository.open();
         for (int i = 0; i < cleanWorkers.length; i++) {
-            cleanWorkers[i] = new CleanWorker("Storage-cleaner-worker-thread-" + i);
+            cleanWorkers[i] = new CleanWorker("storage-cleaner-worker-" + identifier + i);
             cleanWorkers[i].start();
         }
 
         this.cleanTimer = Executors.newSingleThreadScheduledExecutor((r) -> {
-            Thread t = new Thread(r, "Storage-cleaner-timer-thread");
+            Thread t = new Thread(r, "storage-cleaner-timer-" + identifier);
             t.setDaemon(true);
             return t;
         });
@@ -111,7 +113,7 @@ public class LogEventStorage implements Storage {
                 logger.error("clean timer process error!", e);
             }
         }, 1000, 1000, TimeUnit.MILLISECONDS);
-        logger.info("log event storage started.");
+        logger.info("log event storage started for " + identifier);
     }
 
     @SneakyThrows
@@ -133,7 +135,7 @@ public class LogEventStorage implements Storage {
         cleanBoss.shutdownNow();
         txnCache.invalidateAll();
         repository.close();
-        logger.info("log event storage stopped.");
+        logger.info("log event storage stopped for " + identifier);
     }
 
     @Override
@@ -229,7 +231,7 @@ public class LogEventStorage implements Storage {
             try {
                 List<TxnKey> list = Arrays.asList(array);
                 list.stream().collect(Collectors.groupingBy(TxnKey::getPartitionGroupId)).entrySet().forEach(entry -> {
-                    int index = Math.abs(entry.getKey().hashCode() % DEFAULT_WORKER_COUNT);
+                    int index = Math.abs(entry.getKey().hashCode() % cleanWorkers.length);
                     try {
                         cleanWorkers[index].put(entry);
                     } catch (InterruptedException e) {

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.rest.resources;
@@ -99,8 +99,16 @@ public class SystemControlResource {
         SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
     private final NodeInfoMapper nodeInfoMapper =
         SpringContextHolder.getObject(NodeInfoMapper.class);
-    private final StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
-    private final StorageInfoService service = SpringContextHolder.getObject(StorageInfoService.class);
+    private StorageInfoMapper storageInfoMapper = SpringContextHolder.getObject(StorageInfoMapper.class);
+    private StorageInfoService service = SpringContextHolder.getObject(StorageInfoService.class);
+
+    public void setStorageInfoService(StorageInfoService storageInfoService) {
+        service = storageInfoService;
+    }
+
+    public void setStorageInfoMapper(StorageInfoMapper mapper) {
+        storageInfoMapper = mapper;
+    }
 
     private static String getGroupName() {
         String clusterType = DynamicApplicationConfig.getClusterType();
@@ -190,8 +198,6 @@ public class SystemControlResource {
     /**
      * 多流子实例清理接口，
      * 其他如replica/recover 公有云新版发布后，不会调用这个接口
-     * @param clusterId
-     * @return
      */
     @GET
     @Path("/clean")
@@ -289,6 +295,8 @@ public class SystemControlResource {
             String.format("delete from binlog_x_stream where group_name = '%s';", groupName);
         String CDC_META_TABLE_RESET_9 =
             String.format("delete from binlog_x_table_stream_mapping where cluster_id = '%s';", clusterId);
+        String CDC_META_TABLE_RESET_10 =
+            String.format("delete from binlog_x_stream_group where group_name = '%s';", getGroupName());
         String CDC_META_PARAMETER_RESET_1 =
             String.format("delete from binlog_system_config where config_key='%s';",
                 EXPECTED_STORAGE_TSO_KEY);
@@ -315,6 +323,7 @@ public class SystemControlResource {
         if (DynamicApplicationConfig.getClusterType().equals(ClusterType.BINLOG_X.name())) {
             sqlList.add(CDC_META_TABLE_RESET_8);
             sqlList.add(CDC_META_TABLE_RESET_9);
+            sqlList.add(CDC_META_TABLE_RESET_10);
         }
 
         sqlList.add(CDC_META_PARAMETER_RESET_1);
@@ -365,6 +374,27 @@ public class SystemControlResource {
         }
     }
 
+    public StorageInfo getDNMaster(StorageInfo storageInfo) {
+        // 魔术字定义请参照 cn StorageInfoRecord
+        // from vip addr
+        Optional<StorageInfo> vipStorageInfosForOneDn = storageInfoMapper.selectOne(c ->
+            c.where(instKind, isEqualTo(0))
+                .and(isVip, isEqualTo(1))
+                .and(storageInstId, isEqualTo(storageInfo.getStorageInstId()))
+                .and(status, isNotEqualTo(2))
+                .limit(1)
+        );
+
+        // if no vip addr
+        StorageInfo masterStorageInfoForOneDn =
+            vipStorageInfosForOneDn.orElseGet(() -> service.getNormalStorageInfo(storageInfo.getStorageInstId()));
+
+        if (masterStorageInfoForOneDn == null) {
+            throw new PolardbxException("cannot find master storage info for dn " + storageInfo.getStorageInstId());
+        }
+        return masterStorageInfoForOneDn;
+    }
+
     private void flushDNLogs() {
         List<StorageInfo> storageInfos;
         storageInfos = storageInfoMapper.select(c ->
@@ -377,35 +407,17 @@ public class SystemControlResource {
                 (s1, s2) -> s1)).values());
 
         for (StorageInfo storageInfo : storageInfos) {
-            StorageInfo masterStorageInfoForOneDn;
-            // 魔术字定义请参照 cn StorageInfoRecord
-            // from vip addr
-            Optional<StorageInfo> vipStorageInfosForOneDn = storageInfoMapper.selectOne(c ->
-                c.where(instKind, isEqualTo(0))
-                    .and(isVip, isEqualTo(1))
-                    .and(storageInstId, isEqualTo(storageInfo.getStorageInstId()))
-                    .and(status, isNotEqualTo(2))
-                    .limit(1)
-            );
-
-            // if no vip addr
-            masterStorageInfoForOneDn =
-                vipStorageInfosForOneDn.orElseGet(() -> service.getNormalStorageInfo(storageInfo.getStorageInstId()));
-
-            if (masterStorageInfoForOneDn == null) {
-                throw new PolardbxException("cannot find master storage info for dn " + storageInfo.getStorageInstId());
-            }
-
+            StorageInfo masterStorageInfoForOneDn = getDNMaster(storageInfo);
             String ip = masterStorageInfoForOneDn.getIp();
             int port = masterStorageInfoForOneDn.getPort();
             String user = masterStorageInfoForOneDn.getUser();
             String passwordEnc = masterStorageInfoForOneDn.getPasswdEnc();
             String password = PasswdUtil.decryptBase64(passwordEnc);
-
             try {
                 Class.forName("com.mysql.jdbc.Driver");
+                String url = String.format("jdbc:mysql://%s:%s/mysql?useSSL=false", ip, port);
                 try (Connection conn = DriverManager
-                    .getConnection(String.format("jdbc:mysql://%s:%s?useSSL=false", ip, port), user, password)) {
+                    .getConnection(url, user, password)) {
                     try (Statement stmt = conn.createStatement()) {
                         stmt.execute("flush logs");
                     }

@@ -6,13 +6,14 @@
  */
 package com.aliyun.polardbx.binlog.client;
 
+import com.aliyun.polardbx.binlog.SpringContextBootStrap;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSHeartbeatLog;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSQueryLog;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionBegin;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
+import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.client.listener.IEventHandler;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpc.cdc.DumpStream;
+import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -35,22 +36,62 @@ public class DryRunClient implements IEventHandler {
 
     private static CountDownLatch latch = new CountDownLatch(1);
 
-    public static void main(String[] args) throws Exception {
-        final String startFileName = System.getenv("file");
-        final Long position = Long.parseLong(System.getenv("pos"));
-        final String meta_host = System.getenv("meta_host");
-        log.warn("meta_host:" + meta_host + ", startFileName:" + startFileName + ",pos:" + position);
-        CdcClient cdcClient = new CdcClient(() -> {
+    public static class EmptyObserver implements StreamObserver<DumpStream> {
+
+        @Override
+        public void onNext(DumpStream value) {
+            long total = dataCount.addAndGet(value.getPayload().size());
+            long now = System.currentTimeMillis();
+            if (now - lastPrintTime > INTERVAL) {
+                log.info("receive tps : " + total * 1000 / (now - lastPrintTime));
+                lastPrintTime = now;
+                dataCount.set(0);
+            }
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            latch.countDown();
+        }
+
+        @Override
+        public void onCompleted() {
+            latch.countDown();
+        }
+    }
+
+    public static void justForNet(String meta_host, String metaDb_username, String metaDb_password,
+                                  String startFileName, long position, boolean sync)
+        throws Exception {
+        MetaDbHelper metaDbHelper = new MetaDbHelper(() -> {
             try {
                 return DriverManager.getConnection(
-                    "jdbc:mysql://" + meta_host
-                        + "/polardbx_meta_db_polardbx?useUnicode=true&characterEncoding=UTF-8&useSSL=false",
-                    "diamond", "diamond1qaz@2wsx");
+                    meta_host,
+                    metaDb_username, metaDb_password);
             } catch (SQLException throwables) {
                 throw new PolardbxException(throwables);
             }
         });
+        DumperDataSource dumperDataSource = new DumperDataSource(metaDbHelper, sync);
+        dumperDataSource.reConnect(500 * 1024 * 1024);
+        dumperDataSource.dump(new BinlogPosition(startFileName, position, -1, -1), new EmptyObserver());
+        latch.await();
+    }
+
+    public static void justForConsume(String meta_host, String metaDb_username, String metaDb_password,
+                                      String startFileName, long position, boolean dryConsume, boolean sync)
+        throws Exception {
+        CdcClient cdcClient = new CdcClient(() -> {
+            try {
+                return DriverManager.getConnection(
+                    meta_host,
+                    metaDb_username, metaDb_password);
+            } catch (SQLException throwables) {
+                throw new PolardbxException(throwables);
+            }
+        }, sync);
         cdcClient.setBinaryData();
+        cdcClient.setDryRun(dryConsume);
         cdcClient.setExceptionHandler(t -> {
             log.error("detected exception ： ", t);
             latch.countDown();
@@ -69,6 +110,28 @@ public class DryRunClient implements IEventHandler {
         executorService.shutdownNow();
     }
 
+    public static void main(String[] args) throws Exception {
+        final String startFileName = System.getenv("file");
+        final Long position = Long.parseLong(System.getenv("pos"));
+        final String meta_host = System.getenv("metaDb_url");
+        final String metaDb_username = System.getenv("metaDb_username");
+        final String metaDb_password = System.getenv("metaDb_password");
+        final Boolean need_decode = Boolean.parseBoolean(System.getenv("need_decode"));
+        final Boolean dryConsume = Boolean.parseBoolean(System.getenv("dry_consume"));
+        final Boolean sync = Boolean.parseBoolean(System.getenv("sync"));
+        final SpringContextBootStrap appContextBootStrap = new SpringContextBootStrap("spring/spring.xml");
+        appContextBootStrap.boot();
+        log.warn("meta_host:" + meta_host + ", startFileName:" + startFileName + ",pos:" + position + ", decode:"
+            + need_decode + ", dry_consume:" + dryConsume);
+
+        if (need_decode) {
+            justForConsume(meta_host, metaDb_username, metaDb_password, startFileName, position, dryConsume, sync);
+        } else {
+            justForNet(meta_host, metaDb_username, metaDb_password, startFileName, position, sync);
+        }
+
+    }
+
     public void onHandle(CdcEventData cdcEventData) {
         if (!StringUtils.equalsIgnoreCase(binlogFile, cdcEventData.getBinlogFileName())) {
             log.info("process file : " + binlogFile + ":" + cdcEventData.getPosition());
@@ -76,16 +139,6 @@ public class DryRunClient implements IEventHandler {
         position = cdcEventData.getPosition();
         binlogFile = cdcEventData.getBinlogFileName();
         DBMSEvent event = cdcEventData.getEvent();
-        if (event instanceof DBMSTransactionBegin) {
-            DBMSTransactionBegin begin = (DBMSTransactionBegin) event;
-            log.info("begin @ : tso " + begin.getTso());
-        } else if (event instanceof DBMSTransactionEnd) {
-            DBMSTransactionEnd end = (DBMSTransactionEnd) event;
-            log.info("commit @ :" + end.getTransactionId() + " tso " + end.getTso());
-        } else if (event instanceof DBMSQueryLog) {
-            DBMSQueryLog queryLog = (DBMSQueryLog) event;
-            log.info("exec ddl : " + queryLog);
-        }
         if (!(event instanceof DBMSHeartbeatLog)) {
             dataCount.incrementAndGet();
         }

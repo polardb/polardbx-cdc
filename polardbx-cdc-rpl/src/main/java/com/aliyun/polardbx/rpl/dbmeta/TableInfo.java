@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.dbmeta;
@@ -100,12 +100,17 @@ public class TableInfo {
         if (StringUtils.isNotBlank(rawString)) {
             // use first key in range hash. e.g. CINEMA_UID,TENANT_ID
             String[] s = rawString.split("[,;]");
-            if (!keyList.contains(s[0])) {
-                keyList.add(s[0]);
-            }
-            if (s.length >= 2) {
-                if (!keyList.contains(s[1])) {
-                    keyList.add(s[1]);
+//            if (!keyList.contains(s[0])) {
+//                keyList.add(s[0]);
+//            }
+//            if (s.length >= 2) {
+//                if (!keyList.contains(s[1])) {
+//                    keyList.add(s[1]);
+//                }
+//            }
+            for (String key : s) {
+                if (!keyList.contains(key)) {
+                    keyList.add(key);
                 }
             }
         }

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
@@ -34,9 +34,9 @@ import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.extractor.log.DDLEvent;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.extractor.log.TransactionGroup;
+import com.aliyun.polardbx.binlog.extractor.log.VirtualTSO;
 import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
-import org.apache.commons.lang3.StringUtils;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -54,21 +54,20 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import static com.aliyun.polardbx.binlog.cdc.meta.PolarDbXStorageTableMetaFactory.create;
 import static org.mockito.Mockito.when;
 
 /**
  * Created by ziyang.lb
  **/
-public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
-
-
+public class RebuildEventLogFilterTest extends BaseTest {
 
     private String applyDdl;
 
     @Test
     public void testCciFilter() throws Exception {
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
-        setConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
+        mockConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
 
         TransactionGroup tg = new TransactionGroup(new LinkedList<>());
         Transaction tx = mockBaseDdlTransaction();
@@ -96,9 +95,6 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
 
         tg.getTransactionList().add(tx);
 
-        Field field = SpringContextHolder.class.getDeclaredField("applicationContext");
-        field.setAccessible(true);
-        ApplicationContext applicationContext = (ApplicationContext) field.get(null);
 
         JdbcTemplate polarxJdbcTemplate = Mockito.mock(JdbcTemplate.class);
         Map<String, Object> returnMap = new HashMap();
@@ -106,10 +102,7 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
         returnMap.put("visibility", 0L);
         when(polarxJdbcTemplate.queryForMap(
             "select ddl_sql,visibility, ext from __cdc_ddl_record__ where id = 1")).thenReturn(returnMap);
-        DefaultListableBeanFactory listableBeanFactory =
-            (DefaultListableBeanFactory) applicationContext.getAutowireCapableBeanFactory();
-        listableBeanFactory.destroySingleton("polarxJdbcTemplate");
-        listableBeanFactory.registerSingleton("polarxJdbcTemplate", polarxJdbcTemplate);
+        registerSpringObject("polarxJdbcTemplate", polarxJdbcTemplate);
 
         mockFilter().handle(tg, mockHandlerContext());
 
@@ -124,8 +117,8 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testTableWithBlankApply() throws Exception {
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
-        setConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
+        mockConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
 
         TransactionGroup tg = new TransactionGroup(new LinkedList<>());
         Transaction tx = mockBaseDdlTransaction();
@@ -160,10 +153,6 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
 
         tg.getTransactionList().add(tx);
 
-        Field field = SpringContextHolder.class.getDeclaredField("applicationContext");
-        field.setAccessible(true);
-        ApplicationContext applicationContext = (ApplicationContext) field.get(null);
-
         JdbcTemplate polarxJdbcTemplate = Mockito.mock(JdbcTemplate.class);
         Map<String, Object> returnMap = new HashMap();
         returnMap.put("ddl_sql", createSql);
@@ -176,9 +165,7 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
         when(polarxJdbcTemplate.queryForList(
             "select sql_kind, schema_name, table_name, meta_info, ddl_sql,visibility, ext from __cdc_ddl_record__ where id = 1")).thenReturn(
             lst);
-        DefaultListableBeanFactory listableBeanFactory =
-            (DefaultListableBeanFactory) applicationContext.getAutowireCapableBeanFactory();
-        listableBeanFactory.registerSingleton("polarxJdbcTemplate", polarxJdbcTemplate);
+        registerSpringObject("polarxJdbcTemplate", polarxJdbcTemplate);
 
         mockFilter().handle(tg, mockHandlerContext());
 
@@ -194,10 +181,10 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testTableWithUseCdcRecordFirst() throws Exception {
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
-        setConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST, "true");
-        setConfig(ConfigKeys.IS_LAB_ENV, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
+        mockConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST, "true");
+        mockConfig(ConfigKeys.IS_LAB_ENV, "false");
 
         String createSql = "CREATE TABLE `order_refund_manage ` (\n"
             + "\t`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id',\n"
@@ -210,10 +197,6 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
             + ") ENGINE = INNODB DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci COMMENT '退款管理表 ';";
 
         long visibility = 1L;
-
-        Field field = SpringContextHolder.class.getDeclaredField("applicationContext");
-        field.setAccessible(true);
-        ApplicationContext applicationContext = (ApplicationContext) field.get(null);
 
         JdbcTemplate polarxJdbcTemplate = Mockito.mock(JdbcTemplate.class);
         Map<String, Object> returnMap = new HashMap();
@@ -229,10 +212,7 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
         when(polarxJdbcTemplate.queryForList(
             "select sql_kind, schema_name, table_name, meta_info, ddl_sql,visibility, ext from __cdc_ddl_record__ where id = 1")).thenReturn(
             lst);
-        DefaultListableBeanFactory listableBeanFactory =
-            (DefaultListableBeanFactory) applicationContext.getAutowireCapableBeanFactory();
-        listableBeanFactory.destroySingleton("polarxJdbcTemplate");
-        listableBeanFactory.registerSingleton("polarxJdbcTemplate", polarxJdbcTemplate);
+        registerSpringObject("polarxJdbcTemplate", polarxJdbcTemplate);
         TransactionGroup tg = new TransactionGroup(new LinkedList<>());
         Transaction tx = mockBaseDdlTransaction();
 
@@ -270,10 +250,10 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
 
     @Test
     public void testTableWithUseCdcRecordFirstForExt() throws Exception {
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
-        setConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
-        setConfig(ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST, "true");
-        setConfig(ConfigKeys.IS_LAB_ENV, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_HISTORY_FIRST, "false");
+        mockConfig(ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED, "false");
+        mockConfig(ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST, "true");
+        mockConfig(ConfigKeys.IS_LAB_ENV, "false");
 
         String createSql = "CREATE TABLE `order_refund_manage ` (\n"
             + "\t`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id',\n"
@@ -296,10 +276,6 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
             + "\tPRIMARY KEY (`id`)\n"
             + ") ENGINE = INNODB DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci COMMENT '退款管理表 ';";
         long visibility = 1L;
-
-        Field field = SpringContextHolder.class.getDeclaredField("applicationContext");
-        field.setAccessible(true);
-        ApplicationContext applicationContext = (ApplicationContext) field.get(null);
 
         JdbcTemplate polarxJdbcTemplate = Mockito.mock(JdbcTemplate.class);
         String sqlKind = "CREATE_TABLE";
@@ -325,10 +301,8 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
         when(polarxJdbcTemplate.queryForList(
             "select sql_kind, schema_name, table_name, meta_info, ddl_sql,visibility, ext from __cdc_ddl_record__ where id = 1")).thenReturn(
             lst);
-        DefaultListableBeanFactory listableBeanFactory =
-            (DefaultListableBeanFactory) applicationContext.getAutowireCapableBeanFactory();
-        listableBeanFactory.destroySingleton("polarxJdbcTemplate");
-        listableBeanFactory.registerSingleton("polarxJdbcTemplate", polarxJdbcTemplate);
+        registerSpringObject("polarxJdbcTemplate", polarxJdbcTemplate);
+
         TransactionGroup tg = new TransactionGroup(new LinkedList<>());
         Transaction tx = mockBaseDdlTransaction();
 
@@ -396,26 +370,21 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
 
     @Before
     public void setUpFactory() {
-        mockStorageTableMetaFactory =
-            Mockito.mockStatic(PolarDbXStorageTableMetaFactory.class);
-        Mockito.when(
-                PolarDbXStorageTableMetaFactory.create(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any())).
-            thenReturn(new PolarDbXStorageTableMeta(null, null, null, null));
+        mockStorageTableMetaFactory = Mockito.mockStatic(PolarDbXStorageTableMetaFactory.class);
+        PolarDbXStorageTableMeta storageTableMeta = new PolarDbXStorageTableMeta(null, null, null, null);
+        Mockito.when(create(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any())).thenReturn(storageTableMeta);
 
-        mockPolarDbXLogicTableMetaFactory =
-            Mockito.mockStatic(PolarDbXLogicTableMetaFactory.class);
-        Mockito.when(PolarDbXLogicTableMetaFactory.create(Mockito.any(), Mockito.any()))
-            .thenReturn(new PolarDbXLogicTableMeta(null, null) {
-                @Override
-                public boolean apply(BinlogPosition position, DDLRecord record, String cmdId) {
-                    applyDdl = record.getDdlSql();
-                    return false;
-                }
-            });
+        mockPolarDbXLogicTableMetaFactory = Mockito.mockStatic(PolarDbXLogicTableMetaFactory.class);
+        PolarDbXLogicTableMeta logicTableMeta = new PolarDbXLogicTableMeta(null, null) {
+            @Override
+            public boolean apply(BinlogPosition position, DDLRecord record, String cmdId) {
+                applyDdl = record.getDdlSql();
+                return false;
+            }
+        };
+        Mockito.when(PolarDbXLogicTableMetaFactory.create(Mockito.any(), Mockito.any())).thenReturn(logicTableMeta);
 
-        mockConsistencyCheckerFactory =
-            Mockito.mockStatic(ConsistencyCheckerFactory.class);
-
+        mockConsistencyCheckerFactory = Mockito.mockStatic(ConsistencyCheckerFactory.class);
         Mockito.when(ConsistencyCheckerFactory.create(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()))
             .thenReturn(new ConsistencyChecker(null, null, null, ""));
 
@@ -448,7 +417,6 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
         Assert.assertEquals(extInfo, ddlRecord.getExtInfo());
         Assert.assertNotEquals(ddlRecord, cloneRecord);
     }
-
 
     @Test
     public void testCloneAndProcessBeforeApplyWithAlterTableAdd() {
@@ -562,5 +530,43 @@ public class RebuildEventLogFilterTest extends BaseTestWithGmsTables {
         public void onStartConsume(HandlerContext context) {
 
         }
+    }
+
+    @Test
+    public void rebuildEventLogFilterTest() throws Exception {
+        RebuildEventLogFilter filter = mockFilter();
+        HandlerContext handlerContext = mockHandlerContext();
+        handlerContext.getRuntimeContext().setServerCharactorSet(new ServerCharactorSet());
+        String tso = "729537383691085420818264390524637184010000000000000000";
+        BinlogPosition startPos = new BinlogPosition("bin.001", tso);
+        handlerContext.getRuntimeContext().setStartPosition(startPos);
+        filter.onStart(handlerContext);
+        Transaction transaction = mockBaseDdlTransaction();
+        when(transaction.isHeartbeat()).thenReturn(true);
+        Mockito.when(transaction.getVirtualTSOModel()).thenReturn(new VirtualTSO(tso));
+        LinkedList<Transaction> ll = new LinkedList<Transaction>();
+        ll.add(transaction);
+        filter.handle(new TransactionGroup(ll), handlerContext);
+        Mockito.verify(transaction, Mockito.times(1)).isHeartbeat();
+    }
+
+    @Test
+    public void rebuildEventLogFilterArchiveTest() throws Exception {
+        mockConfig(ConfigKeys.TASK_EXTRACT_FILTER_ARCHIVE_ENABLED, "true");
+        mockConfig(ConfigKeys.IS_LAB_ENV, "true");
+        RebuildEventLogFilter filter = mockFilter();
+        HandlerContext handlerContext = mockHandlerContext();
+        handlerContext.getRuntimeContext().setServerCharactorSet(new ServerCharactorSet());
+        String tso = "729537383691085420818264390524637184010000000000000000";
+        BinlogPosition startPos = new BinlogPosition("bin.001", tso);
+        handlerContext.getRuntimeContext().setStartPosition(startPos);
+        filter.onStart(handlerContext);
+        Transaction transaction = mockBaseDdlTransaction();
+        when(transaction.isArchive()).thenReturn(true);
+        Mockito.when(transaction.getVirtualTSOModel()).thenReturn(new VirtualTSO(tso));
+        LinkedList<Transaction> ll = new LinkedList<Transaction>();
+        ll.add(transaction);
+        filter.handle(new TransactionGroup(ll), handlerContext);
+        Mockito.verify(transaction, Mockito.times(1)).isArchive();
     }
 }

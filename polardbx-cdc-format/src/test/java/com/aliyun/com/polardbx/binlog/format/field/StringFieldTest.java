@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.com.polardbx.binlog.format.field;
@@ -57,4 +57,14 @@ public class StringFieldTest {
         Assert.assertArrayEquals(new byte[] {},
             field.encode());
     }
+
+    @Test
+    public void testBinary() {
+        Field field = MakeFieldFactory.makField4TypeMisMatch("binary(20)", "968780", utf8, false, "null", false);
+        Assert.assertArrayEquals(new byte[] {-2, 20}, field.doGetTableMeta());
+        Assert.assertArrayEquals(new byte[] {6, 57, 54, 56, 55, 56, 48},
+            field.encode());
+
+    }
+
 }

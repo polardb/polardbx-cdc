@@ -1,13 +1,16 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.binlog.download;
 
-import com.aliyun.polardbx.binlog.error.PolardbxException;
-import com.aliyun.polardbx.binlog.util.HttpHelper;
+import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
+import com.aliyun.polardbx.binlog.canal.binlog.download.action.DownloadActionFactory;
+import com.aliyun.polardbx.binlog.canal.binlog.download.action.IDownloadAction;
+import lombok.Getter;
+import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,39 +18,44 @@ import java.io.File;
 
 public class DownloadTask implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger("rdsDownloadLogger");
-    private String downloadLink;
-    private String localFilePath;
+    private final BinlogFile binlogFile;
+    @Getter
+    private final String localFilePath;
     private DownloadTaskListener listener;
-    private String storageInstanceId;
+    private final String storageInstanceId;
 
-    public DownloadTask(String storageInstanceId, String downloadLink, String localFilePath) {
+    public DownloadTask(String storageInstanceId, BinlogFile binlogFile, String localFilePath) {
         this.storageInstanceId = storageInstanceId;
-        this.downloadLink = downloadLink;
+        this.binlogFile = binlogFile;
         this.localFilePath = localFilePath;
     }
 
-    public String getLocalFilePath() {
-        return localFilePath;
-    }
 
-    public void exec() {
+    public void exec() throws Exception {
         File localFile = new File(localFilePath);
-        if (listener != null) {
-            listener.beginDownload(storageInstanceId);
-        }
+
         if (!localFile.exists()) {
             try {
-                HttpHelper.download(downloadLink, localFilePath);
+                if (listener != null) {
+                    listener.beginDownload(storageInstanceId);
+                }
+                long start = System.currentTimeMillis();
+                IDownloadAction action = DownloadActionFactory.create();
+                action.exec(storageInstanceId, localFilePath, binlogFile);
+                long useTime = System.currentTimeMillis() - start;
+                logger.info("download file {} success, use time: {}ms, use action : {}", localFilePath, useTime,
+                    action.getClass().getSimpleName());
             } catch (Exception e) {
                 try {
-                    localFile.delete();
-                } catch (Exception d) {
+                    FileUtils.forceDelete(localFile);
+                } catch (Exception ignored) {
                 }
-                throw new PolardbxException(e);
+                throw e;
+            } finally {
+                if (listener != null) {
+                    listener.endDownload(storageInstanceId);
+                }
             }
-        }
-        if (listener != null) {
-            listener.endDownload(storageInstanceId);
         }
     }
 
@@ -65,7 +73,7 @@ public class DownloadTask implements Runnable {
                 t = null;
                 break;
             } catch (Throwable e) {
-                logger.error("download failed!" + downloadLink, e);
+                logger.error("download failed!" + binlogFile, e);
                 t = e;
             }
         } while (max-- > 0);

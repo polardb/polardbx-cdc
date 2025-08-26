@@ -173,6 +173,7 @@ CREATE TABLE `binlog_dumper_info`
     `container_id`   varchar(50) NOT NULL DEFAULT '',
     `version`        bigint(20) NOT NULL DEFAULT '0',
     `polarx_inst_id` varchar(128)         DEFAULT NULL,
+    `delay`          bigint NOT NULL DEFAULT '9223372036854775807',
     PRIMARY KEY (`id`),
     UNIQUE KEY `udx_cluster_ip_port` (`cluster_id`, `ip`, `port`),
     UNIQUE KEY `udx_taskname` (`cluster_id`, `task_name`)
@@ -604,6 +605,7 @@ CREATE TABLE `binlog_x_stream`
     `expected_storage_tso` varchar(200) NOT NULL DEFAULT '' COMMENT '期望的storage tso',
     `latest_cursor`        varchar(600)          DEFAULT NULL COMMENT 'binlog文件最新位点',
     `endpoint`             text COMMENT 'endpoint信息',
+    `status`               int default 0,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_stream_name` (`stream_name`)
 );
@@ -1420,6 +1422,41 @@ DROP TABLE IF EXISTS `file_storage_info`;
 /*!40101 SET @saved_cs_client = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `file_storage_info`
+(
+    `id`                        bigint(11) NOT NULL AUTO_INCREMENT,
+    `inst_id`                   varchar(128) NOT NULL COMMENT 'polardb-x instance id',
+    `engine`                    varchar(255) NOT NULL COMMENT 'engine name',
+    `external_endpoint`         varchar(255) NOT NULL COMMENT '外网访问',
+    `internal_classic_endpoint` varchar(255) NOT NULL COMMENT 'ECS 的经典网络访问（内网）',
+    `internal_vpc_endpoint`     varchar(255) NOT NULL COMMENT 'ECS 的 VPC 网络访问（内网）',
+    `file_uri`                  varchar(255) NOT NULL,
+    `file_system_conf`          text,
+    `access_key_id`             varchar(255) NOT NULL,
+    `access_key_secret`         varchar(255) NOT NULL,
+    `priority`                  bigint(11) NOT NULL COMMENT 'the record with the max priority will be chosen to be engine s uri',
+    `region_id`                 varchar(128)          DEFAULT NULL,
+    `azone_id`                  varchar(128)          DEFAULT NULL,
+    `cache_policy`              bigint(11) NOT NULL DEFAULT '3' COMMENT 'NO_CACHE(0), META_CACHE(1), DATA_CACHE(2), META_AND_DATA_CACHE(3)',
+    `delete_policy`             bigint(11) NOT NULL DEFAULT '1' COMMENT '0 for never, 1 for master only, 2 for master and slave',
+    `status`                    bigint(11) NOT NULL DEFAULT '1' COMMENT '0 for disable, 1 for running, 2 for read only',
+    `gmt_created`               timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `gmt_modified`              timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `endpoint_ordinal`          bigint(20) NOT NULL DEFAULT '0' COMMENT '0 use external_endpoint, 1 use internal_classic_endpoint, 2 use internal_vpc_endpoint',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `file_uri` (`file_uri`)
+);
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+
+
+--
+-- Table structure for table `binlog_file_storage_info`
+--
+
+DROP TABLE IF EXISTS `binlog_file_storage_info`;
+/*!40101 SET @saved_cs_client = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `binlog_file_storage_info`
 (
     `id`                        bigint(11) NOT NULL AUTO_INCREMENT,
     `inst_id`                   varchar(128) NOT NULL COMMENT 'polardb-x instance id',

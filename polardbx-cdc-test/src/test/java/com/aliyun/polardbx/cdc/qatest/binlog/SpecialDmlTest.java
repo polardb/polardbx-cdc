@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.binlog;
@@ -56,9 +56,23 @@ public class SpecialDmlTest extends RplBaseTestCase {
         + " primary key(id),\n"
         + " unique key uk_n(name)) dbpartition by hash(`id`) tbpartition by hash(`id`) tbpartitions 8";
 
+    private static final String CREATE_T_SPACE_COLUMN = "create table if not exists `test_change_column_with_space` (\n"
+        + "        `id` int not null,\n"
+        + "        ` c1` int not null,\n"
+        + "        `c1` int not null,\n"
+        + "        primary key (`id`)\n"
+        + ");";
+
     @BeforeClass
     public static void bootStrap() throws SQLException {
         prepareTestDatabase(DB_NAME);
+    }
+
+    @Test
+    public void testDropSpaceColumn() throws SQLException {
+        JdbcUtil.executeUpdate(polardbxConnection, CREATE_T_SPACE_COLUMN);
+        String sql = "alter table `test_change_column_with_space` drop column ` c1`";
+        JdbcUtil.executeSuccess(polardbxConnection, sql);
     }
 
     @Test

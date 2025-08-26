@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.backup;
@@ -101,7 +101,7 @@ public class BinlogUploadManagerTest {
     public void testProcessUpload_lock_conflict() {
         Connection connection = buildConnection();
         when(manager.getConnection()).thenReturn(connection);
-        
+
         SQLException lockException =
             new SQLException("Lock wait timeout exceeded; try restarting transaction", "", 1205);
         when(stmt.executeQuery(LOCK_SQL)).thenThrow(lockException);

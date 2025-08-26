@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.log;
@@ -37,13 +37,14 @@ import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.service.CdcSyncPointMetaService;
 import com.aliyun.polardbx.binlog.storage.AlreadyExistException;
 import com.aliyun.polardbx.binlog.storage.IteratorBuffer;
-import com.aliyun.polardbx.binlog.storage.StorageFactory;
+import com.aliyun.polardbx.binlog.storage.Storage;
 import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnBufferItem;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.LabEventType;
+import lombok.Setter;
 import lombok.SneakyThrows;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
@@ -72,6 +73,7 @@ import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECO
 import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.INSTRUCTION_FIELD_INSTRUCTION_CONTENT;
 import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.INSTRUCTION_FIELD_INSTRUCTION_ID;
 import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.INSTRUCTION_FIELD_INSTRUCTION_TYPE;
+import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.POLARX_SYNC_POINT_RECORD_FIELD_EXTRA;
 import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.POLARX_SYNC_POINT_RECORD_FIELD_ID;
 import static com.aliyun.polardbx.binlog.extractor.log.TxnKeyBuilder.buildTxnKey;
 import static com.aliyun.polardbx.binlog.extractor.log.TxnKeyBuilder.getTransIdGroupIdPair;
@@ -85,10 +87,8 @@ import static com.aliyun.polardbx.binlog.extractor.log.TxnKeyBuilder.getTransIdG
 public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     public static final AtomicLong CURRENT_TRANSACTION_COUNT = new AtomicLong(0);
     public static final AtomicLong CURRENT_TRANSACTION_PERSISTED_COUNT = new AtomicLong(0);
-
     private static final Logger duplicateTransactionLogger = LoggerFactory.getLogger("duplicateTransactionLogger");
     private static final Logger logger = LoggerFactory.getLogger(Transaction.class);
-
     private static final String ENCODING = "UTF-8";
     private static final String ZERO_19_PADDING = StringUtils.leftPad("0", 10, "0");
     private static final String ENTITY_KEY_PREFIX = "TRANS_ENTITY_";
@@ -102,12 +102,17 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     private FormatDescriptionEvent fde;
     private FormatDescriptionLogEvent fdLogEvent;
 
+    @Setter
     private TransEntity entity = new TransEntity();
     private volatile boolean entityPersisted = false;
     private long entityPersistKey;
+    private Storage storage;
+    private String syncPointExtra;
 
-    public Transaction(FormatDescriptionLogEvent fdLogEvent, FormatDescriptionEvent fde, RuntimeContext rc) {
+    public Transaction(Storage storage, FormatDescriptionLogEvent fdLogEvent, FormatDescriptionEvent fde,
+                       RuntimeContext rc) {
         Pair<Long, String> pair = getTransIdGroupIdPair();
+        this.storage = storage;
         this.fde = fde;
         this.fdLogEvent = fdLogEvent;
         this.getEntity().descriptionEvent = true;
@@ -120,8 +125,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         CURRENT_TRANSACTION_COUNT.incrementAndGet();
     }
 
-    public Transaction(QueryLogEvent qwe, RuntimeContext rc) throws AlreadyExistException {
+    public Transaction(Storage storage, QueryLogEvent qwe, RuntimeContext rc) throws AlreadyExistException {
         Pair<Long, String> pair = getTransIdGroupIdPair();
+        this.storage = storage;
         this.getEntity().transactionId = Math.abs(CommonUtils.randomXid());
         this.getEntity().xid = getEntity().transactionId + rc.getStorageInstId() + qwe.getLogPos();
         this.getEntity().binlogFileName = rc.getBinlogFile();
@@ -135,7 +141,8 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         CURRENT_TRANSACTION_COUNT.incrementAndGet();
     }
 
-    public Transaction(LogEvent logEvent, RuntimeContext rc) throws Exception {
+    public Transaction(Storage storage, LogEvent logEvent, RuntimeContext rc) throws Exception {
+        this.storage = storage;
         this.getEntity().xid = LogEventUtil.getXid(logEvent);
 
         //rewrite charset
@@ -184,7 +191,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         if (enablePersistEntity && !entityPersisted && isValidStatOfPersistEntity()) {
             entityPersistKey = ENTITY_KEY_SEQUENCE.incrementAndGet();
             byte[] key = buildPersistKey();
-            StorageFactory.getStorage().getRepository().selectUnit(entityPersistKey).put(key, entity.serialize());
+            storage.getRepository().selectUnit(entityPersistKey).put(key, entity.serialize());
             entity = null;
             entityPersisted = true;
             CURRENT_TRANSACTION_PERSISTED_COUNT.incrementAndGet();
@@ -199,7 +206,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     public void restoreEntity() {
         if (entityPersisted) {
             byte[] key = buildPersistKey();
-            byte[] value = StorageFactory.getStorage().getRepository().selectUnit(entityPersistKey).get(key);
+            byte[] value = storage.getRepository().selectUnit(entityPersistKey).get(key);
             entity = TransEntity.deserialize(value);
             entityPersisted = false;
             deleteEntity(key);
@@ -211,7 +218,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     private void deleteEntity(byte[] key) throws RocksDBException {
-        StorageFactory.getStorage().getRepository().selectUnit(entityPersistKey).delete(key);
+        storage.getRepository().selectUnit(entityPersistKey).delete(key);
         CURRENT_TRANSACTION_PERSISTED_COUNT.decrementAndGet();
     }
 
@@ -245,7 +252,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         }
 
         try {
-            txnBuffer = StorageFactory.getStorage().create(getEntity().txnKey);
+            txnBuffer = storage.create(getEntity().txnKey);
         } catch (AlreadyExistException e) {
             if (!DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_SKIP_DUPLICATE_TXN_KEY)) {
                 throw e;
@@ -366,7 +373,6 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     }
 
     private boolean processSpecialTableData(LogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
-
         if (event instanceof RowsLogEvent) {
             RowsLogEvent rowsLogEvent = (RowsLogEvent) event;
             TableMapLogEvent table = rowsLogEvent.getTable();
@@ -451,12 +457,15 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         this.getEntity().instructionType = InstructionType.FlushLogs;
     }
 
-    private boolean processCdcInternalDDL(DDLRecord ddlRecord) {
+    public boolean processCdcInternalDDL(DDLRecord ddlRecord) {
         // prepare parameters
 
         String sqlKind = ddlRecord.getSqlKind();
         if (StringUtils.equals(sqlKind, "FLUSH_LOGS")) {
-            String groupName = ddlRecord.getExtInfo().getGroupName();
+            String groupName = null;
+            if (ddlRecord.getExtInfo() != null) {
+                groupName = ddlRecord.getExtInfo().getGroupName();
+            }
             if (StringUtils.isNotBlank(groupName)) {
                 // check 指令是否是针对当前集群
                 if (StringUtils.equalsIgnoreCase(
@@ -508,16 +517,22 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         }
     }
 
-    private void processSyncPoint(WriteRowsLogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
+    void processSyncPoint(WriteRowsLogEvent event, RuntimeContext rc) throws UnsupportedEncodingException {
         BinlogParser binlogParser = new BinlogParser();
         binlogParser.parse(SystemDB.getSyncPointTableMeta(), event, "utf8");
         String id = (String) binlogParser.getField(POLARX_SYNC_POINT_RECORD_FIELD_ID);
+        String extra = null;
+        try {
+            extra = (String) binlogParser.getField(POLARX_SYNC_POINT_RECORD_FIELD_EXTRA);
+        } catch (Exception e) {
+            logger.info("sync point parse extra failed.");
+        }
         final CdcSyncPointMetaService service = getObject(CdcSyncPointMetaService.class);
         final long processSyncPointWaitTimeoutMS =
             DynamicApplicationConfig.getLong(ConfigKeys.TASK_PROCESS_SYNC_POINT_WAIT_TIMEOUT_MILLISECOND);
         Optional<CdcSyncPointMeta> record = service.selectById(id);
         if (record.isPresent()) {
-            processSyncPointMeta(record.get(), rc);
+            processSyncPointMeta(record.get(), rc, extra);
         } else {
             logger.info("sync point is not present, will wait for a moment");
             try {
@@ -527,13 +542,13 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
             record = service.selectById(id);
             if (record.isPresent()) {
-                processSyncPointMeta(record.get(), rc);
+                processSyncPointMeta(record.get(), rc, extra);
             } else {
                 logger.info("wait sync point timeout! id:{}", id);
                 int affectedRows = service.insertIgnore(id);
                 if (affectedRows == 0) { // CN或者其他dispatcher插入了记录
                     record = service.selectById(id);
-                    processSyncPointMeta(record.get(), rc);
+                    processSyncPointMeta(record.get(), rc, extra);
                 } else {
                     logger.info("mark sync point meta as invalid, id:{}", id);
                 }
@@ -541,11 +556,12 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         }
     }
 
-    private void processSyncPointMeta(CdcSyncPointMeta record, RuntimeContext rc) {
+    private void processSyncPointMeta(CdcSyncPointMeta record, RuntimeContext rc, String extra) {
         if (record.getValid() == 1) {
             logger.info("sync point is valid, id:{}", record.getId());
             rc.setHoldingTso();
             setSyncPoint(true);
+            setSyncPointExtra(extra);
         } else {
             logger.info("sync point is not valid, id:{}", record.getId());
         }
@@ -843,7 +859,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     private void releaseTxnBuffer() {
         if (txnBuffer != null && !txnBuffer.isCompleted()) {
-            StorageFactory.getStorage().delete(txnBuffer.getTxnKey());
+            storage.delete(txnBuffer.getTxnKey());
             txnBuffer.deleteEntity();
             txnBuffer = null;
         }
@@ -889,6 +905,14 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
 
     public boolean isSyncPointCheckIgnored() {
         return this.getEntity().syncPointCheckIgnoreFlag;
+    }
+
+    public String getSyncPointExtra() {
+        return syncPointExtra;
+    }
+
+    public void setSyncPointExtra(String syncPointExtra) {
+        this.syncPointExtra = syncPointExtra;
     }
 
     public boolean isDDL() {

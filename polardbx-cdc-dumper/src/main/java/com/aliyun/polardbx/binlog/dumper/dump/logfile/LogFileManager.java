@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
@@ -9,15 +9,19 @@ package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.filesys.CdcFileSystem;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
+import com.aliyun.polardbx.binlog.lock.LogFileLockManager;
 import com.aliyun.polardbx.binlog.restore.BinlogRestoreManager;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
-import com.aliyun.polardbx.binlog.task.ICursorProvider;
+import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
+import com.aliyun.polardbx.binlog.task.IDumperStatisticProvider;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.Getter;
 import lombok.Setter;
@@ -29,10 +33,14 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_FILE_SEEK_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
+import static com.aliyun.polardbx.binlog.enums.BinlogUploadStatus.SUCCESS;
 
 /**
  * Created by ziyang.lb
@@ -40,7 +48,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HE
 @Setter
 @Getter
 @Slf4j
-public class LogFileManager implements ICursorProvider {
+public class LogFileManager implements IDumperStatisticProvider {
     private String taskName;
     private TaskType taskType;
     private ExecutionConfig executionConfig;
@@ -58,6 +66,8 @@ public class LogFileManager implements ICursorProvider {
     private CdcFileSystem cdcFileSystem;
     private BinlogListenerWrapper binlogListeners;
     private volatile boolean running;
+    private LogFileLockManager logFileLockManager;
+    private BinlogOssRecordService binlogOssRecordService;
 
     public void start() {
         if (running) {
@@ -71,14 +81,16 @@ public class LogFileManager implements ICursorProvider {
             binlogListeners.addListener(
                 new BinlogRecordManager(executionConfig.getRuntimeVersion(), groupName, streamName, taskName, taskType,
                     binlogRootPath));
+            binlogOssRecordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
 
             if (RuntimeLeaderElector.isDumperMasterOrX(executionConfig.getRuntimeVersion(), taskType, taskName)) {
                 if (isForceRecover(executionConfig)) {
-                    BinlogFileUtil.deleteBinlogFiles(BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName));
+                    String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+                    deleteLocalBinlogFilesIfUploaded(fullPath, groupName, streamName, getString(CLUSTER_ID));
                 } else {
                     if (isForceDownload(executionConfig)) {
-                        BinlogFileUtil.deleteBinlogFiles(
-                            BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName));
+                        String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+                        deleteLocalBinlogFilesIfUploaded(fullPath, groupName, streamName, getString(CLUSTER_ID));
                     }
                     BinlogRestoreManager restoreManager =
                         new BinlogRestoreManager(groupName, streamName, binlogRootPath);
@@ -100,8 +112,8 @@ public class LogFileManager implements ICursorProvider {
             } else {
                 // 主备Dumper的删除操作要一致
                 if (isForceRecover(executionConfig) || isForceDownload(executionConfig)) {
-                    BinlogFileUtil.deleteBinlogFiles(
-                        BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName));
+                    String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+                    deleteLocalBinlogFilesIfUploaded(fullPath, groupName, streamName, getString(CLUSTER_ID));
                 }
 
                 DumperSlaveStartMode startMode = DumperSlaveStartMode.typeOf(
@@ -143,34 +155,41 @@ public class LogFileManager implements ICursorProvider {
         return cdcFileSystem.getBinlogFile(fileName);
     }
 
-    public CdcFile getMinBinlogFile() {
-        return cdcFileSystem.getMinFile();
+    public CdcFile getLocalBinlogFileByName(String fileName) {
+        return cdcFileSystem.getLocalBinlogFile(fileName);
     }
 
-    public CdcFile getMaxBinlogFile() {
-        return cdcFileSystem.getMaxFile();
+    public CdcFile getMinBinlogFile(boolean needOssRecord) {
+        return cdcFileSystem.getMinFile(needOssRecord);
     }
 
-    public CdcFile getLocalMaxBinlogFile() {
-        return cdcFileSystem.getLocalMaxFile();
+    public CdcFile getMaxBinlogFile(boolean needOssRecord) {
+        return cdcFileSystem.getMaxFile(needOssRecord);
     }
 
-    public List<CdcFile> getAllBinlogFilesOrdered() {
-        return cdcFileSystem.listAllFiles();
+    /**
+     * @param needOssRecord 是否需要返回更详细的oss记录信息
+     */
+    public CdcFile getLocalMaxBinlogFile(boolean needOssRecord) {
+        return cdcFileSystem.getLocalMaxFile(needOssRecord);
     }
 
-    public List<CdcFile> getAllLocalBinlogFilesOrdered() {
-        return cdcFileSystem.listLocalFiles();
+    public List<CdcFile> getAllBinlogFilesOrdered(boolean needOssRecord) {
+        return cdcFileSystem.listAllFiles(needOssRecord);
+    }
+
+    public List<CdcFile> getAllLocalBinlogFilesOrdered(boolean needOssRecord) {
+        return cdcFileSystem.listLocalFiles(needOssRecord);
     }
 
     private String getLocalMaxBinlogFileName() {
-        CdcFile maxFile = cdcFileSystem.getLocalMaxFile();
+        CdcFile maxFile = cdcFileSystem.getLocalMaxFile(false);
         return maxFile == null ? "" : maxFile.getName();
     }
 
     public List<String> getAllLocalBinlogFileNamesOrdered() {
         List<String> res = new ArrayList<>();
-        List<CdcFile> files = getAllLocalBinlogFilesOrdered();
+        List<CdcFile> files = getAllLocalBinlogFilesOrdered(false);
         for (CdcFile file : files) {
             res.add(file.getName());
         }
@@ -258,5 +277,41 @@ public class LogFileManager implements ICursorProvider {
 
     public String getBinlogFullPath() {
         return BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+    }
+
+    @Override
+    public long getDumperDelay() {
+        if (logFileCopier != null) {
+            return logFileCopier.getDelay();
+        }
+        if (logFileGenerator != null) {
+            return logFileGenerator.getDelay();
+        }
+        return Long.MAX_VALUE;
+    }
+
+    public long getLastEventTimestamp() {
+        if (logFileCopier != null) {
+            return logFileCopier.getLastEventTimeStampSecond();
+        }
+        if (logFileGenerator != null) {
+            return logFileGenerator.getCurrentTsoTimeSecond();
+        }
+        return 0;
+    }
+
+    public void deleteLocalBinlogFilesIfUploaded(String fullPath, String gid, String sid, String cid) {
+        File dir = new File(fullPath);
+        if (!dir.exists() || !dir.isDirectory()) {
+            return;
+        }
+
+        for (File file : dir.listFiles()) {
+            String fileName = file.getName();
+            Optional<BinlogOssRecord> recordOpt = binlogOssRecordService.getRecordByName(gid, sid, cid, fileName);
+            if (recordOpt.isPresent() && recordOpt.get().getUploadStatus() == SUCCESS.getValue()) {
+                file.delete();
+            }
+        }
     }
 }

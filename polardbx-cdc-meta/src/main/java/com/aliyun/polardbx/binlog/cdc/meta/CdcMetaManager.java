@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.cdc.meta;
@@ -9,7 +9,11 @@ package com.aliyun.polardbx.binlog.cdc.meta;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.ServerVariables;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.TableCompatibilityProcessor;
+import com.aliyun.polardbx.binlog.dao.BinlogFileStorageInfoDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogFileStorageInfoMapper;
+import com.aliyun.polardbx.binlog.domain.po.BinlogFileStorageInfo;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.github.rholder.retry.Retryer;
 import com.github.rholder.retry.RetryerBuilder;
@@ -27,9 +31,13 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.dao.BinlogFileStorageInfoDynamicSqlSupport.priority;
+import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 /**
  * Created by Shuguang
@@ -66,6 +74,7 @@ public class CdcMetaManager {
             log.error("flyway error", e);
             throw new PolardbxException(e);
         }
+        initBinlogFileStorageInfo();
         log.info("cdc meta tables init done!");
     }
 
@@ -92,5 +101,41 @@ public class CdcMetaManager {
                 return configList.size();
             }
         });
+    }
+
+    /**
+     * 插入binlog_file_storage_info表，测试用
+     */
+    private void initBinlogFileStorageInfo() {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)) {
+            BinlogFileStorageInfoMapper binlogFileStorageInfoMapper =
+                SpringContextHolder.getObject(BinlogFileStorageInfoMapper.class);
+            Optional<BinlogFileStorageInfo> binlogFileStorageInfoOptional = binlogFileStorageInfoMapper.selectOne(
+                s -> s.where(BinlogFileStorageInfoDynamicSqlSupport.instId,
+                        isEqualTo(getString(ConfigKeys.POLARX_INST_ID)))
+                    .orderBy(priority.descending())
+                    .limit(1));
+            if (!binlogFileStorageInfoOptional.isPresent()) {
+                String endpoint = DynamicApplicationConfig.getString(ConfigKeys.OSS_ENDPOINT);
+                String bucketName = DynamicApplicationConfig.getString(ConfigKeys.COMMON_BUCKET_NAME);
+                BinlogFileStorageInfo binlogFileStorageInfo = new BinlogFileStorageInfo();
+                binlogFileStorageInfo.setInstId(DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID));
+                binlogFileStorageInfo.setEngine("S3");
+                binlogFileStorageInfo.setRegionId("aws-global");
+                binlogFileStorageInfo.setExternalEndpoint(endpoint);
+                binlogFileStorageInfo.setInternalVpcEndpoint(endpoint);
+                binlogFileStorageInfo.setInternalClassicEndpoint(endpoint);
+                binlogFileStorageInfo.setFileUri("s3://" + bucketName + "/");
+                binlogFileStorageInfo.setAccessKeyId(DynamicApplicationConfig.getString(ConfigKeys.OSS_ACCESSKEY_ID));
+                binlogFileStorageInfo.setAccessKeySecret(
+                    DynamicApplicationConfig.getString(ConfigKeys.OSS_ACCESSKEY_ID_SECRET));
+                binlogFileStorageInfo.setCachePolicy(1L);
+                binlogFileStorageInfo.setDeletePolicy(1L);
+                binlogFileStorageInfo.setStatus(1L);
+                binlogFileStorageInfo.setEndpointOrdinal(0L);
+                binlogFileStorageInfo.setPriority(10L);
+                binlogFileStorageInfoMapper.insert(binlogFileStorageInfo);
+            }
+        }
     }
 }

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.api;
@@ -15,10 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.text.ParseException;
 import java.util.Collections;
 import java.util.List;
@@ -29,21 +25,19 @@ public class BinlogProcessor {
 
     private static final Logger logger = LoggerFactory.getLogger(BinlogProcessor.class);
 
-    public static boolean test = false;
-
     /**
      * 首先过滤掉ignoreHost的列表，接着优先选取preferHost， 如果preferHost在ignore中，则忽略，如果不存在，则选取列表中binlog begin最靠前，end最靠后的个数最多的。
      */
     public static List<BinlogFile> process(final List<BinlogFile> items, final Set<Long> ignoreHostSet,
                                            Long preferHostId, Long startTime, Long serverId) {
-        logger.info("filter binlog event size : " + items.size() + " ignore host : " + JSON.toJSONString(ignoreHostSet)
-            + " , prefHost : " + preferHostId + ", time: " + startTime + " , serverId : " + serverId);
+        logger.info("before filter binlog file count : {} ignore host : {} , prefHost : {}, time: {} , serverId : {}",
+            items.size(), JSON.toJSONString(ignoreHostSet), preferHostId, startTime, serverId);
 
-        Map<Long, HostInsance> hostInstanceMap = filterAndPrepare(items, ignoreHostSet);
+        Map<Long, HostInstance> hostInstanceMap = filterAndPrepare(items, ignoreHostSet);
 
         logger.info("after filter instance map size : " + hostInstanceMap.size());
 
-        HostInsance finalInstance = null;
+        HostInstance finalInstance = null;
         if (ignoreHostSet.contains(preferHostId)) {
             preferHostId = null;
         }
@@ -57,53 +51,48 @@ public class BinlogProcessor {
             }
 
             if (finalInstance == null) {
-                logger.info("serverId not match extractorServerId , require serverId is " + serverId);
-                finalInstance = findByBigestTimeRegion(hostInstanceMap, startTime);
+                logger.info("serverId not match direct dn serverId , direct dn serverId is {}", serverId);
+                finalInstance = findByBiggestTimeRegion(hostInstanceMap, startTime);
             }
 
-        }
-
-        if (test) {
-            finalInstance.sortList().stream().forEach(b -> {
-                b.setIntranetDownloadLink(b.getDownloadLink());
-            });
         }
 
         return finalInstance == null ? Collections.EMPTY_LIST : finalInstance.sortList();
     }
 
-    private static HostInsance findByBigestTimeRegion(Map<Long, HostInsance> hostInstanceMap, Long startTime) {
-        HostInsance finalInstance = null;
-        for (HostInsance hostInsance : hostInstanceMap.values()) {
-            logger.info("host begin : " + hostInsance.getBegin() + ", check time : " + startTime);
-            if (startTime == null || startTime == -1 || hostInsance.getBegin() <= startTime) {
+    private static HostInstance findByBiggestTimeRegion(Map<Long, HostInstance> hostInstanceMap, Long startTime) {
+        HostInstance finalInstance = null;
+        for (HostInstance hostInstance : hostInstanceMap.values()) {
+            logger.info("host begin : {}, check time : {}", hostInstance.getBegin(), startTime);
+            if (startTime == null || startTime == -1 || hostInstance.getBegin() <= startTime) {
                 if (finalInstance == null) {
-                    finalInstance = hostInsance;
+                    finalInstance = hostInstance;
                 }
                 // 没有serverId的情况下，优先选取endTime最大的
-                if (finalInstance.getEnd() < hostInsance.getEnd()) {
-                    finalInstance = hostInsance;
+                if (finalInstance.getEnd() < hostInstance.getEnd()) {
+                    finalInstance = hostInstance;
                 }
             }
         }
         return finalInstance;
     }
 
-    private static HostInsance findByServerId(Map<Long, HostInsance> hostInstanceMap, Long serverId, Long startTime) {
-        HostInsance finalInstance = null;
-        for (HostInsance hostInsance : hostInstanceMap.values()) {
-            if (startTime == null || startTime == -1 || hostInsance.getBegin() <= startTime) {
-                while (CollectionUtils.isNotEmpty(hostInsance.getBinlogFiles())) {
+    private static HostInstance findByServerId(Map<Long, HostInstance> hostInstanceMap, Long serverId, Long startTime) {
+        HostInstance finalInstance = null;
+        for (HostInstance hostInstance : hostInstanceMap.values()) {
+            if (startTime == null || startTime == -1 || hostInstance.getBegin() <= startTime) {
+                while (CollectionUtils.isNotEmpty(hostInstance.getBinlogFiles())) {
                     try {
-                        if (serverId.equals(extractServerId(hostInsance.getBinlogFiles().get(0)))) {
-                            logger.info("detected server id match extractor server id : " + serverId);
-                            finalInstance = hostInsance;
+                        hostInstance.prepareServerId();
+                        if (serverId.equals(hostInstance.getServerId())) {
+                            logger.info("detected server id match extractor server id : {}", serverId);
+                            finalInstance = hostInstance;
                             break;
                         }
                         break;
                     } catch (Exception e) {
                         if (e.getCause() instanceof FileNotFoundException) {
-                            hostInsance.getBinlogFiles().remove(0);
+                            hostInstance.getBinlogFiles().remove(0);
                         } else {
                             throw e;
                         }
@@ -117,42 +106,9 @@ public class BinlogProcessor {
         return finalInstance;
     }
 
-    private static Long extractServerId(BinlogFile binlogFile) {
-        String url = binlogFile.getIntranetDownloadLink();
-        InputStream is = null;
-        HttpURLConnection connection = null;
-        Long serverId = null;
-        try {
-            connection = (HttpURLConnection) new URL(url).openConnection();
-            connection.connect();
-            is = connection.getInputStream();
-            byte[] buf = new byte[20];
-            is.read(buf);
-            int position = 9;
-            serverId = ((long) (0xff & buf[position++])) | ((long) (0xff & buf[position++]) << 8)
-                | ((long) (0xff & buf[position++]) << 16) | ((long) (0xff & buf[position++]) << 24);
-        } catch (Exception e) {
-            throw new PolardbxException("connect to url failed!" + binlogFile, e);
-        } finally {
-            if (is != null) {
-                try {
-                    is.close();
-                } catch (IOException e) {
-                }
-            }
-            if (connection != null) {
-                connection.disconnect();
-            }
-        }
-        logger
-            .info("extractor remove binlog instanceId  : " + binlogFile.getInstanceID() + ", server Id : " + serverId
-                + " : " + binlogFile.getDownloadLink());
-        return serverId;
-    }
-
-    private static Map<Long, HostInsance> filterAndPrepare(final List<BinlogFile> items,
-                                                           final Set<Long> ignoreHostSet) {
-        final Map<Long, HostInsance> hostInstanceMap = Maps.newHashMap();
+    private static Map<Long, HostInstance> filterAndPrepare(final List<BinlogFile> items,
+                                                            final Set<Long> ignoreHostSet) {
+        final Map<Long, HostInstance> hostInstanceMap = Maps.newHashMap();
         items.stream().filter(b -> {
             Long id = b.getInstanceID();
             if (ignoreHostSet.contains(id)) {
@@ -161,13 +117,13 @@ public class BinlogProcessor {
             return true;
         }).forEach(b -> {
             Long id = b.getInstanceID();
-            HostInsance hostInsance = hostInstanceMap.get(id);
-            if (hostInsance == null) {
-                hostInsance = new HostInsance();
-                hostInstanceMap.put(id, hostInsance);
+            HostInstance hostInstance = hostInstanceMap.get(id);
+            if (hostInstance == null) {
+                hostInstance = new HostInstance();
+                hostInstanceMap.put(id, hostInstance);
             }
             try {
-                hostInsance.addBinlog(b);
+                hostInstance.addBinlog(b);
             } catch (ParseException e) {
                 throw new PolardbxException(e);
             }

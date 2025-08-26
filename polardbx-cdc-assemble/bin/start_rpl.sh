@@ -127,4 +127,4 @@ cd $HOME
 
 #Start Java Process
 echo "$(date +"%Y-%m-%d-%H:%M:%S.%N") ${JAVA} ${JAVA_OPTS} -classpath ${CLASSPATH}:. com.aliyun.polardbx.rpl.RplTaskEngine "taskId=${TASK_ID}"" >>$defaultLog
-${JAVA} ${JAVA_OPTS} -classpath ${CLASSPATH}:. com.aliyun.polardbx.rpl.RplTaskEngine "taskId=${TASK_ID} taskName=${TASK_NAME}" 1>>$defaultLog 2>&1 &
+${JAVA} ${JAVA_OPTS} -classpath ${CLASSPATH}:. com.aliyun.polardbx.rpl.RplTaskEngine "taskId=${TASK_ID} taskName=${TASK_NAME} memory=${MEMORY}" 1>>$defaultLog 2>&1 &

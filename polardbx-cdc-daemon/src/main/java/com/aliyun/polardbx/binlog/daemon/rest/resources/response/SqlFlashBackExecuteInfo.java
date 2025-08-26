@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.rest.resources.response;
@@ -25,7 +25,9 @@ public class SqlFlashBackExecuteInfo {
     private Long fsmId;
     private String fsmState;
     private String fsmStatus;
-    //OSS or LINDORM
+    /**
+     * OSS or LINDORM or S3
+     */
     private String fileStorageType;
     private String filePathPrefix;
     private Long sqlCounter;

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.validation.fullvalid;
@@ -43,12 +43,8 @@ public class ReplicaFullValidUtil {
             throw new IllegalArgumentException("db name can not be empty!");
         }
 
-        String sql = "SHOW TABLES FROM ?";
-        return jdbcTemplate.query(conn -> {
-            PreparedStatement preparedStatement = conn.prepareStatement(sql);
-            preparedStatement.setString(1, dbName);
-            return preparedStatement;
-        }, (rs, rowNum) -> rs.getString(1));
+        String sql = String.format("SHOW tables from `%s`", escape(dbName));
+        return jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString(1));
     }
 
     public static boolean isTableExist(JdbcTemplate jdbcTemplate, String dbName, String tbName) {
@@ -56,19 +52,8 @@ public class ReplicaFullValidUtil {
             throw new IllegalArgumentException("db name or table name can not be empty!");
         }
 
-        String sql = "SHOW TABLES FROM ? LIKE ?";
-        Boolean res = jdbcTemplate.query(new PreparedStatementCreator() {
-            @NotNull
-            @Override
-            public PreparedStatement createPreparedStatement(@NotNull Connection conn) throws SQLException {
-                PreparedStatement preparedStatement = conn.prepareStatement(sql);
-                preparedStatement.setString(1, dbName);
-                preparedStatement.setString(2, tbName);
-                return preparedStatement;
-            }
-        }, ResultSet::next);
-
-        return Boolean.TRUE.equals(res);
+        String sql = String.format("SHOW create table `%s`.`%s`", escape(dbName), escape(tbName));
+        return Boolean.TRUE.equals(jdbcTemplate.query(sql, ResultSet::next));
     }
 
     /**
@@ -141,8 +126,7 @@ public class ReplicaFullValidUtil {
     }
 
     private static String escape(String str) {
-        String regex = "(?<!`)`(?!`)";
-        return str.replaceAll(regex, "``");
+        return CommonUtils.escape(str);
     }
 
     public static String buildPrimaryKeyStr(List<String> keys) {

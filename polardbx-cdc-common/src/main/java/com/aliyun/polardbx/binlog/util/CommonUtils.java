@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
@@ -17,12 +17,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
-import java.net.NetworkInterface;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Base64;
 import java.util.Date;
-import java.util.Enumeration;
 import java.util.Objects;
 import java.util.Random;
 import java.util.Scanner;
@@ -40,12 +38,12 @@ import static com.aliyun.polardbx.binlog.util.StorageSequence.getFixedLengthStor
  * @author ziyang.lb
  **/
 public class CommonUtils {
-    public static final String RDS_HIDDEN_PK_NAME = "__#alibaba_rds_row_id#__";
     public static final String PRIVATE_DDL_TSO_PREFIX = "# POLARX_TSO=";
     public static final String PRIVATE_DDL_ENCODE_BASE64 = "# POLARX_ORIGIN_SQL_ENCODE=BASE64";
     public static final String PRIVATE_DDL_DDL_PREFIX = "# POLARX_ORIGIN_SQL=";
     public static final Pattern PRIVATE_DDL_SQL_PATTERN = Pattern.compile(PRIVATE_DDL_DDL_PREFIX + "([\\W\\w]+)");
     public static final String PRIVATE_DDL_ID_PREFIX = "# POLARX_DDL_ID=";
+    public static final String PRIVATE_DDL_EXTRA_DDL_PREFIX = "# POLARX_EXTRA_DDL=";
     public static final String PRIVATE_DDL_DDL_ROUTE_PREFIX = "# POLARX_DDL_ROUTE_MODE=";
     public static final String PRIVATE_DDL_DDL_TYPES_PREFIX = "# POLARX_DDL_TYPES=";
     public static final String PRIVATE_DDL_POLARX_VARIABLES_PREFIX = "# POLARX_VARIABLES=";
@@ -58,7 +56,6 @@ public class CommonUtils {
     private static final AtomicLong localClock = new AtomicLong();
     private static final ThreadLocal<Long> lastEpochLocal = new ThreadLocal<>();
     private static final ThreadLocal<Long> lastEpochSequenceLocal = new ThreadLocal<>();
-    private static final String BINLOG_FILE_PREFIX = "binlog.";
 
     public static String parsePureTso(String extTso) {
         String[] array = extTso.split("_");
@@ -165,12 +162,12 @@ public class CommonUtils {
     }
 
     public static String getHostIp() {
-        InetAddress address = getHostAddress();
+        InetAddress address = AddressUtil.getHostAddress();
         return address == null ? null : address.getHostAddress();
     }
 
     public static String getHostName() {
-        InetAddress address = getHostAddress();
+        InetAddress address = AddressUtil.getHostAddress();
         return address == null ? null : address.getHostName();
     }
 
@@ -184,59 +181,10 @@ public class CommonUtils {
      * )
      */
     public static String escape(String str) {
-        String regex = "(?<!`)`(?!`)";
-        return str.replaceAll(regex, "``");
-    }
-
-    public static InetAddress getHostAddress() {
-        InetAddress localAddress = null;
-        try {
-            localAddress = InetAddress.getLocalHost();
-            if (isValidHostAddress(localAddress)) {
-                return localAddress;
-            }
-        } catch (Throwable e) {
-            logger.warn("Failed to retriving local host ip address, try scan network card ip address. cause: "
-                + e.getMessage());
+        if (str.contains("`")) {
+            return str.replaceAll("`", "``");
         }
-        try {
-            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-            if (interfaces != null) {
-                while (interfaces.hasMoreElements()) {
-                    try {
-                        NetworkInterface network = interfaces.nextElement();
-                        Enumeration<InetAddress> addresses = network.getInetAddresses();
-                        if (addresses != null) {
-                            while (addresses.hasMoreElements()) {
-                                try {
-                                    InetAddress address = addresses.nextElement();
-                                    if (isValidHostAddress(address)) {
-                                        return address;
-                                    }
-                                } catch (Throwable e) {
-                                    logger.warn("Failed to retriving network card ip address. cause:" + e.getMessage());
-                                }
-                            }
-                        }
-                    } catch (Throwable e) {
-                        logger.warn("Failed to retriving network card ip address. cause:" + e.getMessage());
-                    }
-                }
-            }
-        } catch (Throwable e) {
-            logger.warn("Failed to retriving network card ip address. cause:" + e.getMessage());
-        }
-        logger.error("Could not get local host ip address, will use 127.0.0.1 instead.");
-        return localAddress;
-    }
-
-    private static boolean isValidHostAddress(InetAddress address) {
-        if (address == null || address.isLoopbackAddress()) {
-            return false;
-        }
-        String name = address.getHostAddress();
-        return (name != null && !EMPTY_IP.equals(name) && !LOCALHOST_IP.equals(name) && IP_PATTERN.matcher(name)
-            .matches());
+        return str;
     }
 
     public static MarkInfo getCommand(String rowLogsQuery) {
@@ -392,4 +340,17 @@ public class CommonUtils {
         // 进行替换，替换成 passwd : *****
         return matcher.replaceAll("$1 : *****");
     }
+
+    /**
+     * 将时间戳转换为tso, tso虽然是long类型，单不完全是一个标准的时间戳
+     * tso组成：
+     * |-42bit毫秒级物理时间戳-|-16bit逻辑时间戳-|-6bit保留字节|
+     */
+    public static Long convertToTsoUnit(Long timestamp, TimeUnit timeUnit) {
+        if (timeUnit != TimeUnit.MILLISECONDS) {
+            timestamp = timeUnit.toMillis(timestamp);
+        }
+        return timestamp << 22;
+    }
+
 }

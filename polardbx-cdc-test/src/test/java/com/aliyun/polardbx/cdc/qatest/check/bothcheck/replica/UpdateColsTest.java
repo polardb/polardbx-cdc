@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.check.bothcheck.replica;
@@ -49,7 +49,7 @@ public class UpdateColsTest extends RplBaseTestCase {
         try (Connection syncDbConnection = ConnectionManager.getInstance().getDruidCdcSyncDbConnection()) {
             ResultSet rs =
                 JdbcUtil.executeQuery(String.format(QUERY_BINLOG_EVENT, LabEventType.UPDATE_QUERY_INFO.ordinal()),
-                syncDbConnection);
+                    syncDbConnection);
             if (rs.next()) {
                 String changeCols = rs.getString("params");
                 // update的列仅包括变更列+on update 列

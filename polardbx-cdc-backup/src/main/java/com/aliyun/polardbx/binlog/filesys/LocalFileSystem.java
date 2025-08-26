@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.filesys;
@@ -67,7 +67,6 @@ public class LocalFileSystem implements IFileSystem {
     @Override
     public List<CdcFile> listFiles() {
         List<CdcFile> res = new ArrayList<>();
-
         List<File> fileList = BinlogFileUtil.listLocalBinlogFiles(fullPath, group, stream);
         for (File f : fileList) {
             CdcFile cdcFile = new CdcFile(f.getName(), this);
@@ -75,7 +74,6 @@ public class LocalFileSystem implements IFileSystem {
             res.add(cdcFile);
         }
 
-        res.sort(CdcFile::compareTo);
         return res;
     }
 
@@ -112,5 +110,9 @@ public class LocalFileSystem implements IFileSystem {
         if (dir.exists()) {
             FileUtils.cleanDirectory(dir);
         }
+    }
+
+    public void init() {
+        createDir();
     }
 }

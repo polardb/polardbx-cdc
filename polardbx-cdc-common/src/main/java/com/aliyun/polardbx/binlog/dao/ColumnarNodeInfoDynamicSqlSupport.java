@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.dao;
@@ -9,62 +9,81 @@ package com.aliyun.polardbx.binlog.dao;
 import java.sql.JDBCType;
 import java.util.Date;
 import javax.annotation.Generated;
+
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
 public final class ColumnarNodeInfoDynamicSqlSupport {
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source Table: columnar_node_info")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source Table: columnar_node_info")
     public static final ColumnarNodeInfo columnarNodeInfo = new ColumnarNodeInfo();
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.id")
     public static final SqlColumn<Long> id = columnarNodeInfo.id;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.gmt_created")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.gmt_created")
     public static final SqlColumn<Date> gmtCreated = columnarNodeInfo.gmtCreated;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.gmt_modified")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.gmt_modified")
     public static final SqlColumn<Date> gmtModified = columnarNodeInfo.gmtModified;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.cluster_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.cluster_id")
     public static final SqlColumn<String> clusterId = columnarNodeInfo.clusterId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.container_id")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.container_id")
     public static final SqlColumn<String> containerId = columnarNodeInfo.containerId;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.ip")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.ip")
     public static final SqlColumn<String> ip = columnarNodeInfo.ip;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.daemon_port")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.daemon_port")
     public static final SqlColumn<Integer> daemonPort = columnarNodeInfo.daemonPort;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.available_ports")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.available_ports")
     public static final SqlColumn<String> availablePorts = columnarNodeInfo.availablePorts;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.status")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.status")
     public static final SqlColumn<Integer> status = columnarNodeInfo.status;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.core")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.core")
     public static final SqlColumn<Long> core = columnarNodeInfo.core;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.mem")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.mem")
     public static final SqlColumn<Long> mem = columnarNodeInfo.mem;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.gmt_heartbeat")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.gmt_heartbeat")
     public static final SqlColumn<Date> gmtHeartbeat = columnarNodeInfo.gmtHeartbeat;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.latest_cursor")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.latest_cursor")
     public static final SqlColumn<String> latestCursor = columnarNodeInfo.latestCursor;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.role")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.role")
     public static final SqlColumn<String> role = columnarNodeInfo.role;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.cluster_type")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.cluster_type")
     public static final SqlColumn<String> clusterType = columnarNodeInfo.clusterType;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source field: columnar_node_info.group_name")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source field: columnar_node_info.group_name")
     public static final SqlColumn<String> groupName = columnarNodeInfo.groupName;
 
-    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2023-09-08T11:47:24.24+08:00", comments="Source Table: columnar_node_info")
+    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2023-09-08T11:47:24.24+08:00",
+        comments = "Source Table: columnar_node_info")
     public static final class ColumnarNodeInfo extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 

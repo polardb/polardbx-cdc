@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.applier;
@@ -122,6 +122,7 @@ public class RecoveryApplier extends BaseApplier {
         }
 
         for (DBMSEvent event : dbmsEvents) {
+            StatisticalProxy.getInstance().heartbeat();
             event = filter.convert(event);
 
             if (event == null) {
@@ -431,7 +432,7 @@ public class RecoveryApplier extends BaseApplier {
     }
 
     private String buildFixedLengthNumber(int num) {
-        return StringUtils.leftPad(String.valueOf(num), 6, "0");
+        return StringUtils.leftPad(String.valueOf(num), 10, "0");
     }
 
     private void buildNextResultFileName() {

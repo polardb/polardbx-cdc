@@ -16,6 +16,7 @@ message DumpRequest{
   string dumperName = 2;
   int32 streamSeq = 3;
   int64 version = 4;
+  string storageInstId = 5;
 }
 
 message DumpReply{

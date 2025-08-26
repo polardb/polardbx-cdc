@@ -1,11 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 
+import com.alibaba.polardbx.druid.sql.repository.SchemaObject;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +21,25 @@ import java.util.stream.Collectors;
  **/
 @Slf4j
 public class MemoryTableMetaTest_AlterTable extends MemoryTableMetaBase {
+
+    //see Aone issue ,ID:60853701
+    @Test
+    public void testDropColumnWithSpace() {
+        String sql = "create table if not exists `test_change_column_with_space` (\n"
+            + "        `id` int not null,\n"
+            + "        ` c1` int not null,\n"
+            + "        `c1` int not null,\n"
+            + "        primary key (`id`)\n"
+            + ");";
+        MemoryTableMeta memoryTableMeta = newMemoryTableMeta();
+        applySql(memoryTableMeta, "d1", sql);
+        sql = "alter table `test_change_column_with_space` drop column ` c1`";
+        applySql(memoryTableMeta, "d1", sql);
+
+        TableMeta tableMeta = memoryTableMeta.find("d1", "test_change_column_with_space");
+        Assert.assertNotNull(tableMeta.getFieldMetaByName("c1"));
+        Assert.assertNull(tableMeta.getFieldMetaByName(" c1", true));
+    }
 
     @Test
     public void testChangeColumn() {

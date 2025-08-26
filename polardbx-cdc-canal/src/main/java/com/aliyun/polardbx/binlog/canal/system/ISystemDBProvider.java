@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.canal.system;
@@ -27,6 +27,7 @@ public interface ISystemDBProvider {
 
     // sync point related info
     String POLARX_SYNC_POINT_RECORD_FIELD_ID = "ID";
+    String POLARX_SYNC_POINT_RECORD_FIELD_EXTRA = "EXTRA";
 
     String LOGIC_SCHEMA = "__cdc__";
 
@@ -68,10 +69,12 @@ public interface ISystemDBProvider {
             + ") ENGINE=InnoDB DEFAULT CHARSET=utf8", DRDS_GLOBAL_TX_LOG);
 
     String CREATE_POLARX_SYNC_POINT =
-        String.format("CREATE TABLE `%s` (\n"
-            + "  `ID` bigint(20) NOT NULL AUTO_INCREMENT,\n"
-            + "  `GMT_CREATED` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
-            + "  PRIMARY KEY (`ID`)\n"
+        String.format("CREATE TABLE %s ("
+            + "  `ID` CHAR(36) NOT NULL, "
+            + "  `EXTRA` longtext default null, "
+            + "  `GMT_CREATED` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            + "  PRIMARY KEY (`ID`), "
+            + "  KEY (`GMT_CREATED`) "
             + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", POLARX_SYNC_POINT);
 
     boolean ddlRecordTable(String db, String table);

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.taskmeta;
@@ -17,7 +17,7 @@ import lombok.Data;
  */
 @Data
 public class ApplierConfig {
-    protected int mergeBatchSize = 200;
+    protected int mergeBatchSize = DynamicApplicationConfig.getInt(ConfigKeys.RPL_INC_BATCH_SIZE);
     // 不再支持多语句！transactionEventBatchSize用于transaction写入时的事务合并的size上限
     protected int transactionEventBatchSize = 100;
     protected int logCommitLevel = RplConstants.LOG_NO_COMMIT;

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.cdc.qatest.base;
@@ -10,6 +10,7 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.parser.MySqlExprParser;
 import com.alibaba.polardbx.druid.sql.parser.ByteString;
 import com.alibaba.polardbx.druid.sql.parser.Lexer;
 import com.alibaba.polardbx.druid.sql.parser.Token;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.cdc.qatest.flashback.FlashBackTest;
 import lombok.SneakyThrows;
 import org.apache.commons.lang.StringUtils;
@@ -80,8 +81,7 @@ public class BaseTestCase implements BaseTestMode {
     }
 
     public static String escape(String str) {
-        String regex = "(?<!`)`(?!`)";
-        return str.replaceAll(regex, "``");
+        return CommonUtils.escape(str);
     }
 
     @Before

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.common;
@@ -17,6 +17,7 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.ServerInfoMapper;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.util.ConfigPropMap;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -44,6 +45,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.DATASOURCE_CHECK_VALID_TIMEOUT_SEC;
 import static com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport.instType;
 import static com.aliyun.polardbx.binlog.dao.ServerInfoDynamicSqlSupport.status;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
@@ -68,7 +70,7 @@ public class DruidDataSourceWrapper extends DruidDataSource
     protected LoadingCache<String, DruidDataSource> nestedDataSources;
     protected volatile DruidDataSource proxyDataSource;
     protected ScheduledExecutorService scheduledExecutorService;
-    protected int maxWaitTimeMills = 30000;
+    protected int maxWaitTimeMills;
 
     public DruidDataSourceWrapper(String dbName, String user,
                                   String passwd, String encoding, int minPoolSize,
@@ -146,6 +148,8 @@ public class DruidDataSourceWrapper extends DruidDataSource
                     return ds;
                 }
             });
+        this.maxWaitTimeMills = (int) TimeUnit.SECONDS.toMillis(Integer.parseInt(
+            ConfigPropMap.getPropertyValue(ConfigKeys.DATASOURCE_CN_GET_TIMEOUT_IN_SECOND)));
 
     }
 
@@ -201,9 +205,10 @@ public class DruidDataSourceWrapper extends DruidDataSource
             Set<String> toBeRemovedServers =
                 holdingServers.stream().filter(s -> !latestServers.contains(s)).collect(Collectors.toSet());
 
+            int timeout = DynamicApplicationConfig.getInt(DATASOURCE_CHECK_VALID_TIMEOUT_SEC);
             Set<String> invalidHoldingServers = holdingServers.stream().filter(s -> {
                 try (Connection conn = nestedDataSources.getUnchecked(s).getConnection()) {
-                    if (conn.isValid(1)) {
+                    if (conn.isValid(timeout)) {
                         return false;
                     } else {
                         logger.warn("detected abnormal server node with address1 {}", s);
@@ -245,9 +250,10 @@ public class DruidDataSourceWrapper extends DruidDataSource
     }
 
     private void onServerNodeAdd(Set<String> toBeAddedServers) {
+        int timeout = DynamicApplicationConfig.getInt(DATASOURCE_CHECK_VALID_TIMEOUT_SEC);
         toBeAddedServers.forEach(s -> {
             try (Connection conn = nestedDataSources.getUnchecked(s).getConnection()) {
-                if (conn.isValid(1)) {
+                if (conn.isValid(timeout)) {
                     try {
                         readWriteLock.writeLock().lock();
                         nestedAddresses.add(s);

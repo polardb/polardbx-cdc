@@ -1,11 +1,12 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.rpl.filter;
 
+import com.alibaba.polardbx.druid.sql.SQLUtils;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
@@ -14,6 +15,8 @@ import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.commons.lang3.tuple.Triple;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,14 +33,14 @@ import java.util.regex.Pattern;
 public class ReplicaFilter extends BaseFilter {
 
     private ReplicaMeta replicaMeta;
-    private Set<String> ignoreTables;
-    private Set<String> doTables;
+    private Set<Pair<String, String>> ignoreTables;
+    private Set<Pair<String, String>> doTables;
     private Set<String> ignoreDbs;
     private Set<String> doDbs;
     private Set<Long> ignoreServerIds;
     private List<List<Pattern>> wildIgnoreTables;
     private List<List<Pattern>> wildDoTables;
-    private Map<String, Boolean> filterCache;
+    private Map<Triple<String, String, String>, Boolean> filterCache;
     private Map<String, String> rewriteDbs;
     private String skipTso;
     private String skipUntilTso;
@@ -49,8 +52,8 @@ public class ReplicaFilter extends BaseFilter {
 
     @Override
     public void init() {
-        doTables = initFilterSet(replicaMeta.getDoTable());
-        ignoreTables = initFilterSet(replicaMeta.getIgnoreTable());
+        doTables = initFilterPairSet(replicaMeta.getDoTable());
+        ignoreTables = initFilterPairSet(replicaMeta.getIgnoreTable());
         doDbs = initFilterSet(replicaMeta.getDoDb());
         ignoreDbs = initFilterSet(replicaMeta.getIgnoreDb());
         ignoreServerIds = initIgnoreServerIds(replicaMeta.getIgnoreServerIds());
@@ -81,7 +84,7 @@ public class ReplicaFilter extends BaseFilter {
             return true;
         }
 
-        String key = schema + "." + tbName + "." + action.name();
+        Triple<String, String, String> key = Triple.of(schema, tbName, action.name());
         if (filterCache.containsKey(key)) {
             return filterCache.get(key);
         }
@@ -137,24 +140,24 @@ public class ReplicaFilter extends BaseFilter {
      * Rpl_filter::tables_ok(const char *db, TABLE_LIST *tables)
      */
     private boolean tableOk(String db, String tb) {
-        String fullTbName = db + "." + tb;
-        if (doTables.size() > 0 && doTables.contains(fullTbName)) {
+        Pair<String, String> fullTableName = Pair.of(db, tb);
+        if (!doTables.isEmpty() && doTables.contains(fullTableName)) {
             return true;
         }
 
-        if (ignoreTables.size() > 0 && ignoreTables.contains(fullTbName)) {
+        if (!ignoreTables.isEmpty() && ignoreTables.contains(fullTableName)) {
             return false;
         }
 
-        if (wildDoTables.size() > 0 && findWildTable(wildDoTables, db, tb)) {
+        if (!wildDoTables.isEmpty() && findWildTable(wildDoTables, db, tb)) {
             return true;
         }
 
-        if (wildIgnoreTables.size() > 0 && findWildTable(wildIgnoreTables, db, tb)) {
+        if (!wildIgnoreTables.isEmpty() && findWildTable(wildIgnoreTables, db, tb)) {
             return false;
         }
 
-        return doTables.size() == 0 && wildDoTables.size() == 0;
+        return doTables.isEmpty() && wildDoTables.isEmpty();
     }
 
     /**
@@ -165,7 +168,7 @@ public class ReplicaFilter extends BaseFilter {
     private boolean dbOk(String db, DBMSAction action) {
         boolean dbOk = dbOk(db);
 
-        if (dbOk && doDbs.size() == 0 && ignoreDbs.size() == 0) {
+        if (dbOk && doDbs.isEmpty() && ignoreDbs.isEmpty()) {
             switch (action) {
             case CREATEDB:
             case DROPDB:
@@ -184,11 +187,11 @@ public class ReplicaFilter extends BaseFilter {
      * Rpl_filter::db_ok(const char *db, bool need_increase_counter)
      */
     private boolean dbOk(String db) {
-        if (doDbs.size() > 0) {
+        if (!doDbs.isEmpty()) {
             return doDbs.contains(db);
         }
 
-        if (ignoreDbs.size() > 0) {
+        if (!ignoreDbs.isEmpty()) {
             return !ignoreDbs.contains(db);
         }
 
@@ -200,15 +203,15 @@ public class ReplicaFilter extends BaseFilter {
      * Rpl_filter::db_ok_with_wild_table(const char *db)
      */
     private boolean dbOkWithWildTable(String db) {
-        if (wildDoTables.size() > 0 && findWildTable(wildDoTables, db, "")) {
+        if (!wildDoTables.isEmpty() && findWildTable(wildDoTables, db, "")) {
             return true;
         }
 
-        if (wildIgnoreTables.size() > 0 && findWildTable(wildIgnoreTables, db, "")) {
+        if (!wildIgnoreTables.isEmpty() && findWildTable(wildIgnoreTables, db, "")) {
             return false;
         }
 
-        return wildDoTables.size() == 0;
+        return wildDoTables.isEmpty();
     }
 
     private boolean findWildDb(List<List<Pattern>> wilds, String db) {
@@ -253,7 +256,7 @@ public class ReplicaFilter extends BaseFilter {
             rewriteDb = CommonUtil.trimLeftAll(rewriteDb.trim(), ',');
             rewriteDb = CommonUtil.removeBracket(rewriteDb.trim());
             String[] tokens = rewriteDb.split(",");
-            rewriteDbs.put(tokens[0].trim(), tokens[1].trim());
+            rewriteDbs.put(SQLUtils.normalizeNoTrim(tokens[0].trim()), SQLUtils.normalizeNoTrim(tokens[1].trim()));
         }
         return rewriteDbs;
     }

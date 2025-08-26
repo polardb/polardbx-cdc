@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.extractor.filter;
@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACT_FILTER_LOGIC_DB_BLACKLIST;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_EXTRACT_FILTER_LOGIC_TABLE_BLACKLIST;
-import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildTopology;
+import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildSnapshotTopology;
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 
 /**
@@ -82,7 +82,7 @@ public class EventAcceptFilter implements LogEventFilter<LogEvent>, IFilterBuild
             } else {
                 logger.info("start apply base to " + rc.getStartPosition().getRtso());
                 tableMetaManager.applyBase(rc.getStartPosition(),
-                    buildTopology(ORIGIN_TSO, () -> {
+                    buildSnapshotTopology(ORIGIN_TSO, () -> {
                         if (StringUtils.isBlank(RuntimeContext.getInitTopology())) {
                             throw new PolardbxException("init topology can`t be empty");
                         }

@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.rest.resources.check;
@@ -52,6 +52,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.service.XStreamService.getXStreamsInCurrentCluster;
+
 @Slf4j
 public class ClusterStatusChecker {
     private final StringBuilder errorLog = new StringBuilder();
@@ -60,6 +62,14 @@ public class ClusterStatusChecker {
 
         try {
             ClusterType clusterType = ClusterType.valueOf(DynamicApplicationConfig.getClusterType());
+            if (clusterType == ClusterType.IMPORT || clusterType == ClusterType.REPLICA ||
+                clusterType == ClusterType.FLASHBACK) {
+                // need to check insert into binlog_node_info
+                if (checkReplicaNodeInfo()) {
+                    return "OK";
+                }
+                return "ERROR : node info not prepared";
+            }
             if (clusterType != ClusterType.BINLOG_X &&
                 clusterType != ClusterType.BINLOG) {
                 return "OK";
@@ -139,6 +149,14 @@ public class ClusterStatusChecker {
         if (!status) {
             errorLog.append("Node is not in topology config;");
         }
+    }
+
+    private boolean checkReplicaNodeInfo() {
+        final NodeInfoService nodeInfoService = SpringContextHolder.getObject(NodeInfoService.class);
+        String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+        String instId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
+        NodeInfo currentNodeInfo = nodeInfoService.getOneNode(clusterId, instId);
+        return currentNodeInfo != null;
     }
 
     private void checkDumperCount(ServerInfo serverInfo) {
@@ -238,12 +256,12 @@ public class ClusterStatusChecker {
             streamCount.addAndGet(config.getStreamNameSet().size());
         });
 
-        boolean status = NumberUtils
-            .compare(streamCount.get(), DynamicApplicationConfig.getInt(ConfigKeys.BINLOGX_STREAM_COUNT)) == 0;
+        List<XStream> xStreamList = getXStreamsInCurrentCluster();
+        boolean status = NumberUtils.compare(streamCount.get(), xStreamList.size()) == 0;
         if (!status) {
-            errorLog.append(String
-                .format("stream count not equal config count , topology stream count is %s, config count is %s",
-                    streamCount.get(), DynamicApplicationConfig.getInt(ConfigKeys.BINLOGX_STREAM_COUNT)));
+            errorLog.append(String.format(
+                "running stream count not equal config count, running stream count is %s, config count is %s",
+                streamCount.get(), xStreamList.size()));
         }
     }
 

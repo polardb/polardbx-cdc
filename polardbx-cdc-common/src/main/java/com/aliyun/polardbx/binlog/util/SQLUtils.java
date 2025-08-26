@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.util;
@@ -217,9 +217,13 @@ public class SQLUtils {
     }
 
     public static boolean isLeaderBySqlQuery(DataSource metaDbDataSource) throws SQLException {
-        try (Connection conn = metaDbDataSource.getConnection();
-            Statement stmt = conn.createStatement();
-            // 这个sql 如果当前节点不是leader，不会有任何结果返回；如果是leader，返回结果ROLE = Leader
+        try (Connection conn = metaDbDataSource.getConnection()) {
+            return isLeaderBySqlQuery(conn);
+        }
+    }
+
+    public static boolean isLeaderBySqlQuery(Connection conn) throws SQLException {
+        try (Statement stmt = conn.createStatement();
             ResultSet resultSet = stmt.executeQuery("select * from information_schema.alisql_cluster_local")) {
             while (resultSet.next()) {
                 String roleName = resultSet.getString("ROLE");
@@ -231,7 +235,7 @@ public class SQLUtils {
         }
     }
 
-    public static boolean reWriteRealTypeBySqlMode(SQLStatement statement){
+    public static boolean reWriteRealTypeBySqlMode(SQLStatement statement) {
         boolean modify = false;
         List<SQLColumnDefinition> definitionList = new ArrayList<>();
         if (statement instanceof MySqlCreateTableStatement) {
@@ -262,7 +266,7 @@ public class SQLUtils {
             }
         }
         for (SQLColumnDefinition definition : definitionList) {
-            if (definition == null){
+            if (definition == null) {
                 continue;
             }
             SQLDataType dataType = definition.getDataType();

@@ -7,6 +7,9 @@ needStart=0;
 
 PID_FILE="daemon.pid";
 executeShell="daemon.sh";
+if [ -z "$daemon_port" ]; then
+    daemon_port=$(grep '^daemon_port=' /home/admin/env/env.properties | cut -d'=' -f2);
+fi
 
 if [ ! -f "$WORKER_BIN"/${PID_FILE} ];then
      echo `date` " ${PID_FILE} not exist"
@@ -23,6 +26,11 @@ else
         if  [ "$pid" != "$runningPid" ]; then
             echo `date` " pid not empty, but process not exist"
             needStart=1;
+        else
+            nc -z -w 30 localhost ${daemon_port} &> /dev/null || needStart=1;
+            if [ "$needStart" -eq 1 ];then
+                echo `date` " process exist, but daemon_port can not connect";
+            fi
         fi
     fi
 fi

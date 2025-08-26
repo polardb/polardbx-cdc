@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
@@ -42,7 +42,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
+import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_NO_ALARM_WITHOUT_CCI;
 import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.COLUMNAR_PROCESS_RESTART_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
 
 /**
@@ -56,6 +58,7 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
 
     private final String startScript = "/home/admin/polardbx-columnar/bin/startup.sh";
     private final String stopScript = "/home/admin/polardbx-columnar/bin/shutdown.sh";
+    private static Long restartTimes = 0L;
 
     private final ColumnarTaskConfigMapper columnarTaskConfigMapper =
         SpringContextHolder.getObject(ColumnarTaskConfigMapper.class);
@@ -112,9 +115,8 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
 
                 // JVM心跳超时，但进程还在，一个典型的场景：大数据量场景下GC很频繁，导致cpu使用率很高，Task进程的心跳会出现超时
                 if (!isColumnarLauncherAlive()) {
-                    if (columnarInfoMapper.getColumnarIndexExist()) {
-                        MonitorManager.getInstance()
-                            .triggerAlarm(MonitorType.COLUMNAR_JVM_HEARTBEAT_TIMEOUT_ERROR);
+                    if (alarmWithCci()) {
+                        heartBeatTimeoutAlarm();
                     }
                     log.info("detected heartbeat timeout, and task is already down, prepare to restart, task name {}.",
                         config.getTaskName());
@@ -136,10 +138,26 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
         }
     }
 
+    boolean alarmWithCci() {
+        boolean alarmWithCci = DynamicApplicationConfig.getBoolean(COLUMNAR_NO_ALARM_WITHOUT_CCI);
+        return getColumnarInfoMapper().getColumnarIndexExist() && alarmWithCci;
+    }
+
+    public void heartBeatTimeoutAlarm() {
+        if (restartTimes > DynamicApplicationConfig.getInt(COLUMNAR_PROCESS_RESTART_THRESHOLD)) {
+            MonitorManager.getInstance()
+                .triggerAlarm(MonitorType.COLUMNAR_JVM_HEARTBEAT_TIMEOUT_ERROR);
+            restartTimes = 0L;
+        } else {
+            restartTimes++;
+        }
+    }
+
     public void updateTimeAlarm() {
         long updateTimeInterval = getColumnarInfoMapper().getUpdateTimeInterval();
+        boolean alarmWithCci = DynamicApplicationConfig.getBoolean(COLUMNAR_NO_ALARM_WITHOUT_CCI);
         boolean columnarIndexExist = getColumnarInfoMapper().getColumnarIndexExist();
-        if (columnarIndexExist && updateTimeInterval > DynamicApplicationConfig.getInt(
+        if (alarmWithCci && columnarIndexExist && updateTimeInterval > DynamicApplicationConfig.getInt(
             COLUMNAR_PROCESS_HEARTBEAT_TIMEOUT_MS)) {
             // 列存进程超时，报警
             log.warn("columnar update_time not update for {} seconds", updateTimeInterval / 1000);
@@ -174,15 +192,41 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private boolean isColumnarLauncherAlive() throws Exception {
-        CommandResult result = commander.execCommand(
-            new String[] {"bash", "-c", "ps -ef | grep 'ColumnarLauncher' | grep -v grep | wc -l"}, 1000);
-        if (result.getCode() != 0) {
-            return false;
+    public boolean isColumnarLauncherAlive() {
+        final int MAX_RETRY = 3;
+        final long RETRY_INTERVAL_MS = 500; // 两次重试之间等待时间
+
+        String[] command = new String[] {"bash", "-c", "ps -ef | grep 'ColumnarLauncher' | grep -v grep | wc -l"};
+        int attempt = 0;
+
+        while (attempt < MAX_RETRY) {
+            try {
+                CommandResult result = getCommander().execCommand(command, 5000); // 超时设为5秒
+                if (result.getCode() == 0) {
+                    int count = Integer.parseInt(StringUtils.getDigits(result.getMsg()));
+                    return count > 0;
+                } else {
+                    log.warn("Command failed with code " + result.getCode() + ": " + result.getMsg());
+                }
+
+            } catch (Exception e) {
+                log.warn("Attempt " + (attempt + 1) + " failed: " + e.getMessage());
+            }
+
+            attempt++;
+            if (attempt < MAX_RETRY) {
+                try {
+                    Thread.sleep(RETRY_INTERVAL_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Retry interrupted", ie);
+                }
+            }
         }
 
-        int count = Integer.parseInt(StringUtils.getDigits(result.getMsg()));
-        return count != 0;
+        // 所有尝试都失败
+        log.warn("All attempts to check ColumnarLauncher status have failed.");
+        return false;
     }
 
     private void startColumnar(String taskName, int mem, boolean restart) throws Exception {

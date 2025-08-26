@@ -1,20 +1,20 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.metadata;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsTables;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.Map;
 
-public class TableTopologyManagerTest extends BaseTestWithGmsTables {
+public class TableTopologyManagerTest extends BaseTest {
 
     @Test
     @Ignore
