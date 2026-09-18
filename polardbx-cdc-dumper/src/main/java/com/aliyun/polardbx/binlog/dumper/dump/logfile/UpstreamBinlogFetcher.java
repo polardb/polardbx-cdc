@@ -6,11 +6,13 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoExt;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
@@ -24,7 +26,9 @@ import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.service.XStreamService;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.SqlBuilder;
 
@@ -50,6 +54,8 @@ public class UpstreamBinlogFetcher {
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private TxnStreamRpcClient rpcClient;
     private BinlogKWayMerger kWayMerger;
+    @Getter
+    private boolean tableIdEnabled;
 
     public UpstreamBinlogFetcher(String taskName, TaskType taskType, String streamName, ExecutionConfig executionConfig,
                                  TxnMessageReceiver receiver, boolean rpcUseAsyncMode, int rpcReceiveQueueSize,
@@ -108,6 +114,7 @@ public class UpstreamBinlogFetcher {
                 .setTso(startTso)
                 .setStreamSeq(oneStreamPerDn() ? getStreamId(streamName) : Integer.MAX_VALUE)
                 .setVersion(executionConfig.getRuntimeVersion())
+                .setSubVersion(executionConfig.getSubRuntimeVersion())
                 .setStorageInstId(getStorageInstId()).build();
             rpcClient.dump(dumpRequest);
         } else {
@@ -179,12 +186,24 @@ public class UpstreamBinlogFetcher {
                         + ", expected is " + JSONObject.toJSONString(expectedTasks));
             }
 
+            tableIdEnabled = true;
             upstreamTaskInfoList.forEach(info -> {
                 String address = info.getIp() + ":" + info.getPort();
                 targetTaskAddress.add(Pair.of(info.getTaskName(), address));
+                tableIdEnabled &= checkTableIdEnabled(info);
             });
-            log.info("target upstream task address is :" + JSONObject.toJSONString(targetTaskAddress));
+            log.info("target upstream task address is :{}, tableIdEnabled:{}",
+                JSONObject.toJSONString(targetTaskAddress), tableIdEnabled);
         }
+    }
+
+    boolean checkTableIdEnabled(BinlogTaskInfo info) {
+        String ext = info.getExt();
+        if (StringUtils.isNotBlank(ext)) {
+            BinlogTaskInfoExt binlogTaskInfoExt = JSON.parseObject(ext, BinlogTaskInfoExt.class);
+            return binlogTaskInfoExt.isTableIdEnabled();
+        }
+        return false;
     }
 
     boolean oneStreamPerDn() {

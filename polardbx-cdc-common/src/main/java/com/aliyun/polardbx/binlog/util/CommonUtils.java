@@ -33,6 +33,7 @@ import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.util.StorageSequence.getFixedLengthStorageSeq;
+import static org.apache.commons.lang.time.DateFormatUtils.format;
 
 /**
  * @author ziyang.lb
@@ -72,6 +73,10 @@ public class CommonUtils {
     public static Long getTsoPhysicalTime(String tso, TimeUnit timeUnit) {
         Long tsoLong = getTsoTimestamp(tso);
         return tso2physicalTime(tsoLong, timeUnit);
+    }
+
+    public static String getFormatDateTimeFromTso(String tso) {
+        return format(getTsoPhysicalTime(tso, TimeUnit.MILLISECONDS), "yyyy-MM-dd HH:mm:ss");
     }
 
     public static Long tso2physicalTime(Long tsoLong, TimeUnit timeUnit) {

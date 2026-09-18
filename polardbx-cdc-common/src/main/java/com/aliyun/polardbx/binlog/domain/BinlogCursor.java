@@ -27,31 +27,29 @@ public class BinlogCursor implements Comparable<BinlogCursor> {
     private final String stream;
     private final String tso;
     private final Long version;
+    private final Long subVersion;
     private final long timestamp;
     private final int fileSequence;
 
     public BinlogCursor(String fileName, Long filePosition, String group, String stream, String tso, Long version,
-                        int fileSequence) {
+                        Long subVersion, int fileSequence) {
         this.fileName = fileName;
         this.filePosition = filePosition;
         this.group = group;
         this.stream = stream;
         this.tso = tso;
         this.version = version;
+        this.subVersion = subVersion;
         this.timestamp = System.currentTimeMillis();
         this.fileSequence = fileSequence;
     }
 
-    public BinlogCursor(String fileName, Long filePosition, String group, String stream, String tso, Long version) {
-        this(fileName, filePosition, group, stream, tso, version, 0);
-    }
-
     public BinlogCursor(String fileName, Long filePosition) {
-        this(fileName, filePosition, null, null, null, null);
+        this(fileName, filePosition, null, null, null, null, null, 0);
     }
 
     public BinlogCursor(String fileName, Long filePosition, int fileSequence) {
-        this(fileName, filePosition, null, null, null, null, fileSequence);
+        this(fileName, filePosition, null, null, null, null, null, fileSequence);
     }
 
     @Override

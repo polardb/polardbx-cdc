@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static com.aliyun.polardbx.cdc.qatest.random.SqlConstants.T_RANDOM_CREATE_SQL;
@@ -31,6 +32,18 @@ import static com.aliyun.polardbx.cdc.qatest.random.SqlConstants.T_RANDOM_QUERY_
  * created by ziyang.lb
  **/
 public class ColumnSeeds {
+    /**
+     * 列数上限，防止随机测试中列不断积累导致row size超过MySQL 65535字节限制。
+     * 初始表约184列，上限设为250列，留出约66列的增长空间。
+     */
+    static final int MAX_COLUMN_COUNT = 250;
+
+    /**
+     * 列数下限，防止频繁删列导致列数过少影响测试多样性和稳定性。
+     * 设为100列，确保表始终保留足够多的列类型用于DDL/DML种子选择。
+     */
+    static final int MIN_COLUMN_COUNT = 100;
+
     final String dbName;
     final String tableName;
     // <column name, column type>
@@ -39,6 +52,8 @@ public class ColumnSeeds {
     final Map<String, List<String>> COLUMN_TYPE_DEFAULT_VALUE_MAPPING = new ConcurrentHashMap<>();
     // <column name, query value>
     final Map<String, Object> COLUMN_NAME_QUERY_VALUE_MAPPING = new ConcurrentHashMap<>();
+    // generated column names, DML和Modify操作需要跳过这些列
+    final Set<String> GENERATED_COLUMN_NAMES = ConcurrentHashMap.newKeySet();
 
     final List<String> CHARSET_LIST = Arrays.asList("utf8mb4", "utf8", "gbk");
 
@@ -81,7 +96,7 @@ public class ColumnSeeds {
 
     private void build2() throws SQLException {
         try (Connection connection = ConnectionManager.getInstance().getDruidPolardbxConnection()) {
-            JdbcUtil.executeQuery("use " + dbName, connection);
+            JdbcUtil.useDb(connection, dbName);
             Statement statement = connection.createStatement();
             ResultSet rs = statement.executeQuery(String.format(T_RANDOM_QUERY_SQL, tableName));
             ResultSetMetaData rsMeta = rs.getMetaData();

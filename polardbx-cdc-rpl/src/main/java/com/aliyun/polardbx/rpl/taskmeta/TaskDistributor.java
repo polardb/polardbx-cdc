@@ -220,11 +220,19 @@ public class TaskDistributor {
         for (RplTask rplIncTask : rplIncTasks) {
             long delaySec = FSMMetaManager.computeTaskDelay(rplIncTask);
             if (delaySec > DynamicApplicationConfig.getInt(RPL_DELAY_ALARM_THRESHOLD_SECOND)) {
-                MonitorManager.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
+                MonitorManager.getInstance().triggerAlarmSync(getReplicaDelayAlarmType(rplIncTask.getStateMachineId()),
                     rplIncTask.getId(), String.format("主备复制延迟超时报警：延迟%s秒", delaySec));
             }
         }
         log.info("checkAndRunLocalTasks end");
+    }
+
+    static MonitorType getReplicaDelayAlarmType(long stateMachineId) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.PHONE_ALARM_WHEN_DDL)) {
+            return MonitorType.IMPORT_INC_ERROR;
+        }
+        boolean ddlRunning = !DbTaskMetaManager.getDdlTasksByState(stateMachineId, DdlState.RUNNING).isEmpty();
+        return ddlRunning ? MonitorType.RPL_PROCESS_ERROR : MonitorType.IMPORT_INC_ERROR;
     }
 
     /**

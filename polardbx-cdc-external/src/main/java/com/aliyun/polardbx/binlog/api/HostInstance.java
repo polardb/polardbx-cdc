@@ -6,9 +6,12 @@
  */
 package com.aliyun.polardbx.binlog.api;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.github.luben.zstd.ZstdInputStream;
 import com.google.common.collect.Sets;
 import lombok.Data;
 import lombok.extern.java.Log;
@@ -20,7 +23,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.ParseException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 
@@ -56,6 +58,13 @@ public class HostInstance {
             connection = getConnection(url);
             connection.connect();
             is = connection.getInputStream();
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_USE_HELA)
+                && DynamicApplicationConfig.getBoolean(
+                ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_RDS_BINLOG_AUTO_DECOMPRESS)) {
+                if (url.contains(binlogFile.getLogname() + ".zst")) {
+                    is = new ZstdInputStream(is);
+                }
+            }
             byte[] buf = new byte[20];
             int len = 0;
             int totalRead = 0;

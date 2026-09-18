@@ -6,6 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.api.rds;
 
+import com.aliyun.polardbx.binlog.util.CharsetCache;
 import io.grpc.netty.shaded.io.netty.handler.codec.http.HttpResponseStatus;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang3.StringUtils;
@@ -31,6 +32,7 @@ import javax.crypto.spec.SecretKeySpec;
 import javax.net.ssl.SSLContext;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.nio.charset.UnsupportedCharsetException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.text.SimpleDateFormat;
@@ -116,8 +118,8 @@ public abstract class AbstractRequest<T> {
      * @param encryptText 被签名的字符串
      * @param encryptKey 密钥
      */
-    private byte[] HmacSHA1Encrypt(String encryptText, String encryptKey) throws Exception {
-        byte[] data = encryptKey.getBytes(ENCODING);
+    public byte[] HmacSHA1Encrypt(String encryptText, String encryptKey) throws Exception {
+        byte[] data = encryptKey.getBytes(CharsetCache.lookup(ENCODING));
         // 根据给定的字节数组构造一个密钥,第二参数指定一个密钥算法的名称
         SecretKey secretKey = new SecretKeySpec(data, MAC_NAME);
         // 生成一个指定 Mac 算法 的 Mac 对象
@@ -125,13 +127,13 @@ public abstract class AbstractRequest<T> {
         // 用给定密钥初始化 Mac 对象
         mac.init(secretKey);
 
-        byte[] text = encryptText.getBytes(ENCODING);
+        byte[] text = encryptText.getBytes(CharsetCache.lookup(ENCODING));
         // 完成 Mac 操作
         return mac.doFinal(text);
     }
 
-    private String base64(byte input[]) throws UnsupportedEncodingException {
-        return new String(Base64.encodeBase64(input), ENCODING);
+    public String base64(byte[] input) throws UnsupportedCharsetException {
+        return new String(Base64.encodeBase64(input), CharsetCache.lookup(ENCODING));
     }
 
     private String concatQueryString(Map<String, String> parameters) throws UnsupportedEncodingException {

@@ -40,7 +40,6 @@ import java.util.stream.Collectors;
 import static com.aliyun.polardbx.rpl.applier.DmlApplyHelper.getIsLabEnv;
 import static com.aliyun.polardbx.rpl.applier.DmlApplyHelper.getUpdateChangeColumns;
 import static com.aliyun.polardbx.rpl.applier.DmlApplyHelper.setIsLabEnv;
-
 import static org.mockito.Mockito.when;
 
 @Slf4j
@@ -119,10 +118,7 @@ public class DmlApplyHelperTest extends RplWithGmsTablesBaseTest {
 
         TableInfo tableInfo = DbMetaManager.getTableInfo(srcDataSource, "testdb", "testtable",
             HostType.RDS, false);
-        tableInfo.getColumns().add(new ColumnInfo("id1", 0, null, false,
-            false, "", 0));
-        tableInfo.getColumns().add(new ColumnInfo("id2", 0, null, false,
-            false, "", 0));
+        Assert.assertEquals(2, tableInfo.getColumns().size());
 
         RowChangeBuilder builder = ExtractorUtil.buildRowChangeMeta(tableInfo, "testdb", "testtable",
             DBMSAction.UPDATE);
@@ -156,62 +152,105 @@ public class DmlApplyHelperTest extends RplWithGmsTablesBaseTest {
     @Test
     public void testShouldSerialExecute() throws Exception {
         String dbName = "testdb";
-        String tbName1 = "testtable1";
-        String tbName2 = "testtable2";
-        String tbName3 = "testtable3";
+        String tbName1 = "testtable1"; // No PK table
+        String tbName2 = "testtable2"; // Table with UKs
+        String tbName3 = "testtable3"; // Table with PKs but no UKs
+        String tbName4 = "omc_with_test"; // GSI table starting with omc_with
 
         DbMetaCache dbMetaCache = Mockito.mock(DbMetaCache.class);
+
+        // Table without PKs
         TableInfo tableInfo1 = new TableInfo(dbName, tbName1);
         tableInfo1.setPks(Lists.newArrayList());
 
+        // Table with UKs
         TableInfo tableInfo2 = new TableInfo(dbName, tbName2);
         tableInfo2.setPks(Lists.newArrayList("pk1_c1"));
         tableInfo2.setUks(Lists.newArrayList("uk1_c1", "uk1_c2"));
 
-        TableInfo tableInfo3 = new TableInfo(dbName, tbName2);
+        // Table with PKs but no UKs
+        TableInfo tableInfo3 = new TableInfo(dbName, tbName3);
         tableInfo3.setPks(Lists.newArrayList("pk1_c1"));
+        tableInfo3.setUks(Lists.newArrayList());
+
+        // GSI table starting with omc_with
+        TableInfo tableInfo4 = new TableInfo(dbName, tbName4);
+        tableInfo4.setPks(Lists.newArrayList("pk1_c1"));
+        tableInfo4.setUks(Lists.newArrayList());
+        tableInfo4.setGsiNum(1); // Has GSI
 
         when(dbMetaCache.getTableInfo(dbName, tbName1)).thenReturn(tableInfo1);
         when(dbMetaCache.getTableInfo(dbName, tbName2)).thenReturn(tableInfo2);
         when(dbMetaCache.getTableInfo(dbName, tbName3)).thenReturn(tableInfo3);
+        when(dbMetaCache.getTableInfo(dbName, tbName4)).thenReturn(tableInfo4);
 
         DmlApplyHelper.setDbMetaCache(dbMetaCache);
+        DmlApplyHelper.setIsLabEnv(true); // Enable lab env for GSI testing
 
-        // test table without pks
+        // Test 1: Table without PKs should execute in serial mode for UPDATE action
         DefaultRowChange rowChange = new DefaultRowChange();
         rowChange.setAction(DBMSAction.UPDATE);
         rowChange.setSchema(dbName);
         rowChange.setTable(tbName1);
-        boolean result = DmlApplyHelper.shouldSerialExecute(rowChange);
-        Assert.assertTrue(result);
+        boolean result = DmlApplyHelper.shouldSerialExecute(rowChange, new HashMap<>());
+        Assert.assertTrue("Table without PKs should execute in serial mode for UPDATE", result);
 
+        // Test 2: Table without PKs should execute in serial mode for DELETE action
         rowChange.setAction(DBMSAction.DELETE);
-        result = DmlApplyHelper.shouldSerialExecute(rowChange);
-        Assert.assertTrue(result);
+        result = DmlApplyHelper.shouldSerialExecute(rowChange, new HashMap<>());
+        Assert.assertTrue("Table without PKs should execute in serial mode for DELETE", result);
 
+        // Test 3: Table without PKs should NOT execute in serial mode for INSERT action
         rowChange.setAction(DBMSAction.INSERT);
-        result = DmlApplyHelper.shouldSerialExecute(rowChange);
-        Assert.assertFalse(result);
+        result = DmlApplyHelper.shouldSerialExecute(rowChange, new HashMap<>());
+        Assert.assertFalse("Table without PKs should NOT execute in serial mode for INSERT", result);
 
-        // test table with uks
+        // Test 4: Table with UKs should execute in serial mode for DELETE action
         rowChange = new DefaultRowChange();
         rowChange.setAction(DBMSAction.DELETE);
         rowChange.setSchema(dbName);
         rowChange.setTable(tbName2);
-        result = DmlApplyHelper.shouldSerialExecute(rowChange);
-        Assert.assertTrue(result);
+        result = DmlApplyHelper.shouldSerialExecute(rowChange, new HashMap<>());
+        Assert.assertFalse("Table with UKs should NOT execute in serial mode for just DELETE.", result);
 
+        // Test 5: Table with UKs should NOT execute in serial mode for INSERT action initially
         rowChange.setAction(DBMSAction.INSERT);
-        result = DmlApplyHelper.shouldSerialExecute(rowChange);
+        result = DmlApplyHelper.shouldSerialExecute(rowChange, new HashMap<>());
+        Assert.assertFalse("Table with UKs should NOT execute in serial mode for INSERT initially", result);
+
+        // Test 6: Table with UKs should execute in serial mode for INSERT after DELETE
+        Map<String, Boolean> prepareToSerialExecTables = new HashMap<>();
+        // First mark table for serial execution due to DELETE
+        DefaultRowChange deleteRowChange = new DefaultRowChange();
+        deleteRowChange.setAction(DBMSAction.DELETE);
+        deleteRowChange.setSchema(dbName);
+        deleteRowChange.setTable(tbName2);
+        result = DmlApplyHelper.shouldSerialExecute(deleteRowChange, prepareToSerialExecTables);
         Assert.assertFalse(result);
 
-        // test table without uks
+        // Now INSERT should also execute in serial mode
+        rowChange.setAction(DBMSAction.INSERT);
+        result = DmlApplyHelper.shouldSerialExecute(rowChange, prepareToSerialExecTables);
+        Assert.assertTrue("Table with UKs should execute in serial mode for INSERT after DELETE", result);
+
+        // Test 7: Table without UKs should NOT execute in serial mode for DELETE action
         rowChange = new DefaultRowChange();
         rowChange.setAction(DBMSAction.DELETE);
         rowChange.setSchema(dbName);
         rowChange.setTable(tbName3);
-        result = DmlApplyHelper.shouldSerialExecute(rowChange);
-        Assert.assertFalse(result);
+        result = DmlApplyHelper.shouldSerialExecute(rowChange, new HashMap<>());
+        Assert.assertFalse("Table without UKs should NOT execute in serial mode for DELETE", result);
+
+        // Test 8: GSI table starting with omc_with should execute in serial mode in lab env
+        rowChange = new DefaultRowChange();
+        rowChange.setAction(DBMSAction.INSERT); // Any action should trigger serial mode
+        rowChange.setSchema(dbName);
+        rowChange.setTable(tbName4);
+        result = DmlApplyHelper.shouldSerialExecute(rowChange, new HashMap<>());
+        Assert.assertTrue("GSI table starting with omc_with should execute in serial mode in lab env", result);
+
+        // Reset lab env
+        DmlApplyHelper.setIsLabEnv(false);
     }
 
     /**

@@ -26,7 +26,7 @@
         <property name="username" value="${metaDb_username}"/>
         <property name="password" value="${metaDb_password}"/>
         <property name="metaDbScanSwitch" value="${metadb_scan_switch}"/>
-        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+        <property name="driverClassName" value="com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver"/>
         <property name="url" value="${metaDb_url}"/>
         <property name="maxActive" value="${datasource_max_active}"/>
         <property name="initialSize">

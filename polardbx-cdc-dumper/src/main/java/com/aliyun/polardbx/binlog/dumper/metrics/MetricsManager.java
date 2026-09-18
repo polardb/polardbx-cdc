@@ -12,6 +12,8 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.backup.IDumperMetricsProvider;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumClientType;
+import com.aliyun.polardbx.binlog.dumper.dump.logfile.CompressionStatistics;
+import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumProtocolType;
 import com.aliyun.polardbx.binlog.jvm.JvmSnapshot;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
@@ -28,6 +30,7 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.DateFormatUtils;
 import org.hyperic.sigar.CpuPerc;
 import org.slf4j.Logger;
@@ -64,15 +67,19 @@ import static com.aliyun.polardbx.binlog.util.CommonMetricsHelper.addProcMetrics
 public class MetricsManager implements IDumperMetricsProvider {
 
     private static final Logger METRICS_LOGGER = LoggerFactory.getLogger("METRICS");
+    private static final Logger COMPRESSION_LOGGER = LoggerFactory.getLogger("compressionLogger");
     private static final long INTERVAL = TimeUnit.SECONDS.toMillis(5);
+    private static final long REPORT_INTERVAL = TimeUnit.SECONDS.toMillis(60);
 
     private final TaskType taskType;
+    private final ScheduledExecutorService reportExecutorService;
     private final ScheduledExecutorService scheduledExecutorService;
     private final AtomicLong snapshotSeq = new AtomicLong(0);
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final boolean leader;
     private MetricsSnapshot lastSnapshot;
     private long startTime;
+    private volatile boolean consumerExists;
 
     @Getter
     private final Map<String, DumpClientMetric> dumpClientMetricsMap = new ConcurrentHashMap<>();
@@ -85,11 +92,27 @@ public class MetricsManager implements IDumperMetricsProvider {
             t.setDaemon(true);
             return t;
         });
+        this.reportExecutorService = Executors.newSingleThreadScheduledExecutor((r) -> {
+            Thread t = new Thread(r, "dumper-consumer-reporter");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    public void startReportConsumerExists() {
+        reportExecutorService.scheduleAtFixedRate(() -> {
+            if (consumerExists) {
+                reportConsumerExists();
+                consumerExists = false;
+            }
+        }, REPORT_INTERVAL, REPORT_INTERVAL, TimeUnit.MILLISECONDS);
     }
 
     public void start() {
         if (running.compareAndSet(false, true)) {
             startTime = System.currentTimeMillis();
+
+            startReportConsumerExists();
             scheduledExecutorService.scheduleAtFixedRate(() -> {
                 try {
                     MetricsSnapshot snapshot = buildSnapshot();
@@ -98,10 +121,14 @@ public class MetricsManager implements IDumperMetricsProvider {
                     }
 
                     for (DumpClientMetric metric : dumpClientMetricsMap.values()) {
-                        if (metric.getClientType() != EnumClientType.COLUMNAR) {
-                            reportConsumerExists();
+                        if (metric.getClientType() == EnumClientType.DEFAULT) {
+                            consumerExists = true;
                             break;
                         }
+                    }
+
+                    if (!CompressionStatistics.getLastCompressionFile().isEmpty()) {
+                        COMPRESSION_LOGGER.info(CompressionStatistics.getCompressionInfo());
                     }
 
                     sendMetrics(snapshot);
@@ -118,6 +145,7 @@ public class MetricsManager implements IDumperMetricsProvider {
     public void stop() {
         if (running.compareAndSet(true, false)) {
             scheduledExecutorService.shutdownNow();
+            reportExecutorService.shutdownNow();
             METRICS_LOGGER.info("metrics manager stopped.");
         }
     }
@@ -185,6 +213,7 @@ public class MetricsManager implements IDumperMetricsProvider {
         contactJvmMetrics(snapshot, sb);
         contactProcMetrics(snapshot, sb);
         contactDumpClientMetrics(sb);
+        contactDumpFilterMetrics(sb);
         sb.append("\r\n");
         sb.append(
             "######################################################## dumper metrics end ########################################################");
@@ -198,9 +227,8 @@ public class MetricsManager implements IDumperMetricsProvider {
             return;
         }
         TableFormat dumperClientFormat = new TableFormat("Dumper Client Metrics");
-        dumperClientFormat.addColumn("client", "protocol", "ip", "port", "fileName", "position", "delay(s)", "bps",
-            "lastSyncTimestamp",
-            "alive(s)");
+        dumperClientFormat.addColumn("client", "protocol", "ip", "port", "traceId", "user", "fileName", "position",
+            "delay(s)", "sendBps", "readBps", "lastSyncTimestamp", "alive(s)");
         long now = System.currentTimeMillis();
         for (DumpClientMetric metric : dumpClientMetricsMap.values()) {
             long clientTimeStamp = metric.getTimestamp();
@@ -210,9 +238,26 @@ public class MetricsManager implements IDumperMetricsProvider {
             }
             long alive = TimeUnit.MILLISECONDS.toSeconds(now - metric.getDumpStartTimestamp());
             dumperClientFormat.addRow(metric.getClientType().toString(), metric.getProtocolType().toString(),
-                metric.getRemoteIp(), metric.getRemotePort(), metric.getFileName(),
-                metric.getPosition(), delay, metric.getDumpBps(),
+                metric.getRemoteIp(), metric.getRemotePort(), metric.getTraceId(), metric.getUser(),
+                metric.getFileName(),
+                metric.getPosition(), delay, metric.getDumpBps(), metric.getReadBps(),
                 DateFormatUtils.format(metric.getLastSyncTimestamp(), "yyyy-MM-dd HH:mm:ss"), alive);
+        }
+        sb.append(dumperClientFormat);
+    }
+
+    private void contactDumpFilterMetrics(StringBuilder sb) {
+        if (dumpClientMetricsMap.isEmpty()) {
+            return;
+        }
+        TableFormat dumperClientFormat = new TableFormat("Dumper Filter Metrics");
+        dumperClientFormat.addColumn("client", "traceId", "user", "filterInfo");
+        for (DumpClientMetric metric : dumpClientMetricsMap.values()) {
+            String filterInfo = metric.getFilterInfo();
+            if (metric.getProtocolType() == EnumProtocolType.DUMP && StringUtils.isNotBlank(filterInfo)) {
+                dumperClientFormat.addRow(metric.getClientType().toString(), metric.getTraceId(), metric.getUser(),
+                    filterInfo);
+            }
         }
         sb.append(dumperClientFormat);
     }
@@ -425,9 +470,9 @@ public class MetricsManager implements IDumperMetricsProvider {
         return snapshot;
     }
 
-    private Map<String, StreamMetricsAverage> buildPeriodAverage(MetricsSnapshot snapshot) {
+    Map<String, StreamMetricsAverage> buildPeriodAverage(MetricsSnapshot snapshot) {
         Map<String, StreamMetricsAverage> result = new HashMap<>();
-        for (StreamMetrics latestMetrics : snapshot.streamMetrics.values()) {
+        for (StreamMetrics curSM : snapshot.streamMetrics.values()) {
             StreamMetricsAverage periodAverage = new StreamMetricsAverage();
             long currentTime = snapshot.timestamp;
 
@@ -447,65 +492,47 @@ public class MetricsManager implements IDumperMetricsProvider {
             long periodDumpBytes;
             long periodSyncBytes;
 
-            if (lastSnapshot == null) {
+            // 在light rebalance场景下，last stream metrics 可能是不存在的
+            StreamMetrics lastSM = lastSnapshot == null ? null : lastSnapshot.streamMetrics.get(curSM.getStreamId());
+            if (lastSnapshot == null || lastSM == null) {
                 period = (currentTime - startTime) / 1000;
-                periodRevEventCount = latestMetrics.getTotalRevEventCount();
-                periodRevEventBytes = latestMetrics.getTotalRevEventBytes();
-                periodWriteEventCount = latestMetrics.getTotalWriteEventCount();
-                periodWriteDmlEventCount = latestMetrics.getTotalWriteDmlEventCount();
-                periodWriteDmlTabMapEventCount = latestMetrics.getTotalWriteDmlTabMapEventCount();
-                periodWriteDmlInsertEventCount = latestMetrics.getTotalWriteDmlInsertEventCount();
-                periodWriteDmlUpdateEventCount = latestMetrics.getTotalWriteDmlUpdateEventCount();
-                periodWriteDmlDeleteEventCount = latestMetrics.getTotalWriteDmlDeleteEventCount();
-                periodWriteTxnCount = latestMetrics.getTotalWriteTxnCount();
-                periodWriteEventBytes = latestMetrics.getTotalWriteEventBytes();
-                periodWriteTxnTime = (double) (latestMetrics.getTotalWriteTxnTime());
-                periodUploadBytes = latestMetrics.getTotalUploadBytes();
-                periodDumpBytes = latestMetrics.getTotalDumpBytes();
-                periodSyncBytes = latestMetrics.getTotalSyncBytes();
+                periodRevEventCount = curSM.getTotalRevEventCount();
+                periodRevEventBytes = curSM.getTotalRevEventBytes();
+                periodWriteEventCount = curSM.getTotalWriteEventCount();
+                periodWriteDmlEventCount = curSM.getTotalWriteDmlEventCount();
+                periodWriteDmlTabMapEventCount = curSM.getTotalWriteDmlTabMapEventCount();
+                periodWriteDmlInsertEventCount = curSM.getTotalWriteDmlInsertEventCount();
+                periodWriteDmlUpdateEventCount = curSM.getTotalWriteDmlUpdateEventCount();
+                periodWriteDmlDeleteEventCount = curSM.getTotalWriteDmlDeleteEventCount();
+                periodWriteTxnCount = curSM.getTotalWriteTxnCount();
+                periodWriteEventBytes = curSM.getTotalWriteEventBytes();
+                periodWriteTxnTime = (double) (curSM.getTotalWriteTxnTime());
+                periodUploadBytes = curSM.getTotalUploadBytes();
+                periodDumpBytes = curSM.getTotalDumpBytes();
+                periodSyncBytes = curSM.getTotalSyncBytes();
             } else {
                 period = (currentTime - lastSnapshot.timestamp) / 1000;
-                periodRevEventCount =
-                    latestMetrics.getTotalRevEventCount() - lastSnapshot.streamMetrics.get(latestMetrics.getStreamId())
-                        .getTotalRevEventCount();
-                periodRevEventBytes =
-                    latestMetrics.getTotalRevEventBytes() - lastSnapshot.streamMetrics.get(latestMetrics.getStreamId())
-                        .getTotalRevEventBytes();
-                periodWriteEventCount = latestMetrics.getTotalWriteEventCount() - lastSnapshot.streamMetrics.get(
-                    latestMetrics.getStreamId()).getTotalWriteEventCount();
-                periodWriteDmlEventCount = latestMetrics.getTotalWriteDmlEventCount() - lastSnapshot.streamMetrics.get(
-                    latestMetrics.getStreamId()).getTotalWriteDmlEventCount();
+                periodRevEventCount = curSM.getTotalRevEventCount() - lastSM.getTotalRevEventCount();
+                periodRevEventBytes = curSM.getTotalRevEventBytes() - lastSM.getTotalRevEventBytes();
+                periodWriteEventCount = curSM.getTotalWriteEventCount() - lastSM.getTotalWriteEventCount();
+                periodWriteDmlEventCount = curSM.getTotalWriteDmlEventCount() - lastSM.getTotalWriteDmlEventCount();
                 periodWriteDmlTabMapEventCount =
-                    latestMetrics.getTotalWriteDmlTabMapEventCount() - lastSnapshot.streamMetrics.get(
-                        latestMetrics.getStreamId()).getTotalWriteDmlTabMapEventCount();
+                    curSM.getTotalWriteDmlTabMapEventCount() - lastSM.getTotalWriteDmlTabMapEventCount();
                 periodWriteDmlInsertEventCount =
-                    latestMetrics.getTotalWriteDmlInsertEventCount() - lastSnapshot.streamMetrics.get(
-                        latestMetrics.getStreamId()).getTotalWriteDmlInsertEventCount();
+                    curSM.getTotalWriteDmlInsertEventCount() - lastSM.getTotalWriteDmlInsertEventCount();
                 periodWriteDmlUpdateEventCount =
-                    latestMetrics.getTotalWriteDmlUpdateEventCount() - lastSnapshot.streamMetrics.get(
-                        latestMetrics.getStreamId()).getTotalWriteDmlUpdateEventCount();
+                    curSM.getTotalWriteDmlUpdateEventCount() - lastSM.getTotalWriteDmlUpdateEventCount();
                 periodWriteDmlDeleteEventCount =
-                    latestMetrics.getTotalWriteDmlDeleteEventCount() - lastSnapshot.streamMetrics.get(
-                        latestMetrics.getStreamId()).getTotalWriteDmlDeleteEventCount();
-                periodWriteTxnCount =
-                    latestMetrics.getTotalWriteTxnCount() - lastSnapshot.streamMetrics.get(latestMetrics.getStreamId())
-                        .getTotalWriteTxnCount();
-                periodWriteEventBytes = latestMetrics.getTotalWriteEventBytes() - lastSnapshot.streamMetrics.get(
-                    latestMetrics.getStreamId()).getTotalWriteEventBytes();
-                periodWriteTxnTime = (double) (latestMetrics.getTotalWriteTxnTime() - lastSnapshot.streamMetrics.get(
-                    latestMetrics.getStreamId()).getTotalWriteTxnTime());
-                periodUploadBytes =
-                    latestMetrics.getTotalUploadBytes() - lastSnapshot.streamMetrics.get(latestMetrics.getStreamId())
-                        .getTotalUploadBytes();
-                periodDumpBytes =
-                    latestMetrics.getTotalDumpBytes() - lastSnapshot.streamMetrics.get(latestMetrics.getStreamId())
-                        .getTotalDumpBytes();
-                periodSyncBytes =
-                    latestMetrics.getTotalSyncBytes() - lastSnapshot.streamMetrics.get(latestMetrics.getStreamId())
-                        .getTotalSyncBytes();
+                    curSM.getTotalWriteDmlDeleteEventCount() - lastSM.getTotalWriteDmlDeleteEventCount();
+                periodWriteTxnCount = curSM.getTotalWriteTxnCount() - lastSM.getTotalWriteTxnCount();
+                periodWriteEventBytes = curSM.getTotalWriteEventBytes() - lastSM.getTotalWriteEventBytes();
+                periodWriteTxnTime = (double) (curSM.getTotalWriteTxnTime() - lastSM.getTotalWriteTxnTime());
+                periodUploadBytes = curSM.getTotalUploadBytes() - lastSM.getTotalUploadBytes();
+                periodDumpBytes = curSM.getTotalDumpBytes() - lastSM.getTotalDumpBytes();
+                periodSyncBytes = curSM.getTotalSyncBytes() - lastSM.getTotalSyncBytes();
             }
 
-            periodAverage.streamId = latestMetrics.getStreamId();
+            periodAverage.streamId = curSM.getStreamId();
             periodAverage.avgRevEps = periodRevEventCount / period;
             periodAverage.avgRevBps = periodRevEventBytes / period;
             periodAverage.avgWriteTimePerTxn = periodWriteTxnCount == 0 ? BigDecimal.ZERO :
@@ -526,7 +553,7 @@ public class MetricsManager implements IDumperMetricsProvider {
             periodAverage.avgDumpBps = periodDumpBytes / period;
             periodAverage.avgSyncBps = periodSyncBytes / period;
 
-            result.put(latestMetrics.getStreamId(), periodAverage);
+            result.put(curSM.getStreamId(), periodAverage);
         }
         return result;
     }
@@ -839,6 +866,8 @@ public class MetricsManager implements IDumperMetricsProvider {
     private void reportConsumerExists() {
         String time = Long.valueOf(System.currentTimeMillis()).toString();
         log.info("Report Consumer Exists: latest consume time : {}", time);
+        // 这个逻辑会导致metaDB中的值被修改，从而 invalid DynamicConfig的缓存
+        // 进一步导致需要实时查询的configs触发metaDB查询
         DynamicApplicationConfig.setValue(ConfigKeys.ALARM_LATEST_CONSUME_TIME_MS, time);
     }
 }

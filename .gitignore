@@ -6,4 +6,15 @@ target/
 *.ipr
 *.log
 dev_local
+dev.sh
+env/*
+!env/env.properties.example
 dumper/binlog/
+.java-version
+# Local dev artifacts
+.claude/
+.agents/
+.qoder/
+AGENTS.md
+stream0_*.txt
+docs/analysis/

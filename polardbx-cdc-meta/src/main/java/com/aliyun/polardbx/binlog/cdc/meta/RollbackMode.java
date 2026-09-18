@@ -38,8 +38,8 @@ public enum RollbackMode {
      * <p>
      * 1. 基于逻辑表Schema直接创建出物理表Schema，这是一个有缺陷的模式，可能会触发数据一致性问题(是个概率事件)
      * 2. 数据一致性问题的细节可参见：
-     * https://work.aone.alibaba-inc.com/issue/39018646
-     * https://work.aone.alibaba-inc.com/issue/38874539
+     * historical compatibility behavior
+     * historical compatibility behavior
      */
     SNAPSHOT_UNSAFE,
 

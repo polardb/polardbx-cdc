@@ -12,11 +12,9 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.remote.Appender;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.remote.io.IFileReader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_UPLOAD_MODE;
 import static com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy.PART_SIZE;
@@ -25,8 +23,8 @@ import static com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy.PART_SIZE;
  * @author yudong
  * @since 2023/1/11
  */
+@Slf4j
 public class BinlogUploader {
-    private static final Logger logger = LoggerFactory.getLogger(BinlogUploader.class);
     /**
      * upload buffer
      */
@@ -59,7 +57,7 @@ public class BinlogUploader {
         this.checkInterval = DynamicApplicationConfig.getLong(ConfigKeys.BINLOG_BACKUP_UPLOAD_CHECK_FILE_COMPLETE_MS);
     }
 
-    public void upload() throws IOException {
+    public void upload() throws IOException, InterruptedException {
         UPLOAD_MODE uploadMode = UPLOAD_MODE.valueOf(DynamicApplicationConfig.getString(BINLOG_BACKUP_UPLOAD_MODE));
         boolean supportMultiUpload = RemoteBinlogProxy.getInstance().supportMultiUpload();
         boolean shouldUseMultiMode = RemoteBinlogProxy.getInstance().needSwitchMultiUpload(fetcher.length());
@@ -74,13 +72,18 @@ public class BinlogUploader {
         }
     }
 
-    private void doAppend() throws IOException {
-        logger.info("begin to append binlog:{} to remote {}", fetcher.getName(), remoteFileName);
+    void doAppend() throws IOException, InterruptedException {
+        log.info("## begin to append binlog:{} to remote {}", fetcher.getName(), remoteFileName);
+
         int len;
         final Appender appender = RemoteBinlogProxy.getInstance().providerAppender(remoteFileName);
         appender.begin();
         try {
             while ((len = fetcher.read(buffer)) > 0) {
+                if (Thread.interrupted()) {
+                    throw new InterruptedException("upload thread is interrupted");
+                }
+
                 appender.append(buffer, len);
                 observer.incrementUploadBytes(len);
             }
@@ -89,26 +92,27 @@ public class BinlogUploader {
         }
 
         appender.end();
+        log.info("## append finished binlog:{} to remote {}", fetcher.getName(), remoteFileName);
     }
 
     /**
      * 文件大于4G或远程存储是S3时，切换为此模式
      */
-    private void doMultiUpload() throws IOException {
+    void doMultiUpload() throws IOException, InterruptedException {
+        log.info("## begin to multi upload binlog:{} to remote.", fetcher.getName());
+
         // 分片上传模式需要等该文件写入完成之后，根据文件大小计算出需要分片的个数
         // 之前isComplete()函数内部字符串比较10ms一次可能有性能问题，因此内部实现换成了int比较
         while (!fetcher.isComplete()) {
-            try {
-                Thread.sleep(checkInterval);
-                logger.warn("wait for file " + fetcher.getName() + " complete!");
-            } catch (InterruptedException e) {
+            if (Thread.interrupted()) {
+                throw new InterruptedException("upload thread is interrupted");
             }
+            Thread.sleep(checkInterval);
+            log.warn("wait for binlog file " + fetcher.getName() + " complete!");
         }
 
-        logger.info("begin to multi upload binlog:{} to remote", fetcher.getName());
         long fileLength = fetcher.length();
-        Appender multiUploader = RemoteBinlogProxy.getInstance().providerMultiAppender(remoteFileName,
-            fileLength);
+        Appender multiUploader = RemoteBinlogProxy.getInstance().providerMultiAppender(remoteFileName, fileLength);
         int partCount = multiUploader.begin();
         byte[] buffer = new byte[PART_SIZE];
         for (int i = 0; i < partCount; i++) {
@@ -117,6 +121,7 @@ public class BinlogUploader {
             observer.incrementUploadBytes(readLen);
         }
         multiUploader.end();
+        log.info("## multi upload finished binlog:{} to remote {}", fetcher.getName(), remoteFileName);
     }
 
     public enum UPLOAD_MODE {

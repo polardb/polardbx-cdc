@@ -6,76 +6,62 @@
  */
 package com.aliyun.polardbx.binlog.dao;
 
+import java.sql.JDBCType;
+import java.util.Date;
+import javax.annotation.Generated;
 import org.mybatis.dynamic.sql.SqlColumn;
 import org.mybatis.dynamic.sql.SqlTable;
 
-import javax.annotation.Generated;
-import java.sql.JDBCType;
-import java.util.Date;
-
 public final class BinlogTaskConfigDynamicSqlSupport {
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.233+08:00",
-        comments = "Source Table: binlog_task_config")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262191+08:00", comments="Source Table: binlog_task_config")
     public static final BinlogTaskConfig binlogTaskConfig = new BinlogTaskConfig();
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.234+08:00",
-        comments = "Source field: binlog_task_config.id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.2624+08:00", comments="Source field: binlog_task_config.id")
     public static final SqlColumn<Long> id = binlogTaskConfig.id;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.gmt_created")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262568+08:00", comments="Source field: binlog_task_config.gmt_created")
     public static final SqlColumn<Date> gmtCreated = binlogTaskConfig.gmtCreated;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.gmt_modified")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262623+08:00", comments="Source field: binlog_task_config.gmt_modified")
     public static final SqlColumn<Date> gmtModified = binlogTaskConfig.gmtModified;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.cluster_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262663+08:00", comments="Source field: binlog_task_config.cluster_id")
     public static final SqlColumn<String> clusterId = binlogTaskConfig.clusterId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.container_id")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262704+08:00", comments="Source field: binlog_task_config.container_id")
     public static final SqlColumn<String> containerId = binlogTaskConfig.containerId;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.task_name")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262743+08:00", comments="Source field: binlog_task_config.task_name")
     public static final SqlColumn<String> taskName = binlogTaskConfig.taskName;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.vcpu")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262785+08:00", comments="Source field: binlog_task_config.vcpu")
     public static final SqlColumn<Integer> vcpu = binlogTaskConfig.vcpu;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.mem")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262826+08:00", comments="Source field: binlog_task_config.mem")
     public static final SqlColumn<Integer> mem = binlogTaskConfig.mem;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.ip")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262864+08:00", comments="Source field: binlog_task_config.ip")
     public static final SqlColumn<String> ip = binlogTaskConfig.ip;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.port")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262899+08:00", comments="Source field: binlog_task_config.port")
     public static final SqlColumn<Integer> port = binlogTaskConfig.port;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.235+08:00",
-        comments = "Source field: binlog_task_config.role")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262939+08:00", comments="Source field: binlog_task_config.role")
     public static final SqlColumn<String> role = binlogTaskConfig.role;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.236+08:00",
-        comments = "Source field: binlog_task_config.status")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262984+08:00", comments="Source field: binlog_task_config.status")
     public static final SqlColumn<Integer> status = binlogTaskConfig.status;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.236+08:00",
-        comments = "Source field: binlog_task_config.version")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.263024+08:00", comments="Source field: binlog_task_config.version")
     public static final SqlColumn<Long> version = binlogTaskConfig.version;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.236+08:00",
-        comments = "Source field: binlog_task_config.config")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.263061+08:00", comments="Source field: binlog_task_config.sub_version")
+    public static final SqlColumn<Long> subVersion = binlogTaskConfig.subVersion;
+
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.263102+08:00", comments="Source field: binlog_task_config.config")
     public static final SqlColumn<String> config = binlogTaskConfig.config;
 
-    @Generated(value = "org.mybatis.generator.api.MyBatisGenerator", date = "2021-05-20T15:40:59.234+08:00",
-        comments = "Source Table: binlog_task_config")
+    @Generated(value="org.mybatis.generator.api.MyBatisGenerator", date="2025-07-04T11:08:01.262323+08:00", comments="Source Table: binlog_task_config")
     public static final class BinlogTaskConfig extends SqlTable {
         public final SqlColumn<Long> id = column("id", JDBCType.BIGINT);
 
@@ -97,11 +83,13 @@ public final class BinlogTaskConfigDynamicSqlSupport {
 
         public final SqlColumn<Integer> port = column("port", JDBCType.INTEGER);
 
-        public final SqlColumn<String> role = column("role", JDBCType.VARCHAR);
+        public final SqlColumn<String> role = column("`role`", JDBCType.VARCHAR);
 
-        public final SqlColumn<Integer> status = column("status", JDBCType.INTEGER);
+        public final SqlColumn<Integer> status = column("`status`", JDBCType.INTEGER);
 
         public final SqlColumn<Long> version = column("version", JDBCType.BIGINT);
+
+        public final SqlColumn<Long> subVersion = column("sub_version", JDBCType.BIGINT);
 
         public final SqlColumn<String> config = column("config", JDBCType.LONGVARCHAR);
 

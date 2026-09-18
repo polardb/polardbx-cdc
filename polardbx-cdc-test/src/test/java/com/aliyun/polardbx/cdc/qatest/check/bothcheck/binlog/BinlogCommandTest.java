@@ -20,6 +20,12 @@ import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.concurrent.TimeUnit;
+
+import com.github.rholder.retry.Retryer;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
 
 import static com.aliyun.polardbx.cdc.qatest.base.JdbcUtil.executeQuery;
 import static com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil.usingBinlogX;
@@ -60,137 +66,168 @@ public class BinlogCommandTest extends BaseTestCase {
     @Test
     @SneakyThrows
     public void testShowBinaryLogsForGlobalBinlog() {
-        try (Connection conn = getPolardbxConnection()) {
-            ResultSet resultSet = executeQuery(SHOW_BINARY_LOGS, conn);
-            while (resultSet.next()) {
-                String fileName = resultSet.getString("LOG_NAME");
-                long fileSize = resultSet.getLong("FILE_SIZE");
-                Assert.assertFalse("show binary logs get empty file name!", StringUtils.isEmpty(fileName));
-                Assert.assertNotEquals("show binary logs get 0 file size!", 0, fileSize);
-            }
-        }
+        Retryer<Void> retryer = buildCommandRetryer(30);
 
-        try (Connection conn = getPolardbxConnection()) {
-            ResultSet resultSet = executeQuery(SHOW_MASTER_LOGS, conn);
-            while (resultSet.next()) {
-                String fileName = resultSet.getString("LOG_NAME");
-                long fileSize = resultSet.getLong("FILE_SIZE");
-                Assert.assertFalse("show master logs get empty file name!", StringUtils.isEmpty(fileName));
-                Assert.assertNotEquals("show master logs get 0 file size!", 0, fileSize);
+        // 使用重试器执行检查逻辑
+        retryer.call(() -> {
+            try (Connection conn = getPolardbxConnection()) {
+                ResultSet resultSet = executeQuery(SHOW_BINARY_LOGS, conn);
+                boolean hasData = false;
+                while (resultSet.next()) {
+                    hasData = true;
+                    String fileName = resultSet.getString("LOG_NAME");
+                    long fileSize = resultSet.getLong("FILE_SIZE");
+                    Assert.assertFalse("show binary logs get empty file name!", StringUtils.isEmpty(fileName));
+                    Assert.assertNotEquals("show binary logs get 0 file size!", 0, fileSize);
+                }
+                // 如果没有数据，抛出异常触发重试
+                if (!hasData) {
+                    throw new RuntimeException("show binary logs returns no data!");
+                }
             }
-        }
+            return null;
+        });
+
+        // 使用重试器执行第二个检查逻辑
+        retryer.call(() -> {
+            try (Connection conn = getPolardbxConnection()) {
+                ResultSet resultSet = executeQuery(SHOW_MASTER_LOGS, conn);
+                boolean hasData = false;
+                while (resultSet.next()) {
+                    hasData = true;
+                    String fileName = resultSet.getString("LOG_NAME");
+                    long fileSize = resultSet.getLong("FILE_SIZE");
+                    Assert.assertFalse("show master logs get empty file name!", StringUtils.isEmpty(fileName));
+                    Assert.assertNotEquals("show master logs get 0 file size!", 0, fileSize);
+                }
+                // 如果没有数据，抛出异常触发重试
+                if (!hasData) {
+                    throw new RuntimeException("show master logs returns no data!");
+                }
+            }
+            return null;
+        });
     }
 
     @Test
     @SneakyThrows
     public void testShowFullBinaryLogsForGlobalBinlog() {
-        try (Connection conn = getPolardbxConnection()) {
-            ResultSet resultSet = executeQuery(SHOW_FULL_BINARY_LOGS, conn);
+        buildCommandRetryer(30).call(() -> {
+            try (Connection conn = getPolardbxConnection()) {
+                ResultSet resultSet = executeQuery(SHOW_FULL_BINARY_LOGS, conn);
 
-            boolean hasResult = false;
-            while (resultSet.next()) {
-                hasResult = true;
+                boolean hasResult = false;
+                while (resultSet.next()) {
+                    hasResult = true;
 
-                String fileName = resultSet.getString("LOG_NAME");
-                Assert.assertFalse("show full binary logs get empty file name!", StringUtils.isEmpty(fileName));
-                if (!resultSet.isLast()) {
-                    long fileSize = resultSet.getLong("FILE_SIZE");
-                    Assert.assertNotEquals("show full binary logs get 0 file size!", 0, fileSize);
+                    String fileName = resultSet.getString("LOG_NAME");
+                    Assert.assertFalse("show full binary logs get empty file name!", StringUtils.isEmpty(fileName));
+                    if (!resultSet.isLast()) {
+                        long fileSize = resultSet.getLong("FILE_SIZE");
+                        Assert.assertNotEquals("show full binary logs get 0 file size!", 0, fileSize);
 
-                    Date createTime = resultSet.getDate("CREATE_TIME");
-                    Assert.assertNotNull("show full binary logs get empty create_time!", createTime);
-                    Date lastModifyTime = resultSet.getDate("LAST_MODIFY_TIME");
-                    Assert.assertNotNull("show full binary logs get empty last_modify_time!", lastModifyTime);
-                    Date firstEventTime = resultSet.getDate("FIRST_EVENT_TIME");
-                    Assert.assertNotNull("show full binary logs get empty first_event_time!", firstEventTime);
-                    Date lastEventTime = resultSet.getDate("LAST_EVENT_TIME");
-                    Assert.assertNotNull("show full binary logs get empty last_event_time!", lastEventTime);
-                    String lastTso = resultSet.getString("LAST_TSO");
-                    Assert.assertFalse("show full binary logs get empty last_tso!", StringUtils.isEmpty(lastTso));
-                    String uploadStatus = resultSet.getString("UPLOAD_STATUS");
-                    Assert.assertFalse("show full binary logs get empty upload_status!",
-                        StringUtils.isEmpty(uploadStatus));
-                    String fileLocation = resultSet.getString("FILE_LOCATION");
-                    Assert.assertFalse("show full binary logs get empty file_location!",
-                        StringUtils.isEmpty(fileLocation));
+                        Date createTime = resultSet.getDate("CREATE_TIME");
+                        Assert.assertNotNull("show full binary logs get empty create_time!", createTime);
+                        Date lastModifyTime = resultSet.getDate("LAST_MODIFY_TIME");
+                        Assert.assertNotNull("show full binary logs get empty last_modify_time!", lastModifyTime);
+                        Date firstEventTime = resultSet.getDate("FIRST_EVENT_TIME");
+                        Assert.assertNotNull("show full binary logs get empty first_event_time!", firstEventTime);
+                        Date lastEventTime = resultSet.getDate("LAST_EVENT_TIME");
+                        Assert.assertNotNull("show full binary logs get empty last_event_time!", lastEventTime);
+                        String lastTso = resultSet.getString("LAST_TSO");
+                        Assert.assertFalse("show full binary logs get empty last_tso!", StringUtils.isEmpty(lastTso));
+                        String uploadStatus = resultSet.getString("UPLOAD_STATUS");
+                        Assert.assertFalse("show full binary logs get empty upload_status!",
+                            StringUtils.isEmpty(uploadStatus));
+                        String fileLocation = resultSet.getString("FILE_LOCATION");
+                        Assert.assertFalse("show full binary logs get empty file_location!",
+                            StringUtils.isEmpty(fileLocation));
+                    }
                 }
+
+                Assert.assertTrue("show full binary logs returns no data!", hasResult);
             }
 
-            Assert.assertTrue("show full binary logs returns no data!", hasResult);
-        }
+            try (Connection conn = getPolardbxConnection()) {
+                ResultSet resultSet = executeQuery(SHOW_FULL_MASTER_LOGS, conn);
 
-        try (Connection conn = getPolardbxConnection()) {
-            ResultSet resultSet = executeQuery(SHOW_FULL_MASTER_LOGS, conn);
+                boolean hasResult = false;
+                while (resultSet.next()) {
+                    hasResult = true;
 
-            boolean hasResult = false;
-            while (resultSet.next()) {
-                hasResult = true;
+                    String fileName = resultSet.getString("LOG_NAME");
+                    Assert.assertFalse("show full master logs get empty file name!", StringUtils.isEmpty(fileName));
+                    if (!resultSet.isLast()) {
+                        long fileSize = resultSet.getLong("FILE_SIZE");
+                        Assert.assertNotEquals("show full master logs get 0 file size!", 0, fileSize);
 
-                String fileName = resultSet.getString("LOG_NAME");
-                Assert.assertFalse("show full master logs get empty file name!", StringUtils.isEmpty(fileName));
-                if (!resultSet.isLast()) {
-                    long fileSize = resultSet.getLong("FILE_SIZE");
-                    Assert.assertNotEquals("show full master logs get 0 file size!", 0, fileSize);
-
-                    Date createTime = resultSet.getDate("CREATE_TIME");
-                    Assert.assertNotNull("show full master logs get empty create_time!", createTime);
-                    Date lastModifyTime = resultSet.getDate("LAST_MODIFY_TIME");
-                    Assert.assertNotNull("show full master logs get empty last_modify_time!", lastModifyTime);
-                    Date firstEventTime = resultSet.getDate("FIRST_EVENT_TIME");
-                    Assert.assertNotNull("show full master logs get empty first_event_time!", firstEventTime);
-                    Date lastEventTime = resultSet.getDate("LAST_EVENT_TIME");
-                    Assert.assertNotNull("show full master logs get empty last_event_time!", lastEventTime);
-                    String lastTso = resultSet.getString("LAST_TSO");
-                    Assert.assertFalse("show full master logs get empty last_tso!", StringUtils.isEmpty(lastTso));
-                    String uploadStatus = resultSet.getString("UPLOAD_STATUS");
-                    Assert.assertFalse("show full master logs get empty upload_status!",
-                        StringUtils.isEmpty(uploadStatus));
-                    String fileLocation = resultSet.getString("FILE_LOCATION");
-                    Assert.assertFalse("show full master logs get empty file_location!",
-                        StringUtils.isEmpty(fileLocation));
+                        Date createTime = resultSet.getDate("CREATE_TIME");
+                        Assert.assertNotNull("show full master logs get empty create_time!", createTime);
+                        Date lastModifyTime = resultSet.getDate("LAST_MODIFY_TIME");
+                        Assert.assertNotNull("show full master logs get empty last_modify_time!", lastModifyTime);
+                        Date firstEventTime = resultSet.getDate("FIRST_EVENT_TIME");
+                        Assert.assertNotNull("show full master logs get empty first_event_time!", firstEventTime);
+                        Date lastEventTime = resultSet.getDate("LAST_EVENT_TIME");
+                        Assert.assertNotNull("show full master logs get empty last_event_time!", lastEventTime);
+                        String lastTso = resultSet.getString("LAST_TSO");
+                        Assert.assertFalse("show full master logs get empty last_tso!", StringUtils.isEmpty(lastTso));
+                        String uploadStatus = resultSet.getString("UPLOAD_STATUS");
+                        Assert.assertFalse("show full master logs get empty upload_status!",
+                            StringUtils.isEmpty(uploadStatus));
+                        String fileLocation = resultSet.getString("FILE_LOCATION");
+                        Assert.assertFalse("show full master logs get empty file_location!",
+                            StringUtils.isEmpty(fileLocation));
+                    }
                 }
-            }
 
-            Assert.assertTrue("show full master logs returns no data!", hasResult);
-        }
+                Assert.assertTrue("show full master logs returns no data!", hasResult);
+            }
+            return null;
+        });
     }
 
     @Test
     @SneakyThrows
     public void testShowMasterStatusForGlobalBinlog() {
-        try (Connection conn = getPolardbxConnection()) {
-            ResultSet resultSet = executeQuery(SHOW_MASTER_STATUS, conn);
-            while (resultSet.next()) {
-                String fileName = resultSet.getString("FILE");
-                Assert.assertFalse("show master status get empty file name!", StringUtils.isEmpty(fileName));
-                long position = resultSet.getLong("POSITION");
-                Assert.assertNotEquals("show master status get zero position!", 0, position);
+        buildCommandRetryer(30).call(() -> {
+            try (Connection conn = getPolardbxConnection()) {
+                ResultSet resultSet = executeQuery(SHOW_MASTER_STATUS, conn);
+                while (resultSet.next()) {
+                    String fileName = resultSet.getString("FILE");
+                    Assert.assertFalse("show master status get empty file name!", StringUtils.isEmpty(fileName));
+                    long position = resultSet.getLong("POSITION");
+                    Assert.assertNotEquals("show master status get zero position!", 0, position);
+                }
             }
-        }
+            return null;
+        });
     }
 
     @Test
     @SneakyThrows
     public void testShowFullMasterStatusForGlobalBinlog() {
-        try (Connection conn = getPolardbxConnection()) {
-            ResultSet resultSet = executeQuery(SHOW_FULL_MASTER_STATUS, conn);
-            while (resultSet.next()) {
-                String fileName = resultSet.getString("FILE");
-                Assert.assertFalse("show full master status get empty file name!", StringUtils.isEmpty(fileName));
-                long position = resultSet.getLong("POSITION");
-                Assert.assertNotEquals("show full master status get zero position!", 0, position);
-                String lastTso = resultSet.getString("LASTTSO");
-                Assert.assertFalse("show full master status get empty last_tso!", StringUtils.isEmpty(lastTso));
-                long delayMs = resultSet.getLong("DELAYTIMEMS");
-                int avgRevEps = resultSet.getInt("AVGREVEPS");
-                int avgRevBps = resultSet.getInt("AVGREVEPS");
-                int avgWriteEps = resultSet.getInt("AVGWRITEEPS");
-                int avgWriteBps = resultSet.getInt("AVGWRITEBPS");
-                int avgWriteTps = resultSet.getInt("AVGWRITETPS");
-                int avgUploadBps = resultSet.getInt("AVGUPLOADBPS");
-                int avgDumpBps = resultSet.getInt("AVGDUMPBPS");
+        buildCommandRetryer(30).call(() -> {
+            try (Connection conn = getPolardbxConnection()) {
+                ResultSet resultSet = executeQuery(SHOW_FULL_MASTER_STATUS, conn);
+                while (resultSet.next()) {
+                    String fileName = resultSet.getString("FILE");
+                    Assert.assertFalse("show full master status get empty file name!", StringUtils.isEmpty(fileName));
+                    long position = resultSet.getLong("POSITION");
+                    Assert.assertNotEquals("show full master status get zero position!", 0, position);
+                    String lastTso = resultSet.getString("LASTTSO");
+                    Assert.assertFalse("show full master status get empty last_tso!", StringUtils.isEmpty(lastTso));
+                    long delayMs = resultSet.getLong("DELAYTIMEMS");
+                    int avgRevEps = resultSet.getInt("AVGREVEPS");
+                    int avgRevBps = resultSet.getInt("AVGREVEPS");
+                    int avgWriteEps = resultSet.getInt("AVGWRITEEPS");
+                    int avgWriteBps = resultSet.getInt("AVGWRITEBPS");
+                    int avgWriteTps = resultSet.getInt("AVGWRITETPS");
+                    int avgUploadBps = resultSet.getInt("AVGUPLOADBPS");
+                    int avgDumpBps = resultSet.getInt("AVGDUMPBPS");
+                }
             }
-        }
+            return null;
+        });
     }
 
     // SHOW BINLOG EVENTS
@@ -200,22 +237,25 @@ public class BinlogCommandTest extends BaseTestCase {
     @Test
     @SneakyThrows
     public void testShowBinlogEventsForGlobalBinlog() {
-        try (Connection conn = getPolardbxConnection()) {
-            executeQueryHelper("show binlog events", conn);
-            executeQueryHelper("show binlog events in 'binlog.000001'", conn);
-            executeQueryHelper("show binlog events from 4", conn);
-            executeQueryHelper("show binlog events limit 1", conn);
-            executeQueryHelper("show binlog events limit 1,1", conn);
-            executeQueryHelper("show binlog events in 'binlog.000001' from 4", conn);
-            executeQueryHelper("show binlog events in 'binlog.000001' limit 1", conn);
-            executeQueryHelper("show binlog events in 'binlog.000001' limit 1,1", conn);
-            executeQueryHelper("show binlog events in 'binlog.000001' from 4 limit 1", conn);
-            executeQueryHelper("show binlog events in 'binlog.000001' from 4 limit 1,1", conn);
-            executeQueryHelper("show binlog events in 'binlog.000001' from 4 limit 1", conn);
-            executeQueryHelper("show binlog events in 'binlog.000001' from 4 limit 1,1", conn);
-            executeQueryHelper("show binlog events from 4 limit 1", conn);
-            executeQueryHelper("show binlog events from 4 limit 1,1", conn);
-        }
+        buildCommandRetryer(30).call(() -> {
+            try (Connection conn = getPolardbxConnection()) {
+                executeQueryHelper("show binlog events", conn);
+                executeQueryHelper("show binlog events in 'binlog.000001'", conn);
+                executeQueryHelper("show binlog events from 4", conn);
+                executeQueryHelper("show binlog events limit 1", conn);
+                executeQueryHelper("show binlog events limit 1,1", conn);
+                executeQueryHelper("show binlog events in 'binlog.000001' from 4", conn);
+                executeQueryHelper("show binlog events in 'binlog.000001' limit 1", conn);
+                executeQueryHelper("show binlog events in 'binlog.000001' limit 1,1", conn);
+                executeQueryHelper("show binlog events in 'binlog.000001' from 4 limit 1", conn);
+                executeQueryHelper("show binlog events in 'binlog.000001' from 4 limit 1,1", conn);
+                executeQueryHelper("show binlog events in 'binlog.000001' from 4 limit 1", conn);
+                executeQueryHelper("show binlog events in 'binlog.000001' from 4 limit 1,1", conn);
+                executeQueryHelper("show binlog events from 4 limit 1", conn);
+                executeQueryHelper("show binlog events from 4 limit 1,1", conn);
+            }
+            return null;
+        });
     }
 
     private void executeQueryHelper(String sql, Connection conn) throws Exception {
@@ -228,40 +268,50 @@ public class BinlogCommandTest extends BaseTestCase {
     @SneakyThrows
     public void testShowBinaryStreams() {
         if (usingBinlogX) {
-            try (Connection conn = getPolardbxConnection()) {
-                ResultSet resultSet = executeQuery(SHOW_BINARY_STREAMS, conn);
-                while (resultSet.next()) {
-                    String groupName = resultSet.getString("GROUP");
-                    String streamName = resultSet.getString("STREAM");
-                    String fileName = resultSet.getString("FILE");
-                    long position = resultSet.getLong("POSITION");
-                    Assert.assertFalse("show binary streams get empty group name!", StringUtils.isEmpty(groupName));
-                    Assert.assertFalse("show binary streams get empty stream name!", StringUtils.isEmpty(streamName));
-                    Assert.assertFalse("show binary streams get empty file name!", StringUtils.isEmpty(fileName));
-                    Assert.assertNotEquals("show binary streams get zero position!", 0, position);
+            Retryer<Void> retryer = buildCommandRetryer(120);
+
+            retryer.call(() -> {
+                try (Connection conn = getPolardbxConnection();
+                    ResultSet resultSet = executeQuery(SHOW_BINARY_STREAMS, conn)) {
+                    while (resultSet.next()) {
+                        String groupName = resultSet.getString("GROUP");
+                        String streamName = resultSet.getString("STREAM");
+                        String fileName = resultSet.getString("FILE");
+                        long position = resultSet.getLong("POSITION");
+                        Assert.assertFalse("show binary streams get empty group name!", StringUtils.isEmpty(groupName));
+                        Assert.assertFalse("show binary streams get empty stream name!",
+                            StringUtils.isEmpty(streamName));
+                        Assert.assertFalse("show binary streams get empty file name!", StringUtils.isEmpty(fileName));
+                        Assert.assertNotEquals("show binary streams get zero position!", 0, position);
+                    }
                 }
-            }
+                return null;
+            });
 
             // 多流实验室写死了group name为group1
             String sql1 = String.format(SHOW_BINARY_STREAMS_WITH, "group1");
-            try (Connection conn = getPolardbxConnection();
-                ResultSet resultSet = executeQuery(sql1, conn)) {
-                int streamCount = 0;
-                while (resultSet.next()) {
-                    streamCount++;
+            retryer.call(() -> {
+                try (Connection conn = getPolardbxConnection();
+                    ResultSet resultSet = executeQuery(sql1, conn)) {
+                    int streamCount = 0;
+                    while (resultSet.next()) {
+                        streamCount++;
 
-                    String groupName = resultSet.getString("GROUP");
-                    String streamName = resultSet.getString("STREAM");
-                    String fileName = resultSet.getString("FILE");
-                    long position = resultSet.getLong("POSITION");
-                    Assert.assertEquals("group1", groupName);
-                    Assert.assertFalse("show binary streams get empty stream name!", StringUtils.isEmpty(streamName));
-                    Assert.assertFalse("show binary streams get empty file name!", StringUtils.isEmpty(fileName));
-                    Assert.assertNotEquals("show binary streams get zero position!", 0, position);
+                        String groupName = resultSet.getString("GROUP");
+                        String streamName = resultSet.getString("STREAM");
+                        String fileName = resultSet.getString("FILE");
+                        long position = resultSet.getLong("POSITION");
+                        Assert.assertEquals("group1", groupName);
+                        Assert.assertFalse("show binary streams get empty stream name!",
+                            StringUtils.isEmpty(streamName));
+                        Assert.assertFalse("show binary streams get empty file name!", StringUtils.isEmpty(fileName));
+                        Assert.assertNotEquals("show binary streams get zero position!", 0, position);
+                    }
+
+                    Assert.assertEquals(3, streamCount);
                 }
-
-                Assert.assertEquals(3, streamCount);
-            }
+                return null;
+            });
 
             String notExistGroupName = "group2";
             String sql2 = String.format(SHOW_BINARY_STREAMS_WITH, notExistGroupName);
@@ -276,27 +326,32 @@ public class BinlogCommandTest extends BaseTestCase {
     @SneakyThrows
     public void testShowBinaryLogsForBinlogX() {
         if (usingBinlogX) {
-            String sql1 = String.format(SHOW_BINARY_LOGS_WITH, EXIST_STREAM_NAME);
-            try (Connection conn = getPolardbxConnection()) {
-                ResultSet resultSet = executeQuery(sql1, conn);
-                while (resultSet.next()) {
-                    String fileName = resultSet.getString("LOG_NAME");
-                    long fileSize = resultSet.getLong("FILE_SIZE");
-                    Assert.assertFalse("show binary logs with get empty file name!", StringUtils.isEmpty(fileName));
-                    Assert.assertNotEquals("show binary logs with get 0 file size!", 0, fileSize);
+            buildCommandRetryer(30).call(() -> {
+                String sql1 = String.format(SHOW_BINARY_LOGS_WITH, EXIST_STREAM_NAME);
+                try (Connection conn = getPolardbxConnection()) {
+                    ResultSet resultSet = executeQuery(sql1, conn);
+                    while (resultSet.next()) {
+                        String fileName = resultSet.getString("LOG_NAME");
+                        long fileSize = resultSet.getLong("FILE_SIZE");
+                        Assert.assertFalse("show binary logs with get empty file name!",
+                            StringUtils.isEmpty(fileName));
+                        Assert.assertNotEquals("show binary logs with get 0 file size!", 0, fileSize);
+                    }
                 }
-            }
 
-            String sql2 = String.format(SHOW_MASTER_LOGS_WITH, EXIST_STREAM_NAME);
-            try (Connection conn = getPolardbxConnection()) {
-                ResultSet resultSet = executeQuery(sql2, conn);
-                while (resultSet.next()) {
-                    String fileName = resultSet.getString("LOG_NAME");
-                    long fileSize = resultSet.getLong("FILE_SIZE");
-                    Assert.assertFalse("show master logs with get empty file name!", StringUtils.isEmpty(fileName));
-                    Assert.assertNotEquals("show master logs with get 0 file size!", 0, fileSize);
+                String sql2 = String.format(SHOW_MASTER_LOGS_WITH, EXIST_STREAM_NAME);
+                try (Connection conn = getPolardbxConnection()) {
+                    ResultSet resultSet = executeQuery(sql2, conn);
+                    while (resultSet.next()) {
+                        String fileName = resultSet.getString("LOG_NAME");
+                        long fileSize = resultSet.getLong("FILE_SIZE");
+                        Assert.assertFalse("show master logs with get empty file name!",
+                            StringUtils.isEmpty(fileName));
+                        Assert.assertNotEquals("show master logs with get 0 file size!", 0, fileSize);
+                    }
                 }
-            }
+                return null;
+            });
         }
     }
 
@@ -317,80 +372,89 @@ public class BinlogCommandTest extends BaseTestCase {
     @SneakyThrows
     public void testShowFullBinaryLogsForBinlogX() {
         if (usingBinlogX) {
-            String sql1 = String.format(SHOW_FULL_BINARY_LOGS_WITH, EXIST_STREAM_NAME);
+            buildCommandRetryer(30).call(() -> {
+                String sql1 = String.format(SHOW_FULL_BINARY_LOGS_WITH, EXIST_STREAM_NAME);
 
-            try (Connection conn = getPolardbxConnection()) {
-                ResultSet resultSet = executeQuery(sql1, conn);
+                try (Connection conn = getPolardbxConnection()) {
+                    ResultSet resultSet = executeQuery(sql1, conn);
 
-                boolean hasResult = false;
-                while (resultSet.next()) {
-                    hasResult = true;
+                    boolean hasResult = false;
+                    while (resultSet.next()) {
+                        hasResult = true;
 
-                    String fileName = resultSet.getString("LOG_NAME");
-                    Assert.assertTrue("binlog file name not starts with stream name!",
-                        StringUtils.startsWith(fileName, EXIST_STREAM_NAME));
-                    long fileSize = resultSet.getLong("FILE_SIZE");
-                    Assert.assertNotEquals("show full binary logs with get 0 file size!", 0, fileSize);
-                    if (!resultSet.isLast()) {
-                        Date createTime = resultSet.getDate("CREATE_TIME");
-                        Assert.assertNotNull("show full binary logs with get empty create_time!", createTime);
-                        Date lastModifyTime = resultSet.getDate("LAST_MODIFY_TIME");
-                        Assert.assertNotNull("show full binary logs with get empty last_modify_time!", lastModifyTime);
-                        Date firstEventTime = resultSet.getDate("FIRST_EVENT_TIME");
-                        Assert.assertNotNull("show full binary logs with get empty first_event_time!", firstEventTime);
-                        Date lastEventTime = resultSet.getDate("LAST_EVENT_TIME");
-                        Assert.assertNotNull("show full binary logs with get empty last_event_time!", lastEventTime);
-                        String lastTso = resultSet.getString("LAST_TSO");
-                        Assert.assertFalse("show full binary logs with get empty last_tso!",
-                            StringUtils.isEmpty(lastTso));
-                        String uploadStatus = resultSet.getString("UPLOAD_STATUS");
-                        Assert.assertFalse("show full binary logs with get empty upload_status!",
-                            StringUtils.isEmpty(uploadStatus));
-                        String fileLocation = resultSet.getString("FILE_LOCATION");
-                        Assert.assertFalse("show full binary logs with get empty file_location!",
-                            StringUtils.isEmpty(fileLocation));
+                        String fileName = resultSet.getString("LOG_NAME");
+                        Assert.assertTrue("binlog file name not starts with stream name!",
+                            StringUtils.startsWith(fileName, EXIST_STREAM_NAME));
+                        long fileSize = resultSet.getLong("FILE_SIZE");
+                        Assert.assertNotEquals("show full binary logs with get 0 file size!", 0, fileSize);
+                        if (!resultSet.isLast()) {
+                            Date createTime = resultSet.getDate("CREATE_TIME");
+                            Assert.assertNotNull("show full binary logs with get empty create_time!", createTime);
+                            Date lastModifyTime = resultSet.getDate("LAST_MODIFY_TIME");
+                            Assert.assertNotNull("show full binary logs with get empty last_modify_time!",
+                                lastModifyTime);
+                            Date firstEventTime = resultSet.getDate("FIRST_EVENT_TIME");
+                            Assert.assertNotNull("show full binary logs with get empty first_event_time!",
+                                firstEventTime);
+                            Date lastEventTime = resultSet.getDate("LAST_EVENT_TIME");
+                            Assert.assertNotNull("show full binary logs with get empty last_event_time!",
+                                lastEventTime);
+                            String lastTso = resultSet.getString("LAST_TSO");
+                            Assert.assertFalse("show full binary logs with get empty last_tso!",
+                                StringUtils.isEmpty(lastTso));
+                            String uploadStatus = resultSet.getString("UPLOAD_STATUS");
+                            Assert.assertFalse("show full binary logs with get empty upload_status!",
+                                StringUtils.isEmpty(uploadStatus));
+                            String fileLocation = resultSet.getString("FILE_LOCATION");
+                            Assert.assertFalse("show full binary logs with get empty file_location!",
+                                StringUtils.isEmpty(fileLocation));
+                        }
                     }
+
+                    Assert.assertTrue("show full binary logs with returns no data!", hasResult);
                 }
 
-                Assert.assertTrue("show full binary logs with returns no data!", hasResult);
-            }
+                String sql2 = String.format(SHOW_FULL_MASTER_LOGS_WITH, EXIST_STREAM_NAME);
+                try (Connection conn = getPolardbxConnection()) {
+                    ResultSet resultSet = executeQuery(sql2, conn);
 
-            String sql2 = String.format(SHOW_FULL_MASTER_LOGS_WITH, EXIST_STREAM_NAME);
-            try (Connection conn = getPolardbxConnection()) {
-                ResultSet resultSet = executeQuery(sql2, conn);
+                    boolean hasResult = false;
+                    while (resultSet.next()) {
+                        hasResult = true;
 
-                boolean hasResult = false;
-                while (resultSet.next()) {
-                    hasResult = true;
-
-                    String fileName = resultSet.getString("LOG_NAME");
-                    Assert.assertTrue("binlog file name not starts with stream name!",
-                        StringUtils.startsWith(fileName, EXIST_STREAM_NAME));
-                    long fileSize = resultSet.getLong("FILE_SIZE");
-                    Assert.assertNotEquals("show full master logs with get 0 file size!", 0, fileSize);
-                    if (!resultSet.isLast()) {
-                        Date createTime = resultSet.getDate("CREATE_TIME");
-                        Assert.assertNotNull("show full master logs with get empty create_time!", createTime);
-                        Date lastModifyTime = resultSet.getDate("LAST_MODIFY_TIME");
-                        Assert.assertNotNull("show full master logs with get empty last_modify_time!", lastModifyTime);
-                        Date firstEventTime = resultSet.getDate("FIRST_EVENT_TIME");
-                        Assert.assertNotNull("show full master logs with get empty first_event_time!", firstEventTime);
-                        Date lastEventTime = resultSet.getDate("LAST_EVENT_TIME");
-                        Assert.assertNotNull("show full master logs with get empty last_event_time!", lastEventTime);
-                        String lastTso = resultSet.getString("LAST_TSO");
-                        Assert.assertFalse("show full master logs with get empty last_tso!",
-                            StringUtils.isEmpty(lastTso));
-                        String uploadStatus = resultSet.getString("UPLOAD_STATUS");
-                        Assert.assertFalse("show full master logs with get empty upload_status!",
-                            StringUtils.isEmpty(uploadStatus));
-                        String fileLocation = resultSet.getString("FILE_LOCATION");
-                        Assert.assertFalse("show full master logs with get empty file_location!",
-                            StringUtils.isEmpty(fileLocation));
+                        String fileName = resultSet.getString("LOG_NAME");
+                        Assert.assertTrue("binlog file name not starts with stream name!",
+                            StringUtils.startsWith(fileName, EXIST_STREAM_NAME));
+                        long fileSize = resultSet.getLong("FILE_SIZE");
+                        Assert.assertNotEquals("show full master logs with get 0 file size!", 0, fileSize);
+                        if (!resultSet.isLast()) {
+                            Date createTime = resultSet.getDate("CREATE_TIME");
+                            Assert.assertNotNull("show full master logs with get empty create_time!", createTime);
+                            Date lastModifyTime = resultSet.getDate("LAST_MODIFY_TIME");
+                            Assert.assertNotNull("show full master logs with get empty last_modify_time!",
+                                lastModifyTime);
+                            Date firstEventTime = resultSet.getDate("FIRST_EVENT_TIME");
+                            Assert.assertNotNull("show full master logs with get empty first_event_time!",
+                                firstEventTime);
+                            Date lastEventTime = resultSet.getDate("LAST_EVENT_TIME");
+                            Assert.assertNotNull("show full master logs with get empty last_event_time!",
+                                lastEventTime);
+                            String lastTso = resultSet.getString("LAST_TSO");
+                            Assert.assertFalse("show full master logs with get empty last_tso!",
+                                StringUtils.isEmpty(lastTso));
+                            String uploadStatus = resultSet.getString("UPLOAD_STATUS");
+                            Assert.assertFalse("show full master logs with get empty upload_status!",
+                                StringUtils.isEmpty(uploadStatus));
+                            String fileLocation = resultSet.getString("FILE_LOCATION");
+                            Assert.assertFalse("show full master logs with get empty file_location!",
+                                StringUtils.isEmpty(fileLocation));
+                        }
                     }
-                }
 
-                Assert.assertTrue("show full master logs with returns no data!", hasResult);
-            }
+                    Assert.assertTrue("show full master logs with returns no data!", hasResult);
+                }
+                return null;
+            });
         }
     }
 
@@ -398,17 +462,20 @@ public class BinlogCommandTest extends BaseTestCase {
     @SneakyThrows
     public void testShowMasterStatusForBinlogX() {
         if (usingBinlogX) {
-            String sql = String.format(SHOW_MASTER_STATUS_WITH, EXIST_STREAM_NAME);
-            try (Connection conn = getPolardbxConnection()) {
-                ResultSet resultSet = executeQuery(sql, conn);
-                while (resultSet.next()) {
-                    String fileName = resultSet.getString("FILE");
-                    Assert.assertTrue("show master status with get binlog file name not starts with stream name!",
-                        StringUtils.startsWith(fileName, EXIST_STREAM_NAME));
-                    long position = resultSet.getLong("POSITION");
-                    Assert.assertNotEquals("show master status with get zero position!", 0, position);
+            buildCommandRetryer(30).call(() -> {
+                String sql = String.format(SHOW_MASTER_STATUS_WITH, EXIST_STREAM_NAME);
+                try (Connection conn = getPolardbxConnection()) {
+                    ResultSet resultSet = executeQuery(sql, conn);
+                    while (resultSet.next()) {
+                        String fileName = resultSet.getString("FILE");
+                        Assert.assertTrue("show master status with get binlog file name not starts with stream name!",
+                            StringUtils.startsWith(fileName, EXIST_STREAM_NAME));
+                        long position = resultSet.getLong("POSITION");
+                        Assert.assertNotEquals("show master status with get zero position!", 0, position);
+                    }
                 }
-            }
+                return null;
+            });
         }
     }
 
@@ -416,27 +483,31 @@ public class BinlogCommandTest extends BaseTestCase {
     @SneakyThrows
     public void testShowFullMasterStatusForBinlogX() {
         if (usingBinlogX) {
-            String sql = String.format(SHOW_FULL_MASTER_STATUS_WITH, EXIST_STREAM_NAME);
-            try (Connection conn = getPolardbxConnection()) {
-                ResultSet resultSet = executeQuery(sql, conn);
-                while (resultSet.next()) {
-                    String fileName = resultSet.getString("FILE");
-                    Assert.assertTrue("show full master status get binlog file name not starts with stream name!",
-                        StringUtils.startsWith(fileName, EXIST_STREAM_NAME));
-                    long position = resultSet.getLong("POSITION");
-                    Assert.assertNotEquals("show full master status get zero position!", 0, position);
-                    String lastTso = resultSet.getString("LASTTSO");
-                    Assert.assertFalse("show full master status get empty last_tso!", StringUtils.isEmpty(lastTso));
-                    long delayMs = resultSet.getLong("DELAYTIMEMS");
-                    int avgRevEps = resultSet.getInt("AVGREVEPS");
-                    int avgRevBps = resultSet.getInt("AVGREVEPS");
-                    int avgWriteEps = resultSet.getInt("AVGWRITEEPS");
-                    int avgWriteBps = resultSet.getInt("AVGWRITEBPS");
-                    int avgWriteTps = resultSet.getInt("AVGWRITETPS");
-                    int avgUploadBps = resultSet.getInt("AVGUPLOADBPS");
-                    int avgDumpBps = resultSet.getInt("AVGDUMPBPS");
+            buildCommandRetryer(30).call(() -> {
+                String sql = String.format(SHOW_FULL_MASTER_STATUS_WITH, EXIST_STREAM_NAME);
+                try (Connection conn = getPolardbxConnection()) {
+                    ResultSet resultSet = executeQuery(sql, conn);
+                    while (resultSet.next()) {
+                        String fileName = resultSet.getString("FILE");
+                        Assert.assertTrue("show full master status get binlog file name not starts with stream name!",
+                            StringUtils.startsWith(fileName, EXIST_STREAM_NAME));
+                        long position = resultSet.getLong("POSITION");
+                        Assert.assertNotEquals("show full master status get zero position!", 0, position);
+                        String lastTso = resultSet.getString("LASTTSO");
+                        Assert.assertFalse("show full master status get empty last_tso!",
+                            StringUtils.isEmpty(lastTso));
+                        long delayMs = resultSet.getLong("DELAYTIMEMS");
+                        int avgRevEps = resultSet.getInt("AVGREVEPS");
+                        int avgRevBps = resultSet.getInt("AVGREVEPS");
+                        int avgWriteEps = resultSet.getInt("AVGWRITEEPS");
+                        int avgWriteBps = resultSet.getInt("AVGWRITEBPS");
+                        int avgWriteTps = resultSet.getInt("AVGWRITETPS");
+                        int avgUploadBps = resultSet.getInt("AVGUPLOADBPS");
+                        int avgDumpBps = resultSet.getInt("AVGDUMPBPS");
+                    }
                 }
-            }
+                return null;
+            });
         }
     }
 
@@ -444,34 +515,37 @@ public class BinlogCommandTest extends BaseTestCase {
     @SneakyThrows
     public void testShowBinlogEventsForBinlogX() {
         if (usingBinlogX) {
-            try (Connection conn = getPolardbxConnection()) {
-                executeQueryHelper("show binlog events with 'group1_stream_0'", conn);
-                executeQueryHelper("show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001'",
-                    conn);
-                executeQueryHelper("show binlog events with 'group1_stream_0' from 4", conn);
-                executeQueryHelper("show binlog events with 'group1_stream_0' limit 1", conn);
-                executeQueryHelper("show binlog events with 'group1_stream_0' limit 1,1", conn);
-                executeQueryHelper(
-                    "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4", conn);
-                executeQueryHelper(
-                    "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' limit 1", conn);
-                executeQueryHelper(
-                    "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' limit 1,1", conn);
-                executeQueryHelper(
-                    "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4 limit 1",
-                    conn);
-                executeQueryHelper(
-                    "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4 limit 1,1",
-                    conn);
-                executeQueryHelper(
-                    "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4 limit 1",
-                    conn);
-                executeQueryHelper(
-                    "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4 limit 1,1",
-                    conn);
-                executeQueryHelper("show binlog events with 'group1_stream_0' from 4 limit 1", conn);
-                executeQueryHelper("show binlog events with 'group1_stream_0' from 4 limit 1,1", conn);
-            }
+            buildCommandRetryer(30).call(() -> {
+                try (Connection conn = getPolardbxConnection()) {
+                    executeQueryHelper("show binlog events with 'group1_stream_0'", conn);
+                    executeQueryHelper("show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001'",
+                        conn);
+                    executeQueryHelper("show binlog events with 'group1_stream_0' from 4", conn);
+                    executeQueryHelper("show binlog events with 'group1_stream_0' limit 1", conn);
+                    executeQueryHelper("show binlog events with 'group1_stream_0' limit 1,1", conn);
+                    executeQueryHelper(
+                        "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4", conn);
+                    executeQueryHelper(
+                        "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' limit 1", conn);
+                    executeQueryHelper(
+                        "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' limit 1,1", conn);
+                    executeQueryHelper(
+                        "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4 limit 1",
+                        conn);
+                    executeQueryHelper(
+                        "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4 limit 1,1",
+                        conn);
+                    executeQueryHelper(
+                        "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4 limit 1",
+                        conn);
+                    executeQueryHelper(
+                        "show binlog events with 'group1_stream_0' in 'group1_stream_0_binlog.000001' from 4 limit 1,1",
+                        conn);
+                    executeQueryHelper("show binlog events with 'group1_stream_0' from 4 limit 1", conn);
+                    executeQueryHelper("show binlog events with 'group1_stream_0' from 4 limit 1,1", conn);
+                }
+                return null;
+            });
         }
     }
 
@@ -495,10 +569,13 @@ public class BinlogCommandTest extends BaseTestCase {
 //        }
 //    }
 
-//    private Retryer<Object> buildRetryer() {
-//        return RetryerBuilder.newBuilder().retryIfException()
-//            .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.SECONDS))
-//            .withStopStrategy(StopStrategies.stopAfterAttempt(600)).build();
-//    }
+    static Retryer<Void> buildCommandRetryer(int maxAttempts) {
+        return RetryerBuilder.<Void>newBuilder()
+            .retryIfException()
+            .retryIfExceptionOfType(AssertionError.class)
+            .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.SECONDS))
+            .withStopStrategy(StopStrategies.stopAfterAttempt(maxAttempts))
+            .build();
+    }
 
 }

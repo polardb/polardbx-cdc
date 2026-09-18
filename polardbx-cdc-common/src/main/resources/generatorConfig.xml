@@ -14,7 +14,7 @@
             <property name="suppressDate" value="false"/>
         </commentGenerator>
 
-        <jdbcConnection driverClass="com.mysql.jdbc.Driver"
+        <jdbcConnection driverClass="com.alibaba.polardbx.core.jdbc.Driver"
                         connectionURL="jdbc:mysql://127.0.0.1:3306"
                         userId="YOUR_USER_ID"
                         password="YOUR_PASSWORD">

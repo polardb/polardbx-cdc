@@ -6,7 +6,6 @@
  */
 package com.aliyun.polardbx.binlog.lock;
 
-import com.aliyun.polardbx.binlog.backup.StreamContext;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.filesys.LocalFileSystem;
@@ -43,8 +42,7 @@ public class LogFileLockManagerTest extends BaseTest {
     @SneakyThrows
     public void setUp() {
         logFileLockManagerCollection = new LogFileLockManagerCollection();
-        StreamContext context = new StreamContext(groupName, null, clusterId, taskName, TaskType.Dumper, 1);
-        logFileLockManager = new LogFileLockManager(streamName, context);
+        logFileLockManager = new LogFileLockManager(streamName, TaskType.Dumper, 1, groupName);
         localFileSystem = new LocalFileSystem(rootPath, groupName, streamName);
         logFileLockManager.setLocalFileSystem(localFileSystem);
         logFileLockManagerCollection.add(streamName, logFileLockManager);

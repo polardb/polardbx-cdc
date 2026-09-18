@@ -283,7 +283,7 @@ public class JsonConversion {
                     if (i > 0) {
                         buf.append(", ");
                     }
-                    buf.append('"').append(key(i, charsetName)).append('"');
+                    buf.append('"').append(escape(key(i, charsetName))).append('"');
                     buf.append(": ");
                     element(i, charsetName).toJsonString(buf, charsetName);
                 }
@@ -315,7 +315,7 @@ public class JsonConversion {
                 buf.append("true");
                 break;
             case LITERAL_NULL:
-                buf.append("NULL");
+                buf.append("null");
                 break;
             case OPAQUE:
                 String text = null;
@@ -365,12 +365,12 @@ public class JsonConversion {
                     buf.append('"').append(text).append('"');
                 } else {
                     text = m_data.getFixString((int) m_length, charsetName);
-                    buf.append('"').append(escapse(text)).append('"');
+                    buf.append('"').append(escape(text)).append('"');
                 }
 
                 break;
             case STRING:
-                buf.append('"').append(escapse(m_string_value)).append('"');
+                buf.append('"').append(escape(m_string_value)).append('"');
                 break;
             case ERROR:
                 throw new IllegalArgumentException("illegal json data");
@@ -380,17 +380,33 @@ public class JsonConversion {
         }
     }
 
-    private static StringBuilder escapse(String data) {
+    private static StringBuilder escape(String data) {
         StringBuilder sb = new StringBuilder(data.length());
         int endIndex = data.length();
         for (int i = 0; i < endIndex; ++i) {
             char c = data.charAt(i);
             if (c == '"') {
-                sb.append('\\');
+                sb.append("\\\"");
+            } else if (c == '\n') {
+                sb.append("\\n");
+            } else if (c == '\r') {
+                sb.append("\\r");
             } else if (c == '\\') {
-                sb.append("\\");
+                sb.append("\\\\");
+            } else if (c == '\t') {
+                sb.append("\\t");
+            } else if (c < 16) {
+                sb.append("\\u000");
+                sb.append(Integer.toHexString(c));
+            } else if (c < 32) {
+                sb.append("\\u00");
+                sb.append(Integer.toHexString(c));
+            } else if (c >= 0x7f && c <= 0xA0) {
+                sb.append("\\u00");
+                sb.append(Integer.toHexString(c));
+            } else {
+                sb.append(c);
             }
-            sb.append(c);
         }
         return sb;
     }

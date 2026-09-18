@@ -20,4 +20,6 @@ public class ExtractorConfig {
     protected String privateMeta;
     protected int eventBufferSize = 2048;
     protected boolean enableSrcLogicalMetaSnapshot = false;
+    protected boolean enableDetectHeartbeat = false;
+    protected boolean createHeartbeatTable = false;
 }

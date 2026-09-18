@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * This class defines a set of SQL column information like
@@ -71,6 +72,13 @@ public abstract class DBMSColumnSet implements Serializable {
      * Return all columns in object.
      */
     public abstract List<? extends DBMSColumn> getColumns();
+
+    /**
+     * Return the normalized names of columns externalized in the table metadata carried by this column set.
+     */
+    public Set<String> getExternalizedColumnNames() {
+        return Collections.emptySet();
+    }
 
     /**
      * Return the primary key columns if it exists, return <code>null</code> in

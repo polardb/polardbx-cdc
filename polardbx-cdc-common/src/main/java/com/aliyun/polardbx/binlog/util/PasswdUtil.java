@@ -12,6 +12,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.DN_PASSWORD_KEY;
@@ -35,14 +36,14 @@ public class PasswdUtil {
 
     public static String decryptBase64(String sSrc, String sKey) {
         try {
-            byte[] raw = sKey.getBytes("utf-8");
+            byte[] raw = sKey.getBytes(StandardCharsets.UTF_8);
             SecretKeySpec skeySpec = new SecretKeySpec(raw, "AES");
             Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
             cipher.init(Cipher.DECRYPT_MODE, skeySpec);
             //先用base64解密
             byte[] encrypted1 = Base64.getDecoder().decode(sSrc);
             byte[] original = cipher.doFinal(encrypted1);
-            String originalString = new String(original, "utf-8");
+            String originalString = new String(original, StandardCharsets.UTF_8);
             return originalString;
         } catch (Exception ex) {
             throw new RuntimeException("param error during decrypt", ex);

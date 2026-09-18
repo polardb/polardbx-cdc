@@ -6,9 +6,13 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog.download;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.canal.binlog.download.action.DownloadActionFactory;
 import com.aliyun.polardbx.binlog.canal.binlog.download.action.IDownloadAction;
+import com.aliyun.polardbx.binlog.util.DecompressCmd;
+import com.aliyun.polardbx.binlog.util.DecompressCmdFactory;
 import lombok.Getter;
 import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
@@ -30,9 +34,17 @@ public class DownloadTask implements Runnable {
         this.localFilePath = localFilePath;
     }
 
-
     public void exec() throws Exception {
-        File localFile = new File(localFilePath);
+
+        String localFilePathTmp = this.localFilePath;
+        boolean autoDecompress =
+            DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_RDS_BINLOG_AUTO_DECOMPRESS);
+        DecompressCmd decompressCmd = null;
+        if (binlogFile.needDecompress() && autoDecompress) {
+            localFilePathTmp = localFilePathTmp + ".zst";
+            decompressCmd = DecompressCmdFactory.create(localFilePathTmp, this.localFilePath);
+        }
+        File localFile = new File(this.localFilePath);
 
         if (!localFile.exists()) {
             try {
@@ -41,11 +53,20 @@ public class DownloadTask implements Runnable {
                 }
                 long start = System.currentTimeMillis();
                 IDownloadAction action = DownloadActionFactory.create();
-                action.exec(storageInstanceId, localFilePath, binlogFile);
+                action.exec(storageInstanceId, localFilePathTmp, binlogFile);
+                if (decompressCmd != null) {
+                    decompressCmd.execute();
+                }
                 long useTime = System.currentTimeMillis() - start;
-                logger.info("download file {} success, use time: {}ms, use action : {}", localFilePath, useTime,
+                logger.info("download file {} success, use time: {}ms, use action : {}", localFilePathTmp, useTime,
                     action.getClass().getSimpleName());
             } catch (Exception e) {
+                try {
+                    if (decompressCmd != null) {
+                        FileUtils.forceDelete(new File(localFilePathTmp));
+                    }
+                } catch (Exception ignored) {
+                }
                 try {
                     FileUtils.forceDelete(localFile);
                 } catch (Exception ignored) {

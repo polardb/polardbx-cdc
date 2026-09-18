@@ -6,6 +6,9 @@
  */
 package com.aliyun.polardbx.binlog.jvm;
 
+import lombok.Getter;
+import lombok.Setter;
+
 /**
  * Created by ziyang.lb on 2021/01/21.
  **/
@@ -31,6 +34,18 @@ public class JvmSnapshot {
      * 老年代最大内存
      */
     private long oldMax;
+
+    @Setter
+    @Getter
+    private double totalRatio;
+
+    @Setter
+    @Getter
+    private long youngCommitted;
+
+    @Setter
+    @Getter
+    private long heapMax;
 
     private long metaUsed;
     private long metaMax;

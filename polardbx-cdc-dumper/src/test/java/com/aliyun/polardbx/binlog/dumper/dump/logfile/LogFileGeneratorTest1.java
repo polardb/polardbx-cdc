@@ -6,6 +6,9 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.TimelineEnvConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
@@ -16,20 +19,32 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.dumper.dump.util.TableIdManager;
+import com.aliyun.polardbx.binlog.format.utils.EventGenerator;
 import com.aliyun.polardbx.binlog.protocol.TxnFlag;
+import com.aliyun.polardbx.binlog.protocol.TxnItem;
 import com.aliyun.polardbx.binlog.protocol.TxnMergedToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Test;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 @Slf4j
 public class LogFileGeneratorTest1 extends BaseTest {
@@ -40,8 +55,8 @@ public class LogFileGeneratorTest1 extends BaseTest {
     public void testArchiveServerIdCheck() {
         LogFileGenerator generator = Mockito.mock(LogFileGenerator.class);
         TxnMergedToken currentToken =
-                TxnMergedToken.newBuilder().setTxnFlag(TxnFlag.ARCHIVE).setType(TxnType.DML).build();
-        Mockito.when(generator.serverIdCheckFailed(currentToken)).thenCallRealMethod();
+            TxnMergedToken.newBuilder().setTxnFlag(TxnFlag.ARCHIVE).setType(TxnType.DML).build();
+        when(generator.serverIdCheckFailed(currentToken)).thenCallRealMethod();
         Assert.assertFalse(generator.serverIdCheckFailed(currentToken));
     }
 
@@ -49,8 +64,8 @@ public class LogFileGeneratorTest1 extends BaseTest {
     public void testNormalServerIdCheckFailed() {
         LogFileGenerator generator = Mockito.mock(LogFileGenerator.class);
         TxnMergedToken currentToken =
-                TxnMergedToken.newBuilder().setTxnFlag(TxnFlag.NORMAL).setType(TxnType.DML).build();
-        Mockito.when(generator.serverIdCheckFailed(currentToken)).thenCallRealMethod();
+            TxnMergedToken.newBuilder().setTxnFlag(TxnFlag.NORMAL).setType(TxnType.DML).build();
+        when(generator.serverIdCheckFailed(currentToken)).thenCallRealMethod();
         Assert.assertTrue(generator.serverIdCheckFailed(currentToken));
     }
 
@@ -58,8 +73,8 @@ public class LogFileGeneratorTest1 extends BaseTest {
     public void testNeedServerIdCheckNormal() {
         LogFileGenerator generator = Mockito.mock(LogFileGenerator.class);
         TxnMergedToken currentToken =
-                TxnMergedToken.newBuilder().setTxnFlag(TxnFlag.NORMAL).setType(TxnType.DML).build();
-        Mockito.when(generator.needCheckServerId(currentToken)).thenCallRealMethod();
+            TxnMergedToken.newBuilder().setTxnFlag(TxnFlag.NORMAL).setType(TxnType.DML).build();
+        when(generator.needCheckServerId(currentToken)).thenCallRealMethod();
         Assert.assertTrue(generator.needCheckServerId(currentToken));
     }
 
@@ -67,8 +82,8 @@ public class LogFileGeneratorTest1 extends BaseTest {
     public void testNeedServerIdCheckArchive() {
         LogFileGenerator generator = Mockito.mock(LogFileGenerator.class);
         TxnMergedToken currentToken =
-                TxnMergedToken.newBuilder().setTxnFlag(TxnFlag.ARCHIVE).setType(TxnType.DML).build();
-        Mockito.when(generator.needCheckServerId(currentToken)).thenCallRealMethod();
+            TxnMergedToken.newBuilder().setTxnFlag(TxnFlag.ARCHIVE).setType(TxnType.DML).build();
+        when(generator.needCheckServerId(currentToken)).thenCallRealMethod();
         Assert.assertFalse(generator.needCheckServerId(currentToken));
     }
 
@@ -153,7 +168,7 @@ public class LogFileGeneratorTest1 extends BaseTest {
     @Test
     public void testExtractServerIdFromTraceId() {
         LogFileGenerator generator = Mockito.mock(LogFileGenerator.class);
-        Mockito.when(generator.extractServerIdFromTraceId(Mockito.anyString())).thenCallRealMethod();
+        when(generator.extractServerIdFromTraceId(Mockito.anyString())).thenCallRealMethod();
         String normalTrace = "/*DRDS /127.0.0.1/197122bf23800002-4/0/0/ */";
         long serverId = generator.extractServerIdFromTraceId(normalTrace);
         Assert.assertEquals(0, serverId);
@@ -163,5 +178,70 @@ public class LogFileGeneratorTest1 extends BaseTest {
         normalTrace = "/*DRDS /127.0.0.1/197122bf23800002-4/0/456/3306/db1/tb1/ */";
         serverId = generator.extractServerIdFromTraceId(normalTrace);
         Assert.assertEquals(456, serverId);
+    }
+
+    @Test
+    public void testCheckFirstCompressed() {
+        LogFileGenerator generator = Mockito.mock(LogFileGenerator.class, Mockito.CALLS_REAL_METHODS);
+        TimelineEnvConfig config = new TimelineEnvConfig();
+        generator.setTimelineEnvConfig(config);
+        Assert.assertFalse(generator.checkFirstCompressed());
+        config.getConfigMap().put(ConfigKeys.BINLOG_TRANSACTION_COMPRESSION, "ON");
+        Assert.assertTrue(generator.checkFirstCompressed());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testWriteMetaConfigEnvChange() {
+        LogFileGenerator generator = Mockito.mock(LogFileGenerator.class);
+        TxnMergedToken token = TxnMergedToken.newBuilder().setTso("0").build();
+        TimelineEnvConfig config = Mockito.mock(TimelineEnvConfig.class);
+        Mockito.doCallRealMethod().when(generator).writeMetaConfigEnvChange();
+        Mockito.doCallRealMethod().when(generator).setTimelineEnvConfig(any());
+        Mockito.doCallRealMethod().when(generator).setCurrentToken(any());
+        when(generator.checkFirstCompressed()).thenReturn(true);
+        generator.setCurrentToken(token);
+        generator.setTimelineEnvConfig(config);
+        generator.writeMetaConfigEnvChange();
+        Mockito.verify(generator, Mockito.times(1)).doFlushLog();
+    }
+
+    @Test
+    @SneakyThrows
+    public void testPrepareTimelineEnvConfig() {
+        LogFileGenerator generator = Mockito.mock(LogFileGenerator.class, Mockito.CALLS_REAL_METHODS);
+        Field startTsoField = LogFileGenerator.class.getDeclaredField("startTso");
+        startTsoField.setAccessible(true);
+        startTsoField.set(generator, "100");
+
+        Map<String, String> configContent = new HashMap<>(1);
+        configContent.put(ConfigKeys.BINLOG_TRANSACTION_COMPRESSION, "ON");
+        String configContentStr = JSON.toJSONString(configContent);
+        String insertSql =
+            String.format(
+                "insert into binlog_env_config_history(`change_env_content`,`tso`,`instruction_id`) values ('%s','%s','%s')",
+                configContentStr, "100", "zm_test_config_exists");
+        JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
+        metaTemplate.execute(insertSql);
+        generator.prepareTimelineEnvConfig();
+
+        Field compressedAlreadyField = LogFileGenerator.class.getDeclaredField("compressedAlready");
+        compressedAlreadyField.setAccessible(true);
+        Assert.assertTrue(compressedAlreadyField.getBoolean(generator));
+    }
+
+    @Test
+    @SneakyThrows
+    public void testUpdateDmlEventGenerateTableId() {
+        LogFileGenerator generator = Mockito.mock(LogFileGenerator.class, Mockito.CALLS_REAL_METHODS);
+        try (MockedStatic<EventGenerator> eventGeneratorMockedStatic = Mockito.mockStatic(EventGenerator.class)) {
+            TxnItem txnItem = TxnItem.newBuilder().setSchema("zimian").setTable("test").setEventType(30).build();
+            TableIdManager tableIdManager = new TableIdManager(1, false);
+            Field tableIdManagerField = LogFileGenerator.class.getDeclaredField("tableIdManager");
+            tableIdManagerField.setAccessible(true);
+            tableIdManagerField.set(generator, tableIdManager);
+            long tableId = generator.updateDmlEvent(txnItem, new byte[0]);
+            Assert.assertEquals(2, tableId);
+        }
     }
 }

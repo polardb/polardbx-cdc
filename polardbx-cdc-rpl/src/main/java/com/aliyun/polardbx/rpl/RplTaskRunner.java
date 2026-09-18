@@ -24,7 +24,7 @@ import com.aliyun.polardbx.rpl.applier.SplitApplier;
 import com.aliyun.polardbx.rpl.applier.SplitTransactionApplier;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.applier.TableParallelApplier;
-import com.aliyun.polardbx.rpl.applier.TransactionApplier;
+import com.aliyun.polardbx.rpl.applier.TransactionParallelApplierV3;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.extractor.BaseExtractor;
 import com.aliyun.polardbx.rpl.extractor.CdcExtractor;
@@ -63,6 +63,8 @@ import com.aliyun.polardbx.rpl.taskmeta.ValidationExtractorConfig;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.STREAM_NAME;
 
 /**
  * @author shicai.xsc 2020/12/8 14:11
@@ -150,12 +152,21 @@ public class RplTaskRunner {
         context.setConfig(config);
         context.setPhysicalNum(0);
         ExtractorConfig extractorConfig = JSON.parseObject(taskConfig.getExtractorConfig(), ExtractorConfig.class);
+        // 区分迁移任务和 replica 任务
         if (extractorConfig.getFilterType() == FilterType.IMPORT_FILTER) {
             DataImportMeta.PhysicalMeta importMeta = JSON.parseObject(
                 extractorConfig.getPrivateMeta(), DataImportMeta.PhysicalMeta.class);
             context.setPhysicalMeta(importMeta);
             DataImportMeta meta = JSON.parseObject(config, DataImportMeta.class);
             context.setPhysicalNum(meta.getMetaList().size());
+            if (StringUtils.isNotBlank(importMeta.getStreamName())) {
+                System.setProperty(STREAM_NAME, importMeta.getStreamName());
+            }
+        } else if (extractorConfig.getFilterType() == FilterType.RPL_FILTER) {
+            ReplicaMeta replicaMeta = JSON.parseObject(extractorConfig.getPrivateMeta(), ReplicaMeta.class);
+            if (StringUtils.isNotBlank(replicaMeta.getStreamName())) {
+                System.setProperty(STREAM_NAME, replicaMeta.getStreamName());
+            }
         }
         log.info("RplTaskRunner prepare filter");
         createFilter();
@@ -314,7 +325,7 @@ public class RplTaskRunner {
 
         switch (config.getApplierType()) {
         case TRANSACTION:
-            applier = new TransactionApplier(config, targetHostInfo, srcHostInfo);
+            applier = new TransactionParallelApplierV3(config, targetHostInfo, srcHostInfo);
             break;
         case SERIAL:
             applier = new MysqlApplier(config, targetHostInfo, srcHostInfo);

@@ -73,9 +73,12 @@ public abstract class RelayDataReaderBase implements RelayDataReader {
                     String.format("request tso is less than origin start tso, %s:%s.", requestTso, originStartTso));
             }
 
-            LockingCleaner.CheckParameter parameter =
-                new LockingCleaner.CheckParameter(requestTso, storeEngine.getMaxCleanTso());
-            storeEngine.getLockingCleaner().checkWithCallback(parameter, () -> null);
+            // 在cleanLock内读取maxCleanTso，避免与clean操作产生竞态
+            // 竞态场景: checkValid()在锁外读到旧maxCleanTso → clean执行删除 → checkWithCallback用过期值校验通过
+            storeEngine.getLockingCleaner().checkWithCallback(() -> {
+                String maxCleanTso = storeEngine.getMaxCleanTso();
+                return new LockingCleaner.CheckParameter(requestTso, maxCleanTso);
+            }, () -> null);
         } catch (InvalidTsoException e) {
             log.error("invalid tso error, task will restart!!", e);
             storeEngine.close();

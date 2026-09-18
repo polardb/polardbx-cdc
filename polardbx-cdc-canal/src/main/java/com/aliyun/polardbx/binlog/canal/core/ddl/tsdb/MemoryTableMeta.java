@@ -25,6 +25,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnPrimaryKey;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnUniqueKey;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLConstraint;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
@@ -43,6 +44,9 @@ import com.alibaba.polardbx.druid.sql.repository.SchemaObject;
 import com.alibaba.polardbx.druid.sql.repository.SchemaObjectStoreProvider;
 import com.alibaba.polardbx.druid.sql.repository.SchemaRepository;
 import com.alibaba.polardbx.druid.util.JdbcConstants;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
@@ -85,14 +89,15 @@ public class MemoryTableMeta implements TableMetaTSDB {
     private final Logger logger;
     private final boolean ignoreApplyError;
     @Getter
+    protected SchemaRepository repository;
+    protected boolean isMySql8 = false;
+    @Getter
     @Setter
     private boolean ignoreImplicitPrimaryKey;
     @Getter
     private boolean forceReplace;
-
-    @Getter
-    protected SchemaRepository repository;
-    protected boolean isMySql8 = false;
+    @Setter
+    private boolean forceReplaceDatabase;
 
     public MemoryTableMeta(Logger logger, boolean ignoreApplyError) {
         this(logger, DEFAULT_MAX_CACHE_SIZE, DEFAULT_CACHE_EXPIRE_TIME_MINUTES, ignoreApplyError);
@@ -122,6 +127,7 @@ public class MemoryTableMeta implements TableMetaTSDB {
 
     @Override
     public boolean init(String destination) {
+        this.forceReplaceDatabase = DynamicApplicationConfig.getBoolean(ConfigKeys.META_BUILD_FORCE_REPLACE_DATABASE);
         return true;
     }
 
@@ -138,6 +144,22 @@ public class MemoryTableMeta implements TableMetaTSDB {
         }
         ddl = ddl.toLowerCase();
         ddl = tryRepairSql(ddl);
+
+        // Strip leading comments before TDDL hint when enabled
+        if (SpringContextHolder.isInitialize()
+            && DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_DDL_STRIP_LEADING_COMMENTS)) {
+            String tddlHintPrefix = "/*+tddl:";
+            int tddlHintIdx = ddl.indexOf(tddlHintPrefix);
+            if (tddlHintIdx > 0) {
+                String originalDdl = ddl;
+                ddl = ddl.substring(tddlHintIdx);
+                logger.warn("stripped leading comments before TDDL hint for DDL apply, schema: {}, "
+                        + "original length: {}, stripped length: {}, first 100 chars of original: [{}]",
+                    schema, originalDdl.length(), ddl.length(),
+                    originalDdl.substring(0, Math.min(100, originalDdl.length())));
+            }
+        }
+
         tableMetas.invalidateAll();
         synchronized (this) {
             if (StringUtils.isNotEmpty(schema)) {
@@ -246,6 +268,11 @@ public class MemoryTableMeta implements TableMetaTSDB {
                 if (sqlCreateTableStatement.isIfNotExists()) {
                     return forceReplace || find(schemaName, tableName) == null;
                 }
+            } else if (statement instanceof SQLCreateDatabaseStatement) {
+                SQLCreateDatabaseStatement sqlCreateDatabaseStatement = (SQLCreateDatabaseStatement) statement;
+                if (sqlCreateDatabaseStatement.isIfNotExists()) {
+                    return forceReplaceDatabase || repository.findSchema(schemaName) == null;
+                }
             }
         }
 
@@ -277,11 +304,12 @@ public class MemoryTableMeta implements TableMetaTSDB {
                     }
                     String targetName = ((SQLIdentifierExpr) tableOption.getTarget()).getName();
                     if ("CHARACTER SET".equalsIgnoreCase(targetName) || "CHARSET".equalsIgnoreCase(targetName)) {
+                        // charset 取值可能带反引号或引号（如保留字 `binary`），需归一化后再作为 charset 名使用
                         if (tableOption.getValue() instanceof SQLBinaryOpExpr) {
                             SQLBinaryOpExpr binaryOpExpr = (SQLBinaryOpExpr) tableOption.getValue();
-                            tableMeta.setCharset(binaryOpExpr.getLeft().toString());
+                            tableMeta.setCharset(normalize(binaryOpExpr.getLeft().toString()));
                         } else {
-                            tableMeta.setCharset(tableOption.getValue().toString());
+                            tableMeta.setCharset(normalize(tableOption.getValue().toString()));
                         }
                         break;
                     }
@@ -398,8 +426,12 @@ public class MemoryTableMeta implements TableMetaTSDB {
                     fieldMeta.setUnique(true);
                 }
             }
-            fieldMeta.setGenerated(column.getGeneratedAlawsAs() != null);
+            if (column.getGeneratedAlawsAs() != null) {
+                fieldMeta.setGenerated(true);
+                fieldMeta.setNullable(false);
+            }
             fieldMeta.setIsOnUpdate(column.getOnUpdate() != null);
+            fieldMeta.setExternalized(column.isExternalize());
             tableMeta.addFieldMeta(fieldMeta);
         } else if (element instanceof MySqlPrimaryKey) {
             MySqlPrimaryKey column = (MySqlPrimaryKey) element;

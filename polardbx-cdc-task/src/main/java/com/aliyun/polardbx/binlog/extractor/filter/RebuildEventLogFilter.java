@@ -207,33 +207,39 @@ public class RebuildEventLogFilter implements LogEventFilter<TransactionGroup> {
         IteratorBuffer it = transaction.iterator();
         reformatContext.setIt(it);
         reformatContext.setVirtualTSO(transaction.getVirtualTsoStr());
-        if (it != null) {
-            boolean allRemove = true;
-            while (it.hasNext()) {
-                TxnItemRef tir = it.next();
-                EventData eventData = tir.getEventData();
-                byte[] bytes = DirectByteOutput.unsafeFetch(eventData.getPayload());
-                LogEvent e = logDecoder.decode(new LogBuffer(bytes, 0, bytes.length), logContext);
-                if (!acceptFilter.accept(e)) {
-                    removeOneItem(tir, it);
-                    continue;
-                }
+        reformatContext.setExternalColumnTxnContext(transaction.getExternalColumnTxnContext());
+        try {
+            if (it != null) {
+                boolean allRemove = true;
+                while (it.hasNext()) {
+                    TxnItemRef tir = it.next();
+                    EventData eventData = tir.getEventData();
+                    byte[] bytes = DirectByteOutput.unsafeFetch(eventData.getPayload());
+                    LogEvent e = logDecoder.decode(new LogBuffer(bytes, 0, bytes.length), logContext);
+                    if (!acceptFilter.accept(e)) {
+                        removeOneItem(tir, it);
+                        continue;
+                    }
 
-                Long serverId = instanceServerId;
-                if (transaction.getServerId() != null) {
-                    serverId = transaction.getServerId();
-                }
-                reformatContext.setServerId(serverId);
-                if (!reformat(tir, e, reformatContext, eventData)) {
-                    it.remove();
-                    continue;
-                }
+                    Long serverId = instanceServerId;
+                    if (transaction.getServerId() != null) {
+                        serverId = transaction.getServerId();
+                    }
+                    reformatContext.setServerId(serverId);
+                    if (!reformat(tir, e, reformatContext, eventData)) {
+                        it.remove();
+                        continue;
+                    }
 
-                allRemove = false;
+                    allRemove = false;
+                }
+                if (allRemove) {
+                    transaction.release();
+                }
             }
-            if (allRemove) {
-                transaction.release();
-            }
+        } finally {
+            reformatContext.setExternalColumnTxnContext(null);
+            transaction.releaseExternalColumnTxnContext();
         }
     }
 

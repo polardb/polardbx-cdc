@@ -42,6 +42,9 @@ public class StatMetrics {
     private AtomicLong persistentMessageCounter = new AtomicLong();
     private AtomicLong totalInCache = new AtomicLong();
     private AtomicLong periodCommitCount = new AtomicLong();
+    private AtomicLong totalApplyDelay = new AtomicLong();
+    private AtomicLong applyAttemptCount = new AtomicLong();
+    private AtomicLong heartbeatCount = new AtomicLong();
 
     public static StatMetrics getInstance() {
         return INSTANCE;
@@ -87,7 +90,12 @@ public class StatMetrics {
     private void doStatOutDelay(DBMSEvent event) {
         long now = System.currentTimeMillis();
         long extractTimestamp = event.getExtractTimeStamp();
+        long sourceTimestamp = event.getSourceTimeStamp();
         setProcessDelay(now - extractTimestamp);
+        // 基于同一个event计算端到端延迟: extractDelay + processDelay = now - sourceTimestamp
+        if (sourceTimestamp > 0) {
+            setTotalApplyDelay(now - sourceTimestamp);
+        }
     }
 
     public void setTotalInCache(long totalInCache) {
@@ -138,6 +146,18 @@ public class StatMetrics {
         processDelay.set(delay);
     }
 
+    public void setTotalApplyDelay(long delay) {
+        totalApplyDelay.set(delay);
+    }
+
+    public void addApplyAttemptCount(long count) {
+        applyAttemptCount.addAndGet(count);
+    }
+
+    public void addHeartbeatCount(long count) {
+        heartbeatCount.addAndGet(count);
+    }
+
     public void addPersistEventCount(long addNum) {
         persistentMessageCounter.addAndGet(addNum);
     }
@@ -148,10 +168,10 @@ public class StatMetrics {
 
     public void addCommitCount(List<DBMSEvent> events) {
         long eventSize = 0;
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)){
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)) {
             eventSize = events.stream().filter(event -> (!(event instanceof DefaultQueryLog) ||
                 (((DefaultQueryLog) event).getQuery().contains("# POLARX_TSO=")))).count();
-        }else{
+        } else {
             eventSize = events.size();
         }
         addCommitCount(eventSize);

@@ -7,8 +7,8 @@
 package com.aliyun.polardbx.rpl.validation;
 
 import com.aliyun.polardbx.binlog.testing.BaseTest;
+import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.validation.fullvalid.task.ReplicaFullValidCheckTask;
-import com.mysql.jdbc.StatementImpl;
 import lombok.SneakyThrows;
 import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Test;
@@ -17,6 +17,8 @@ import org.mockito.Mockito;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.Collections;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -50,11 +52,11 @@ public class ReplicaFullValidCheckTaskTest extends BaseTest {
         ReplicaFullValidCheckTask task = mock(ReplicaFullValidCheckTask.class, Mockito.CALLS_REAL_METHODS);
         DataSource datasource = mock(DataSource.class);
         try (Connection conn = mock(Connection.class);
-            StatementImpl stmt = mock(StatementImpl.class)) {
+            Statement stmt = mock(Statement.class)) {
             when(datasource.getConnection()).thenReturn(conn);
             when(conn.createStatement()).thenReturn(stmt);
 
-            boolean result = task.validSyncPointTsoHelper(datasource, "table1", "tso1");
+            boolean result = task.validSyncPointTsoHelper(datasource, ordinaryTableInfo(), "tso1");
             assertTrue(result);
 
             verify(stmt, times(1)).execute("SET SNAPSHOT_TS = tso1");
@@ -72,12 +74,12 @@ public class ReplicaFullValidCheckTaskTest extends BaseTest {
         ReplicaFullValidCheckTask task = mock(ReplicaFullValidCheckTask.class, Mockito.CALLS_REAL_METHODS);
         DataSource datasource = mock(DataSource.class);
         try (Connection conn = mock(Connection.class);
-            StatementImpl stmt = mock(StatementImpl.class)) {
+            Statement stmt = mock(Statement.class)) {
             when(datasource.getConnection()).thenReturn(conn);
             when(conn.createStatement()).thenReturn(stmt);
             doThrow(SQLException.class).when(stmt).execute("/*+TDDL:scan()*/ SELECT 1 FROM `table1` LIMIT 1");
 
-            boolean result = task.validSyncPointTsoHelper(datasource, "table1", "tso1");
+            boolean result = task.validSyncPointTsoHelper(datasource, ordinaryTableInfo(), "tso1");
             assertFalse(result);
 
             verify(stmt, times(1)).execute("SET SNAPSHOT_TS = tso1");
@@ -87,5 +89,31 @@ public class ReplicaFullValidCheckTaskTest extends BaseTest {
             verify(stmt, times(1)).execute("ROLLBACK ");
             verify(stmt, times(1)).execute("SET SNAPSHOT_TS = -1");
         }
+    }
+
+    @Test
+    @SneakyThrows
+    public void testValidSyncPointTsoHelper_externalizedTableUsesLogicalPrimaryKeyProbe() {
+        ReplicaFullValidCheckTask task = mock(ReplicaFullValidCheckTask.class, Mockito.CALLS_REAL_METHODS);
+        DataSource datasource = mock(DataSource.class);
+        try (Connection conn = mock(Connection.class);
+            Statement stmt = mock(Statement.class)) {
+            when(datasource.getConnection()).thenReturn(conn);
+            when(conn.createStatement()).thenReturn(stmt);
+
+            TableInfo tableInfo = ordinaryTableInfo();
+            tableInfo.setExternalizedColumnNames(Collections.singleton("body"));
+            boolean result = task.validSyncPointTsoHelper(datasource, tableInfo, "tso1");
+            assertTrue(result);
+
+            verify(stmt, times(1)).execute("SELECT MIN(`id`) FROM `table1`");
+            verify(stmt, times(0)).execute("/*+TDDL:scan()*/ SELECT 1 FROM `table1` LIMIT 1");
+        }
+    }
+
+    private static TableInfo ordinaryTableInfo() {
+        TableInfo tableInfo = new TableInfo("db1", "table1");
+        tableInfo.getPks().add("id");
+        return tableInfo;
     }
 }

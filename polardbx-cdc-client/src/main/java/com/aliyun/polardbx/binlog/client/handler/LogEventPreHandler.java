@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.client.handler;
@@ -22,6 +22,8 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.XidLogEvent;
 import com.aliyun.polardbx.binlog.client.LogEventWrapper;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.lmax.disruptor.EventHandler;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 
@@ -31,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Scanner;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class LogEventPreHandler implements EventHandler<LogEventWrapper> {
 
@@ -39,11 +42,13 @@ public class LogEventPreHandler implements EventHandler<LogEventWrapper> {
 
     public static final String PRIVATE_DDL_ENCODE_BASE64 = "# POLARX_ORIGIN_SQL_ENCODE=BASE64";
 
-    private DBMSTransactionEnd commitEvent = null;
-    private DBMSTransactionBegin beginEvent = null;
-    private String lastTraceInfo;
+    protected DBMSTransactionEnd commitEvent = null;
+    protected DBMSTransactionBegin beginEvent = null;
+    protected String lastTraceInfo;
+    @Getter
+    protected AtomicBoolean decode64Enabled = new AtomicBoolean(false);
 
-    private void checkTransaction(LogPosition logPosition, List<DBMSEvent> dbmsEventList) {
+    protected void checkTransaction(LogPosition logPosition, List<DBMSEvent> dbmsEventList) {
         if (commitEvent != null) {
             throw new PolardbxException("last commit event not receive cts event! with " + logPosition);
         }
@@ -53,7 +58,7 @@ public class LogEventPreHandler implements EventHandler<LogEventWrapper> {
         }
     }
 
-    private DBMSEvent processQueryLogEvent(QueryLogEvent queryLogEvent) {
+    protected DBMSEvent processQueryLogEvent(QueryLogEvent queryLogEvent) {
         String queryData = queryLogEvent.getQuery();
         DBMSEvent eventData = null;
         if (queryData.startsWith("BEGIN")) {
@@ -66,7 +71,7 @@ public class LogEventPreHandler implements EventHandler<LogEventWrapper> {
             while (scanner.hasNext()) {
                 String line = scanner.nextLine();
                 line = StringUtils.trim(line);
-                if (StringUtils.startsWith(line, PRIVATE_DDL_ENCODE_BASE64)) {
+                if (StringUtils.startsWith(line, PRIVATE_DDL_ENCODE_BASE64) && decode64Enabled.get()) {
                     needDecode = true;
                 } else if (StringUtils.startsWith(line, POLARX_DDL_ORIGIN_SQL_PREFIX)) {
                     ddl = line.substring(POLARX_DDL_ORIGIN_SQL_PREFIX.length());
@@ -87,7 +92,7 @@ public class LogEventPreHandler implements EventHandler<LogEventWrapper> {
         return eventData;
     }
 
-    private DBMSEvent processRowsQueryLogEvent(RowsQueryLogEvent rowsQueryLogEvent) throws SQLException {
+    protected DBMSEvent processRowsQueryLogEvent(RowsQueryLogEvent rowsQueryLogEvent) throws SQLException {
         String rowsQuery = rowsQueryLogEvent.getRowsQuery();
         String[] multiLine = rowsQuery.split("\n");
         DBMSEvent eventData = null;

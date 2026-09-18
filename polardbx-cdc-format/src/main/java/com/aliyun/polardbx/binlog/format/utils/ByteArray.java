@@ -6,17 +6,21 @@
  */
 package com.aliyun.polardbx.binlog.format.utils;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.Assert;
+
+import java.io.UnsupportedEncodingException;
 
 /**
  * Created by ShuGuang
  */
+@Slf4j
 public class ByteArray {
 
-    private final byte[] data;
-    private int origin;
-    private int pos;
-    private int limit;
+    protected byte[] data;
+    protected int origin;
+    protected int pos;
+    protected int limit;
 
     public ByteArray(byte[] data) {
         assert data != null;
@@ -74,6 +78,7 @@ public class ByteArray {
         if (b < 0xfb) {
             return b;
         } else if (b == 0xfc) {
+            /* 251 is reserved for NULL */
             return readInteger(2);
         } else if (b == 0xfd) {
             return readInteger(3);
@@ -106,6 +111,17 @@ public class ByteArray {
     }
 
     /**
+     * Read string with te length provided by this pos
+     */
+    public String readString() {
+        final int len = (0xff & data[pos]);
+        int offset = pos + 1;
+        String string = new String(data, offset, len);
+        pos += len + 1;
+        return string;
+    }
+
+    /**
      * Read left string.
      */
     public String readEofString(boolean crc32) {
@@ -128,6 +144,29 @@ public class ByteArray {
         writeLong(value, length);
     }
 
+    public void writeLongNetStore(long value) {
+        int length = netLengthSize(value);
+        writeLongNetStore(value, length);
+    }
+
+    public void writeLongNetStore(long value, int length) {
+        if (length == 1) {
+            writeLong(value, length);
+        } else if (length == 3) {
+            /* 251 is reserved for NULL */
+            writeLong(252, 1);
+            writeLong(value, length - 1);
+        } else if (length == 4) {
+            writeLong(253, 1);
+            writeLong(value, length - 1);
+        } else if (length == 9) {
+            writeLong(254, 1);
+            writeLong(value, length - 1);
+        } else {
+            log.error("No such length in net_store_length format");
+        }
+    }
+
     /**
      * Write fixed length string, only for ascii code.
      */
@@ -147,13 +186,30 @@ public class ByteArray {
         writeString(value);
     }
 
+    public void read(byte[] dst) {
+        for (int i = 0; i < dst.length; i++) {
+            dst[i] = (byte) read();
+        }
+    }
+
     public int read() {
         Assert.isTrue(pos < limit);
         return data[pos++] & 0xff;
     }
 
+    public byte readByte() {
+        Assert.isTrue(pos < limit);
+        return data[pos++];
+    }
+
     public void write(byte[] bytes) {
         for (int i = 0; i < bytes.length; i++) {
+            write(bytes[i]);
+        }
+    }
+
+    public void write(byte[] bytes, int length) {
+        for (int i = 0; i < length; i++) {
             write(bytes[i]);
         }
     }
@@ -172,6 +228,11 @@ public class ByteArray {
         this.pos += n;
     }
 
+    public void setPos(int pos) {
+        Assert.isTrue(pos >= origin && pos <= limit);
+        this.pos = pos;
+    }
+
     public void reset() {
         this.pos = origin;
     }
@@ -186,5 +247,22 @@ public class ByteArray {
 
     public int getLimit() {
         return limit;
+    }
+
+    /**
+     * mysql 的长度计算公式
+     *
+     * @return long, the length of value
+     */
+    public static int netLengthSize(long value) {
+        if (value < 251L) {
+            return 1;
+        } else if (value < 65536L) {
+            return 3;
+        } else if (value < 16777216L) {
+            return 4;
+        } else {
+            return 9;
+        }
     }
 }

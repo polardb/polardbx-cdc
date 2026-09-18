@@ -11,14 +11,19 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.RuntimeMode;
 import com.aliyun.polardbx.binlog.SpringContextBootStrap;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.TaskBootStrap;
-import com.aliyun.polardbx.binlog.TaskConfigProvider;
+import com.aliyun.polardbx.binlog.TaskRuntimeConfigProvider;
 import com.aliyun.polardbx.binlog.cdc.meta.CdcMetaManager;
 import com.aliyun.polardbx.binlog.daemon.cluster.bootstrap.ClusterBootStrapFactory;
 import com.aliyun.polardbx.binlog.daemon.cluster.bootstrap.ClusterBootstrapService;
 import com.aliyun.polardbx.binlog.daemon.rest.RestServer;
 import com.aliyun.polardbx.binlog.daemon.schedule.ColumnarNodeReporter;
 import com.aliyun.polardbx.binlog.daemon.schedule.NodeReporter;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
+import com.aliyun.polardbx.binlog.domain.TaskType;
+import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.dumper.DumperBootStrap;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -27,12 +32,15 @@ import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.COMMON_PORTS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_HEARTBEAT_INTERVAL_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
+import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 /**
  * Created by ShuGuang
@@ -49,13 +57,13 @@ public class DaemonBootStrap {
                 new SpringContextBootStrap("spring/spring.xml");
             appContextBootStrap.boot();
 
-            log.info("Env {} {} {} {}", DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID),
-                DynamicApplicationConfig.getString(ConfigKeys.INST_ID),
-                DynamicApplicationConfig.getString(ConfigKeys.INST_IP),
-                DynamicApplicationConfig.getString(COMMON_PORTS));
+            log.info("Env {} {} {} {}", getString(ConfigKeys.CLUSTER_ID),
+                getString(ConfigKeys.INST_ID),
+                getString(ConfigKeys.INST_IP),
+                getString(COMMON_PORTS));
 
             // Cluster Parameter
-            String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+            String clusterId = getString(ConfigKeys.CLUSTER_ID);
             String clusterType = DynamicApplicationConfig.getClusterType();
 
             // 初始化表
@@ -102,25 +110,38 @@ public class DaemonBootStrap {
                 }
             }));
 
-            RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
-            if (runtimeMode == RuntimeMode.LOCAL_SINGLE) {
-                waitForTopologyReady();
-                TaskBootStrap taskBootStrap = new TaskBootStrap();
-                taskBootStrap.setTaskConfigProvider(new TaskConfigProvider("Final"));
-                taskBootStrap.boot(new String[] {TASK_NAME + "=Final"});
-
-                DumperBootStrap dumperBootStrap = new DumperBootStrap();
-                dumperBootStrap.setTaskConfigProvider(new TaskConfigProvider("Dumper-1"));
-                dumperBootStrap.boot(new String[] {TASK_NAME + "=Dumper-1"});
-            }
+            tryStartWorkerModule();
         } catch (Throwable t) {
             log.error("## Something goes wrong when starting up the daemon process:", t);
             Runtime.getRuntime().halt(1);
         }
     }
 
-    public static void waitForTopologyReady() throws InterruptedException {
-        long endTimestamp = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+    private static String buildDumperName() {
+        BinlogTaskConfigMapper mapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
+        Optional<BinlogTaskConfig> dumperConfig = mapper.selectOne(
+            s -> s.where(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(getString(ConfigKeys.CLUSTER_ID)))
+                .and(BinlogTaskConfigDynamicSqlSupport.role, isEqualTo(TaskType.Dumper.name())));
+        return dumperConfig.map(BinlogTaskConfig::getTaskName).orElse("Dumper-1");
+    }
+
+    public static void tryStartWorkerModule() throws InterruptedException {
+        RuntimeMode runtimeMode = RuntimeMode.valueOf(getString(ConfigKeys.RUNTIME_MODE));
+        if (runtimeMode == RuntimeMode.LOCAL_SINGLE) {
+            waitForTopologyReady(30);
+            TaskBootStrap taskBootStrap = new TaskBootStrap();
+            taskBootStrap.setTaskRuntimeConfigProvider(new TaskRuntimeConfigProvider("Final"));
+            taskBootStrap.boot(new String[] {TASK_NAME + "=Final"});
+
+            String dumperName = buildDumperName();
+            DumperBootStrap dumperBootStrap = new DumperBootStrap();
+            dumperBootStrap.setTaskRuntimeConfigProvider(new TaskRuntimeConfigProvider(dumperName));
+            dumperBootStrap.boot(new String[] {TASK_NAME + "=" + dumperName});
+        }
+    }
+
+    public static void waitForTopologyReady(long timeoutSeconds) throws InterruptedException {
+        long endTimestamp = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(timeoutSeconds);
         while (System.currentTimeMillis() < endTimestamp) {
             // wait for cluster config create success
             String preClusterSnapshotStr = SystemDbConfig.getSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY);

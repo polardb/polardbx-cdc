@@ -6,11 +6,11 @@
  */
 package com.aliyun.polardbx.binlog;
 
+import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
 import com.aliyun.polardbx.binlog.task.TaskHeartbeat;
 import com.aliyun.polardbx.binlog.util.LabEventType;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -18,18 +18,21 @@ import java.util.Map;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getClusterType;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
 /**
  * Created by ziyang.lb
  **/
+@Slf4j
 public class TaskBootStrap {
 
-    private static final Logger logger = LoggerFactory.getLogger(TaskBootStrap.class);
-    private TaskConfigProvider taskConfigProvider;
+    private TaskRuntimeConfigProvider taskRuntimeConfigProvider;
 
     public static void main(String[] args) {
         TaskBootStrap bootStrap = new TaskBootStrap();
-        bootStrap.setTaskConfigProvider(new TaskConfigProvider(handleArgs(args[0]).get(TASK_NAME)));
+        bootStrap.setTaskRuntimeConfigProvider(new TaskRuntimeConfigProvider(handleArgs(args[0]).get(TASK_NAME)));
         bootStrap.boot(args);
     }
 
@@ -51,6 +54,8 @@ public class TaskBootStrap {
 
     public void boot(String[] args) {
         try {
+            log.info("## prepare to start task!");
+
             Map<String, String> argsMap = handleArgs(args[0]);
             String taskName = argsMap.get(TASK_NAME);
             System.setProperty(TASK_NAME, taskName);
@@ -63,41 +68,52 @@ public class TaskBootStrap {
             TableCompatibilityProcessor.process();
             TableCompatibilityProcessorWithTask.process();
 
-            // do start
-            logger.info("## starting the task, with name {}.", taskName);
-            final TaskController controller =
-                new TaskController(DynamicApplicationConfig.getString(CLUSTER_ID), taskConfigProvider);
-            final TaskHeartbeat taskHeartbeat =
-                new TaskHeartbeat(DynamicApplicationConfig.getString(CLUSTER_ID),
-                    DynamicApplicationConfig.getClusterType(), taskName,
-                    DynamicApplicationConfig.getInt(TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS),
-                    taskConfigProvider.getTaskRuntimeConfig().getBinlogTaskConfig());
+            // construction
+            final TaskRuntimeConfig taskRuntimeConfig = taskRuntimeConfigProvider.getTaskRuntimeConfig();
+            final TaskController controller = new TaskController(getString(CLUSTER_ID),
+                taskRuntimeConfig, taskRuntimeConfigProvider);
+            final TaskHeartbeat taskHeartbeat = buildTaskHeartbeat(controller, taskRuntimeConfig, taskName);
             LabEventManager.logEvent(LabEventType.FINAL_TASK_START);
+
+            // do start
+            log.info("## starting the task, with name {}, with version {}:{}.",
+                taskName, taskRuntimeConfig.getExecutionConfig().getRuntimeVersion(),
+                taskRuntimeConfig.getExecutionConfig().getSubRuntimeVersion());
             taskHeartbeat.start();
             controller.start();
 
-            logger.info("## the task is running now ......");
+            log.info("## the task is running now ......");
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
-                    logger.info("## stop the task");
+                    log.info("## stop the task");
                     LabEventManager.logEvent(LabEventType.FINAL_TASK_STOP);
                     taskHeartbeat.stop();
                     controller.stop();
                     appContextBootStrap.close();
                 } catch (Throwable e) {
-                    logger.warn("##something goes wrong when stopping the task", e);
+                    log.warn("##something goes wrong when stopping the task", e);
                 } finally {
-                    logger.info("## task is down.");
+                    log.info("## task is down.");
                 }
             }));
         } catch (Throwable t) {
-            logger.error("## Something goes wrong when starting up the task process:", t);
+            log.error("## Something goes wrong when starting up the task process:", t);
             Runtime.getRuntime().halt(1);
         }
     }
 
-    public void setTaskConfigProvider(TaskConfigProvider taskConfigProvider) {
-        this.taskConfigProvider = taskConfigProvider;
+    public void setTaskRuntimeConfigProvider(TaskRuntimeConfigProvider taskRuntimeConfigProvider) {
+        this.taskRuntimeConfigProvider = taskRuntimeConfigProvider;
     }
 
+    private TaskHeartbeat buildTaskHeartbeat(TaskController taskController, TaskRuntimeConfig taskRuntimeConfig,
+                                             String taskName) {
+        return new TaskHeartbeat(getString(CLUSTER_ID),
+            getClusterType(),
+            taskName,
+            getInt(TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS),
+            taskRuntimeConfig,
+            taskRuntimeConfigProvider,
+            new TaskSubVersionChangeCallback(taskController, i -> Runtime.getRuntime().halt(1)));
+    }
 }

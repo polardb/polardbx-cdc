@@ -9,6 +9,8 @@ package com.aliyun.polardbx.rpl.applier;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DdlResult;
+import com.aliyun.polardbx.binlog.canal.core.ddl.parser.DruidDdlParser;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
@@ -21,12 +23,14 @@ import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.dbmeta.DbMetaCache;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
+import com.aliyun.polardbx.rpl.taskmeta.ApplierType;
 import com.aliyun.polardbx.rpl.taskmeta.ConflictStrategy;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.DdlState;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
 import javax.sql.DataSource;
 import java.net.InetSocketAddress;
@@ -39,7 +43,9 @@ import java.util.concurrent.Executors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.IS_LAB_ENV;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_APPLY_USE_CACHED_THREAD_POOL_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_INC_MAX_POOL_SIZE_IN_LAB;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.rpl.applier.DdlApplyHelper.getDdlSqlContext;
 import static com.aliyun.polardbx.rpl.applier.DdlApplyHelper.processDdlSql;
 import static com.aliyun.polardbx.rpl.applier.DdlApplyHelper.tryRefreshMetaInfo;
@@ -71,17 +77,25 @@ public class MysqlApplier extends BaseApplier {
     @Override
     public void init() throws Exception {
         log.info("init Applier: " + this.getClass().getName());
+        if (applierConfig.isSkipMismatchedColumns()
+            && applierConfig.getApplierType() != ApplierType.MERGE
+            && applierConfig.getApplierType() != ApplierType.FULL_COPY) {
+            throw new PolardbxException(
+                "skipMismatchedColumns is only supported by MERGE and FULL_COPY appliers, "
+                    + "which do not execute UPDATE directly");
+        }
         if (hostInfo.getServerId() == RplConstants.SERVER_ID_NULL) {
             hostInfo.setServerId(getSrcServerId());
         }
         buildMaxPoolSize();
         buildExecutorService();
         dbMetaCache = new DbMetaCache(hostInfo, applierConfig.getMinPoolSize(), applierConfig.getMaxPoolSize(),
-            false);
+            false, applierConfig.getCustomizedUsingUkAsPkTables());
 
-        DmlApplyHelper.setCompareAll(applierConfig.isCompareAll());
         DmlApplyHelper.setInsertOnUpdateMiss(applierConfig.isInsertOnUpdateMiss());
         DmlApplyHelper.setDbMetaCache(dbMetaCache);
+        DmlApplyHelper.setFilterColumns(applierConfig.getFilterColumns());
+        DmlApplyHelper.setSkipMismatchedColumns(applierConfig.isSkipMismatchedColumns());
     }
 
     @Override
@@ -125,8 +139,40 @@ public class MysqlApplier extends BaseApplier {
             return;
         }
 
-        // prepare tso & token
         DefaultQueryLog queryLog = (DefaultQueryLog) dbmsEvent;
+
+        // 处理 schema-refresh-only 事件：仅刷新 DbMetaCache，不执行 DDL
+        if (queryLog.isSchemaRefreshOnly()) {
+            String originSql = DdlApplyHelper.getOriginSql(queryLog.getQuery());
+            String sql = StringUtils.isNotBlank(originSql) ? originSql : queryLog.getQuery();
+            DdlResult ddlResult = DruidDdlParser.parse(sql, queryLog.getSchema());
+            if (ddlResult != null) {
+                if (DdlApplyHelper.isDropDatabase(sql)) {
+                    dbMetaCache.removeDataSource(queryLog.getSchema());
+                } else if (StringUtils.isNotBlank(queryLog.getSchema())
+                    && StringUtils.isNotBlank(ddlResult.getTableName())) {
+                    dbMetaCache.refreshTableInfo(queryLog.getSchema(), ddlResult.getTableName());
+                }
+            }
+            log.info("schemaRefreshOnly ddlApply, schema: {}, table: {}, sql: {}",
+                queryLog.getSchema(),
+                ddlResult != null ? ddlResult.getTableName() : "null", sql);
+            return;
+        }
+
+        // DDL白名单检查：仅允许ADD COLUMN通过
+        if (applierConfig.isDdlOnlyAddColumn()) {
+            String originSql = DdlApplyHelper.getOriginSql(queryLog.getQuery());
+            String checkSql = StringUtils.isNotBlank(originSql) ? originSql : queryLog.getQuery();
+            DdlResult result = DruidDdlParser.parse(checkSql, queryLog.getSchema());
+            if (result == null || result.getSqlStatement() == null
+                || !DdlApplyHelper.isOnlyAddColumn(result.getSqlStatement())) {
+                log.warn("ddlApply ignore non-add-column DDL, sql: {}", queryLog.getQuery());
+                return;
+            }
+        }
+
+        // prepare tso & token
         String position = queryLog.getPosition();
         String tso = DdlApplyHelper.getTso(queryLog.getQuery(), queryLog.getTimestamp(), position);
         String token = UUID.randomUUID().toString();
@@ -226,9 +272,7 @@ public class MysqlApplier extends BaseApplier {
 
     private void buildMaxPoolSize() {
         if (getBoolean(IS_LAB_ENV)) {
-            List<RplTask> rplTasks = DbTaskMetaManager.listTaskByService(TaskContext.getInstance().getServiceId());
-            int newSize = applierConfig.getMaxPoolSize() / rplTasks.size();
-            applierConfig.setMaxPoolSize(newSize);
+            applierConfig.setMaxPoolSize(getInt(RPL_INC_MAX_POOL_SIZE_IN_LAB));
         }
     }
 

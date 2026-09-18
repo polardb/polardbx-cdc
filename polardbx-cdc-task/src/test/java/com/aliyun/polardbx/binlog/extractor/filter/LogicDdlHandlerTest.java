@@ -371,6 +371,38 @@ public class LogicDdlHandlerTest extends BaseTest {
     }
 
     @Test
+    public void testExternalColumnDdlUsesCanonicalOriginalSqlForEveryConsumer() {
+        String physicalDdl = "CREATE TABLE ext_t(id BIGINT, body_addr_ VARCHAR(128))";
+        String canonicalDdl = "CREATE TABLE ext_t(id BIGINT, body LONGTEXT EXTERNALIZE)";
+        DDLRecord record = new DDLRecord();
+        record.setId(9L);
+        record.setSchemaName("d1");
+        record.setTableName("ext_t");
+        record.setSqlKind("CREATE_TABLE");
+        record.setDdlSql(physicalDdl);
+        DDLExtInfo extInfo = new DDLExtInfo();
+        extInfo.setExternalColumnDdl(true);
+        extInfo.setOriginalDdl(canonicalDdl);
+        record.setExtInfo(extInfo);
+
+        LogicDDLHandler handler = new LogicDDLHandler(1L, Mockito.mock(EventAcceptFilter.class),
+            Mockito.mock(PolarDbXTableMetaManager.class));
+        Assert.assertEquals(canonicalDdl, handler.buildOutputDdlForPolarx(record));
+        String mysqlDdl = handler.buildOutputDdlForMysql(record);
+        Assert.assertTrue(mysqlDdl.toUpperCase().contains("EXTERNALIZE"));
+        Assert.assertTrue(mysqlDdl.toUpperCase().contains("BODY LONGTEXT"));
+        Assert.assertFalse(mysqlDdl.toLowerCase().contains("body_addr_"));
+
+        Transaction transaction = mockTransaction(physicalDdl, "ext_t", "d1", 1);
+        DDLRecord applyRecord = transaction.getDdlEvent().getDdlRecord();
+        applyRecord.getExtInfo().setExternalColumnDdl(true);
+        applyRecord.getExtInfo().setOriginalDdl(canonicalDdl);
+        handler.rebuildDdlForApply(transaction, "utf8mb4", "utf8mb4_general_ci");
+        Assert.assertTrue(applyRecord.getDdlSql().toUpperCase().contains("BODY LONGTEXT EXTERNALIZE"));
+        Assert.assertFalse(applyRecord.getDdlSql().toLowerCase().contains("body_addr_"));
+    }
+
+    @Test
     public void testRebuildDdlForApply() {
         String createSql = "CREATE TABLE `order_refund_manage ` (\n"
             + "\t`id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键id',\n"

@@ -7,9 +7,13 @@
 package com.aliyun.polardbx.binlog.format;
 
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
+import com.aliyun.polardbx.binlog.util.CharsetCache;
 import lombok.Data;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.charset.UnsupportedCharsetException;
 
 @Data
 public abstract class BinlogBuilder {
@@ -122,11 +126,11 @@ public abstract class BinlogBuilder {
     }
 
     protected int getStringLength(String value) throws UnsupportedEncodingException {
-        return value.getBytes(ISO_8859_1).length;
+        return value.getBytes(StandardCharsets.ISO_8859_1).length;
     }
 
     protected void writeFixString(AutoExpandBuffer outputData, String value, int len, String charset) throws Exception {
-        byte[] bytes = value.getBytes(charset);
+        byte[] bytes = value.getBytes(CharsetCache.lookup(charset));
         int lastLen = len - bytes.length;
         if (lastLen <= 0) {
             throw new ArrayIndexOutOfBoundsException(String.format("length is %d, try to write string size is %d",
@@ -140,8 +144,9 @@ public abstract class BinlogBuilder {
     }
 
     protected void writeString(AutoExpandBuffer outputData, String value, String charset, boolean insertStringLength)
-        throws UnsupportedEncodingException {
-        byte[] bytes = value.getBytes(charset);
+        throws UnsupportedCharsetException {
+        Charset c = CharsetCache.lookup(charset);
+        byte[] bytes = value.getBytes(c);
         if (insertStringLength) {
             numberToBytes(outputData, bytes.length, INT8);
         }

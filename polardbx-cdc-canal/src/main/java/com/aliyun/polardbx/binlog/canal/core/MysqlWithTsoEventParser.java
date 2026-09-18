@@ -155,6 +155,9 @@ public class MysqlWithTsoEventParser extends AbstractMysqlEventParser implements
 
     private MysqlConnection buildMysqlConnection(AuthenticationInfo runningInfo) {
         MysqlConnection connection = new MysqlConnection(runningInfo);
+        if (StringUtils.isNotBlank(ignoreServerIds)) {
+            connection.setIgnoreServerIds(ignoreServerIds);
+        }
         return connection;
     }
 

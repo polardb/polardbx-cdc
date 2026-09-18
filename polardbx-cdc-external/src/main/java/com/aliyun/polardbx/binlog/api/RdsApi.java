@@ -9,6 +9,7 @@ package com.aliyun.polardbx.binlog.api;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.util.HttpHelper;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +20,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
@@ -84,14 +86,10 @@ public class RdsApi {
     /**
      * @param uid "petadata" + uid
      */
-    public static DescribeBinlogFilesResult describeBinlogFiles(
-        String dbInstanceName,
-        String uid,
-        String user_id,
-        String startTime,
-        String endTime,
-        Integer maxRecordsPerPage,
-        Integer pageNumbers) throws Exception {
+    public static DescribeBinlogFilesResult describeBinlogFiles(String dbInstanceName, String uid, String user_id,
+                                                                String startTime, String endTime,
+                                                                Integer maxRecordsPerPage, Integer pageNumbers)
+        throws Exception {
 
         Map<String, String> params = new HashMap<>();
         params.put("Action", "DescribeBinlogFiles");
@@ -102,6 +100,10 @@ public class RdsApi {
         params.put("EndTime", endTime);
         params.put("MaxRecordsPerPage", maxRecordsPerPage + "");
         params.put("PageNumbers", pageNumbers + "");
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_RDS_API_PASS_HELA)) {
+            params.put("UseHela",
+                DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_USE_HELA) + "");
+        }
         String resp = submitFormRequest(params);
         JSONObject object = JSON.parseObject(resp);
         if (object.getString("Code").equalsIgnoreCase("200")) {
@@ -152,12 +154,12 @@ public class RdsApi {
     public static String createSignature(Map<String, String> paramMap, String key) {
         String data = getParamString(paramMap);
         try {
-            SecretKeySpec signingKey = new SecretKeySpec(key.getBytes("UTF-8"), "HmacSHA1");
+            SecretKeySpec signingKey = new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA1");
             Mac mac = Mac.getInstance("HmacSHA1");
             mac.init(signingKey);
-            byte[] rawHmac = mac.doFinal(data.getBytes("UTF-8"));
+            byte[] rawHmac = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(rawHmac);
-        } catch (NoSuchAlgorithmException | InvalidKeyException | UnsupportedEncodingException e) {
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             e.printStackTrace();
         }
         return "";

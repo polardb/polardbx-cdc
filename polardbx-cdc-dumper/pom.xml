@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.19-SNAPSHOT</version>
+        <version>5.4.21-SNAPSHOT</version>
     </parent>
     <artifactId>polardbx-cdc-dumper</artifactId>
     <url>http://maven.apache.org</url>
@@ -54,6 +54,10 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
         </dependency>
     </dependencies>
 </project>

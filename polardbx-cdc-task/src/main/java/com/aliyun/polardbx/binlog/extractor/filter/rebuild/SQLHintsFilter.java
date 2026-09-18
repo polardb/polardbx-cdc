@@ -86,12 +86,13 @@ public class SQLHintsFilter {
     }
 
     private static Set<String> getHintsBlackList() {
+        Set<String> blackList = Sets.newHashSet();
         String config = getString(TASK_REFORMAT_DDL_HINT_BLACKLIST);
         if (StringUtils.isNotBlank(config)) {
             String[] array = StringUtils.split(config.toUpperCase(), ",");
-            return Sets.newHashSet(array);
+            blackList.addAll(Sets.newHashSet(array));
         }
-        return Sets.newHashSet();
+        return blackList;
     }
 
     private static String rewriteText(String text, List<Pair<String, List<String>>> filterList) {

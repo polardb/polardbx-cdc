@@ -11,7 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /**
  * This class defines a set of one or more row changes.
@@ -42,6 +44,14 @@ public abstract class DBMSRowChange extends DBMSEvent {
      */
     public DBMSColumnSet getColumnSet() {
         return columnSet;
+    }
+
+    public boolean hasExternalizedColumns() {
+        return !getExternalizedColumnNames().isEmpty();
+    }
+
+    public Set<String> getExternalizedColumnNames() {
+        return columnSet == null ? Collections.emptySet() : columnSet.getExternalizedColumnNames();
     }
 
     public void setColumnSet(DBMSColumnSet columnSet) {

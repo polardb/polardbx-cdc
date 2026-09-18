@@ -35,6 +35,8 @@ import java.util.Objects;
  */
 public class TableMeta implements Serializable {
 
+    private static final long serialVersionUID = -7064481071869953044L;
+
     private String schema;
     private String table;
     private List<FieldMeta> fields = new ArrayList<>();
@@ -198,7 +200,23 @@ public class TableMeta implements Serializable {
         return Objects.hash(schema, table, fields, ddl, charset, useImplicitPk, indexes);
     }
 
+    public boolean basicEquals(Object o) {
+        if (Objects.equals(o, this)) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        TableMeta tableMeta = (TableMeta) o;
+        return useImplicitPk == tableMeta.useImplicitPk
+            && Objects.equals(fields, tableMeta.fields)
+            && Objects.equals(charset, tableMeta.charset);
+    }
+
     public static class FieldMeta implements Serializable {
+
+        private static final long serialVersionUID = -5586247641304008861L;
 
         private String columnName;
         private String columnType;
@@ -212,6 +230,7 @@ public class TableMeta implements Serializable {
         private boolean generated;
         private boolean implicitPk;
         private boolean onUpdate;
+        private boolean externalized;
         private TableMeta parent;
 
         public FieldMeta() {
@@ -250,7 +269,8 @@ public class TableMeta implements Serializable {
 
         private void preProcessColumnType() {
             binary = StringUtils.containsIgnoreCase(columnType, "VARBINARY")
-                || StringUtils.containsIgnoreCase(columnType, "BINARY");
+                || StringUtils.containsIgnoreCase(columnType, "BINARY")
+                || StringUtils.containsIgnoreCase(columnType, "VECTOR");
             unsigned = StringUtils.containsIgnoreCase(columnType, "unsigned");
         }
 
@@ -363,6 +383,14 @@ public class TableMeta implements Serializable {
             this.onUpdate = onUpdate;
         }
 
+        public boolean isExternalized() {
+            return externalized;
+        }
+
+        public void setExternalized(boolean externalized) {
+            this.externalized = externalized;
+        }
+
         @Override
         public boolean equals(Object o) {
             if (this == o) {
@@ -379,6 +407,8 @@ public class TableMeta implements Serializable {
                 unsigned == fieldMeta.unsigned &&
                 generated == fieldMeta.generated &&
                 implicitPk == fieldMeta.implicitPk &&
+                onUpdate == fieldMeta.onUpdate &&
+                externalized == fieldMeta.externalized &&
                 Objects.equals(columnName, fieldMeta.columnName) &&
                 Objects.equals(columnType, fieldMeta.columnType) &&
                 Objects.equals(defaultValue, fieldMeta.defaultValue) &&
@@ -389,7 +419,7 @@ public class TableMeta implements Serializable {
         public int hashCode() {
             return Objects
                 .hash(columnName, columnType, nullable, key, defaultValue, unique, charset, binary, unsigned, generated,
-                    implicitPk);
+                    implicitPk, onUpdate, externalized);
         }
 
         @Override
@@ -402,10 +432,12 @@ public class TableMeta implements Serializable {
                 + ", key=" + key
                 + ", defaultValue=" + defaultValue
                 + ", unique=" + unique
+                + ", onUpdate=" + onUpdate
                 + ", binary=" + binary
                 + ", unsigned=" + unsigned
                 + ", generated=" + generated
                 + ", implicitPk=" + implicitPk
+                + ", externalized=" + externalized
                 + "]";
         }
 

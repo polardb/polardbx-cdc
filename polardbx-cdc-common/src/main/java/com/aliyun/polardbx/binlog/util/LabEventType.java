@@ -32,8 +32,13 @@ public enum LabEventType {
     UPDATE_QUERY_INFO("从binlog解析的update sql变更列"),
     TRANSPARENT_CONSUMING("触发透明消费"),
     REPLICA_BINLOG_POS_CHECK("检查到rpl接收到的pos无序"),
+    SCHEDULE_SET_COMPRESSION("定时开关压缩测试"),
     DUMPER_FILE_STATUS_CHECK("检测到dump的文件状态有误"),
-    TASK_FILTER_ARCHIVE_ENABLED("开启task归档表删除event过滤");
+    TASK_FILTER_ARCHIVE_ENABLED("开启task归档表删除event过滤"),
+    SEEK_LAST_TSO_CHECK("seekLastTso校验"),
+    FORCE_DOWNLOAD_BINLOG_CHECK("校验forceDownload是否失败"),
+    DUPLICATE_UPDATE_TABLE_ID("重复分配了table id"),
+    REPLICA_SERVER_ID_FILTER_DML("Dumper未过滤匹配server_id的DML事件，Replica端检测到漏过滤");
 
     private final String desc;
 

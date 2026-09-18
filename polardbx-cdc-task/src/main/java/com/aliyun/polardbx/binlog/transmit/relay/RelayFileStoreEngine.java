@@ -43,6 +43,10 @@ public class RelayFileStoreEngine extends StoreEngineBase implements StoreEngine
         DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_FILE_FLUSH_INTERVAL_MS);
     private static final RelayFileCounter RELAY_FILE_COUNTER = new RelayFileCounter();
 
+    public static RelayFileCounter getRelayFileCounter() {
+        return RELAY_FILE_COUNTER;
+    }
+
     private final RelayFileManager relayFileManager;
     private final Pair<byte[], byte[]> boundPair;
     private final RateLimiter rateLimiter;

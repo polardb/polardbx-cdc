@@ -39,6 +39,7 @@ import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
+import com.aliyun.polardbx.binlog.util.CharsetCache;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.filter.BaseFilter;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
@@ -48,9 +49,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
+import java.nio.charset.UnsupportedCharsetException;
 import java.sql.Types;
 import java.util.BitSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 基于{@linkplain LogEvent}转化为Entry对象的处理
@@ -166,19 +171,20 @@ public class ImportLogEventConvert extends LogEventConvert {
                 mySQLDBMSEvent.setXaTransaction(xaTransaction);
                 return mySQLDBMSEvent;
             } else {
-                // ddl 不处理
+                // DDL事件：委托父类处理（解析、tableMetaCache更新、构造 DefaultQueryLog）
+                return super.parseQueryEvent(event, isSeek);
             }
         }
-        return null;
     }
 
     @Override
     protected MySQLDBMSEvent parseRowsQueryEvent(RowsQueryLogEvent event) {
         String queryString;
         try {
-            queryString = new String(event.getRowsQuery().getBytes(ISO_8859_1), charset);
+            queryString =
+                new String(event.getRowsQuery().getBytes(StandardCharsets.ISO_8859_1), CharsetCache.lookup(charset));
             return buildRowsQueryEntry(queryString, event.getHeader(), DBMSAction.ROWQUERY);
-        } catch (UnsupportedEncodingException e) {
+        } catch (UnsupportedCharsetException e) {
             throw new CanalParseException(e);
         }
     }
@@ -253,6 +259,7 @@ public class ImportLogEventConvert extends LogEventConvert {
 
             // 构造列信息
             List<DBMSColumn> dbmsColumns = Lists.newArrayList();
+            Set<String> externalizedColumnNames = null;
             List<FieldMeta> fieldMetas = tableMeta.getFields();
             // 兼容一下canal的逻辑,认为DDL新增列都加在末尾,如果表结构的列比binlog的要多
             int size = fieldMetas.size();
@@ -274,12 +281,19 @@ public class ImportLogEventConvert extends LogEventConvert {
                     fieldMeta.isOnUpdate()
                 );
                 dbmsColumns.add(column);
+                if (fieldMeta.isExternalized()) {
+                    if (externalizedColumnNames == null) {
+                        externalizedColumnNames = new LinkedHashSet<>();
+                    }
+                    externalizedColumnNames.add(fieldMeta.getColumnName());
+                }
             }
 
             DefaultRowChange rowChange = new DefaultRowChange(action,
                 rewriteDbName,
                 rewriteTableName,
-                new DefaultColumnSet(dbmsColumns));
+                externalizedColumnNames == null ? new DefaultColumnSet(dbmsColumns) :
+                    new DefaultColumnSet(dbmsColumns, externalizedColumnNames));
             rowChange.putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_SCHEMA, table.getDbName()));
             rowChange.putOption(new DefaultOption(RplConstants.BINLOG_EVENT_OPTION_SOURCE_TABLE, table.getTableName()));
 

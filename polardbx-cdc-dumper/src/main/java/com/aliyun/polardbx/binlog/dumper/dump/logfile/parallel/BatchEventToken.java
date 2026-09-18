@@ -7,6 +7,8 @@
 package com.aliyun.polardbx.binlog.dumper.dump.logfile.parallel;
 
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -17,7 +19,9 @@ import java.util.List;
 public class BatchEventToken extends EventToken {
     private long dmlEventSize;
     private long notDmlEventSize;
-    private final List<SingleEventToken> tokens = new LinkedList<>();
+    @Getter
+    @Setter
+    private List<SingleEventToken> tokens = new LinkedList<>();
 
     public boolean hasCapacity(SingleEventToken eventToken, int maxSlotSize, int maxSlotPayloadSize) {
         if (notDmlEventSize + eventToken.getLength() > maxSlotSize) {
@@ -25,6 +29,11 @@ public class BatchEventToken extends EventToken {
         }
         return dmlEventSize + notDmlEventSize + eventToken.getLength() <= maxSlotPayloadSize;
     }
+
+    public boolean hasCompressionCapacity(SingleEventToken eventToken, int maxUncompressedSize) {
+        return dmlEventSize + notDmlEventSize + eventToken.getLength() <= maxUncompressedSize;
+    }
+
 
     public void addToken(SingleEventToken eventToken) {
         switch (eventToken.getType()) {
@@ -45,7 +54,4 @@ public class BatchEventToken extends EventToken {
         tokens.add(eventToken);
     }
 
-    public List<SingleEventToken> getTokens() {
-        return tokens;
-    }
 }

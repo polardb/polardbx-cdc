@@ -11,6 +11,7 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.rocksdb.RocksDB;
@@ -24,6 +25,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_CHECK_INTERVAL_MILLS;
+import static com.aliyun.polardbx.binlog.util.RocksDBUtil.clearTempLibFiles;
 
 /**
  * 磁盘存储
@@ -31,6 +33,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_CHECK_INTERV
 @Slf4j
 public class Repository {
     private static final AtomicBoolean loaded = new AtomicBoolean(false);
+    @Getter
     private final String basePath;
     private final PersistMode persistMode;
     private final Double persistNewThreshold;
@@ -43,6 +46,7 @@ public class Repository {
     private final AtomicBoolean exceedPersistThreshold;
     private final AtomicBoolean isStarted;
     private PersistCheckResult persistCheckResult;
+    private final int persistCheckInterval;
 
     public Repository(boolean isPersistOn, String basePath, PersistMode persistMode, double persistNewThreshold,
                       int txnPersistThreshold, int txnItemPersistThreshold, DeleteMode deleteMode, int repoUnitCount) {
@@ -58,6 +62,7 @@ public class Repository {
         this.exceedPersistThreshold = new AtomicBoolean(false);
         this.isStarted = new AtomicBoolean(false);
         this.persistCheckResult = new PersistCheckResult(false, System.currentTimeMillis());
+        persistCheckInterval = DynamicApplicationConfig.getInt(STORAGE_PERSIST_CHECK_INTERVAL_MILLS);
     }
 
     public void open() {
@@ -115,8 +120,7 @@ public class Repository {
     }
 
     public boolean isReachPersistThreshold(boolean instantCheck) {
-        int checkInterval = DynamicApplicationConfig.getInt(STORAGE_PERSIST_CHECK_INTERVAL_MILLS);
-        if (instantCheck || System.currentTimeMillis() - persistCheckResult.checkTime >= checkInterval) {
+        if (instantCheck || System.currentTimeMillis() - persistCheckResult.checkTime >= persistCheckInterval) {
             double totalRatio = JvmUtils.getTotalUsedRatio();
             double oldRatio = JvmUtils.getOldUsedRatio();
             boolean result = (totalRatio >= persistNewThreshold) || (oldRatio >= persistNewThreshold);
@@ -180,23 +184,6 @@ public class Repository {
             RepoUnit unit = new RepoUnit(basePath + "/" + UUID.randomUUID(), true, true, true);
             repoUnits.add(unit);
             unit.open();
-        }
-    }
-
-    // RocksDB会在临时目录生成临时的lib文件，当通过kill命令的方式终止进程时，临时文件可以被释放掉
-    // 但通过kill -9命令的方式终止进程时，临时文件不会被释放掉，此处做一下手动清理
-    private void clearTempLibFiles() {
-        File directory = new File("/tmp");
-        if (directory.exists()) {
-            File[] files = directory.listFiles((dir, name) ->
-                name.startsWith("librocksdbjni") && name.endsWith(".so")
-            );
-
-            if (files != null && files.length > 0) {
-                for (File file : files) {
-                    FileUtils.deleteQuietly(file);
-                }
-            }
         }
     }
 

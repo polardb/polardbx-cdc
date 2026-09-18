@@ -75,7 +75,7 @@ public class BigTransTest extends RplBaseTestCase {
         + "`c_set` set('a','b','c') DEFAULT NULL,\n"
         + "`c_testcase` varchar(10) DEFAULT NULL,\n"
         + "PRIMARY KEY (`id`) ) \n"
-        + "ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='10000000' dbpartition by hash(`id`) tbpartition by hash(`id`) tbpartitions 8";
+        + "ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 DEFAULT COLLATE=utf8mb4_general_ci COMMENT='10000000' dbpartition by hash(`id`) tbpartition by hash(`id`) tbpartitions 8";
     private static final String INSERT_SINGLE_SQL =
         "INSERT t_big_trans (c_bit_1 , c_bit_8 , c_bit_16 , c_bit_32 , c_bit_64 , c_tinyint_1 , c_tinyint_4 , c_tinyint_8 , c_tinyint_8_un , c_smallint_1 , c_smallint_16 , c_smallint_16_un , c_mediumint_1 , c_mediumint_24 , c_mediumint_24_un , c_int_1 , c_int_32 , c_int_32_un , c_bigint_1 , c_bigint_64 , c_bigint_64_un , c_decimal , c_decimal_pr , c_float , c_float_pr , c_float_un , c_double , c_double_pr , c_double_un , c_date , c_datetime , c_timestamp , c_time , c_year , c_year_4 , c_char , c_varchar , c_binary , c_varbinary , c_blob_tiny , c_blob , c_blob_medium , c_blob_long , c_text_tiny , c_text , c_text_medium , c_text_long , c_enum , c_set , c_testcase) \n"
             + "VALUES( \n"

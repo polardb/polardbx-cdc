@@ -26,6 +26,7 @@ import com.aliyun.polardbx.rpl.taskmeta.ConflictStrategy;
 import com.aliyun.polardbx.rpl.taskmeta.ConflictType;
 import com.google.common.collect.Lists;
 import lombok.Data;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -37,9 +38,10 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
@@ -57,11 +59,11 @@ public class DmlApplyHelper {
     /*
      * CONSTANT variables
      */
-    private static final String INSERT_UPDATE_SQL = "INSERT INTO `%s`.`%s`(%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s";
     private static final String SIMPLE_INSERT_SQL = "INSERT INTO `%s`.`%s`(%s) VALUES %s";
     private static final String REPLACE_SQL = "REPLACE INTO `%s`.`%s`(%s) VALUES %s";
     private static final String INSERT_IGNORE_SQL = "INSERT IGNORE INTO `%s`.`%s`(%s) VALUES %s";
     private static final String DELETE_SQL = "DELETE FROM `%s`.`%s` WHERE %s";
+    private static final String DELETE_SQL_2 = "DELETE `%s` FROM `%s`.`%s` FORCE INDEX(`%s`) WHERE %s";
     private static final String UPDATE_SQL = "UPDATE `%s`.`%s` SET %s WHERE %s";
     private static final String SELECT_SQL = "SELECT * FROM `%s`.`%s` WHERE %s";
     private static final String CDC_UPDATE_DB = "cdc_update_db";
@@ -69,14 +71,15 @@ public class DmlApplyHelper {
     /*
      * need initialize by another component
      */
-    private static final boolean randomCompareAll = getBoolean(ConfigKeys.RPL_RANDOM_COMPARE_ALL);
     private static boolean isLabEnv = getBoolean(ConfigKeys.IS_LAB_ENV);
-    private static boolean compareAll = false;
     private static boolean insertOnUpdateMiss = true;
     private static DbMetaCache dbMetaCache;
+    @Setter
+    private static Map<String, Set<String>> filterColumns;
+    private static boolean skipMismatchedColumns = false;
 
-    public static void setCompareAll(boolean compareAll) {
-        DmlApplyHelper.compareAll = compareAll;
+    public static void setSkipMismatchedColumns(boolean skip) {
+        DmlApplyHelper.skipMismatchedColumns = skip;
     }
 
     public static void setInsertOnUpdateMiss(boolean insertOnUpdateMiss) {
@@ -87,8 +90,36 @@ public class DmlApplyHelper {
         DmlApplyHelper.dbMetaCache = dbMetaCache;
     }
 
-    public static boolean isFiltered(DBMSColumn column) {
-        return column.isGenerated() || column.isRdsImplicitPk();
+    public static boolean isFiltered(String fullTbName, DBMSColumn column) {
+        return column.isGenerated() || column.isRdsImplicitPk() ||
+            isFilterByFilterColumns(fullTbName, column.getName());
+    }
+
+    public static boolean isFilterByFilterColumns(String fullTbName, String columnName) {
+        if (filterColumns == null) {
+            return false;
+        }
+        Set<String> columns = filterColumns.get(fullTbName);
+        if (columns == null) {
+            return false;
+        }
+        return columns.contains(columnName);
+    }
+
+    /**
+     * 判断列类型是否不支持 SQL 比较操作（不能放入 WHERE = ? 或 ON DUPLICATE KEY UPDATE col=VALUES(col)）
+     * 包括 VECTOR、GEOMETRY 系列类型
+     */
+    public static boolean isNonComparableType(ColumnInfo colInfo) {
+        String typeName = colInfo.getTypeName();
+        if (StringUtils.isBlank(typeName)) {
+            return false;
+        }
+        return StringUtils.containsIgnoreCase(typeName, "VECTOR")
+            || StringUtils.containsIgnoreCase(typeName, "GEOMETRY")
+            || StringUtils.containsIgnoreCase(typeName, "POINT")
+            || StringUtils.containsIgnoreCase(typeName, "LINESTRING")
+            || StringUtils.containsIgnoreCase(typeName, "POLYGON");
     }
 
     public static SqlContext getInsertSqlExecContext(DefaultRowChange rowChange, TableInfo dstTbInfo,
@@ -98,7 +129,7 @@ public class DmlApplyHelper {
         StringBuilder nameSqlSb = new StringBuilder();
         StringBuilder valueSqlSb = new StringBuilder();
         List<Serializable> params = new ArrayList<>();
-        generateSql(nameSqlSb, valueSqlSb, rowChange, params, false);
+        generateSql(nameSqlSb, valueSqlSb, rowChange, params, false, dstTbInfo);
         String sql;
         switch (insertMode) {
         case RplConstants.INSERT_MODE_SIMPLE_INSERT_OR_DELETE:
@@ -137,7 +168,7 @@ public class DmlApplyHelper {
         StringBuilder nameSqlSb = new StringBuilder();
         StringBuilder valueSqlSb = new StringBuilder();
         List<Serializable> params = new ArrayList<>();
-        generateSql(nameSqlSb, valueSqlSb, rowChange, params, true);
+        generateSql(nameSqlSb, valueSqlSb, rowChange, params, true, dstTbInfo);
         String insertSql = String
             .format(REPLACE_SQL,
                 CommonUtils.escape(dstTbInfo.getSchema()),
@@ -155,6 +186,8 @@ public class DmlApplyHelper {
         StringBuilder nameSqlSb = new StringBuilder();
         StringBuilder valueSqlSb = new StringBuilder();
         List<Serializable> params = new ArrayList<>();
+        String fullTbName = dstTbInfo.getSchema() + "." + dstTbInfo.getName();
+
         for (int i = 1; i <= rowChange.getRowSize(); i++) {
             // INSERT INTO t1(column1, column2) VALUES(value1, value2),(value3, value4)
             // ON DUPLICATE KEY UPDATE column1=VALUES(column1),columns2=VALUES(column2)
@@ -165,7 +198,10 @@ public class DmlApplyHelper {
             Iterator<? extends DBMSColumn> it = columns.iterator();
             while (it.hasNext()) {
                 DBMSColumn column = it.next();
-                if (isFiltered(column)) {
+                if (skipMismatchedColumns && dstTbInfo.getColumnInfoOrNull(column.getName()) == null) {
+                    continue;
+                }
+                if (isFiltered(fullTbName, column)) {
                     continue;
                 }
                 if (i == 1) {
@@ -208,10 +244,22 @@ public class DmlApplyHelper {
     public static SqlContextV2 getMergeInsertSqlExecContextV2(DefaultRowChange rowChange, TableInfo dstTbInfo,
                                                               int insertMode) {
         List<? extends DBMSColumn> columns = rowChange.getColumns();
+        List<DBMSColumn> applyColumns = new ArrayList<>();
+        for (DBMSColumn column : columns) {
+            ColumnInfo dstCol = dstTbInfo.getColumnInfoOrNull(column.getName());
+            if (dstCol == null) {
+                if (skipMismatchedColumns) {
+                    continue;
+                }
+            }
+            if (!dstCol.isGenerated() && !isFiltered(dstTbInfo.getSchema() + "." + dstTbInfo.getName(), column)) {
+                applyColumns.add(column);
+            }
+        }
         List<List<Serializable>> paramsList = new ArrayList<>();
         for (int i = 1; i <= rowChange.getRowSize(); i++) {
             List<Serializable> params = new ArrayList<>();
-            for (DBMSColumn column : columns) {
+            for (DBMSColumn column : applyColumns) {
                 Serializable columnValue = rowChange.getRowValue(i, column.getName());
                 params.add(columnValue);
             }
@@ -220,7 +268,7 @@ public class DmlApplyHelper {
         StringBuilder nameSqlSb = new StringBuilder();
         StringBuilder valueSqlSb = new StringBuilder();
         valueSqlSb.append("(");
-        Iterator<? extends DBMSColumn> it = columns.iterator();
+        Iterator<? extends DBMSColumn> it = applyColumns.iterator();
         while (it.hasNext()) {
             DBMSColumn column = it.next();
             nameSqlSb.append(repairDMLName(column.getName()));
@@ -264,9 +312,18 @@ public class DmlApplyHelper {
         StringBuilder whereSqlSb = new StringBuilder();
         List<Serializable> params = new ArrayList<>();
         getWhereInSqlV2(rowChange, dstTbInfo, whereSqlSb, params);
-        String deleteSql = String.format(DELETE_SQL, CommonUtils.escape(dstTbInfo.getSchema()),
-            CommonUtils.escape(dstTbInfo.getName()), whereSqlSb);
+
+        String deleteSql = getDeleteSql(dstTbInfo, whereSqlSb);
         return new MergeDmlSqlContext(deleteSql, dstTbInfo.getSchema(), dstTbInfo.getName(), params);
+    }
+
+    private static String getDeleteSql(TableInfo tableInfo, StringBuilder whereSqlSb) {
+        boolean useForceIndexSql = tableInfo.isUkAsPkTable();
+        String ukAsPkKeyName = tableInfo.getUkAsPkKeyName();
+        return useForceIndexSql && StringUtils.isNotBlank(ukAsPkKeyName) ?
+            String.format(DELETE_SQL_2, escape(tableInfo.getName()), escape(tableInfo.getSchema()),
+                escape(tableInfo.getName()), tableInfo.getUkAsPkKeyName(), whereSqlSb) :
+            String.format(DELETE_SQL, escape(tableInfo.getSchema()), escape(tableInfo.getName()), whereSqlSb);
     }
 
     public static SqlContext getUpdateSqlExecContext(DefaultRowChange rowChange, TableInfo dstTbInfo) {
@@ -274,14 +331,19 @@ public class DmlApplyHelper {
         if (changeColumns.isEmpty()) {
             return null;
         }
+
         // SET {column1} = {value1}, {column2} = {value2}
         StringBuilder setSqlSb = new StringBuilder();
         List<Serializable> params = new ArrayList<>();
+        String fullTbName = dstTbInfo.getSchema() + "." + dstTbInfo.getName();
 
         Iterator<? extends DBMSColumn> it = changeColumns.iterator();
         while (it.hasNext()) {
             DBMSColumn changeColumn = it.next();
-            if (isFiltered(changeColumn)) {
+            if (skipMismatchedColumns && dstTbInfo.getColumnInfoOrNull(changeColumn.getName()) == null) {
+                continue;
+            }
+            if (isFiltered(fullTbName, changeColumn)) {
                 continue;
             }
             setSqlSb.append(repairDMLName(changeColumn.getName())).append("=?");
@@ -292,6 +354,11 @@ public class DmlApplyHelper {
             params.add(changeColumnValue);
         }
         trimLastComma(setSqlSb);
+
+        // 所有变更列都在目标端不存在或被过滤时，跳过本次UPDATE
+        if (setSqlSb.length() == 0) {
+            return null;
+        }
 
         // WHERE {column1} = {value1} AND {column2} = {value2}
         StringBuilder whereSqlSb = new StringBuilder();
@@ -307,12 +374,13 @@ public class DmlApplyHelper {
     }
 
     private static List<ColumnInfo> getWhereColumns(TableInfo tableInfo) {
-        // for lab test
-        // random 优先级低于 compare all
-        if (randomCompareAll) {
-            return tableInfo.getWithTypeKeyList(compareAll || new Random().nextBoolean());
+        List<ColumnInfo> columns = tableInfo.getWithTypeKeyList();
+        if (columns.isEmpty() || !columns.stream().map(ColumnInfo::getName).collect(Collectors.toSet())
+            .containsAll(tableInfo.getKeyList())) {
+            throw new PolardbxException("empty or incomplete row identity metadata for " + tableInfo.getSchema()
+                + "." + tableInfo.getName() + ", keys=" + tableInfo.getKeyList());
         }
-        return tableInfo.getWithTypeKeyList(compareAll);
+        return columns;
     }
 
     private static void getWhereSql(DefaultRowChange rowChange, int rowIndex, TableInfo tableInfo,
@@ -427,7 +495,7 @@ public class DmlApplyHelper {
         }
     }
 
-    private static String repairDMLName(String name) {
+    public static String repairDMLName(String name) {
         return "`" + escape(name) + "`";
     }
 
@@ -438,13 +506,18 @@ public class DmlApplyHelper {
     }
 
     private static void generateSql(StringBuilder nameSqlSb, StringBuilder valueSqlSb, DefaultRowChange rowChange,
-                                    List<Serializable> params, boolean change) {
+                                    List<Serializable> params, boolean change, TableInfo dstTbInfo) {
         List<? extends DBMSColumn> columns = rowChange.getColumns();
         valueSqlSb.append('(');
         Iterator<? extends DBMSColumn> it = columns.iterator();
+        String fullTbName = rowChange.getSchema() + "." + rowChange.getTable();
+
         while (it.hasNext()) {
             DBMSColumn column = it.next();
-            if (isFiltered(column)) {
+            if (skipMismatchedColumns && dstTbInfo != null && dstTbInfo.getColumnInfoOrNull(column.getName()) == null) {
+                continue;
+            }
+            if (isFiltered(fullTbName, column)) {
                 continue;
             }
             nameSqlSb.append(repairDMLName(column.getName()));
@@ -491,7 +564,7 @@ public class DmlApplyHelper {
         throws Exception {
         for (DefaultRowChange rowChange : rowChanges) {
             if (rowChange.getRowSize() > 1) {
-                throw new PolardbxException("row change should not has more than 1 column here");
+                throw new PolardbxException("row change should not has more than 1 row here");
             }
             boolean overwrite = (strategy == ConflictStrategy.DIRECT_OVERWRITE);
             List<SqlContext> sqlContexts = getSqlContexts(rowChange, overwrite);
@@ -535,18 +608,17 @@ public class DmlApplyHelper {
                 return;
             }
         }
-        if (compareAll) {
-            // 打开compareAll的时候，认为源端的数据更老，理所应当地 ignore insert dup 和 ignore update miss
-            log.warn("in compare all mode, conflict type: {}, all conflicts will be ignored, {}", type, rowChange);
-            return;
-        }
         switch (strategy) {
         case IGNORE:
             log.warn("in ignore mode, all conflicts will be ignored, {}", rowChange);
             break;
         case INTERRUPT:
             log.warn("in interrupt mode, conflicts will interrupt write, {}", rowChange);
-            throw e;
+            if (e != null) {
+                throw e;
+            }
+            throw new PolardbxException(
+                "DML conflict " + type + " will interrupt write, row change: " + rowChange);
         case DIRECT_OVERWRITE:
             log.warn("dup exception should not be thrown here, {}", rowChange);
             throw new PolardbxException("dup exception should not be thrown here", e);
@@ -645,8 +717,10 @@ public class DmlApplyHelper {
         return pkColumnsIndex;
     }
 
-    public static boolean shouldSerialExecute(DefaultRowChange rowChange) throws Exception {
+    public static boolean shouldSerialExecute(DefaultRowChange rowChange,
+                                              Map<String, Boolean> prepareToSerialExecTables) throws Exception {
         TableInfo tbInfo = dbMetaCache.getTableInfo(rowChange.getSchema(), rowChange.getTable());
+
         // no pk && not only insert in this batch
         if (tbInfo.getPks().isEmpty()
             && (rowChange.getAction() == DBMSAction.UPDATE || rowChange.getAction() == DBMSAction.DELETE)) {
@@ -654,10 +728,22 @@ public class DmlApplyHelper {
                 tbInfo.getSchema() + "." + tbInfo.getName(), rowChange.getAction());
             return true;
         }
+
         // may exist uk exchange, so delete must be executed in serial mode.
-        if (rowChange.getAction() == DBMSAction.DELETE && (tbInfo.getUks() != null && !tbInfo.getUks().isEmpty())) {
-            return true;
+        // future improvements could include finer-grained conflict detection based on uk values.
+        if ((tbInfo.getUks() != null && !tbInfo.getUks().isEmpty())) {
+            String fullTbName = rowChange.getSchema() + "." + rowChange.getTable();
+            if (rowChange.getAction() == DBMSAction.DELETE) {
+                prepareToSerialExecTables.putIfAbsent(fullTbName, true);
+            } else if (rowChange.getAction() == DBMSAction.INSERT) {
+                if (prepareToSerialExecTables.getOrDefault(fullTbName, false)) {
+                    log.warn("row change executing mode goes to serial for uk-table {}, reason DELETE + INSERT.",
+                        tbInfo.getSchema() + "." + tbInfo.getName());
+                    return true;
+                }
+            }
         }
+
         // has gsi && start with omc_with
         return isLabEnv && tbInfo.getGsiNum() >= 1 && rowChange.getTable().startsWith("omc_with");
     }
@@ -719,6 +805,11 @@ public class DmlApplyHelper {
      * @return 发生更改的列列表
      */
     public static List<DBMSColumn> getUpdateChangeColumns(DefaultRowChange rowChange, TableInfo dstTbInfo) {
+        // 被 supersede 过的链中幸存的 UPDATE，强制使用全列但排除 identity keys（PK+分区键）
+        if (rowChange.isForceAllColumns()) {
+            return getForceAllColumnsUpdateColumns(rowChange, dstTbInfo);
+        }
+
         Set<DBMSColumn> changeColumns = new HashSet<>(rowChange.getColumnSet().getColumnSize());
         ColsUpdateMode mode =
             ColsUpdateMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RPL_COLS_UPDATE_MODE).toUpperCase());
@@ -748,11 +839,89 @@ public class DmlApplyHelper {
             break;
         }
 
+        /*
+         * An externalized column has a stricter source-of-truth rule than an ordinary column: only the
+         * UPDATE_ROWS after-image bitmap proves that a logical value is present. CDC deliberately omits an
+         * unchanged external column so generic MySQL consumers keep their existing raw value. Treating that
+         * omission as an ALL-mode value would turn DefaultRowChange#getChangeValue into NULL and overwrite the
+         * target value. A genuinely changed external column remains in the bitmap and is kept here with its
+         * restored logical payload.
+         *
+         * Apply this after every update-mode branch so TIMESTAMP, ONUPDATE and ALL cannot diverge on the
+         * external-column contract. forceAllColumns has its own earlier metadata-based exclusion path.
+         */
+        Set<String> externalizedColumns = rowChange.getExternalizedColumnNames();
+        if (!externalizedColumns.isEmpty()) {
+            changeColumns.removeIf(column -> {
+                String columnName = column.getName().toLowerCase(Locale.ROOT);
+                return externalizedColumns.contains(columnName)
+                    && !rowChange.hasChangeColumn(column.getColumnIndex());
+            });
+        }
+
         // 如果是实验室环境，记录更新信息
         if (isLabEnv) {
             recordUpdateInfo(rowChange.getSchema(), changeColumns);
         }
 
         return new ArrayList<>(changeColumns);
+    }
+
+    /**
+     * Build the columns that an absolute-value UPDATE must never rewrite blindly.
+     * <p>
+     * PK/shard keys are real row identities. Externalized columns are not identities, but an unchanged
+     * field in a global-binlog UPDATE may carry its canonical BlobRef address instead of the logical
+     * TEXT/BLOB payload. They therefore share the "exclude from blind SET" role only; callers must not
+     * reuse this set for WHERE clauses, DAG keys or shard routing.
+     */
+    static Set<String> getBlindUpdateExcludedColumns(TableInfo dstTbInfo, Set<String> externalizedColumns) {
+        if (externalizedColumns.isEmpty()) {
+            return new HashSet<>(dstTbInfo.getKeyList());
+        }
+
+        Set<String> excludeColumns = new HashSet<>();
+        for (String keyColumn : dstTbInfo.getKeyList()) {
+            excludeColumns.add(keyColumn.toLowerCase(Locale.ROOT));
+        }
+        for (String externalizedColumn : externalizedColumns) {
+            excludeColumns.add(externalizedColumn.toLowerCase(Locale.ROOT));
+        }
+        return excludeColumns;
+    }
+
+    /**
+     * forceAllColumns mode returns the complete logical after-image except columns that are unsafe to
+     * rewrite blindly. A changed externalized column never reaches this path: external-column changes
+     * are compaction barriers and retain their original UPDATE event with the restored payload.
+     */
+    private static List<DBMSColumn> getForceAllColumnsUpdateColumns(DefaultRowChange rowChange, TableInfo dstTbInfo) {
+        Set<String> externalizedColumns = rowChange.getExternalizedColumnNames();
+        if (externalizedColumns.isEmpty()) {
+            Set<String> excludeColumns = new HashSet<>(dstTbInfo.getKeyList());
+            List<DBMSColumn> result = new ArrayList<>();
+            for (DBMSColumn column : rowChange.getColumns()) {
+                if (!excludeColumns.contains(column.getName())) {
+                    result.add(column);
+                }
+            }
+            if (result.isEmpty()) {
+                return new ArrayList<>(rowChange.getColumns());
+            }
+            return result;
+        }
+
+        Set<String> excludeColumns = getBlindUpdateExcludedColumns(dstTbInfo, externalizedColumns);
+        List<DBMSColumn> result = new ArrayList<>();
+        for (DBMSColumn column : rowChange.getColumns()) {
+            if (!excludeColumns.contains(column.getName().toLowerCase(Locale.ROOT))) {
+                result.add(column);
+            }
+        }
+
+        // Preserve the historical key-only-table fallback for ordinary tables. For a table containing
+        // externalized columns, falling back to all columns would reintroduce the exact BlobRef-address
+        // corruption this exclusion prevents; an empty list safely turns the compacted no-op into a skip.
+        return result;
     }
 }

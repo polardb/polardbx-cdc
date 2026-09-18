@@ -6,7 +6,11 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog.dbms;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * This class creates a default SQL column set implementation. <br />
@@ -18,6 +22,7 @@ public class DefaultColumnSet extends DBMSColumnSet {
     private static final long serialVersionUID = -3429762238191668175L;
 
     protected List<? extends DBMSColumn> columns;
+    protected Set<String> externalizedColumnNames;
 
     public DefaultColumnSet() {
     }
@@ -31,10 +36,35 @@ public class DefaultColumnSet extends DBMSColumnSet {
     }
 
     /**
+     * Create a column set carrying the event-version externalized-column metadata.
+     */
+    public DefaultColumnSet(List<? extends DBMSColumn> columns, Set<String> externalizedColumnNames) {
+        this(columns);
+        setExternalizedColumnNames(externalizedColumnNames);
+    }
+
+    /**
      * Return all columns in object.
      */
     public List<? extends DBMSColumn> getColumns() {
         return columns;
+    }
+
+    @Override
+    public Set<String> getExternalizedColumnNames() {
+        return externalizedColumnNames == null ? Collections.emptySet() : externalizedColumnNames;
+    }
+
+    public void setExternalizedColumnNames(Set<String> externalizedColumnNames) {
+        if (externalizedColumnNames == null || externalizedColumnNames.isEmpty()) {
+            this.externalizedColumnNames = Collections.emptySet();
+            return;
+        }
+        Set<String> normalizedNames = new LinkedHashSet<>();
+        for (String columnName : externalizedColumnNames) {
+            normalizedNames.add(columnName.toLowerCase(Locale.ROOT));
+        }
+        this.externalizedColumnNames = Collections.unmodifiableSet(normalizedNames);
     }
 
     /**

@@ -27,6 +27,7 @@ import org.mybatis.dynamic.sql.SqlBuilder;
 import java.util.List;
 import java.util.Optional;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_START_TSO;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.GLOBAL_BINLOG_LATEST_CURSOR;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RECOVER_TSO_BINLOG_NUM_LIMIT;
@@ -98,7 +99,12 @@ public class RecoverTsoBuilder {
                 fileName = record.get().getBinlogFile();
             } else {
                 log.info("cannot find a tso, will use origin tso");
-                tso = expectedStorageTso;
+                String startTso = DynamicApplicationConfig.getString(BINLOGX_STREAM_START_TSO);
+                if (StringUtils.isNotBlank(startTso)) {
+                    tso = startTso;
+                } else {
+                    tso = expectedStorageTso;
+                }
                 fileName = ExecutionConfig.ORIGIN_BINLOG_FILE;
             }
         }

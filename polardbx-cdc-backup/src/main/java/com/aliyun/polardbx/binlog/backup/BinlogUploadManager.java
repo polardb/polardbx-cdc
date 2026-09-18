@@ -30,7 +30,9 @@ import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.LabEventType;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.Setter;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +51,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -77,7 +80,7 @@ public class BinlogUploadManager implements Runnable {
     /**
      * 提供流的最新cursor信息
      */
-    private final IFileCursorProvider provider;
+    private final IFileCursorProvider fileCursorProvider;
     /**
      * 本地产生的binlog文件的保存路径（不带group和stream）
      */
@@ -94,19 +97,25 @@ public class BinlogUploadManager implements Runnable {
     /**
      * group name
      */
-    private final String group;
+    @Setter
+    private String group;
     /**
      * 这个dumper负责的所有流
      */
-    private final List<String> streamList;
+    @Setter
+    @Getter(AccessLevel.PROTECTED)
+    private Set<String> streamSet;
     /**
      * cluster id
      */
+    @Setter
     private String clusterId;
     /**
      * 用于保存各个流对应的LocalFileSystem
      */
-    private final Map<String, LocalFileSystem> fileSystemMap;
+    @Setter
+    @Getter(AccessLevel.PROTECTED)
+    private Map<String, LocalFileSystem> fileSystemMap;
     /**
      * 扫描线程，负责扫描binlog_oss_record，获得所有需要上传的本地文件列表
      */
@@ -118,10 +127,14 @@ public class BinlogUploadManager implements Runnable {
     /**
      * 正在上传中的文件列表，用于避免重复上传
      */
+    @Getter
     private final Set<String> uploadingFiles;
+    @Getter
+    private final Map<String, Map<String, Future<?>>> runningUploadTasks;
     /**
      * key: stream name, value: MetricsObserver object
      */
+    @Getter(AccessLevel.PROTECTED)
     private final Map<String, MetricsObserver> metricsObserverMap;
     /**
      * BinlogUploader的状态
@@ -139,21 +152,22 @@ public class BinlogUploadManager implements Runnable {
     public BinlogUploadManager(StreamContext context, Map<String, MetricsObserver> metrics) {
         this.recordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
         this.recordMapper = SpringContextHolder.getObject(BinlogOssRecordMapper.class);
-        this.provider = SpringContextHolder.getObject(IFileCursorProvider.class);
+        this.fileCursorProvider = SpringContextHolder.getObject(IFileCursorProvider.class);
         this.binlogRootPath = BinlogFileUtil.getRootPath(context.getTaskType(), context.getVersion());
         this.taskType = context.getTaskType();
         this.taskName = context.getTaskName();
         this.version = context.getVersion();
         this.uploadingFiles = new HashSet<>();
+        this.runningUploadTasks = new HashMap<>();
         this.group = context.getGroup();
-        this.streamList = context.getStreamList();
+        this.streamSet = context.getStreamSet();
         this.clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
         this.isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
         this.scanUploadIntervalMs = getInt(ConfigKeys.BINLOG_BACKUP_UPLOAD_SCAN_INTERVAL_MS);
         this.metricsObserverMap = metrics;
 
         fileSystemMap = new HashMap<>();
-        for (String stream : streamList) {
+        for (String stream : streamSet) {
             LocalFileSystem localFileSystem = new LocalFileSystem(binlogRootPath, group, stream);
             fileSystemMap.put(stream, localFileSystem);
         }
@@ -179,22 +193,57 @@ public class BinlogUploadManager implements Runnable {
     }
 
     public void start() {
+        logger.info("## starting binlog uploader ...");
         scanExecutor.execute(this);
+        logger.info("## the binlog uploader is running now ...");
+    }
+
+    public void start(Set<String> streams, Map<String, MetricsObserver> metrics) {
+        logger.info("## adding new streams to binlog uploader, streams: {} ...", streams);
+        synchronized (this) {
+            streamSet.addAll(streams);
+            streams.forEach(s -> {
+                LocalFileSystem localFileSystem = new LocalFileSystem(binlogRootPath, group, s);
+                fileSystemMap.put(s, localFileSystem);
+                metricsObserverMap.put(s, metrics.get(s));
+            });
+        }
+        logger.info("## the streams is successfully added to binlog uploader ...");
     }
 
     public void stop() {
+        logger.info("## stopping binlog uploader ...");
+
         this.runnable = false;
         if (scanExecutor != null) {
             scanExecutor.shutdownNow();
         }
+        if (keepAliveExecutor != null) {
+            keepAliveExecutor.shutdownNow();
+        }
         this.uploadingFiles.clear();
+
+        logger.info("## the binlog uploader is stopped ...");
+    }
+
+    public void stop(String stream) {
+        logger.info("## removing stream: {} from binlog uploader ...", stream);
+        synchronized (this) {
+            Map<String, Future<?>> futureMap = runningUploadTasks.get(stream);
+            if (futureMap != null) {
+                futureMap.values().forEach(future -> future.cancel(true));
+            }
+            streamSet.removeIf(s -> s.equals(stream));
+            metricsObserverMap.remove(stream);
+            fileSystemMap.remove(stream);
+        }
+        logger.info("## the stream is successfully removed from binlog uploader ...");
     }
 
     @Override
     public void run() {
         try {
             MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_BACKUP);
-            logger.info("binlog uploader start to run");
             while (runnable) {
                 try {
                     // 每隔一段时间进行一轮扫描上传
@@ -203,7 +252,9 @@ public class BinlogUploadManager implements Runnable {
                         continue;
                     }
 
-                    dispatchUploadJobs(getFilesToUpload());
+                    synchronized (this) {
+                        dispatchUploadJobs(getFilesToUpload());
+                    }
                 } catch (Throwable e) {
                     logger.error("binlog uploader meet an exception", e);
                     alert("Scan Thread");
@@ -221,16 +272,18 @@ public class BinlogUploadManager implements Runnable {
     /**
      * 上传本地文件目录中有，并且binlog_oss_record表中状态非success的文件
      */
-    private List<BinlogOssRecord> getFilesToUpload() {
+    public List<BinlogOssRecord> getFilesToUpload() {
         List<BinlogOssRecord> result = new ArrayList<>();
         BinlogOssRecordService ossRecordService = getObject(BinlogOssRecordService.class);
-        for (String stream : streamList) {
+        for (String stream : streamSet) {
             Set<String> localFiles =
                 fileSystemMap.get(stream).listFiles().stream().map(CdcFile::getName).collect(Collectors.toSet());
             List<BinlogOssRecord> recordsForUpload =
                 ossRecordService.getRecordsForUpload(group, stream, clusterId);
+            // 本地存在 且 本地文件大小比远程文件大小大，则加入到上传列表中
             List<BinlogOssRecord> partResult =
-                recordsForUpload.stream().filter(r -> localFiles.contains(r.getBinlogFile()))
+                recordsForUpload.stream()
+                    .filter(r -> localFiles.contains(r.getBinlogFile()))
                     .collect(Collectors.toList());
             result.addAll(partResult);
         }
@@ -238,7 +291,26 @@ public class BinlogUploadManager implements Runnable {
         return result;
     }
 
-    private boolean uploadFinished(int id) {
+    /**
+     * 本意是想要在上传时校验一下本地文件和远程文件的大小，实现本地文件比远程大才上传
+     * 但由于在reset时不会清空远程文件，所以在reset完后大量文件都过不了校验
+     * 因此，这里暂时不校验，这段逻辑也没有调用方了
+     *
+     * @return int
+     */
+    private int compareBinlogLocalRemoteSize(LocalFileSystem localFileSystem, BinlogOssRecord record) {
+        String remoteFileName = BinlogFileUtil.buildRemoteFilePartName(
+            record.getBinlogFile(), record.getGroupId(), record.getStreamId());
+        RemoteBinlogProxy remoteBinlogProxy = RemoteBinlogProxy.getInstance();
+        long remoteSize = 0L;
+        if (remoteBinlogProxy.isObjectsExistForPrefix(remoteFileName)) {
+            remoteSize = RemoteBinlogProxy.getInstance().getSize(remoteFileName);
+        }
+        Long localSize = localFileSystem.size(record.getBinlogFile());
+        return localSize.compareTo(remoteSize);
+    }
+
+    boolean uploadFinished(int id) {
         Optional<BinlogOssRecord> record = recordService.getRecordById(id);
         return record.isPresent() && BinlogUploadStatus.fromValue(record.get().getUploadStatus()).uploadFinished();
     }
@@ -247,13 +319,13 @@ public class BinlogUploadManager implements Runnable {
         return uploadingFiles.contains(fileName);
     }
 
-    private void dispatchUploadJobs(List<BinlogOssRecord> records) {
+    void dispatchUploadJobs(List<BinlogOssRecord> records) {
         for (final BinlogOssRecord record : records) {
             if (isUploading(record.getBinlogFile()) || uploadFinished(record.getId())) {
                 continue;
             }
 
-            uploadExecutor.submit(() -> {
+            Future<?> future = uploadExecutor.submit(() -> {
                 try {
                     logger.info("begin to upload binlog file: " + record.getBinlogFile());
                     processUpload(record);
@@ -265,9 +337,13 @@ public class BinlogUploadManager implements Runnable {
                     // 如果上传中发生异常，将这个record从uploadingFiles中移除，下次扫描线程又能够扫到这个record没有上传成功
                     // 如果不从uploadingFiles中移除，则会误认为这个文件正在上传中，会导致这个文件之后永远也得不到上传
                     uploadingFiles.remove(record.getBinlogFile());
+                    runningUploadTasks.computeIfAbsent(record.getStreamId(), k -> new HashMap<>())
+                        .remove(record.getBinlogFile());
                 }
             });
 
+            runningUploadTasks.computeIfAbsent(record.getStreamId(), k -> new HashMap<>())
+                .put(record.getBinlogFile(), future);
             uploadingFiles.add(record.getBinlogFile());
         }
     }
@@ -290,9 +366,8 @@ public class BinlogUploadManager implements Runnable {
                     deleteFileOnRemote(record);
 
                     // 由于上传过程会很久，需要每隔一定时间执行一次sql，避免连接被视为空闲销毁
-                    future =
-                        getKeepAliveExecutor().scheduleAtFixedRate(() -> keepAlive(conn, record), KEEP_ALIVE_INTERVAL,
-                            KEEP_ALIVE_INTERVAL, TimeUnit.SECONDS);
+                    future = getKeepAliveExecutor().scheduleAtFixedRate(
+                        () -> keepAlive(conn, record), KEEP_ALIVE_INTERVAL, KEEP_ALIVE_INTERVAL, TimeUnit.SECONDS);
 
                     doUpload(record);
 
@@ -322,14 +397,14 @@ public class BinlogUploadManager implements Runnable {
         return DriverManager.getConnection(metaDs.getUrl(), metaDs.getUsername(), metaDs.getPassword());
     }
 
-    public void doUpload(BinlogOssRecord record) throws IOException {
+    public void doUpload(BinlogOssRecord record) throws IOException, InterruptedException {
         IFileReader fetcher = new BinlogFileReader(record.getBinlogFile(),
             BinlogFileUtil.getFullPath(binlogRootPath, record.getGroupId(), record.getStreamId()),
-            new BinlogFileStatusChecker(provider, record.getStreamId()));
+            new BinlogFileStatusChecker(fileCursorProvider, record.getStreamId()));
         String remoteFileName = BinlogFileUtil.buildRemoteFilePartName(
             record.getBinlogFile(), record.getGroupId(), record.getStreamId());
-        BinlogUploader binlogUploader =
-            new BinlogUploader(fetcher, remoteFileName, metricsObserverMap.get(record.getStreamId()), record);
+        BinlogUploader binlogUploader = new BinlogUploader(fetcher, remoteFileName,
+            metricsObserverMap.get(record.getStreamId()), record);
         binlogUploader.upload();
     }
 

@@ -6,17 +6,25 @@
  */
 package com.aliyun.polardbx.binlog.canal;
 
+import com.aliyun.polardbx.binlog.canal.binlog.event.RowsQueryLogEvent;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
+import org.mockito.Mock;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * created by ziyang.lb
  **/
+@Slf4j
 public class LogEventUtilTest {
 
     @Test
@@ -141,5 +149,17 @@ public class LogEventUtilTest {
         Long tid = LogEventUtil.getTranIdFromXid(xid, "utf8");
         String groupName = LogEventUtil.getGroupFromXid(xid, "utf8");
         System.out.println("tid : " + tid + " , groupName : " + groupName);
+    }
+
+    @Test
+    public void testBuildTrace() {
+        String query = "/*DRDS /127.0.0.1/19e8eeec2d800000-1/1//////1/ */";
+        RowsQueryLogEvent event = mock(RowsQueryLogEvent.class);
+        when(event.getRowsQuery()).thenReturn(query);
+        String[] res = LogEventUtil.buildTrace(event);
+        log.info("res:{}", Arrays.toString(res));
+        Assert.assertEquals(4, res.length);
+        Assert.assertEquals("1", res[2]);
+        Assert.assertEquals("1", res[3]);
     }
 }

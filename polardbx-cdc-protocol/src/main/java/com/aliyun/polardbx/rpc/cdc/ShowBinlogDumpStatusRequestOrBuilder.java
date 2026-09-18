@@ -13,18 +13,27 @@ public interface ShowBinlogDumpStatusRequestOrBuilder extends
     // @@protoc_insertion_point(interface_extends:dumper.ShowBinlogDumpStatusRequest)
     com.google.protobuf.MessageOrBuilder {
 
-    /**
-     * <code>string streamName = 1;</code>
-     *
-     * @return The streamName.
-     */
-    java.lang.String getStreamName();
+  /**
+   * <code>string streamName = 1;</code>
+   * @return The streamName.
+   */
+  java.lang.String getStreamName();
+  /**
+   * <code>string streamName = 1;</code>
+   * @return The bytes for streamName.
+   */
+  com.google.protobuf.ByteString
+      getStreamNameBytes();
 
-    /**
-     * <code>string streamName = 1;</code>
-     *
-     * @return The bytes for streamName.
-     */
-    com.google.protobuf.ByteString
-    getStreamNameBytes();
+  /**
+   * <code>string instId = 2;</code>
+   * @return The instId.
+   */
+  java.lang.String getInstId();
+  /**
+   * <code>string instId = 2;</code>
+   * @return The bytes for instId.
+   */
+  com.google.protobuf.ByteString
+      getInstIdBytes();
 }

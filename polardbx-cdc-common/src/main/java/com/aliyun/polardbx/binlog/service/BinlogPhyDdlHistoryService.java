@@ -18,6 +18,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.sql.SQLException;
 import java.util.List;
 
 /**
@@ -56,6 +57,10 @@ public class BinlogPhyDdlHistoryService {
             if (log.isDebugEnabled()) {
                 log.debug(logInfo);
             }
+        } catch (Exception e) {
+            log.error("ddl insert failed:{}, at {}:{}", phyDdlHistory.getDdl(), phyDdlHistory.getBinlogFile(),
+                phyDdlHistory.getPos());
+            throw e;
         }
     }
 

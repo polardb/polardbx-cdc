@@ -8,6 +8,7 @@ package com.aliyun.polardbx.rpl.taskmeta;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.TypeReference;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.ResultCode;
@@ -22,8 +23,8 @@ import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplStateMachine;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
-import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
+import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
 import com.aliyun.polardbx.binlog.filesys.CdcFileSystem;
@@ -37,6 +38,7 @@ import com.aliyun.polardbx.rpc.cdc.Request;
 import com.aliyun.polardbx.rpl.applier.StatisticUnit;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.HostManager;
+import com.aliyun.polardbx.rpl.common.ReplicaMode;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.DataImportFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.DataImportTaskDetailInfo;
@@ -49,8 +51,10 @@ import com.aliyun.polardbx.rpl.validation.common.ValidationTypeEnum;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.MutableTriple;
+import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,14 +68,18 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_RESOURCE_USE_RATIO;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 
 /**
  * @author shicai.xsc 2021/1/8 11:15
@@ -84,7 +92,7 @@ public class FSMMetaManager {
     private static final String UNLOCK_DB = "ALTER DATABASE `%s` SET read_only=false";
 
     public static ResourceManager RESOURCE_MANAGER =
-        new ResourceManager(DynamicApplicationConfig.getString(CLUSTER_ID));
+        new ResourceManager(getString(CLUSTER_ID));
 
     /* /v1/import/service/start */
     public static ResultCode<?> startStateMachine(long FSMId) {
@@ -230,8 +238,8 @@ public class FSMMetaManager {
             for (RplTask task : backFlowTasks) {
                 RplTaskConfig config = DbTaskMetaManager.getTaskConfig(task.getId());
                 String streamName = getStreamName(config);
-                BinlogPosition position = StringUtils.isNotBlank(streamName) ? findStreamStartPosition(streamName)
-                    : findMainStartPosition();
+                BinlogPosition position =
+                    StringUtils.isNotBlank(streamName) ? findStreamStartPosition(streamName) : findMainStartPosition();
                 if (position != null) {
                     DbTaskMetaManager.updateTask(task.getId(), null, null, position.toString(), null, null);
                 } else {
@@ -246,8 +254,7 @@ public class FSMMetaManager {
         return new ResultCode<>(RplConstants.FAILURE_CODE, "failure", false);
     }
 
-    public static BinlogPosition findStartPosition(ManagedChannel channel)
-        throws InterruptedException {
+    public static BinlogPosition findStartPosition(ManagedChannel channel) throws InterruptedException {
         BinlogPosition position = new BinlogPosition(null, 0, -1, -1);
         CountDownLatch countDownLatch = new CountDownLatch(1);
         CdcServiceGrpc.CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
@@ -308,8 +315,8 @@ public class FSMMetaManager {
 
     public static String getStreamName(RplTaskConfig rplTaskConfig) {
         ExtractorConfig extractorConfig = JSON.parseObject(rplTaskConfig.getExtractorConfig(), ExtractorConfig.class);
-        DataImportMeta.PhysicalMeta importMeta = JSON.parseObject(extractorConfig.getPrivateMeta(),
-            DataImportMeta.PhysicalMeta.class);
+        DataImportMeta.PhysicalMeta importMeta =
+            JSON.parseObject(extractorConfig.getPrivateMeta(), DataImportMeta.PhysicalMeta.class);
         return importMeta.getStreamName();
     }
 
@@ -335,6 +342,26 @@ public class FSMMetaManager {
             return new ResultCode<>(RplConstants.SUCCESS_CODE, "success", true);
         }
         return new ResultCode<>(RplConstants.FAILURE_CODE, "failure", false);
+    }
+
+    public static ResultCode<?> enableHeartbeat(long fsmId, boolean enableHeartbeat) {
+        RplService incCopyService = DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY);
+        List<RplTask> incTasks = DbTaskMetaManager.listTaskByService(incCopyService.getId());
+        // 遍历incTasks， 提取taskId set集合， DbTaskMetaManager.listTaskConfig 返回task列表，并更新其heartbeat参数
+        if (CollectionUtils.isNotEmpty(incTasks)) {
+            Set<Long> taskIds = new HashSet<>();
+            incTasks.forEach(task -> taskIds.add(task.getId()));
+            List<RplTaskConfig> taskConfigs = DbTaskMetaManager.listTaskConfig(taskIds);
+            taskConfigs.forEach(taskConfig -> {
+                RdsExtractorConfig extractorConfig =
+                    JSON.parseObject(taskConfig.getExtractorConfig(), RdsExtractorConfig.class);
+                extractorConfig.setCreateHeartbeatTable(enableHeartbeat);
+                extractorConfig.setEnableDetectHeartbeat(enableHeartbeat);
+                String newConfigStr = JSON.toJSONString(extractorConfig);
+                DbTaskMetaManager.updateTaskConfig(taskConfig.getTaskId(), newConfigStr, null, null, null);
+            });
+        }
+        return new ResultCode<>(RplConstants.SUCCESS_CODE, "success", true);
     }
 
     private static boolean lockDbs(Collection<String> dbNames) {
@@ -869,15 +896,18 @@ public class FSMMetaManager {
         defaultLogger.warn(
             "connect to " + String.format("jdbc:mysql://%s:%s", meta.getMasterHost(), meta.getMasterPort()));
         try (Connection connection = DriverManager.getConnection(String.format(
-                "jdbc:mysql://%s:%s?allowLoadLocalInfile=false&autoDeserialize=false"
-                    + "&allowLocalInfile=false&allowUrlInLocalInfile=false&useSSL=false", meta.getMasterHost(),
-                meta.getMasterPort()),
-            meta.getMasterUser(), meta.getMasterPassword())) {
+            "jdbc:mysql://%s:%s?allowLoadLocalInfile=false&autoDeserialize=false"
+                + "&allowLocalInfile=false&allowUrlInLocalInfile=false&useSSL=false", meta.getMasterHost(),
+            meta.getMasterPort()), meta.getMasterUser(), meta.getMasterPassword())) {
 
             List<MutableTriple<String, Integer, String>> masterInfos;
             if (meta.isEnableDynamicMasterHost()) {
                 if (StringUtils.isNotEmpty(meta.getMasterInstId())) {
                     masterInfos = CommonUtil.getComputeNodesWithFixedInstId(connection, meta.getMasterInstId());
+                    // assert MasterInstId is not self
+                    checkInstId(meta.getMasterInstId());
+                    // assert MasterHost,MasterPort in masterInfos
+                    checkMasterHostAndPort(masterInfos, meta);
                 } else {
                     masterInfos = CommonUtil.getComputeNodes(connection);
                     meta.setMasterInstId(masterInfos.get(0).getRight());
@@ -898,7 +928,7 @@ public class FSMMetaManager {
             defaultLogger.info("initStateMachine, created stateMachine, {}", stateMachine.getId());
 
             // rpl full extraction service
-            if (meta.isImageMode()) {
+            if (meta.getMode() == ReplicaMode.IMAGE || meta.getMode() == ReplicaMode.FULL_DATA) {
                 RplService rplFullService = DbTaskMetaManager.addService(stateMachine.getId(), ServiceType.REPLICA_FULL,
                     Collections.singletonList(FSMState.REPLICA_FULL));
                 createReplicaTasks(rplFullService, meta);
@@ -931,6 +961,27 @@ public class FSMMetaManager {
         }
     }
 
+    public static void checkInstId(String sourceInstId) {
+        String selfInstId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
+        if (StringUtils.equals(selfInstId, sourceInstId)) {
+            defaultLogger.error("initStateMachine failed because of using self as source");
+            throw new RuntimeException("should not use self as replica source");
+        }
+    }
+
+    public static void checkMasterHostAndPort(List<MutableTriple<String, Integer, String>> masterInfos,
+                                              ReplicaMeta meta) {
+        // assert MasterHost,MasterPort in masterInfos
+        boolean inList = masterInfos.stream()
+            .anyMatch(masterInfo -> masterInfo.getLeft().equals(meta.getMasterHost())
+                && masterInfo.getMiddle().equals(meta.getMasterPort()));
+        if (!inList) {
+            defaultLogger.error("initStateMachine failed because of "
+                + "MasterHost,MasterPort not in masterInfos");
+            throw new RuntimeException("MasterHost,MasterPort not in masterInfos");
+        }
+    }
+
     public static RplStateMachine initStateMachine(StateMachineType type, RecoveryMeta meta, RecoveryFSM fsm) {
         if (type != StateMachineType.RECOVERY) {
             defaultLogger.error("initStateMachine failed because of unmatched type and meta");
@@ -942,7 +993,7 @@ public class FSMMetaManager {
             String randomUUID = UUID.randomUUID().toString();
 
             // create stateMachine
-            String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+            String clusterId = getString(ConfigKeys.CLUSTER_ID);
             RplStateMachine stateMachine =
                 DbTaskMetaManager.createStateMachine(config, StateMachineType.RECOVERY, fsm, null, clusterId, null);
 
@@ -1033,11 +1084,11 @@ public class FSMMetaManager {
         return true;
     }
 
-    public static boolean isReplicaImageMode(long FSMId) {
+    public static boolean isReplicaModeContainsFull(long FSMId) {
         RplStateMachine stateMachine = DbTaskMetaManager.getStateMachine(FSMId);
         if (stateMachine != null && stateMachine.getConfig() != null) {
             ReplicaMeta replicaMeta = JSON.parseObject(stateMachine.getConfig(), ReplicaMeta.class);
-            return replicaMeta.isImageMode();
+            return replicaMeta.getMode() == ReplicaMode.IMAGE || replicaMeta.getMode() == ReplicaMode.FULL_DATA;
         }
         return false;
     }
@@ -1111,7 +1162,7 @@ public class FSMMetaManager {
                     DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(), rplService.getId(),
                         extractorConfigStr, pipelineConfigStr, applierConfigStr,
                         ServiceType.valueOf(rplService.getServiceType()), i,
-                        DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID),
+                        getString(ConfigKeys.CLUSTER_ID),
                         DynamicApplicationConfig.getInt(ConfigKeys.RPL_DEFAULT_LOWER_MEMORY));
 
                 defaultLogger.info("create SQL flash back task, service: {}, task: {}", rplService.getId(),
@@ -1142,7 +1193,7 @@ public class FSMMetaManager {
             DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(), rplService.getId(), "", "",
                 combineConfigStr,
                 ServiceType.valueOf(rplService.getServiceType()), mirror,
-                DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID),
+                getString(ConfigKeys.CLUSTER_ID),
                 DynamicApplicationConfig.getInt(ConfigKeys.RPL_DEFAULT_LOWER_MEMORY));
         defaultLogger.info("create combine task end, service: {}, task: {}", rplService.getId(), rplTask.getId());
     }
@@ -1151,6 +1202,8 @@ public class FSMMetaManager {
         defaultLogger.info("createTasks start, service: {}", rplService.getId());
         CommonUtil.hostSafeCheck(meta.getMasterHost());
         try {
+            int taskNum = 1;
+            List<String> dnIdList = new ArrayList<>();
             if (ServiceType.valueOf(rplService.getServiceType()) == ServiceType.REPLICA_INC && StringUtils.isBlank(
                 meta.getPosition())) {
                 try (Connection connection = DriverManager.getConnection(String.format(
@@ -1162,13 +1215,32 @@ public class FSMMetaManager {
                     meta.setPosition(CommonUtil.getBinaryLatestPosition(connection));
                 }
             }
-            RplTask rplTask =
-                DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(), rplService.getId(),
-                    null, null, null,
+            if (ServiceType.valueOf(rplService.getServiceType()) == ServiceType.REPLICA_FULL &&
+                meta.isExtractFullFromDn()) {
+                try (Connection connection = DriverManager.getConnection(String.format(
+                    "jdbc:mysql://%s:%s?allowLoadLocalInfile=false&autoDeserialize=false"
+                        + "&allowLocalInfile=false&allowUrlInLocalInfile=false&useSSL=false", meta.getMasterHost(),
+                    meta.getMasterPort()), meta.getMasterUser(), meta.getMasterPassword())) {
+                    defaultLogger.warn("connect to " + String.format("jdbc:mysql://%s:%s", meta.getMasterHost(),
+                        meta.getMasterPort()));
+                    Map<String, HostInfo> dnInfoMap = CommonUtil.getDnInfoMap(connection);
+                    dnIdList = new ArrayList<>(dnInfoMap.keySet());
+                    taskNum = dnIdList.size();
+                }
+            }
+            for (int i = 0; i < taskNum; i++) {
+                if (ServiceType.valueOf(rplService.getServiceType()) == ServiceType.REPLICA_FULL &&
+                    meta.isExtractFullFromDn()) {
+                    meta.setDnId(dnIdList.get(i));
+                }
+                RplTask rplTask = DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(),
+                    rplService.getId(), null, null, null,
                     ServiceType.valueOf(rplService.getServiceType()), 0, meta.getClusterId(),
-                    computeIncTaskMemory(1));
-            updateReplicaTaskConfig(rplTask, meta, true);
-            defaultLogger.info("createTasks end, service: {}, task: {}", rplService.getId(), rplTask.getId());
+                    computeIncTaskMemory(taskNum));
+                updateReplicaTaskConfig(rplTask, meta, true);
+                defaultLogger.info("createTask end, service: {}, task: {}", rplService.getId(), rplTask.getId());
+            }
+            defaultLogger.info("createTasks end, service: {}", rplService.getId());
         } catch (Throwable e) {
             defaultLogger.error("createTasks failed, service: {}", rplService.getId(), e);
             throw e;
@@ -1178,19 +1250,24 @@ public class FSMMetaManager {
     private static void createStreamReplicaTasks(RplService rplService, ReplicaMeta meta, Connection connection,
                                                  List<MutableTriple<String, Integer, String>> masterInfos) {
         defaultLogger.info("createTasks start, service: {}", rplService.getId());
-        List<String> streamPositions = CommonUtil.getStreamLatestPositions(connection, meta.getStreamGroup());
+        // 如果 meta.position 为空，那么获取 stream group 的最新位点
+        boolean useMetaPosition = StringUtils.isNotBlank(meta.getPosition());
+        List<Pair<String, String>> streamPositions =
+            CommonUtil.getStreamLatestPositions(connection, meta.getStreamGroup());
         for (int i = 0; i < streamPositions.size(); i++) {
             // use dynamic host info
             meta.setMasterHost(masterInfos.get(i % masterInfos.size()).getLeft());
             meta.setMasterPort(masterInfos.get(i % masterInfos.size()).getMiddle());
-            meta.setPosition(streamPositions.get(i));
+            meta.setStreamName(streamPositions.get(i).getLeft());
+            if (!useMetaPosition) {
+                meta.setPosition(streamPositions.get(i).getRight());
+            }
             RplTask rplTask =
-                DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(), rplService.getId(),
-                    null, null, null,
-                    ServiceType.valueOf(rplService.getServiceType()), 0, meta.getClusterId(),
+                DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(), rplService.getId(), null, null,
+                    null, ServiceType.valueOf(rplService.getServiceType()), 0, meta.getClusterId(),
                     computeIncTaskMemory(streamPositions.size()));
             updateReplicaTaskConfig(rplTask, meta, true);
-            defaultLogger.info("createTasks end, service: {}, task: {}", rplService.getId(), rplTask.getId());
+            defaultLogger.info("createTask end, service: {}, task: {}", rplService.getId(), rplTask.getId());
         }
     }
 
@@ -1222,8 +1299,7 @@ public class FSMMetaManager {
         try {
             RplTask rplTask =
                 DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(), rplService.getId(), null, null,
-                    null,
-                    ServiceType.REPLICA_FULL_VALIDATION, 0, rplMeta.getClusterId(),
+                    null, ServiceType.REPLICA_FULL_VALIDATION, 0, rplMeta.getClusterId(),
                     DynamicApplicationConfig.getInt(ConfigKeys.RPL_DEFAULT_LOWER_MEMORY));
             defaultLogger.info("createTasks end, service: {}, task: {}", rplService.getId(), rplTask.getId());
             updateReplicaTaskConfig(rplTask, rplMeta, false);
@@ -1232,6 +1308,8 @@ public class FSMMetaManager {
         }
     }
 
+    // 这个函数逻辑上会有问题，会丢掉全量的dn id 还有 增量多流的位点（也就是不知道连哪个流了）
+    // 因此 PolarDB-X 的replication不建议任何场景使用reset slave，如需重置任务请 reset slave all 然后重新 change master
     public static void resetReplicaFsm(RplStateMachine stateMachine) {
         RplStateMachine newStateMachine = new RplStateMachine();
         newStateMachine.setId(stateMachine.getId());
@@ -1256,6 +1334,14 @@ public class FSMMetaManager {
         newStateMachine.setId(stateMachine.getId());
         newStateMachine.setConfig(config);
         DbTaskMetaManager.updateStateMachine(newStateMachine);
+    }
+
+    public static void enableHeartbeatForLab(ExtractorConfig extractorConfig) {
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV)) {
+            defaultLogger.info("enable heartbeat for lab");
+            extractorConfig.setEnableDetectHeartbeat(true);
+            extractorConfig.setCreateHeartbeatTable(true);
+        }
     }
 
     // 由于meta和实际运行的position以及hostInfo不一定一致，用参数来控制是否采用meta里的数据
@@ -1303,6 +1389,7 @@ public class FSMMetaManager {
             extractorConfig.setPrivateMeta(JSON.toJSONString(meta));
             extractorConfig.setHostInfo(getRplExtractorHostInfo(meta));
             extractorConfig.setEnableSrcLogicalMetaSnapshot(meta.isEnableSrcLogicalMetaSnapshot());
+            enableHeartbeatForLab(extractorConfig);
             extractorConfigStr = JSON.toJSONString(extractorConfig);
 
             PipelineConfig pipelineConfig = rplTaskConfig.getPipelineConfig() != null ?
@@ -1318,7 +1405,6 @@ public class FSMMetaManager {
             }
             applierConfig.setEnableDdl(meta.isEnableDdl());
             applierConfig.setApplierType(meta.getApplierType());
-            applierConfig.setCompareAll(meta.isCompareAll());
             applierConfig.setInsertOnUpdateMiss(meta.isInsertOnUpdateMiss());
             applierConfig.setConflictStrategy(meta.getConflictStrategy());
             applierConfigStr = JSON.toJSONString(applierConfig);
@@ -1382,10 +1468,20 @@ public class FSMMetaManager {
         defaultLogger.info("createTasks start, service: {}", rplService.getId());
         try {
             ServiceType serviceType = ServiceType.valueOf(rplService.getServiceType());
-            if (serviceType == ServiceType.FULL_COPY || serviceType == ServiceType.INC_COPY) {
+            if (serviceType == ServiceType.FULL_COPY) {
                 for (int i = 0; i < meta.getMetaList().size(); ++i) {
                     createOneImportTask(rplService, meta, meta.getMetaList().get(i), i);
                 }
+            } else if (serviceType == ServiceType.INC_COPY) {
+                boolean rplFullFromDn = DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_FULL_FROM_DN);
+                if (rplFullFromDn && meta.getLogicalMeta().getSrcType() == HostType.POLARX2) {
+                    createOneImportTask(rplService, meta, meta.getLogicalMeta(), 0);
+                } else {
+                    for (int i = 0; i < meta.getMetaList().size(); ++i) {
+                        createOneImportTask(rplService, meta, meta.getMetaList().get(i), i);
+                    }
+                }
+
             } else if (serviceType == ServiceType.FULL_VALIDATION || serviceType == ServiceType.RECONCILIATION) {
                 createOneImportTask(rplService, meta, meta.getMetaList().get(0), 0);
             } else if (serviceType == ServiceType.CDC_INC) {
@@ -1416,15 +1512,33 @@ public class FSMMetaManager {
             extractorConfigStr = JSON.toJSONString(fullExtractorConfig);
             break;
         case INC_COPY:
-            RdsExtractorConfig extractorConfig = new RdsExtractorConfig();
-            extractorConfig.setExtractorType(ExtractorType.DATA_IMPORT_INC);
-            extractorConfig.setFilterType(FilterType.IMPORT_FILTER);
-            extractorConfig.setPrivateMeta(JSON.toJSONString(physicalMeta));
-            extractorConfig.setHostInfo(getImportExtractorHostInfo(physicalMeta));
-            extractorConfig.setUid(physicalMeta.getRdsUid());
-            extractorConfig.setBid(physicalMeta.getRdsBid());
-            extractorConfig.setRdsInstanceId(physicalMeta.getRdsInstanceId());
-            extractorConfigStr = JSON.toJSONString(extractorConfig);
+            boolean rplFullFromDn = DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_FULL_FROM_DN);
+            if (rplFullFromDn && meta.getLogicalMeta().getSrcType() == HostType.POLARX2) {
+                RdsExtractorConfig extractorConfig = new RdsExtractorConfig();
+                extractorConfig.setExtractorType(ExtractorType.DATA_IMPORT_INC);
+                extractorConfig.setFilterType(FilterType.IMPORT_FILTER);
+                extractorConfig.setPrivateMeta(JSON.toJSONString(meta.getLogicalMeta()));
+                extractorConfig.setHostInfo(getImportExtractorHostInfo(meta.getLogicalMeta()));
+                extractorConfig.setUid(physicalMeta.getRdsUid());
+                extractorConfig.setBid(physicalMeta.getRdsBid());
+                extractorConfig.setRdsInstanceId(meta.getLogicalMeta().getRdsInstanceId());
+                extractorConfigStr = JSON.toJSONString(extractorConfig);
+            } else {
+                RdsExtractorConfig extractorConfig = new RdsExtractorConfig();
+                extractorConfig.setExtractorType(ExtractorType.DATA_IMPORT_INC);
+                extractorConfig.setFilterType(FilterType.IMPORT_FILTER);
+                extractorConfig.setPrivateMeta(JSON.toJSONString(physicalMeta));
+                extractorConfig.setHostInfo(getImportExtractorHostInfo(physicalMeta));
+                extractorConfig.setUid(physicalMeta.getRdsUid());
+                extractorConfig.setBid(physicalMeta.getRdsBid());
+                extractorConfig.setRdsInstanceId(physicalMeta.getRdsInstanceId());
+                if (meta.isNeedHeartbeat()) {
+                    // 目前只有polar-m需要
+                    extractorConfig.setCreateHeartbeatTable(true);
+                    extractorConfig.setEnableDetectHeartbeat(true);
+                }
+                extractorConfigStr = JSON.toJSONString(extractorConfig);
+            }
             break;
         case FULL_VALIDATION:
             ValidationExtractorConfig validationExtractorConfig = new ValidationExtractorConfig();
@@ -1458,7 +1572,14 @@ public class FSMMetaManager {
 
         // pipeline config
         PipelineConfig pipelineConfig = new PipelineConfig();
-        pipelineConfig.setSupportXa(ServiceType.valueOf(rplService.getServiceType()) != ServiceType.CDC_INC);
+        ServiceType pipelineServiceType = ServiceType.valueOf(rplService.getServiceType());
+        boolean supportXa = (pipelineServiceType != ServiceType.CDC_INC);
+        if (pipelineServiceType == ServiceType.INC_COPY
+            && (meta.getLogicalMeta().getSrcType() == HostType.RDS
+            || meta.getLogicalMeta().getSrcType() == HostType.POLARX2)) {
+            supportXa = false;
+        }
+        pipelineConfig.setSupportXa(supportXa);
         pipelineConfig.setFixedTpsLimit(physicalMeta.getFixedTpsLimit());
         pipelineConfig.setSkipException(physicalMeta.isSkipException());
         pipelineConfig.setBufferSize(meta.getRingBufferSize());
@@ -1468,7 +1589,7 @@ public class FSMMetaManager {
         // applier config
         ApplierConfig applierConfig = new ApplierConfig();
         applierConfig.setApplierType(meta.getApplierType());
-        // 评估升级默认关闭ddl支持
+        // 迁移链路默认关闭ddl支持
         applierConfig.setEnableDdl(false);
 
         // add crosscheck config
@@ -1483,10 +1604,28 @@ public class FSMMetaManager {
         if (type == ServiceType.INC_COPY) {
             applierConfig.setLogCommitLevel(RplConstants.LOG_ALL_COMMIT);
             applierConfig.setMergeBatchSize(meta.getIncMergeBatchSize());
+            updateIncCopyApplierConfig_4_CustomizedPk(applierConfig);
+            // 仅RDS/PolarDB-M/PolarX-2.0源支持DDL，PolarX-1.0不支持
+            if (meta.getLogicalMeta().getSrcType() == HostType.RDS
+                || meta.getLogicalMeta().getSrcType() == HostType.POLARX2) {
+                applierConfig.setEnableDdl(true);
+                applierConfig.setDdlOnlyAddColumn(true);
+            }
+            applierConfig.setSkipMismatchedColumns(true);
+        }
+        if (type == ServiceType.CDC_INC) {
+            updateCdcIncApplierConfig_4_FilterColumn(applierConfig);
+            // CDC_INC链路：目标端为RDS/PolarDB-M/PolarX-2.0时支持加列DDL
+            if (meta.getLogicalMeta().getSrcType() == HostType.RDS
+                || meta.getLogicalMeta().getSrcType() == HostType.POLARX2) {
+                applierConfig.setEnableDdl(true);
+                applierConfig.setDdlOnlyAddColumn(true);
+            }
         }
         if (type == ServiceType.FULL_COPY) {
             applierConfig.setApplierType(ApplierType.FULL_COPY);
             applierConfig.setMergeBatchSize(meta.getFullMergeBatchSize());
+            applierConfig.setSkipMismatchedColumns(true);
         }
         applierConfigStr = JSON.toJSONString(applierConfig);
 
@@ -1497,9 +1636,9 @@ public class FSMMetaManager {
         }
 
         RplTask rplTask =
-            DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(), rplService.getId(),
-                extractorConfigStr, pipelineConfigStr, applierConfigStr,
-                ServiceType.valueOf(rplService.getServiceType()), sequenceId, meta.getCdcClusterId(), memory);
+            DbTaskMetaManager.addTaskWithMemory(rplService.getStateMachineId(), rplService.getId(), extractorConfigStr,
+                pipelineConfigStr, applierConfigStr, ServiceType.valueOf(rplService.getServiceType()), sequenceId,
+                meta.getCdcClusterId(), memory);
         defaultLogger.info("createTasks end, service: {}, task: {}", rplService.getId(), rplTask.getId());
         // 增量任务需要特殊处理，写入增量起始位点
         if (type == ServiceType.INC_COPY) {
@@ -1602,14 +1741,12 @@ public class FSMMetaManager {
 
     public static HostInfo getBackflowApplierHostInfo(DataImportMeta meta) {
         return new HostInfo(meta.getBackFlowMetaList().get(0).getDstHost(),
-            meta.getBackFlowMetaList().get(0).getDstPort(),
-            meta.getBackFlowMetaList().get(0).getDstUser(),
-            meta.getBackFlowMetaList().get(0).getDstPassword(), "",
-            meta.getBackFlowMetaList().get(0).getDstType(),
+            meta.getBackFlowMetaList().get(0).getDstPort(), meta.getBackFlowMetaList().get(0).getDstUser(),
+            meta.getBackFlowMetaList().get(0).getDstPassword(), "", meta.getBackFlowMetaList().get(0).getDstType(),
             meta.getBackFlowMetaList().get(0).getDstServerId());
     }
 
-    //////////////////////////// For Daemon //////////////////////////////
+    /// ///////////////////////// For Daemon //////////////////////////////
 
     private static int computeValProgress(RplTask task) {
         if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.FINISHED) {
@@ -1646,5 +1783,27 @@ public class FSMMetaManager {
             return 99;
         }
         return (int) (dealtCount * 100 / totalCount);
+    }
+
+    public static void updateIncCopyApplierConfig_4_CustomizedPk(ApplierConfig applierConfig) {
+        String ukAsPkTableConfig = DynamicApplicationConfig.getString(ConfigKeys.RPL_UK_AS_PK_TABLE_CONFIG);
+        if (StringUtils.isNotBlank(ukAsPkTableConfig)) {
+            Map<String, String> customizedUsingUkAsPkTables = JSONObject.parseObject(ukAsPkTableConfig,
+                new TypeReference<Map<String, String>>() {
+                });
+            applierConfig.setCustomizedUsingUkAsPkTables(customizedUsingUkAsPkTables);
+        }
+    }
+
+    public static void updateCdcIncApplierConfig_4_FilterColumn(ApplierConfig applierConfig) {
+        String filterColumnsConfig = DynamicApplicationConfig.getString(ConfigKeys.RPL_UK_AS_PK_FILTER_COLUMN_CONFIG);
+        if (StringUtils.isNotBlank(filterColumnsConfig)) {
+            Map<String, Set<String>> filterColumns = JSONObject.parseObject(filterColumnsConfig,
+                new TypeReference<Map<String, Set<String>>>() {
+                }
+            );
+
+            applierConfig.setFilterColumns(filterColumns);
+        }
     }
 }

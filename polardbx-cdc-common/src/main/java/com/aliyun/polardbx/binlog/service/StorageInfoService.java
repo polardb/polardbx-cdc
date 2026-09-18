@@ -8,7 +8,6 @@ package com.aliyun.polardbx.binlog.service;
 
 import com.alibaba.druid.util.JdbcUtils;
 import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
-import com.aliyun.polardbx.binlog.domain.DnHost;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
@@ -24,19 +23,16 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_CHECK_DN_LEADER_BY_SHOW_STORAGE;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
-import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instId;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.isVip;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.status;
-import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.storageInstId;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.storageMasterInstId;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
@@ -207,10 +203,19 @@ public class StorageInfoService {
     public boolean checkLeaderByDN(StorageInfo storageInfo) {
         try (Connection conn = getConnection(storageInfo)) {
             return SQLUtils.isLeaderBySqlQuery(conn);
-        } catch (Exception e) {
-            log.info("check leader error, {}:{}:{}",
-                storageInfo.getStorageInstId(), storageInfo.getIp(), storageInfo.getPort(), e);
+        } catch (SQLException e) {
+            printCheckLog(storageInfo, e);
             return false;
+        }
+    }
+
+    private void printCheckLog(StorageInfo storageInfo, SQLException e) {
+        if (StringUtils.startsWith(e.getMessage(), "Access denied for user")) {
+            log.warn("{},{}:{}:{}", e.getMessage(),
+                storageInfo.getStorageInstId(), storageInfo.getIp(), storageInfo.getPort());
+        } else {
+            log.error("check leader error, {}:{}:{}", storageInfo.getStorageInstId(),
+                storageInfo.getIp(), storageInfo.getPort(), e);
         }
     }
 

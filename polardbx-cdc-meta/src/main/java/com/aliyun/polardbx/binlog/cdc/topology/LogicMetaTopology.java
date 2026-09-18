@@ -12,8 +12,10 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * created by ziyang.lb
@@ -28,6 +30,7 @@ public class LogicMetaTopology {
     private boolean shared;
     private boolean interned;
     private boolean lowerCased;
+    private long maxTableId;
 
     public void add(LogicDbTopology logicDbMeta) {
         logicDbMetas.add(logicDbMeta);
@@ -54,6 +57,14 @@ public class LogicMetaTopology {
         private String charset;
         private List<PhyDbTopology> phySchemas;
         private List<LogicTableMetaTopology> logicTableMetas;
+
+        public List<LogicTableMetaTopology> getSortedLogicTableMetas() {
+            if (logicTableMetas == null) {
+                return new ArrayList<>();
+            }
+            return logicTableMetas.stream().sorted(Comparator.comparing(LogicTableMetaTopology::getTableName))
+                .collect(Collectors.toList());
+        }
 
         public LogicDbTopology copy() {
             LogicDbTopology obj = new LogicDbTopology();
@@ -140,6 +151,11 @@ public class LogicMetaTopology {
         return logicDbMetas;
     }
 
+    public List<LogicDbTopology> getSortedLogicDbMetas() {
+        return logicDbMetas.stream().sorted(Comparator.comparing(LogicDbTopology::getSchema))
+            .collect(Collectors.toList());
+    }
+
     public void removeSchema(String schema) {
         Iterator<LogicDbTopology> iterator = this.logicDbMetas.iterator();
         while (iterator.hasNext()) {
@@ -161,5 +177,9 @@ public class LogicMetaTopology {
                 break;
             }
         }
+    }
+
+    public long incrementAndGetTableId() {
+        return ++maxTableId;
     }
 }

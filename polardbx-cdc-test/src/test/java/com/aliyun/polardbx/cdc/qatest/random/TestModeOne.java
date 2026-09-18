@@ -26,8 +26,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -37,6 +39,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED;
 import static com.aliyun.polardbx.cdc.qatest.random.DdlType.AddColumn;
+import static com.aliyun.polardbx.cdc.qatest.random.DdlType.AddGeneratedColumn;
 import static com.aliyun.polardbx.cdc.qatest.random.DdlType.AlterTableCharset;
 import static com.aliyun.polardbx.cdc.qatest.random.DdlType.DropColumn;
 import static com.aliyun.polardbx.cdc.qatest.random.DdlType.ModifyColumn;
@@ -74,6 +77,8 @@ public class TestModeOne extends RplBaseTestCase {
         AlterTableCharset,
         AlterTableCharset,
         AlterTableCharset,
+        AddGeneratedColumn,
+        AddGeneratedColumn,
         DropColumn,
         DropColumn);
 
@@ -125,6 +130,7 @@ public class TestModeOne extends RplBaseTestCase {
 
     private void buildDdlType() {
         addDdlType(AddColumn, 4);
+        addDdlType(AddGeneratedColumn, 2);
         if (testMode == TEST_MODE.FORWARD_MODE) {
             addDdlType(ModifyColumn, 6);
             addDdlType(DropColumn, 2);
@@ -231,7 +237,7 @@ public class TestModeOne extends RplBaseTestCase {
                     break;
                 }
 
-                List<DdlType> ddlTypeList = Lists.newArrayList(AddColumn, DropColumn, ModifyColumn);
+                List<DdlType> ddlTypeList = Lists.newArrayList(AddColumn, DropColumn, ModifyColumn, AddGeneratedColumn);
                 int index = new Random().nextInt(ddlTypeList.size());
                 DdlType ddlType = ddlTypeList.get(index);
                 switch (ddlType) {
@@ -246,6 +252,9 @@ public class TestModeOne extends RplBaseTestCase {
                     break;
                 case AlterTableCharset:
                     alterTableCharset();
+                    break;
+                case AddGeneratedColumn:
+                    addGeneratedColumn();
                     break;
                 default:
                     throw new PolardbxException("invalid ddl type " + ddlType);
@@ -381,6 +390,21 @@ public class TestModeOne extends RplBaseTestCase {
         log.warn("backflow mode : " + testMode);
     }
 
+    private List<DdlType> getAvailableDdlTypes(List<DdlType> candidates) {
+        int columnCount = columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.size();
+        if (columnCount < ColumnSeeds.MAX_COLUMN_COUNT && columnCount > ColumnSeeds.MIN_COLUMN_COUNT) {
+            return candidates;
+        }
+        List<DdlType> available = new ArrayList<>(candidates);
+        if (columnCount >= ColumnSeeds.MAX_COLUMN_COUNT) {
+            available.removeIf(t -> t == AddColumn || t == AddGeneratedColumn);
+        }
+        if (columnCount <= ColumnSeeds.MIN_COLUMN_COUNT) {
+            available.removeIf(t -> t == DdlType.DropColumn);
+        }
+        return available.isEmpty() ? candidates : available;
+    }
+
     private Thread buildDdlThread(AtomicBoolean running) {
         return new Thread(() -> {
             try {
@@ -394,9 +418,9 @@ public class TestModeOne extends RplBaseTestCase {
                     dmlExecutorService.submit(dmlExecutor);
                     dmlExecutor.waitStart();
 
-                    // execute ddl sql
-                    int index = new Random().nextInt(ddlTypes.size());
-                    DdlType ddlType = ddlTypes.get(index);
+                    // execute ddl sql, filtering by column count limits
+                    List<DdlType> availableTypes = getAvailableDdlTypes(ddlTypes);
+                    DdlType ddlType = availableTypes.get(new Random().nextInt(availableTypes.size()));
                     switch (ddlType) {
                     case AddColumn:
                         addColumn();
@@ -409,6 +433,9 @@ public class TestModeOne extends RplBaseTestCase {
                         break;
                     case AlterTableCharset:
                         alterTableCharset();
+                        break;
+                    case AddGeneratedColumn:
+                        addGeneratedColumn();
                         break;
                     default:
                         throw new PolardbxException("invalid ddl type " + ddlType);
@@ -435,6 +462,7 @@ public class TestModeOne extends RplBaseTestCase {
             .directCompareDetail(true)
             .compareDetailOneByOne(true)
             .loopWaitTimeoutMs(loopWaitTimeoutMs)
+            .ignoreColumns(columnSeeds.GENERATED_COLUMN_NAMES)
             .build();
 
         if (isBackflowMode() || isBidirectionalMode()) {
@@ -508,6 +536,7 @@ public class TestModeOne extends RplBaseTestCase {
         String columnName = ddlSqlBuilder.findSeedColumn4Drop();
         String sql = ddlSqlBuilder.buildDropColumnSql(columnName);
         columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.remove(columnName);
+        columnSeeds.GENERATED_COLUMN_NAMES.remove(columnName);
 
         try (Connection connection = getDdlConnection(dbName)) {
             setSqlMode("", connection);
@@ -549,6 +578,23 @@ public class TestModeOne extends RplBaseTestCase {
         } catch (Throwable t) {
             Metrics.getInstance().getModifyColumnFail().incrementAndGet();
             log.error("modify column error!! \r\nsql : " + alterTableCharsetSql, t);
+        }
+    }
+
+    private void addGeneratedColumn() {
+        String columnName = "gen_" + RandomUtil.randomIdentifier();
+        Pair<String, String> pair = ddlSqlBuilder.buildAddGeneratedColumnSql(columnName);
+
+        try (Connection connection = getDdlConnection(dbName)) {
+            setSqlMode("", connection);
+            Statement stmt = connection.createStatement();
+            stmt.execute(pair.getValue());
+            columnSeeds.GENERATED_COLUMN_NAMES.add(columnName);
+            columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.put(columnName, pair.getKey());
+            Metrics.getInstance().getAddGeneratedColumnSuccess().incrementAndGet();
+        } catch (Throwable t) {
+            Metrics.getInstance().getAddGeneratedColumnFail().incrementAndGet();
+            log.error("add generated column error!! \r\nsql : " + pair.getValue(), t);
         }
     }
 

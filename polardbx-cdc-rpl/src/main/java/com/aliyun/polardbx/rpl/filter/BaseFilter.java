@@ -34,6 +34,10 @@ public class BaseFilter {
         return false;
     }
 
+    public boolean isFilteredByServerId(long serverId) {
+        return false;
+    }
+
     public boolean ignoreEventByTso(String tso) {
         return false;
     }

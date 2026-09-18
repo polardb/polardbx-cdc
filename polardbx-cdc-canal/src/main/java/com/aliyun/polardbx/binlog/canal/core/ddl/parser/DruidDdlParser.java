@@ -27,6 +27,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropIndexStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLRevokeStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableSource;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLTruncateStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLUnique;
@@ -34,6 +35,7 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateRol
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateUserStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement.Item;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRevokeRoleStatement;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 
 import java.util.List;
@@ -168,6 +170,14 @@ public class DruidDdlParser {
                     ddlResult = new DdlResult();
                     ddlResult.setType(DBMSAction.OTHER);
                 }
+            } else if (statement instanceof SQLRevokeStatement) {
+                ddlResult = new DdlResult();
+                ddlResult.setType(DBMSAction.OTHER);
+                ddlResult.setHasIfExistsOrNotExists(((SQLRevokeStatement) statement).isIfExists());
+            } else if (statement instanceof MySqlRevokeRoleStatement) {
+                ddlResult = new DdlResult();
+                ddlResult.setType(DBMSAction.OTHER);
+                ddlResult.setHasIfExistsOrNotExists(((MySqlRevokeRoleStatement) statement).isIfExists());
             }
 
             if (ddlResult != null) {
@@ -187,7 +197,7 @@ public class DruidDdlParser {
         if (sqlName instanceof SQLPropertyExpr) {
             SQLExpr owner = ((SQLPropertyExpr) sqlName).getOwner();
             if (owner instanceof SQLPropertyExpr) {
-                // see https://aone.alibaba-inc.com/v2/project/860366/bug/55137024
+                // see historical compatibility behavior
                 owner = ((SQLPropertyExpr) owner).getOwner();
             }
 

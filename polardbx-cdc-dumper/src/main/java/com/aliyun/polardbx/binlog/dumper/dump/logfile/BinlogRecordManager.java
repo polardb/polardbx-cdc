@@ -88,6 +88,13 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
     }
 
     @Override
+    public void stop() {
+        if (executor != null) {
+            executor.shutdownNow();
+        }
+    }
+
+    @Override
     public void run() {
         try {
             MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_BACKUP);
@@ -96,33 +103,47 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
                 return;
             }
 
-            do {
-                try {
-                    doCompensation();
-                } catch (Exception e) {
-                    logger.error("on start failed", e);
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException interruptedException) {
-                        break;
-                    }
-                    continue;
-                }
-                break;
-            } while (true);
+            tryCompensation();
+            loopExecuteTask();
 
-            while (true) {
-                try {
-                    RecordTask task = taskQueue.poll(5, TimeUnit.SECONDS);
-                    if (task != null) {
-                        task.exec();
-                    }
-                } catch (Throwable e) {
-                    logger.error("record task failed", e);
-                }
-            }
         } finally {
             MDC.remove(MDC_THREAD_LOGGER_KEY);
+        }
+    }
+
+    public void tryCompensation() {
+        do {
+            if (Thread.currentThread().isInterrupted()) {
+                break;
+            }
+
+            try {
+                doCompensation();
+            } catch (Exception e) {
+                logger.error("on start failed", e);
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException interruptedException) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        } while (true);
+    }
+
+    public void loopExecuteTask() {
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                RecordTask task = taskQueue.poll(5, TimeUnit.SECONDS);
+                if (task != null) {
+                    task.exec();
+                }
+            } catch (InterruptedException e) {
+                break;
+            } catch (Throwable e) {
+                logger.error("record task failed", e);
+            }
         }
     }
 
@@ -135,7 +156,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
      * binlog_oss_record表中有一些文件记录，但是master本地并没有这些文件，这时master会将这些记录删除
      * Q:如何进行补偿？
      * A:本地有某些binlog文件，但是binlog_oss_record表中无对应的记录，此时会尝试在表中插入这些文件对应的记录
-     * 但是补偿有一个限制：如果文件的文件序号小于max purged record，说明这些文件在oss上已经被删除了，所以也没必要补偿了
+     * 但是补偿有一个限制：如果文件的文件序号小于max purged record，说明这些文件在oss上已经被删除了，所以也没有必要补偿了
      */
     public void doCompensation() {
         List<File> localFiles = BinlogFileUtil.listLocalBinlogFiles(binlogFullPath, group, stream);
@@ -159,7 +180,6 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
                 }
             } else {
                 // 本地有binlog文件，表中没有对应的记录，并且文件不属于已经被purged的文件，则进行补偿
-
                 if (!maxPurgedRecord.isPresent()
                     || BinlogFileUtil.compareBinlogFileName(f.getName(), maxPurgedRecord.get().getBinlogFile()) > 0) {
                     logger.info("local file corresponding record not exist, add finish task, file name:{}",
@@ -207,7 +227,20 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
             BinlogOssRecord record = optionalRecord.get();
             record.setLogEnd(new Date(binlogEndInfo.getLastEventTimeStamp()));
             record.setLastTso(binlogEndInfo.getLastEventTso());
-            record.setLogSize(file.length());
+            // 如果文件已上传成功，不更新 logSize，保持与远端存储（OSS）上的文件大小一致
+            // 特例：logSize为0是非法值（拓扑切换时旧master的onFinishFile被leader校验拦截，而上传线程仍置SUCCESS所致），
+            // 此时用本地文件大小回填，避免log_size=0永久固化
+            if (record.getUploadStatus() != BinlogUploadStatus.SUCCESS.getValue()) {
+                record.setLogSize(file.length());
+            } else if (record.getLogSize() == null || record.getLogSize() == 0) {
+                logger.warn("backfill logSize for file {} because recorded size is 0 though upload_status is "
+                    + "SUCCESS, local size={}", file.getName(), file.length());
+                record.setLogSize(file.length());
+            } else {
+                logger.warn("skip updating logSize for file {} because upload_status is SUCCESS, "
+                    + "local size={}, recorded size={}", file.getName(), file.length(), record.getLogSize());
+            }
+            record.setLastXid(binlogEndInfo.getLastXid());
             if (!backupOn) {
                 // 如果不开启备份，上传状态为IGNORE表示该文件是完整的
                 record.setUploadStatus(BinlogUploadStatus.IGNORE.getValue());
@@ -226,7 +259,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
         void exec() throws FileNotFoundException;
     }
 
-    class BinlogRecordCreateTask implements RecordTask {
+    protected class BinlogRecordCreateTask implements RecordTask {
         private final File file;
 
         public BinlogRecordCreateTask(File file) {
@@ -238,9 +271,8 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
             Optional<BinlogOssRecord> recordOptional =
                 recordService.getRecordByName(group, stream, clusterId, file.getName());
             if (recordOptional.isPresent()) {
-                logger.info(
-                    "file corresponding record already exist, skip insert binlog_oss_record table, file name:{}",
-                    file.getName());
+                logger.info("file corresponding record already exist, skip insert binlog_oss_record table, "
+                    + "file name:{}", file.getName());
                 return;
             }
             BinlogOssRecord record = new BinlogOssRecord();
@@ -257,7 +289,7 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
         }
     }
 
-    class BinlogRecordFinishTask implements RecordTask {
+    protected class BinlogRecordFinishTask implements RecordTask {
         private final File file;
 
         public BinlogRecordFinishTask(File file) {
@@ -271,11 +303,27 @@ public class BinlogRecordManager implements IBinlogListener, Runnable {
 
             int seekBufferSize = DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE);
             boolean useDirectByteBuffer = DynamicApplicationConfig.getBoolean(BINLOG_WRITE_BUFFER_DIRECT_ENABLE);
-            BinlogFile binlogFile = new BinlogFile(file, "r", 1024, seekBufferSize, useDirectByteBuffer, null);
+            // This task only reads an existing binlog. In lab mode the default BinlogFile constructor also opens
+            // a new lab backup path with mode "r", which is guaranteed to fail when that suffixed copy does not
+            // exist and prevents both startup and rotate-time compensation from repairing the record.
+            BinlogFile binlogFile =
+                new BinlogFile(file, "r", 1024, seekBufferSize, useDirectByteBuffer, null, false);
             try {
                 if (recordOptional.isPresent()) {
                     BinlogOssRecord record = recordOptional.get();
-                    record.setLogSize(file.length());
+                    // 如果文件已上传成功，不更新 logSize，保持与远端存储（OSS）上的文件大小一致
+                    // 特例：logSize为0是非法值（拓扑切换时旧master的onFinishFile被leader校验拦截，而上传线程仍置SUCCESS所致），
+                    // 此时用本地文件大小回填，避免log_size=0永久固化
+                    if (record.getUploadStatus() != BinlogUploadStatus.SUCCESS.getValue()) {
+                        record.setLogSize(file.length());
+                    } else if (record.getLogSize() == null || record.getLogSize() == 0) {
+                        logger.warn("backfill logSize in FinishTask for file {} because recorded size is 0 though "
+                            + "upload_status is SUCCESS, local size={}", file.getName(), file.length());
+                        record.setLogSize(file.length());
+                    } else {
+                        logger.warn("skip updating logSize in FinishTask for file {} because upload_status is SUCCESS, "
+                            + "local size={}, recorded size={}", file.getName(), file.length(), record.getLogSize());
+                    }
                     record.setLogBegin(new Date(binlogFile.getLogBegin()));
                     if (record.getLogEnd() == null) {
                         // onFinishFile方法会进行赋值，这里进行补偿

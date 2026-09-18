@@ -54,10 +54,35 @@ public class Rds8DecodeTest extends BaseTest {
         parse("mysql_bin_panda.2");
     }
 
+    /**
+     * 该文件来源：
+     * dd if=mysql_bin.000003 of=p1 bs=1 count=462
+     * 0-462
+     * dd if=mysql_bin.000003 of=p2 bs=1 skip=1308011 count=189
+     * 1308011-1308200
+     * cat p1 p2 > mysql_bin_hippo.3
+     */
+    @Test
+    public void testParseHippo() {
+        parse("mysql_bin_hippo.3");
+    }
+
     @Test
     public void testGetPandaCodeName() {
         String name = QueryLogEvent.findCodeName(QueryLogEvent.Q_OPT_INDEX_FORMAT_PANDA_ENABLED);
         Assert.assertEquals("Q_OPT_INDEX_FORMAT_PANDA_ENABLED", name);
+    }
+
+    @Test
+    public void testGetHippoCodeName() {
+        String name = QueryLogEvent.findCodeName(QueryLogEvent.Q_OPT_INDEX_FORMAT_HIPPO_ENABLED);
+        Assert.assertEquals("Q_OPT_INDEX_FORMAT_HIPPO_ENABLED", name);
+    }
+
+    @Test
+    public void testGetSpcCodeName() {
+        String name = QueryLogEvent.findCodeName(QueryLogEvent.Q_OPT_INDEX_FORMAT_SPC_ENABLED);
+        Assert.assertEquals("Q_OPT_INDEX_FORMAT_SPC_ENABLED", name);
     }
 
     @SneakyThrows

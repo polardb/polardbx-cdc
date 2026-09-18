@@ -7,12 +7,17 @@
 package com.aliyun.polardbx.rpl.filter;
 
 import com.alibaba.polardbx.druid.sql.SQLUtils;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
+import com.aliyun.polardbx.binlog.util.LabEventType;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
@@ -45,6 +50,9 @@ public class ReplicaFilter extends BaseFilter {
     private String skipTso;
     private String skipUntilTso;
     private boolean needCheckSkip;
+    @Setter
+    private boolean ignoreServerIdByServer;
+    private boolean labEnv;
 
     public ReplicaFilter(ReplicaMeta replicaMeta) {
         this.replicaMeta = replicaMeta;
@@ -63,9 +71,11 @@ public class ReplicaFilter extends BaseFilter {
         rewriteDbs = initRewriteDbs(replicaMeta.getRewriteDb());
         skipTso = replicaMeta.getSkipTso();
         skipUntilTso = replicaMeta.getSkipUntilTso();
+        ignoreServerIdByServer = DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_DUMP_SERVER_ID_IGNORE_ENABLED);
         if (StringUtils.isNotEmpty(skipTso) || StringUtils.isNotEmpty(skipUntilTso)) {
             needCheckSkip = true;
         }
+        this.labEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
     }
 
     /**
@@ -80,8 +90,25 @@ public class ReplicaFilter extends BaseFilter {
 
     @Override
     public boolean ignoreEvent(String schema, String tbName, DBMSAction action, long serverId) {
-        if (ignoreServerIds.contains(serverId)) {
-            return true;
+        if (labEnv && ignoreServerIdByServer) {
+            // 实验室环境且上游主动过滤：Dumper 只过滤了 DML，DDL 被放行到下游
+            if (ignoreServerIds.contains(serverId)) {
+                if (isDdlAction(action)) {
+                    // DDL: Replica 端过滤
+                    return true;
+                } else {
+                    // DML: Dumper 应已过滤，到达此处说明 Dumper 漏过滤，记录 lab event 供集成测试校验
+                    log.error("Dumper don't filter serverId:{}, when {} in {}.{}",
+                        serverId, action.toString(), schema, tbName);
+                    LabEventManager.logEvent(LabEventType.REPLICA_SERVER_ID_FILTER_DML,
+                        String.format("serverId:%s, action:%s, table:%s.%s", serverId, action, schema, tbName));
+                }
+            }
+        } else {
+            // 其他情况：正常过滤所有匹配 server_id 的事件
+            if (ignoreServerIds.contains(serverId)) {
+                return true;
+            }
         }
 
         Triple<String, String, String> key = Triple.of(schema, tbName, action.name());
@@ -96,6 +123,11 @@ public class ReplicaFilter extends BaseFilter {
             StatMetrics.getInstance().addSkipCount(1);
         }
         return result;
+    }
+
+    @Override
+    public boolean isFilteredByServerId(long serverId) {
+        return ignoreServerIds.contains(serverId);
     }
 
     @Override
@@ -276,5 +308,10 @@ public class ReplicaFilter extends BaseFilter {
         filter = filter.replace("_", ".").replace("%", ".*");
         filter = filter.replace("(", "_").replace(")", "%");
         return Pattern.compile(filter);
+    }
+
+    private boolean isDdlAction(DBMSAction action) {
+        return action != DBMSAction.INSERT && action != DBMSAction.UPDATE
+            && action != DBMSAction.DELETE && action != DBMSAction.REPLACE;
     }
 }

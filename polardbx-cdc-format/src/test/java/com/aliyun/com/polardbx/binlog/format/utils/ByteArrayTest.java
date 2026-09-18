@@ -50,4 +50,53 @@ public class ByteArrayTest {
         log.info("flags {}", l6);
         Assert.assertEquals(0, l6);
     }
+
+    @Test
+    public void testWriteLongWriteStore() {
+        byte[] data = new byte[16];
+        ByteArray byteArray = new ByteArray(data);
+        byteArray.writeLongNetStore(0);
+        byteArray.setPos(0);
+        long value = byteArray.readLenenc();
+        Assert.assertEquals(0, value);
+
+        data = new byte[16];
+        byteArray = new ByteArray(data);
+        byteArray.writeLongNetStore(1);
+        byteArray.setPos(0);
+        value = byteArray.readLenenc();
+        Assert.assertEquals(1, value);
+
+        data = new byte[16];
+        byteArray = new ByteArray(data);
+        byteArray.writeLongNetStore(65537L);
+        byteArray.setPos(0);
+        value = byteArray.readLenenc();
+        Assert.assertEquals(65537, value);
+
+        data = new byte[16];
+        byteArray = new ByteArray(data);
+        byteArray.writeLongNetStore(16777217L);
+        byteArray.setPos(0);
+        value = byteArray.readLenenc();
+        Assert.assertEquals(16777217L, value);
+    }
+
+    @Test
+    public void testWrite() {
+        byte[] a = new byte[16];
+        byte[] b = new byte[16];
+        ByteArray src = new ByteArray(a);
+        ByteArray target = new ByteArray(b);
+        for (int i = 0; i < 16; i++) {
+            src.writeLong(i, 1);
+        }
+        target.write(a, 8);
+        for (int i = 0; i < 8; i++) {
+            Assert.assertEquals(a[i], b[i]);
+        }
+        for (int i = 8; i < 16; i++) {
+            Assert.assertEquals(0, b[i]);
+        }
+    }
 }

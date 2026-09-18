@@ -6,9 +6,16 @@
  */
 package com.aliyun.polardbx.binlog.remote.oss;
 
+import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.OSSException;
 import com.aliyun.oss.model.BucketVersioningConfiguration;
+import com.aliyun.oss.model.DeleteObjectsRequest;
+import com.aliyun.oss.model.DeleteVersionsRequest;
+import com.aliyun.oss.model.ListObjectsV2Request;
+import com.aliyun.oss.model.ListObjectsV2Result;
+import com.aliyun.oss.model.ListVersionsRequest;
+import com.aliyun.oss.model.OSSObjectSummary;
 import com.aliyun.oss.model.OSSVersionSummary;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.VersionListing;
@@ -18,12 +25,16 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class OssManagerTest extends BaseTest {
@@ -154,5 +165,148 @@ public class OssManagerTest extends BaseTest {
 
         // 验证: 确保返回值正确
         assertEquals(1024L, size);
+    }
+
+    @Test
+    public void testDeleteAll() {
+        OssConfig ossConfig = mock(OssConfig.class);
+        OSS ossClient = mock(OSS.class);
+
+        OssManager ossManager = new OssManager(ossConfig, false) {
+            @Override
+            public OSS getOssClient() {
+                return ossClient;
+            }
+
+            @Override
+            boolean getBucketVersioningEnabled() {
+                return true;
+            }
+        };
+
+        when(ossConfig.getBucketName()).thenReturn("test-bucket");
+        when(ossConfig.getPolardbxInstance()).thenReturn("test-instance");
+
+        // Mock deleteObjects behavior
+        ListObjectsV2Result listObjectsResult = mock(ListObjectsV2Result.class);
+        when(listObjectsResult.getObjectSummaries()).thenReturn(Collections.emptyList());
+        when(listObjectsResult.isTruncated()).thenReturn(false);
+        when(ossClient.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(listObjectsResult);
+
+        // Mock deleteVersions behavior
+        VersionListing versionListing = mock(VersionListing.class);
+        when(versionListing.getVersionSummaries()).thenReturn(Collections.emptyList());
+        when(versionListing.isTruncated()).thenReturn(false);
+        when(ossClient.listVersions(any(ListVersionsRequest.class))).thenReturn(versionListing);
+
+        // Execute the method
+        ossManager.deleteAll("test-prefix");
+
+        // Verify interactions
+        verify(ossClient, times(1)).listObjectsV2(any(ListObjectsV2Request.class));
+        verify(ossClient, times(1)).listVersions(any(ListVersionsRequest.class));
+        verify(ossClient, times(2)).shutdown();
+    }
+
+    /**
+     * 测试 deleteAll 方法删除对象的情况
+     */
+    @Test
+    public void testDeleteAllWithObjects() {
+        OssConfig ossConfig = mock(OssConfig.class);
+        OSS ossClient = mock(OSS.class);
+
+        OssManager ossManager = new OssManager(ossConfig, false) {
+            @Override
+            public OSS getOssClient() {
+                return ossClient;
+            }
+
+            @Override
+            boolean getBucketVersioningEnabled() {
+                return true;
+            }
+        };
+
+        when(ossConfig.getBucketName()).thenReturn("test-bucket");
+        when(ossConfig.getPolardbxInstance()).thenReturn("test-instance");
+
+        // Mock deleteObjects behavior with objects to delete
+        OSSObjectSummary objectSummary1 = mock(OSSObjectSummary.class);
+        when(objectSummary1.getKey()).thenReturn("key1");
+        OSSObjectSummary objectSummary2 = mock(OSSObjectSummary.class);
+        when(objectSummary2.getKey()).thenReturn("key2");
+
+        ListObjectsV2Result listObjectsResult = mock(ListObjectsV2Result.class);
+        when(listObjectsResult.getObjectSummaries()).thenReturn(Arrays.asList(objectSummary1, objectSummary2));
+        when(listObjectsResult.isTruncated()).thenReturn(false);
+        when(ossClient.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(listObjectsResult);
+
+        // Mock deleteVersions behavior
+        VersionListing versionListing = mock(VersionListing.class);
+        when(versionListing.getVersionSummaries()).thenReturn(Collections.emptyList());
+        when(versionListing.isTruncated()).thenReturn(false);
+        when(ossClient.listVersions(any(ListVersionsRequest.class))).thenReturn(versionListing);
+
+        // Execute the method
+        ossManager.deleteAll("test-prefix");
+
+        // Verify interactions
+        verify(ossClient, times(1)).listObjectsV2(any(ListObjectsV2Request.class));
+        verify(ossClient, times(1)).deleteObjects(any(DeleteObjectsRequest.class));
+        verify(ossClient, times(1)).listVersions(any(ListVersionsRequest.class));
+        verify(ossClient, times(2)).shutdown();
+    }
+
+    /**
+     * 测试 deleteAll 方法删除版本的情况
+     */
+    @Test
+    public void testDeleteAllWithVersions() {
+        OssConfig ossConfig = mock(OssConfig.class);
+        OSS ossClient = mock(OSS.class);
+
+        OssManager ossManager = new OssManager(ossConfig, false) {
+            @Override
+            public OSS getOssClient() {
+                return ossClient;
+            }
+
+            @Override
+            boolean getBucketVersioningEnabled() {
+                return true;
+            }
+        };
+
+        when(ossConfig.getBucketName()).thenReturn("test-bucket");
+        when(ossConfig.getPolardbxInstance()).thenReturn("test-instance");
+
+        // Mock deleteObjects behavior
+        ListObjectsV2Result listObjectsResult = mock(ListObjectsV2Result.class);
+        when(listObjectsResult.getObjectSummaries()).thenReturn(Collections.emptyList());
+        when(listObjectsResult.isTruncated()).thenReturn(false);
+        when(ossClient.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(listObjectsResult);
+
+        // Mock deleteVersions behavior with versions to delete
+        OSSVersionSummary versionSummary1 = mock(OSSVersionSummary.class);
+        when(versionSummary1.getKey()).thenReturn("key1");
+        when(versionSummary1.getVersionId()).thenReturn("version1");
+        OSSVersionSummary versionSummary2 = mock(OSSVersionSummary.class);
+        when(versionSummary2.getKey()).thenReturn("key2");
+        when(versionSummary2.getVersionId()).thenReturn("version2");
+
+        VersionListing versionListing = mock(VersionListing.class);
+        when(versionListing.getVersionSummaries()).thenReturn(Arrays.asList(versionSummary1, versionSummary2));
+        when(versionListing.isTruncated()).thenReturn(false);
+        when(ossClient.listVersions(any(ListVersionsRequest.class))).thenReturn(versionListing);
+
+        // Execute the method
+        ossManager.deleteAll("test-prefix");
+
+        // Verify interactions
+        verify(ossClient, times(1)).listObjectsV2(any(ListObjectsV2Request.class));
+        verify(ossClient, times(1)).listVersions(any(ListVersionsRequest.class));
+        verify(ossClient, times(1)).deleteVersions(any(DeleteVersionsRequest.class));
+        verify(ossClient, times(3)).shutdown();
     }
 }

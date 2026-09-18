@@ -30,6 +30,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_CHECK_CONSISTENCY_ENABLED;
+import static com.aliyun.polardbx.binlog.cdc.meta.ExternalColumnMetaConstants.EXTERNALIZED_ADDR_SUFFIX;
+import static com.aliyun.polardbx.binlog.cdc.meta.ExternalColumnMetaConstants.EXTERNALIZED_BLOB_REF_TYPE;
 import static com.aliyun.polardbx.binlog.cdc.meta.MetaFilter.isSupportApply;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 
@@ -61,7 +63,7 @@ public class ConsistencyChecker {
             List<Map<String, Object>> list =
                 polarxTemplate.queryForList("show topology from __cdc__.__cdc_ddl_record__");
             String cdcPhyTableName = list.get(0).get("TABLE_NAME").toString();
-            return polarxTemplate.queryForObject("/!+TDDL:node(0)*/select meta_info from __cdc___000000." +
+            return polarxTemplate.queryForObject("/*+TDDL:node(0)*/select meta_info from __cdc___000000." +
                 cdcPhyTableName + " where id = " + i, String.class);
         };
     }
@@ -240,6 +242,16 @@ public class ConsistencyChecker {
             phySchemaName, phyTableName, createPhyIfNotExist);
         TableMeta distinctPhyDimTableMeta = polarDbXLogicTableMeta.findDistinctPhy(logicSchemaName, logicTableName);
 
+        // An externalized logical column intentionally has a different physical name and type. The logical-vs-physical
+        // comparison below only verifies that this mapping is structurally possible; the distinct physical meta is
+        // still required to describe and strictly verify the complete physical table layout.
+        if (hasExternalizedColumns(logicDimTableMeta) && distinctPhyDimTableMeta == null) {
+            throw new PolardbxException(String.format(
+                "check consistency failed, distinct physical table meta is missing for externalized table, "
+                    + "logicSchema %s, logicTable %s, phySchema %s, phyTable %s, tso %s.",
+                logicSchemaName, logicTableName, phySchemaName, phyTableName, tso));
+        }
+
         // compare table meta
         boolean result1 = compareOne(logicDimTableMeta, phyDimTableMeta, logicSchemaName, logicTableName, tso,
             phySchemaName, phyTableName, 0);
@@ -301,17 +313,31 @@ public class ConsistencyChecker {
                     .collect(Collectors.toMap(Triple::getLeft,
                         triple -> triple.getMiddle()
                             + triple.getRight()));
-            logicDimColumns.forEach(p -> {
-                if (!(phyColumnMap.containsKey(p.getLeft()) && (p.getMiddle() + p.getRight()).equals(
-                    phyColumnMap.get(p.getLeft())))) {
-                    String message = String.format(
-                        "check consistency failed, logic table meta and phy table meta is not consistent, logicSchema %s, "
-                            + "logicTable %s , phySchema %s, phyTable %s, logicColumns %s, phy Columns %s, tso %s.",
-                        logicSchemaName, logicTableName, phySchemaName, phyTableName,
-                        parseColumns(logicDimTableMeta), parseColumns(phyDimTableMeta), tso);
-                    throw new PolardbxException(message);
+            Map<String, TableMeta.FieldMeta> phyFields = phyDimTableMeta.getFields().stream()
+                .collect(Collectors.toMap(f -> StringUtils.lowerCase(f.getColumnName()), f -> f));
+            for (TableMeta.FieldMeta logicField : logicDimTableMeta.getFields()) {
+                Triple<String, String, String> logicColumn = parseColumn(logicField);
+                if (phyColumnMap.containsKey(logicColumn.getLeft())
+                    && (logicColumn.getMiddle() + logicColumn.getRight()).equals(
+                    phyColumnMap.get(logicColumn.getLeft()))) {
+                    continue;
                 }
-            });
+
+                // An externalized logical column is represented by a <logical>_addr_ physical column
+                // with a different type. Validate that mapping here; the caller separately requires
+                // the distinct physical metadata to match the actual physical table exactly.
+                if (logicField.isExternalized()) {
+                    validateExternalizedPhysicalColumn(logicDimTableMeta, phyDimTableMeta, logicField, phyFields);
+                    continue;
+                }
+
+                String message = String.format(
+                    "check consistency failed, logic table meta and phy table meta is not consistent, logicSchema %s, "
+                        + "logicTable %s , phySchema %s, phyTable %s, logicColumns %s, phy Columns %s, tso %s.",
+                    logicSchemaName, logicTableName, phySchemaName, phyTableName,
+                    parseColumns(logicDimTableMeta), parseColumns(phyDimTableMeta), tso);
+                throw new PolardbxException(message);
+            }
         }
         return result;
     }
@@ -321,6 +347,34 @@ public class ConsistencyChecker {
             .map(f -> Triple.of(SQLUtils.normalize(f.getColumnName().toLowerCase()), f.getColumnType().toLowerCase(),
                 StringUtils.lowerCase(f.getCharset())))
             .collect(Collectors.toList());
+    }
+
+    private boolean hasExternalizedColumns(TableMeta tableMeta) {
+        return tableMeta != null && tableMeta.getFields().stream().anyMatch(TableMeta.FieldMeta::isExternalized);
+    }
+
+    private void validateExternalizedPhysicalColumn(TableMeta logicTableMeta, TableMeta phyTableMeta,
+                                                    TableMeta.FieldMeta logicField,
+                                                    Map<String, TableMeta.FieldMeta> phyFields) {
+        String blobRefName = logicField.getColumnName() + EXTERNALIZED_ADDR_SUFFIX;
+        TableMeta.FieldMeta blobRefField = phyFields.get(StringUtils.lowerCase(blobRefName));
+        if (blobRefField == null) {
+            throw new PolardbxException(String.format(
+                "externalized physical BlobRef column %s is not found for %s.%s.%s",
+                blobRefName, logicTableMeta.getSchema(), logicTableMeta.getTable(), logicField.getColumnName()));
+        }
+        String blobRefType = StringUtils.deleteWhitespace(StringUtils.lowerCase(blobRefField.getColumnType()));
+        if (!StringUtils.equals(blobRefType, EXTERNALIZED_BLOB_REF_TYPE)) {
+            throw new PolardbxException(String.format(
+                "invalid externalized physical BlobRef column type %s for %s.%s.%s, expected %s",
+                blobRefField.getColumnType(), phyTableMeta.getSchema(), phyTableMeta.getTable(), blobRefName,
+                EXTERNALIZED_BLOB_REF_TYPE));
+        }
+    }
+
+    private Triple<String, String, String> parseColumn(TableMeta.FieldMeta fieldMeta) {
+        return Triple.of(SQLUtils.normalize(fieldMeta.getColumnName().toLowerCase()),
+            fieldMeta.getColumnType().toLowerCase(), StringUtils.lowerCase(fieldMeta.getCharset()));
     }
 
     private boolean comparePhyDbTopology(List<LogicMetaTopology.PhyDbTopology> src,

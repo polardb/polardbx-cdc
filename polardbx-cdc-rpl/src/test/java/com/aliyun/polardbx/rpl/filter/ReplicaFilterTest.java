@@ -6,8 +6,10 @@
  */
 package com.aliyun.polardbx.rpl.filter;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.After;
@@ -19,7 +21,7 @@ import org.junit.Test;
  * @author shicai.xsc 2021/3/3 16:58
  * @since 5.0.0.0
  */
-public class ReplicaFilterTest {
+public class ReplicaFilterTest extends BaseTest {
 
     @Before
     public void before() throws Exception {
@@ -848,16 +850,29 @@ public class ReplicaFilterTest {
 
     @Test
     public void ignoreServerId() {
+        mockConfig(ConfigKeys.IS_LAB_ENV, "true");
         ReplicaMeta replicaMeta = new ReplicaMeta();
         replicaMeta.setIgnoreServerIds("2121,21212");
         replicaMeta.setDoTable(" db1.table1  ");
         ReplicaFilter filter = new ReplicaFilter(replicaMeta);
+        mockConfig(ConfigKeys.BINLOG_DUMP_SERVER_ID_IGNORE_ENABLED, "false");
         filter.init();
         DefaultRowChange rowChange = new DefaultRowChange();
         rowChange.setAction(DBMSAction.INSERT);
 
         Assert.assertTrue(filter.ignoreEvent("db1", "table1", DBMSAction.INSERT, 2121));
         Assert.assertFalse(filter.ignoreEvent("db1", "table1", DBMSAction.INSERT, 1212));
+
+        filter.setIgnoreServerIdByServer(true);
+        // labEnv=true + ignoreServerIdByServer=true: Dumper 已过滤 DML，Replica 仅过滤 DDL
+        // DML with matching server_id: Dumper 漏过滤，记录 lab event 但不抛异常；
+        // 后续走正常白名单逻辑，db1.table1 在 doTable 白名单内，不过滤
+        Assert.assertFalse(filter.ignoreEvent("db1", "table1", DBMSAction.INSERT, 2121));
+        // DDL with matching server_id: Replica 过滤
+        Assert.assertTrue(filter.ignoreEvent("db1", "table1", DBMSAction.CREATE, 2121));
+        Assert.assertTrue(filter.ignoreEvent("db1", "table1", DBMSAction.ALTER, 2121));
+        // DDL with non-matching server_id: 不过滤
+        Assert.assertFalse(filter.ignoreEvent("db1", "table1", DBMSAction.CREATE, 1212));
     }
 
     @Test

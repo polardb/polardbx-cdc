@@ -36,6 +36,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_CLEAN_BUFFER_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_RETURNING_FIX_ENABLED;
 
 /**
  * Created by ziyang.lb
@@ -57,6 +58,7 @@ public class LogEventStorage implements Storage {
     private final AtomicLong lastDeleteTime;
     private final Repository repository;
     private volatile boolean running;
+    private final boolean returningFixEnabled;
 
     public LogEventStorage(String identifier, Repository repository) {
         this(identifier, repository, DEFAULT_WORKER_COUNT);
@@ -85,6 +87,7 @@ public class LogEventStorage implements Storage {
         this.deleteBufferPointer = new AtomicInteger(0);
         this.lastDeleteTime = new AtomicLong(0);
         this.repository = repository;
+        this.returningFixEnabled = DynamicApplicationConfig.getBoolean(TASK_REFORMAT_RETURNING_FIX_ENABLED);
     }
 
     @Override
@@ -265,6 +268,7 @@ public class LogEventStorage implements Storage {
                     public TxnBuffer load(TxnKey key) {
                         long startTime = System.nanoTime();
                         TxnBuffer buffer = new TxnBuffer(key, LogEventStorage.this.repository);
+                        buffer.setReturningFixEnabled(returningFixEnabled);
                         long endTime = System.nanoTime();
                         StorageMetrics.get().getTxnCreateCostTime().getAndAdd(endTime - startTime);
                         StorageMetrics.get().getTxnCreateCount().incrementAndGet();

@@ -9,6 +9,9 @@ package com.aliyun.polardbx.cdc.qatest.binlog;
 import com.aliyun.polardbx.cdc.qatest.base.CheckParameter;
 import com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil;
 import com.aliyun.polardbx.cdc.qatest.base.RplBaseTestCase;
+
+import static com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil.usingBinlogX;
+
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
@@ -50,7 +53,7 @@ public class CreateTableDoubleTimesTest extends RplBaseTestCase {
             c.createStatement().execute(CREATE_TABLE_SQL2);
         }
         sendTokenAndWait(CheckParameter.builder().build());
-        try (Connection c = getCdcSyncDbConnection(dbName)) {
+        try (Connection c = usingBinlogX ? getCdcSyncDbConnectionFirst(dbName) : getCdcSyncDbConnection(dbName)) {
             ResultSet rs = c.createStatement().executeQuery(SHOW_CREATE_TABLE);
             Assert.assertTrue(rs.next());
             String createTable = rs.getString(2);

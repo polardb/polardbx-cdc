@@ -11,11 +11,16 @@ import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_FULL_VALID_ONLY_COMPARE_ROW_COUNT_TABLES;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 
 /**
@@ -32,8 +37,16 @@ public class ValSQLGenerator {
     private static final String BATCH_CHECK_SQL_TEMPLATE =
         "SELECT COUNT(*) as CNT, BIT_XOR(CAST(CRC32(CONCAT_WS(',', %s, CONCAT(%s)))AS UNSIGNED)) AS CHECKSUM FROM %s";
 
+    private static final String BATCH_COUNT_SQL_TEMPLATE = "SELECT COUNT(*) as CNT1,COUNT(*) as CNT2 FROM %s";
+
     private static final String ROW_CHECK_SQL_TEMPLATE =
         "SELECT CAST(CRC32(CONCAT_WS(',', %s, CONCAT(%s)))AS UNSIGNED) AS CHECKSUM, %s FROM %s";
+
+    private static final String FLOAT_REAL_ROUND_TEMPLATE =
+        "cast(round(%s, 6 - floor(log10(abs(%s)))) as decimal(65, 30))";
+
+    private static final String DOUBLE_ROUND_TEMPLATE =
+        "cast(round(%s, 15 - floor(log10(abs(%s)))) as decimal(65, 30))";
 
     private static final String SELECT_SQL_TEMPLATE =
         "SELECT %s FROM %s";
@@ -56,17 +69,47 @@ public class ValSQLGenerator {
      */
     public static SqlContextBuilder.SqlContext getBatchCheckSql(String dbName, String tableName, TableInfo srcTableInfo,
                                                                 List<Object> lowerBounds, List<Object> upperBounds) {
-        List<String> columnNames = new ArrayList<>();
+
+        List<Pair<String, Integer>> columnNameAndTypes = new ArrayList<>();
         for (ColumnInfo col : srcTableInfo.getColumns()) {
-            columnNames.add(col.getName());
+            columnNameAndTypes.add(Pair.of(col.getName(), col.getType()));
         }
 
-        String columnNamesStr =
-            columnNames.stream().map(k -> String.format("`%s`", escape(k))).collect(Collectors.joining(", "));
+        String columnNamesStr = columnNameAndTypes.stream().map(k -> {
+            if (k.getRight() == Types.DOUBLE) {
+                return String.format(DOUBLE_ROUND_TEMPLATE, k.getLeft(), k.getLeft());
+            } else if (k.getRight() == Types.FLOAT) {
+                return String.format(FLOAT_REAL_ROUND_TEMPLATE, k.getLeft(), k.getLeft());
+            } else if (k.getRight() == Types.REAL) {
+                return String.format(FLOAT_REAL_ROUND_TEMPLATE, k.getLeft(), k.getLeft());
+            } else {
+                return String.format("`%s`", escape(k.getLeft()));
+            }
+        }).collect(Collectors.joining(", "));
+
         String columnIsNullStr =
-            columnNames.stream().map(k -> String.format("ISNULL(`%s`)", escape(k))).collect(Collectors.joining(", "));
-        String sqlBeforeWhere = String.format(BATCH_CHECK_SQL_TEMPLATE, columnNamesStr, columnIsNullStr,
-            CommonUtils.tableName(dbName, tableName));
+            columnNameAndTypes.stream().map(k -> String.format("ISNULL(`%s`)", escape(k.getLeft())))
+                .collect(Collectors.joining(", "));
+
+        String sqlBeforeWhere;
+        String onlyCompareRowCountTables = getString(RPL_FULL_VALID_ONLY_COMPARE_ROW_COUNT_TABLES);
+        String tableFullName = dbName + "." + tableName;
+        boolean shouldOnlyCompareRowCount = false;
+        if (StringUtils.isNotBlank(onlyCompareRowCountTables)) {
+            String[] tables = onlyCompareRowCountTables.split(",");
+            for (String table : tables) {
+                if (table.trim().equalsIgnoreCase(tableFullName)) {
+                    shouldOnlyCompareRowCount = true;
+                    break;
+                }
+            }
+        }
+        if (shouldOnlyCompareRowCount) {
+            sqlBeforeWhere = String.format(BATCH_COUNT_SQL_TEMPLATE, CommonUtils.tableName(dbName, tableName));
+        } else {
+            sqlBeforeWhere = String.format(BATCH_CHECK_SQL_TEMPLATE, columnNamesStr, columnIsNullStr,
+                CommonUtils.tableName(dbName, tableName));
+        }
 
         SqlContextBuilder.SqlContext result =
             SqlContextBuilder.buildRangeQueryContext(sqlBeforeWhere, null, srcTableInfo.getPks(), lowerBounds,
@@ -84,18 +127,31 @@ public class ValSQLGenerator {
      */
     public static SqlContextBuilder.SqlContext getRowCheckSql(String dbName, String tableName, TableInfo srcTableInfo,
                                                               List<Object> lowerBounds, List<Object> upperBounds) {
-        List<String> columnNames = new ArrayList<>();
+        List<Pair<String, Integer>> columnNameAndTypes = new ArrayList<>();
         for (ColumnInfo col : srcTableInfo.getColumns()) {
-            columnNames.add(col.getName());
+            columnNameAndTypes.add(Pair.of(col.getName(), col.getType()));
         }
 
         List<String> keys = srcTableInfo.getKeyList();
         String keyCols =
             keys.stream().map(k -> String.format("`%s`", escape(k))).collect(Collectors.joining(", "));
+
         String columnNamesStr =
-            columnNames.stream().map(k -> String.format("`%s`", escape(k))).collect(Collectors.joining(", "));
+            columnNameAndTypes.stream().map(k -> {
+                if (k.getRight() == Types.DOUBLE) {
+                    return String.format(DOUBLE_ROUND_TEMPLATE, k.getLeft(), k.getLeft());
+                } else if (k.getRight() == Types.FLOAT) {
+                    return String.format(FLOAT_REAL_ROUND_TEMPLATE, k.getLeft(), k.getLeft());
+                } else if (k.getRight() == Types.REAL) {
+                    return String.format(FLOAT_REAL_ROUND_TEMPLATE, k.getLeft(), k.getLeft());
+                } else {
+                    return String.format("`%s`", escape(k.getLeft()));
+                }
+            }).collect(Collectors.joining(", "));
+
         String columnIsNullStr =
-            columnNames.stream().map(k -> String.format("ISNULL(`%s`)", escape(k))).collect(Collectors.joining(", "));
+            columnNameAndTypes.stream().map(k -> String.format("ISNULL(`%s`)", escape(k.getLeft())))
+                .collect(Collectors.joining(", "));
 
         String sqlBeforeWhere = String.format(ROW_CHECK_SQL_TEMPLATE, columnNamesStr, columnIsNullStr, keyCols,
             CommonUtils.tableName(dbName, tableName));

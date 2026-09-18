@@ -203,11 +203,15 @@ public class CommonMetricsHelper {
     }
 
     public static void addReplicaMetrics(List<CommonMetrics> commonMetrics, RplStatMetrics statMetrics, String prefix) {
-        commonMetrics.add(CommonMetrics.builder()
-            .key(prefix + "trueDelayMills")
-            .type(1)
-            .value(statMetrics.getTrueDelayMills())
-            .build());
+        // trueDelayMills 为 null 表示延迟未知（无有效位点），跳过上报，监控通过指标缺失识别未知状态；
+        // 其余字段在 StatisticalProxy.fill 中恒被赋值，无 null 风险
+        if (statMetrics.getTrueDelayMills() != null) {
+            commonMetrics.add(CommonMetrics.builder()
+                .key(prefix + "trueDelayMills")
+                .type(1)
+                .value(statMetrics.getTrueDelayMills())
+                .build());
+        }
         commonMetrics.add(CommonMetrics.builder()
             .key(prefix + "outRps")
             .type(1)

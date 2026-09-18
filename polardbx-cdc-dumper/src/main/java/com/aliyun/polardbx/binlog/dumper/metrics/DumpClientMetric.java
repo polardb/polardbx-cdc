@@ -13,6 +13,7 @@ import lombok.Getter;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+//TODO(zm): 输出每个链路的filter信息
 public class DumpClientMetric {
     @Getter
     private String remoteIp;
@@ -36,11 +37,24 @@ public class DumpClientMetric {
     @Getter
     private String traceId;
     @Getter
+    private String user;
+    @Getter
     private EnumProtocolType protocolType;
 
-    private long lastAvgTimestamp = System.currentTimeMillis();
+    private long lastAvgDumpTime = System.currentTimeMillis();
+    private long lastAvgReadBpsTime = System.currentTimeMillis();
 
     private final MetricsManager metricsManager;
+    private final AtomicLong dumpBytes = new AtomicLong(0);
+    private final AtomicLong readBytes = new AtomicLong(0);
+    @Getter
+    private long dumpStartTimestamp;
+    @Getter
+    private long lastSyncTimestamp;
+    @Getter
+    private String filterInfo;
+    @Getter
+    private String instId;
 
     public DumpClientMetric(String remoteIp, int remotePort, MetricsManager metricsManager) {
         this.remoteIp = remoteIp;
@@ -52,14 +66,6 @@ public class DumpClientMetric {
         return remoteIp + ":" + remotePort;
     }
 
-    private final AtomicLong dumpBytes = new AtomicLong(0);
-
-    @Getter
-    private long dumpStartTimestamp;
-
-    @Getter
-    private long lastSyncTimestamp;
-
     public static void addDumpBytes(long bytes, DumpClientMetric metrics) {
         if (metrics == null) {
             return;
@@ -68,15 +74,31 @@ public class DumpClientMetric {
         metrics.lastSyncTimestamp = System.currentTimeMillis();
     }
 
+    public static void addReadBytes(long bytes, DumpClientMetric metrics) {
+        if (metrics == null) {
+            return;
+        }
+        metrics.readBytes.addAndGet(bytes);
+        metrics.lastSyncTimestamp = System.currentTimeMillis();
+    }
+
     public long getDumpBps() {
         long now = System.currentTimeMillis();
-        long diff = Math.max(TimeUnit.MILLISECONDS.toSeconds(now - lastAvgTimestamp), 1);
-        lastAvgTimestamp = now;
+        long diff = Math.max(TimeUnit.MILLISECONDS.toSeconds(now - lastAvgDumpTime), 1);
+        lastAvgDumpTime = now;
         return dumpBytes.getAndSet(0) / diff;
     }
 
-    public static void startDump(EnumClientType clientType, EnumProtocolType protocolType, long processId,
-                                 String traceId, DumpClientMetric metrics) {
+    public long getReadBps() {
+        long now = System.currentTimeMillis();
+        long diff = Math.max(TimeUnit.MILLISECONDS.toSeconds(now - lastAvgReadBpsTime), 1);
+        lastAvgReadBpsTime = now;
+        return readBytes.getAndSet(0) / diff;
+    }
+
+    public static void startDump(String instId, EnumClientType clientType, EnumProtocolType protocolType,
+                                 long processId,
+                                 String traceId, String user, String filterInfo, DumpClientMetric metrics) {
         if (metrics == null) {
             return;
         }
@@ -85,7 +107,10 @@ public class DumpClientMetric {
         metrics.clientType = clientType;
         metrics.processId = processId;
         metrics.traceId = traceId;
+        metrics.user = user;
         metrics.protocolType = protocolType;
+        metrics.filterInfo = filterInfo;
+        metrics.instId = instId;
     }
 
     public static void stopDump(DumpClientMetric metrics) {

@@ -83,6 +83,8 @@ public class DefaultCdcExtractHandler implements EventHandle {
                 StatMetrics.getInstance().setReceiveDelay(now - logEvent.getWhen() * 1000);
                 StatMetrics.getInstance().addInMessageCount(1);
                 StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
+            } else {
+                StatMetrics.getInstance().addHeartbeatCount(1);
             }
             if (sqldbmsEvent == null) {
                 return;

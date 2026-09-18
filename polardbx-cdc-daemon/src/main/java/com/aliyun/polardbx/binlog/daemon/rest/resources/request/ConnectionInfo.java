@@ -19,5 +19,6 @@ public class ConnectionInfo {
     private String user;
     private String pwd;
     private String dbInstanceId;
+    private String dbType;
     private List<String> dbNameList;
 }

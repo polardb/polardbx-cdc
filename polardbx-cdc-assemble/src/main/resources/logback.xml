@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration scan="true" scanPeriod="10 seconds">
+    <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
 
     <appender name="fileAppender" class="ch.qos.logback.classic.sift.SiftingAppender">
         <discriminator>
@@ -320,6 +321,29 @@
         </encoder>
     </appender>
 
+    <appender name="compressionAppender"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${user.home}/logs/polardbx-binlog/${taskName}/compression.log</file>
+        <append>true</append>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${user.home}/logs/polardbx-binlog/${taskName}/%d{yyyy-MM-dd}/compression.%i.log.gz
+            </fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy
+                    class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>10</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>
+                <![CDATA[
+						    %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n
+						]]>
+            </pattern>
+            <charset class="java.nio.charset.Charset">UTF-8</charset>
+        </encoder>
+    </appender>
+
     <appender name="metricsAppender"
               class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${user.home}/logs/polardbx-binlog/${taskName}/metrics.log</file>
@@ -502,6 +526,10 @@
 
     <logger name="METRICS" level="INFO" additivity="false">
         <appender-ref ref="metricsAppender"/>
+    </logger>
+
+    <logger name="compressionLogger" level="INFO" additivity="false">
+        <appender-ref ref="compressionAppender"/>
     </logger>
 
     <logger name="META-METRICS" level="INFO" additivity="false">

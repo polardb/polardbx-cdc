@@ -6,12 +6,13 @@
     <parent>
         <artifactId>polardbx-cdc</artifactId>
         <groupId>com.aliyun.polardbx</groupId>
-        <version>5.4.19-SNAPSHOT</version>
+        <version>5.4.21-SNAPSHOT</version>
     </parent>
 
     <artifactId>polardbx-cdc-client</artifactId>
     <version>${cdc.client.version}</version>
     <properties>
+        <license.dir>${project.parent.basedir}</license.dir>
         <grpc.version>1.30.0</grpc.version>
         <slf4j.version>1.7.32</slf4j.version>
     </properties>
@@ -92,6 +93,15 @@
             <scope>provided</scope>
         </dependency>
         <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+        </dependency>
+        <!-- 添加 Zstd 压缩库依赖 -->
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-netty-shaded</artifactId>
             <version>${grpc.version}</version>
@@ -116,6 +126,12 @@
             <artifactId>junit</artifactId>
             <version>4.12</version>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 
@@ -173,4 +189,3 @@
     </build>
 
 </project>
-

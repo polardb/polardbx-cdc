@@ -8,6 +8,7 @@ package com.aliyun.polardbx.binlog.extractor.log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.TypeReference;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.RuntimeContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
@@ -126,6 +127,7 @@ public class TransactionTest extends BaseTest {
 
     @Test
     public void testSyncPoint() throws Exception {
+        mockConfig(ConfigKeys.TASK_SYNC_POINT_ENABLED, "true");
         FileLogFetcher fetcher = new FileLogFetcher();
         fetcher.open(new File(TransactionTest.class.getClassLoader().getResource("binlog/mysql_bin.2").toURI()), 985);
         LogDecoder logDecoder = new LogDecoder(LogEvent.START_EVENT_V3, LogEvent.ENUM_END_EVENT);

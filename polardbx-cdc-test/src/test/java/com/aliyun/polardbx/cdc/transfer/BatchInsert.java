@@ -46,7 +46,7 @@ public class BatchInsert {
 
         boolean useTSO = false;
 
-        Class.forName("com.mysql.jdbc.Driver");
+        Class.forName("com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver");
 
         logger.info("use TSO " + useTSO);
         String url = String.format(

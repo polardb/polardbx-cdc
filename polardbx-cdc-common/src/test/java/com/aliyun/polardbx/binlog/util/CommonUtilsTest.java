@@ -7,9 +7,7 @@
 package com.aliyun.polardbx.binlog.util;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.time.DateFormatUtils;
 import org.junit.Assert;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.Scanner;
@@ -18,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.convertToTsoUnit;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.getActualTso;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.getCurrentStackTrace;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.getFormatDateTimeFromTso;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.getTsoPhysicalTime;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.getTsoTimestamp;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.tso2physicalTime;
@@ -36,18 +35,23 @@ public class CommonUtilsTest {
     }
 
     @Test
-    @Ignore
     public void testTso2Datetime() {
         long seconds = tso2physicalTime(7294554800564207680L, TimeUnit.SECONDS);
-        System.out.println("seconds is :" + DateFormatUtils
-            .format(seconds * 1000, "yyyy-MM-dd HH:mm:ss"));
+        Assert.assertEquals(1739157390, seconds);
     }
 
     @Test
-    @Ignore
+    public void testGetFormatDateTimeFromTso() {
+        String tso = "738928645428477958419203516698334371840000000000000000";
+        String datetime = getFormatDateTimeFromTso(tso);
+        Assert.assertEquals("2025-10-29 21:06:17", datetime);
+        System.out.println(datetime);
+    }
+
+    @Test
     public void testGetTsoDatetime() {
-        long seconds = getTsoPhysicalTime("729455479969598675218256200089951436880000000000000000", TimeUnit.SECONDS);
-        System.out.println("seconds is :" + DateFormatUtils.format(seconds * 1000, "yyyy-MM-dd HH:mm:ss"));
+        long seconds = getTsoPhysicalTime("738441180017275705619154770157088481380000000000000000", TimeUnit.SECONDS);
+        Assert.assertEquals(1760580968, seconds);
     }
 
     @Test

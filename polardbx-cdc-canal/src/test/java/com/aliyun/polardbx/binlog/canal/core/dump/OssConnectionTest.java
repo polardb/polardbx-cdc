@@ -473,8 +473,8 @@ public class OssConnectionTest extends BaseTest {
             OssConnection ossConnection =
                 Mockito.mock(OssConnection.class, withSettings().useConstructor("a", "b", "c", "d", 1L, 3L, 4L));
             List<BinlogFile> binlogFileList = new ArrayList<>();
-            binlogFileUtilMockedStatic.when(()->BinlogFileUtil.readServerId(anyString())).thenReturn(111111L);
-            binlogFileUtilMockedStatic.when(()->BinlogFileUtil.readFileSize(anyString())).thenReturn(30L);
+            binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readServerId(anyString())).thenReturn(111111L);
+            binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readFileSize(anyString())).thenReturn(30L);
             BinlogFile binlogFile = new BinlogFile();
             binlogFile.setLogname("a");
             binlogFile.setIntranetDownloadLink("download-link");
@@ -608,7 +608,6 @@ public class OssConnectionTest extends BaseTest {
         Assert.assertNotNull(fetcher);
     }
 
-
     @Test
     public void testFilterBinlogListByGareth() throws Exception {
         OssConnection ossConnection =
@@ -617,13 +616,16 @@ public class OssConnectionTest extends BaseTest {
         mockConfig(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS, "true");
         mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH, "true");
         mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_POOL_TYPE, "nas");
-        mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_CONFIG, "{\"uid\":\"223274842729957349\",\"protocol\":\"nfs\",\"protocolVersion\":\"v4\",\"type\":\"nas\",\"region\":\"cn-beijing\",\"originalIp\":\"10.0.109.210\",\"originalPort\":\"2049\",\"mountpoint\":\"/apsaradb/test\"}");
-        try(MockedStatic<Shell> shellMockedStatic = Mockito.mockStatic(Shell.class);
+        mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_CONFIG,
+            "{\"uid\":\"000000000000000001\",\"protocol\":\"nfs\",\"protocolVersion\":\"v4\",\"type\":\"nas\",\"region\":\"cn-beijing\",\"originalIp\":\"192.0.2.20\",\"originalPort\":\"2049\",\"mountpoint\":\"/test/nas\"}");
+        try (MockedStatic<Shell> shellMockedStatic = Mockito.mockStatic(Shell.class);
             MockedStatic<BinlogFileUtil> binlogFileUtilMockedStatic = Mockito.mockStatic(BinlogFileUtil.class);
-        ){
+        ) {
             binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readFileSize(anyString())).thenReturn(30L);
             binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readServerId(anyString())).thenReturn(1111L);
-            shellMockedStatic.when(() -> Shell.execCommand(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn("success");
+            shellMockedStatic.when(
+                () -> Shell.execCommand(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(),
+                    anyString(), anyString(), anyString())).thenReturn("success");
             List<BinlogFile> binlogFileList = new ArrayList<>();
             BinlogFile binlogFile = new BinlogFile();
             binlogFile.setDownloadLink("download link");
@@ -640,14 +642,14 @@ public class OssConnectionTest extends BaseTest {
             Mockito.mock(OssConnection.class, withSettings().useConstructor("a", "b", "c", "d", 1L, 3L, 4L));
         doCallRealMethod().when(ossConnection).filterBinlogList(anyList());
         doCallRealMethod().when(ossConnection).prepareServerIdForDbs(anyList());
-        mockConfig(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS, "true");
+        mockConfig(ConfigKeys.DOWNLOAD_BINLOG_USE_DBS, "true");
         mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH, "true");
         mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_POOL_TYPE, "");
         mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_CONFIG, "");
-        try(MockedStatic<Shell> shellMockedStatic = Mockito.mockStatic(Shell.class);
+        try (MockedStatic<Shell> shellMockedStatic = Mockito.mockStatic(Shell.class);
             MockedStatic<BinlogFileUtil> binlogFileUtilMockedStatic = Mockito.mockStatic(BinlogFileUtil.class);
             MockedStatic<DbsApi> dbsApiMockedStatic = Mockito.mockStatic(DbsApi.class)
-        ){
+        ) {
             binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readFileSize(anyString())).thenReturn(30L);
             binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readServerId(anyString())).thenReturn(1111L);
             DescribeStorageInfoResult result = new DescribeStorageInfoResult();
@@ -655,8 +657,11 @@ public class OssConnectionTest extends BaseTest {
             result.setDataJson(JSON.toJSONString(entity));
             result.setData(entity);
             result.getData().setType("nas");
-            dbsApiMockedStatic.when(() -> DbsApi.describeStorageInfo(anyString(), anyString(), anyString())).thenReturn(result);
-            shellMockedStatic.when(() -> Shell.execCommand(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn("success");
+            dbsApiMockedStatic.when(() -> DbsApi.describeStorageInfo(anyString(), anyString(), anyString()))
+                .thenReturn(result);
+            shellMockedStatic.when(
+                () -> Shell.execCommand(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(),
+                    anyString(), anyString(), anyString())).thenReturn("success");
             List<BinlogFile> binlogFileList = new ArrayList<>();
             BinlogFile binlogFile = new BinlogFile();
             binlogFile.setDownloadLink("download link");
@@ -665,7 +670,7 @@ public class OssConnectionTest extends BaseTest {
             binlogFile.setStorageEntityId("test");
             binlogFileList.add(binlogFile);
             ossConnection.filterBinlogList(binlogFileList);
-            dbsApiMockedStatic.verify(()->DbsApi.describeStorageInfo(anyString(), anyString(), anyString()));
+            dbsApiMockedStatic.verify(() -> DbsApi.describeStorageInfo(anyString(), anyString(), anyString()));
         }
     }
 
@@ -676,10 +681,10 @@ public class OssConnectionTest extends BaseTest {
         doCallRealMethod().when(ossConnection).filterBinlogList(anyList());
         mockConfig(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS, "true");
         mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH, "false");
-        try(MockedStatic<Shell> shellMockedStatic = Mockito.mockStatic(Shell.class);
+        try (MockedStatic<Shell> shellMockedStatic = Mockito.mockStatic(Shell.class);
             MockedStatic<BinlogFileUtil> binlogFileUtilMockedStatic = Mockito.mockStatic(BinlogFileUtil.class);
             MockedStatic<DbsApi> dbsApiMockedStatic = Mockito.mockStatic(DbsApi.class);
-        ){
+        ) {
             binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readFileSize(anyString())).thenReturn(30L);
             binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readServerId(anyString())).thenReturn(1111L);
             RdsDownloadForRestoreResult restoreResult = new RdsDownloadForRestoreResult();
@@ -687,7 +692,9 @@ public class OssConnectionTest extends BaseTest {
             downloadData.setTaskId(UUID.randomUUID().toString());
             downloadData.setStatus("OK");
             restoreResult.setData(downloadData);
-            dbsApiMockedStatic.when(() -> DbsApi.submitDownloadTask(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(restoreResult);
+            dbsApiMockedStatic.when(
+                    () -> DbsApi.submitDownloadTask(anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(restoreResult);
             List<BinlogFile> binlogFileList = new ArrayList<>();
             BinlogFile binlogFile = new BinlogFile();
             binlogFile.setDownloadLink("download link");
@@ -704,12 +711,12 @@ public class OssConnectionTest extends BaseTest {
             Mockito.mock(OssConnection.class, withSettings().useConstructor("a", "b", "c", "d", 1L, 3L, 4L));
         doCallRealMethod().when(ossConnection).filterBinlogList(anyList());
         doCallRealMethod().when(ossConnection).prepareServerIdForDbs(anyList());
-        mockConfig(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS, "true");
+        mockConfig(ConfigKeys.DOWNLOAD_BINLOG_USE_DBS, "true");
         mockConfig(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH, "false");
-        try(MockedStatic<Shell> shellMockedStatic = Mockito.mockStatic(Shell.class);
+        try (MockedStatic<Shell> shellMockedStatic = Mockito.mockStatic(Shell.class);
             MockedStatic<BinlogFileUtil> binlogFileUtilMockedStatic = Mockito.mockStatic(BinlogFileUtil.class);
             MockedStatic<DbsApi> dbsApiMockedStatic = Mockito.mockStatic(DbsApi.class);
-        ){
+        ) {
             binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readFileSize(anyString())).thenReturn(10L);
             binlogFileUtilMockedStatic.when(() -> BinlogFileUtil.readServerId(anyString())).thenReturn(1111L);
             RdsDownloadForRestoreResult restoreResult = new RdsDownloadForRestoreResult();
@@ -717,11 +724,14 @@ public class OssConnectionTest extends BaseTest {
             downloadData.setTaskId(UUID.randomUUID().toString());
             downloadData.setStatus("OK");
             restoreResult.setData(downloadData);
-            dbsApiMockedStatic.when(() -> DbsApi.submitDownloadTask(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(restoreResult);
+            dbsApiMockedStatic.when(
+                    () -> DbsApi.submitDownloadTask(anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(restoreResult);
             DescribeTaskStatusResult describeTaskStatusResult = new DescribeTaskStatusResult();
             describeTaskStatusResult.setData(new DescribeTaskStatusResult.Data());
             describeTaskStatusResult.getData().setStatus("Failed");
-            dbsApiMockedStatic.when(() -> DbsApi.describeTaskStatus(anyString(), anyString(), anyString(), anyString())).thenReturn(describeTaskStatusResult);
+            dbsApiMockedStatic.when(() -> DbsApi.describeTaskStatus(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(describeTaskStatusResult);
             List<BinlogFile> binlogFileList = new ArrayList<>();
             BinlogFile binlogFile = new BinlogFile();
             binlogFile.setDownloadLink("download link");

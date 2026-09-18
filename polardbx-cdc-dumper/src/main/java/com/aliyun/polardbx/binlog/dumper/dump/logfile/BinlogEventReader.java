@@ -21,6 +21,8 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 import static com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet.loadCharactorSetFromCN;
 
@@ -81,7 +83,7 @@ public class BinlogEventReader {
         if (timestamp < 0) {
             throw new PolardbxException("invalid event timestamp:" + timestamp);
         }
-        if (eventType < 0 || eventType > 0x23) {
+        if (eventType < 0 || eventType > 0x28) {
             throw new PolardbxException("invalid event type:" + eventType);
         }
         if (eventSize != endPos - startPos) {
@@ -146,17 +148,21 @@ public class BinlogEventReader {
         }
     }
 
-    public BinlogEvent nextBinlogEvent() throws IOException {
+    public List<BinlogEvent> nextBinlogEvent() throws IOException {
         if (buffer.remaining() < 13) {
             buffer.compact();
             this.read();
         }
         int cur = buffer.position();
-        skipBytes(4);// timestamp
-        byte eventType = buffer.get();// event type
-        skipBytes(4);// server id
+        // timestamp
+        skipBytes(4);
+        // event type
+        byte eventType = buffer.get();
+        // server id
+        skipBytes(4);
+        // length
         int length = (0xff & buffer.get()) | ((0xff & buffer.get()) << 8) | ((0xff & buffer.get()) << 16)
-            | ((buffer.get()) << 24);// length
+            | ((buffer.get()) << 24);
 
         byte[] data = new byte[length];
         if (buffer.remaining() < length - 13) {
@@ -173,13 +179,35 @@ public class BinlogEventReader {
         long serverId = ba.readLong(4);
         ba.skip(4);
         long endLogPos = ba.readLong(4);
-        String info = getEventInfo(data, length);
+
+        List<BinlogEvent> binlogEvents = new ArrayList<>();
+        LogEvent event = decoder.decode(new LogBuffer(data, 0, length), context);
+        if (event == null) {
+            log.error("decode event failed, event type:{} at pos:{}.", LogEvent.getTypeName(eventType), fp);
+        }
+
+        String info = StringUtils.defaultString(event.info(), StringUtils.EMPTY);
         BinlogEvent binlogEvent = BinlogEvent.newBuilder().setLogName(fileName).setPos(fp).setEventType(
             LogEvent.getTypeName(eventType)).setServerId(serverId).setEndLogPos(endLogPos).setInfo(info).build();
+        binlogEvents.add(binlogEvent);
+
+        // 如果该事件是压缩事务，则解压缩之
+        if (eventType == LogEvent.TRANSACTION_PAYLOAD_EVENT) {
+            List<LogEvent> compressedEvents = decoder.processIterateDecode(event, context);
+            for (LogEvent e : compressedEvents) {
+                binlogEvent =
+                    BinlogEvent.newBuilder().setLogName(fileName).setPos(e.getHeader().getLogPos())
+                        .setEventType(LogEvent.getTypeName(e.getHeader().getType()))
+                        .setServerId(serverId).setEndLogPos(e.getHeader().getLogPos()).setInfo(e.info())
+                        .build();
+                binlogEvents.add(binlogEvent);
+                rowCount--;
+            }
+        }
         fp += length;
         rowCount--;
 
-        return binlogEvent;
+        return binlogEvents;
     }
 
     private String getEventInfo(byte[] data, int length) throws IOException {

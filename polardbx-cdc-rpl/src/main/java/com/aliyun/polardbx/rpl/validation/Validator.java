@@ -20,15 +20,16 @@ import com.aliyun.polardbx.binlog.domain.po.ValidationTask;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
+import com.aliyun.polardbx.rpl.common.JdbcParameterBinder;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
+import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
 import com.aliyun.polardbx.rpl.dbmeta.DbMetaManager;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.extractor.full.ExtractorUtil;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportStateMachineContext;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
-import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.validation.common.DiffRecord;
 import com.aliyun.polardbx.rpl.validation.common.DiffStateEnum;
 import com.aliyun.polardbx.rpl.validation.common.ValidationStateEnum;
@@ -88,7 +89,8 @@ public class Validator {
     private static final String taskId = Long.toString(TaskContext.getInstance().getTaskId());
 
     @Getter
-    private static final int rpsLimit = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_MAX_ROW_SIZE_PER_SECOND);
+    private static final int rpsLimit =
+        DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_MAX_ROW_SIZE_PER_SECOND);
     private static final int parallelism = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_TABLE_PARALLELISM);
 
     private static final boolean skipCollect =
@@ -211,7 +213,7 @@ public class Validator {
         threadPool.shutdown();
     }
 
-    private void validTable(String srcDbName, String dstDbName, String tableName) throws Exception {
+    public void validTable(String srcDbName, String dstDbName, String tableName) throws Exception {
         log.info("start check table:{}.{}", srcDbName, tableName);
 
         Optional<ValidationTask> valTaskRecord = getValTaskRecord(srcDbName, tableName, type);
@@ -233,17 +235,21 @@ public class Validator {
             createValTask(srcDbName, dstDbName, tableName, type);
         }
 
-        srcTableInfo = DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, HostType.POLARX1, false);
+        srcTableInfo = DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName,
+            meta.getSrcLogicalConnInfo().getType(), false);
 
         List<List<Object>> sampleResult = doSample(srcDbName, dstDbName, tableName);
         if (checkPoint != null) {
             List<String> keyNames = srcTableInfo.getKeyList();
             List<Integer> fieldTypes = new ArrayList<>();
+            List<String> collations = new ArrayList<>();
             for (String keyName : keyNames) {
-                fieldTypes.add(srcTableInfo.getColumnType(keyName));
+                ColumnInfo columnInfo = srcTableInfo.getColumnInfo(keyName);
+                fieldTypes.add(columnInfo.getType());
+                collations.add(columnInfo.getCollationName());
             }
             List<Object> cp = JSON.parseObject(checkPoint, List.class);
-            sampleResult = filterSample(sampleResult, cp, fieldTypes);
+            sampleResult = filterSample(sampleResult, cp, fieldTypes, collations);
         }
 
         if (CollectionUtils.isEmpty(sampleResult)) {
@@ -264,8 +270,8 @@ public class Validator {
         log.info("check table:{}.{} finished.", srcDbName, tableName);
     }
 
-    private void check(String srcDbName, String dstDbName, String tableName, List<Object> lowerBound,
-                       List<Object> upperBound) throws Exception {
+    public void check(String srcDbName, String dstDbName, String tableName, List<Object> lowerBound,
+                      List<Object> upperBound) throws Exception {
         boolean res = batchCheck(srcDbName, dstDbName, tableName, lowerBound, upperBound);
         if (!res) {
             detailCheck(srcDbName, dstDbName, tableName, lowerBound, upperBound);
@@ -295,7 +301,7 @@ public class Validator {
     }
 
     private List<List<Object>> filterSample(List<List<Object>> sampleResult, List<Object> checkPoint,
-                                            List<Integer> fieldTypes) {
+                                            List<Integer> fieldTypes, List<String> collations) {
         List<List<Object>> res = new ArrayList<>();
         res.add(checkPoint);
 
@@ -310,7 +316,7 @@ public class Validator {
             for (Object o : sampleResult.get(idx)) {
                 keyVal.add(o.toString());
             }
-            if (compareKeyVal(cpKeyVal, keyVal, fieldTypes) < 0) {
+            if (compareKeyVal(cpKeyVal, keyVal, fieldTypes, collations) < 0) {
                 break;
             }
             idx++;
@@ -322,17 +328,18 @@ public class Validator {
         return res;
     }
 
-    private List<List<Object>> doSample(String srcDbName, String dstDbName, String tableName) throws Exception {
-        List<List<Object>> res =
-            ValidationSampler.sample(dstDs.get(dstDbName), dstDbName, tableName, srcTableInfo.getPks());
+    public List<List<Object>> doSample(String srcDbName, String dstDbName, String tableName) throws Exception {
+        DruidDataSource ds = meta.isSampleFromSrc() ? srcDs.get(srcDbName) : dstDs.get(dstDbName);
+        List<List<Object>> res = ValidationSampler.sample(ds, dstDbName, tableName, srcTableInfo.getPks());
         log.info("sample table {}.{} finished, sample point count:{}", srcDbName, tableName, res.size());
         return res;
     }
 
-    private boolean batchCheck(String srcDbName, String dstDbName, String tableName, List<Object> lowerBound,
-                               List<Object> upperBound) throws Exception {
+    public boolean batchCheck(String srcDbName, String dstDbName, String tableName, List<Object> lowerBound,
+                              List<Object> upperBound) throws Exception {
         TableInfo tableInfo =
-            DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, HostType.POLARX1, false);
+            DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, meta.getSrcLogicalConnInfo()
+                .getType(), false);
         SqlContextBuilder.SqlContext srcContext =
             ValSQLGenerator.getBatchCheckSql(srcDbName, tableName, tableInfo, lowerBound, upperBound);
         SqlContextBuilder.SqlContext dstContext =
@@ -378,7 +385,7 @@ public class Validator {
         try (Connection conn = ds.getConnection();
             PreparedStatement stmt = conn.prepareStatement(sql)) {
             for (int i = 0; i < params.size(); i++) {
-                stmt.setObject(i + 1, params.get(i));
+                JdbcParameterBinder.bind(stmt, i + 1, params.get(i));
             }
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -398,15 +405,19 @@ public class Validator {
         persistDiff(srcDbName, dstDbName, tableName, diffRows);
     }
 
-    private List<DiffRecord> findDiff(String srcDbName, String dstDbName, String tableName, List<Object> lowerBound,
-                                      List<Object> upperBound) throws Exception {
+    public List<DiffRecord> findDiff(String srcDbName, String dstDbName, String tableName, List<Object> lowerBound,
+                                     List<Object> upperBound) throws Exception {
         TableInfo tableInfo =
-            DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, HostType.POLARX1, false);
+            DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, meta.getSrcLogicalConnInfo()
+                .getType(), false);
 
         List<String> keyNames = tableInfo.getKeyList();
         List<Integer> fieldTypes = new ArrayList<>();
+        List<String> collations = new ArrayList<>();
         for (String keyName : keyNames) {
-            fieldTypes.add(tableInfo.getColumnType(keyName));
+            ColumnInfo columnInfo = tableInfo.getColumnInfo(keyName);
+            fieldTypes.add(columnInfo.getType());
+            collations.add(columnInfo.getCollationName());
         }
 
         SqlContextBuilder.SqlContext srcContext =
@@ -433,8 +444,8 @@ public class Validator {
 
             List<Object> params = srcContext.params;
             for (int i = 0; i < params.size(); i++) {
-                srcStmt.setObject(i + 1, params.get(i));
-                dstStmt.setObject(i + 1, params.get(i));
+                JdbcParameterBinder.bind(srcStmt, i + 1, params.get(i));
+                JdbcParameterBinder.bind(dstStmt, i + 1, params.get(i));
             }
 
             try (ResultSet srcRs = srcStmt.executeQuery();
@@ -506,7 +517,7 @@ public class Validator {
                         }
 
                         DiffRecord diffRecord;
-                        int cmp = compareKeyVal(srcKeyStr, dstKeyStr, fieldTypes);
+                        int cmp = compareKeyVal(srcKeyStr, dstKeyStr, fieldTypes, collations);
                         if (cmp == 0) {
                             log.info("Found diff rows, srcKey:{}, dstKey:{}, src checksum:{}, dst checksum:{}",
                                 srcKeyVal, dstKeyVal, lastSrcCheckSum, lastDstCheckSum);
@@ -544,10 +555,13 @@ public class Validator {
         return res;
     }
 
-    private int compareKeyVal(List<String> keyVal1, List<String> keyVal2, List<Integer> fieldTypes) {
+    private int compareKeyVal(List<String> keyVal1, List<String> keyVal2, List<Integer> fieldTypes,
+                              List<String> collations) {
         int result = 0;
         for (int i = 0; i < keyVal1.size(); i++) {
             int type = fieldTypes.get(i);
+            String collation = collations.get(i);
+
             String k1 = keyVal1.get(i);
             String k2 = keyVal2.get(i);
             if (ExtractorUtil.isInteger(type)) {
@@ -558,6 +572,10 @@ public class Validator {
                 double v1 = Double.parseDouble(k1);
                 double v2 = Double.parseDouble(k2);
                 result = Double.compare(v1, v2);
+            } else if (ExtractorUtil.isCharType(type) && ExtractorUtil.isCaseInsensitiveCollation(collation)) {
+                String v1 = k1.toLowerCase();
+                String v2 = k2.toLowerCase();
+                result = v1.compareTo(v2);
             } else {
                 result = k1.compareTo(k2);
             }

@@ -29,8 +29,8 @@ import static com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil.getConnectionPr
 public class BinlogXCommandWithUserTest extends BaseTestCase {
 
     private static final String SHOW_BINARY_STREAMS = "show binary streams";
-    private static final String SHOW_BINARY_LOGS = "show binary logs";
-    private static final String SHOW_BINARY_LOGS_WITH_STREAM = "show binary logs with '%s'";
+    public static final String SHOW_BINARY_LOGS = "show binary logs";
+    public static final String SHOW_BINARY_LOGS_WITH_STREAM = "show binary logs with '%s'";
     private static final String SHOW_MASTER_STATUS = "show master status";
     private static final String SHOW_MASTER_STATUS_WITH_STREAM = "show master status with '%s'";
     private static final String SHOW_BINLOG_EVENTS = "show binlog events limit 10";
@@ -117,6 +117,7 @@ public class BinlogXCommandWithUserTest extends BaseTestCase {
 
     private Retryer<Object> buildRetryer() {
         return RetryerBuilder.newBuilder().retryIfException()
+            .retryIfExceptionOfType(AssertionError.class)
             .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.SECONDS))
             .withStopStrategy(StopStrategies.stopAfterAttempt(600)).build();
     }

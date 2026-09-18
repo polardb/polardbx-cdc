@@ -17,6 +17,8 @@ import com.aliyun.polardbx.binlog.dao.RplFullValidSubTaskMapper;
 import com.aliyun.polardbx.binlog.domain.po.RplFullValidDiff;
 import com.aliyun.polardbx.binlog.domain.po.RplFullValidSubTask;
 import com.aliyun.polardbx.binlog.service.RplSyncPointService;
+import com.aliyun.polardbx.rpl.common.JdbcParameterBinder;
+import com.aliyun.polardbx.rpl.dbmeta.DbMetaManager;
 import com.aliyun.polardbx.rpl.dbmeta.TableInfo;
 import com.aliyun.polardbx.rpl.validation.fullvalid.ReplicaFullValidDiffStatus;
 import com.aliyun.polardbx.rpl.validation.fullvalid.ReplicaFullValidSqlGenerator;
@@ -52,6 +54,7 @@ import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
 
     private static final Logger log = LoggerFactory.getLogger("fullValidLogger");
+    private static final String EXTERNALIZED_SCAN_REJECTION = "SCAN hint on table with externalized columns";
 
     private static final RplFullValidSubTaskMapper subTaskMapper =
         SpringContextHolder.getObject(RplFullValidSubTaskMapper.class);
@@ -153,6 +156,13 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
             log.info("direct mode, will skip to get sync point");
         }
 
+        if (hasExternalizedColumns()) {
+            log.info("skip replica hash check for externalized table and check logical rows directly: src={}.{}, "
+                    + "dst={}.{}",
+                srcTableInfo.getSchema(), srcTableInfo.getName(), dstTableInfo.getSchema(), dstTableInfo.getName());
+            return checkDetail();
+        }
+
         if (checkHash()) {
             return true;
         }
@@ -172,8 +182,36 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
             return false;
         }
 
-        return validSyncPointTsoHelper(srcDataSource, srcTableInfo.getName(), primaryTso) &&
-            validSyncPointTsoHelper(dstDataSource, dstTableInfo.getName(), secondaryTso);
+        return validSyncPointTsoHelper(srcDataSource, srcTableInfo, primaryTso) &&
+            validSyncPointTsoHelper(dstDataSource, dstTableInfo, secondaryTso);
+    }
+
+    public boolean validSyncPointTsoHelper(DataSource ds, TableInfo tableInfo, String snapshotTso)
+        throws SQLException {
+        boolean externalized = !CollectionUtils.isEmpty(tableInfo.getExternalizedColumnNames());
+        boolean retryWithLogicalProbe = false;
+        try (Connection conn = ds.getConnection();
+            Statement stmt = conn.createStatement()) {
+            stmt.execute("SET SNAPSHOT_TS = " + snapshotTso);
+            stmt.execute("SET TRANSACTION_POLICY = TSO");
+            stmt.execute("BEGIN");
+            try {
+                stmt.execute(buildSnapshotProbeSql(tableInfo));
+            } catch (SQLException e) {
+                if (!externalized && loadExternalizedColumnInfoAfterScanRejection(ds, tableInfo, e)) {
+                    retryWithLogicalProbe = true;
+                } else {
+                    return false;
+                }
+            } finally {
+                stmt.execute("ROLLBACK ");
+                stmt.execute("SET SNAPSHOT_TS = -1");
+            }
+        }
+        // The first release-compatible SCAN was rejected by CN's exact external-column guard. Retry only this
+        // explicitly identified external table with the logical snapshot probe; ordinary tables never load or parse
+        // SHOW CREATE TABLE here.
+        return !retryWithLogicalProbe || validSyncPointTsoHelper(ds, tableInfo, snapshotTso);
     }
 
     public boolean validSyncPointTsoHelper(DataSource ds, String tbName, String snapshotTso) throws SQLException {
@@ -194,6 +232,25 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         }
     }
 
+    private boolean hasExternalizedColumns() {
+        return !CollectionUtils.isEmpty(srcTableInfo.getExternalizedColumnNames())
+            || !CollectionUtils.isEmpty(dstTableInfo.getExternalizedColumnNames());
+    }
+
+    private static String buildSnapshotProbeSql(TableInfo tableInfo) throws SQLException {
+        String tableName = "`" + escape(tableInfo.getName()) + "`";
+        if (CollectionUtils.isEmpty(tableInfo.getExternalizedColumnNames())) {
+            return "/*+TDDL:scan()*/ SELECT 1 FROM " + tableName + " LIMIT 1";
+        }
+
+        if (CollectionUtils.isEmpty(tableInfo.getPks())) {
+            throw new SQLException("externalized table has no primary key for snapshot probe: "
+                + tableInfo.getSchema() + "." + tableInfo.getName());
+        }
+        String primaryKey = "`" + escape(tableInfo.getPks().get(0)) + "`";
+        return "SELECT MIN(" + primaryKey + ") FROM " + tableName;
+    }
+
     public void setSyncPointTso(Pair<String, String> syncPointTso) {
         this.syncPointTso = syncPointTso;
     }
@@ -211,11 +268,10 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
 
             final String primaryTso = syncPointTso == null ? null : syncPointTso.getLeft();
             final String secondaryTso = syncPointTso == null ? null : syncPointTso.getRight();
-            long srcDigest = getHashDigest(srcTableInfo.getSchema(), srcTableInfo.getName(), srcDataSource, primaryTso,
-                rplHashCheckSql, lowerBound, upperBound);
-            long dstDigest =
-                getHashDigest(dstTableInfo.getSchema(), dstTableInfo.getName(), dstDataSource, secondaryTso,
-                    rplHashCheckSql, lowerBound, upperBound);
+            long srcDigest = getHashDigest(srcTableInfo, srcDataSource, primaryTso, rplHashCheckSql,
+                lowerBound, upperBound);
+            long dstDigest = getHashDigest(dstTableInfo, dstDataSource, secondaryTso, rplHashCheckSql,
+                lowerBound, upperBound);
             boolean res = srcDigest == dstDigest;
             if (!res) {
                 log.info("hash check failed!, src hash:{}, src snapshot tso:{}, dst hash:{}, dst snapshot tso:{}",
@@ -243,8 +299,8 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         try (Connection srcConn = srcDataSource.getConnection();
             Connection dstConn = dstDataSource.getConnection()) {
             try {
-                startTxn(srcConn, srcTableInfo.getSchema(), srcTableInfo.getName(), primaryTso);
-                startTxn(dstConn, dstTableInfo.getSchema(), dstTableInfo.getName(), secondaryTso);
+                startTxn(srcConn, srcDataSource, srcTableInfo, primaryTso);
+                startTxn(dstConn, dstDataSource, dstTableInfo, secondaryTso);
 
                 try (PreparedStatement srcStmt = srcConn.prepareStatement(checkSumSql);
                     PreparedStatement dstStmt = dstConn.prepareStatement(checkSumSql)) {
@@ -252,8 +308,8 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
                     dstStmt.setFetchSize(fetchSize);
                     Object[] params = ArrayUtils.addAll(lowerBound.toArray(), upperBound.toArray());
                     for (int i = 0; i < params.length; i++) {
-                        srcStmt.setObject(i + 1, params[i]);
-                        dstStmt.setObject(i + 1, params[i]);
+                        JdbcParameterBinder.bind(srcStmt, i + 1, params[i]);
+                        JdbcParameterBinder.bind(dstStmt, i + 1, params[i]);
                     }
 
                     try (ResultSet srcRs = srcStmt.executeQuery();
@@ -350,16 +406,16 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         return result;
     }
 
-    private long getHashDigest(String db, String tb, DataSource dataSource, String snapshotTso, String rplHashCheckSql,
+    private long getHashDigest(TableInfo tableInfo, DataSource dataSource, String snapshotTso, String rplHashCheckSql,
                                List<Object> lowerBound, List<Object> upperBound) throws Exception {
         try (Connection conn = dataSource.getConnection()) {
             try {
-                startTxn(conn, db, tb, snapshotTso);
+                startTxn(conn, dataSource, tableInfo, snapshotTso);
 
                 try (PreparedStatement stmt = conn.prepareStatement(rplHashCheckSql)) {
                     Object[] params = ArrayUtils.addAll(lowerBound.toArray(), upperBound.toArray());
                     for (int i = 0; i < params.length; i++) {
-                        stmt.setObject(i + 1, params[i]);
+                        JdbcParameterBinder.bind(stmt, i + 1, params[i]);
                     }
                     try (ResultSet resultSet = stmt.executeQuery()) {
                         if (resultSet.next()) {
@@ -375,7 +431,8 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
         }
     }
 
-    private void startTxn(Connection conn, String db, String tb, String snapshotTso) throws SQLException {
+    private void startTxn(Connection conn, DataSource dataSource, TableInfo tableInfo, String snapshotTso)
+        throws SQLException {
         try (Statement stmt = conn.createStatement()) {
             // 可能会抛snapshot too old异常
             if (!StringUtils.isEmpty(snapshotTso)) {
@@ -386,18 +443,43 @@ public class ReplicaFullValidCheckTask extends ReplicaFullValidSubTask {
 
             stmt.execute("SET TRANSACTION_POLICY = TSO");
             stmt.execute("BEGIN");
-            stmt.execute("/*+TDDL:scan()*/ SELECT 1 FROM `" + escape(tb) + "` LIMIT 1");
+            stmt.execute(buildSnapshotProbeSql(tableInfo));
         } catch (SQLException e) {
             log.warn("failed to start txn", e);
+            loadExternalizedColumnInfoAfterScanRejection(dataSource, tableInfo, e);
 
             // 如果上面抛snapshot too old异常，这里尝试放弃使用sync point，相当于direct模式
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute("SET SNAPSHOT_TS = -1");
                 stmt.execute("SET TRANSACTION_POLICY = TSO");
                 stmt.execute("BEGIN");
-                stmt.execute("/*+TDDL:scan()*/ SELECT 1 FROM `" + escape(tb) + "` LIMIT 1");
+                stmt.execute(buildSnapshotProbeSql(tableInfo));
             }
         }
+    }
+
+    private boolean loadExternalizedColumnInfoAfterScanRejection(DataSource dataSource, TableInfo tableInfo,
+                                                                 SQLException failure) throws SQLException {
+        if (!isExternalizedScanRejection(failure)) {
+            return false;
+        }
+        DbMetaManager.loadExternalizedColumnInfo(dataSource, tableInfo.getSchema(), tableInfo.getName(), tableInfo);
+        if (CollectionUtils.isEmpty(tableInfo.getExternalizedColumnNames())) {
+            throw new SQLException("CN rejected SCAN as an externalized table but SHOW CREATE TABLE has no "
+                + "EXTERNALIZE column: " + tableInfo.getSchema() + "." + tableInfo.getName(), failure);
+        }
+        return true;
+    }
+
+    private static boolean isExternalizedScanRejection(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (org.apache.commons.lang3.StringUtils.contains(current.getMessage(), EXTERNALIZED_SCAN_REJECTION)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void rollbackTxn(Connection conn) throws SQLException {

@@ -72,16 +72,18 @@ public class EventDataSinkHandler implements EventHandler<EventData>, LifecycleA
     private void processSingleEventToken(EventData event, SingleEventToken eventToken) throws IOException {
         try {
             if (eventToken.getType() == HEARTBEAT) {
-                handleContext.getLogFileGenerator().tryFlush4ParallelWrite(eventToken.getNextPosition(),
-                    eventToken.getTso(), eventToken.getTsoTimeSecond(), false);
+                long realPos = handleContext.getLogFileGenerator().getBinlogFile().writePointer();
+                handleContext.getLogFileGenerator()
+                    .tryFlush4ParallelWrite(realPos, eventToken.getTso(), eventToken.getTsoTimeSecond(), false);
             } else {
                 BinlogFile binlogFile = handleContext.getLogFileGenerator().getBinlogFile();
+                // dml | 压缩事务需要用到token数据， 其他的不要
                 if (eventToken.isUseTokenData()) {
                     byte[] data = eventToken.getData();
-                    binlogFile.writeEvent(data, 0, data.length, false, eventToken.getCheckServerId());
+                    eventToken.setLength(data.length);
+                    binlogFile.writeEvent(data, 0, eventToken);
                 } else {
-                    binlogFile.writeEvent(event.getData(), eventToken.getOffset(), eventToken.getLength(), false,
-                        eventToken.getCheckServerId());
+                    binlogFile.writeEvent(event.getData(), eventToken.getOffset(), eventToken);
                 }
                 afterWrite(eventToken);
             }

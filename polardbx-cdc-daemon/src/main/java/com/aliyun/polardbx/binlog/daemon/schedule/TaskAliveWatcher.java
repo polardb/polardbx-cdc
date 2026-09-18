@@ -6,9 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
-import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.RuntimeMode;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.pipeline.CommandPipeline;
@@ -19,7 +17,6 @@ import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
-import com.aliyun.polardbx.binlog.domain.BinlogTaskConfigStatus;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.enums.BinlogTaskStatus;
@@ -29,7 +26,6 @@ import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.GmsTimeUtil;
-import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Sets;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
@@ -49,21 +45,28 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_ROCKSDB_BASE_PATH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_EXECUTION_INSTRUCTION;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_FORCE_KILL_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_BLACKLIST;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RUNTIME_MODE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_BASE_PATH;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_DUMP_SAME_REGION_STORAGE_BINLOG;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.daemon.constant.ClusterExecutionInstruction.START_EXECUTION_INSTRUCTION;
 import static com.aliyun.polardbx.binlog.daemon.constant.ClusterExecutionInstruction.STOP_EXECUTION_INSTRUCTION;
+import static com.aliyun.polardbx.binlog.util.SystemDbConfig.getSystemDbConfig;
 
 /**
  * Created by ziyang.lb
  */
 @Slf4j
 public class TaskAliveWatcher extends AbstractBinlogTimerTask {
-    private final CommandPipeline commander = new CommandPipeline();
+
+    private final CommandPipeline commandPipeline;
     private final String instId;
 
     private final BinlogTaskConfigMapper taskConfigMapper =
@@ -72,132 +75,116 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         SpringContextHolder.getObject(DumperInfoMapper.class);
     private final BinlogTaskInfoMapper taskInfoMapper =
         SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
-    private AtomicBoolean sameRegionFlag;
+    private final AtomicBoolean sameRegionFlag;
 
     public TaskAliveWatcher(String cluster, String clusterType, String taskName, int interval) {
+        this(cluster, clusterType, taskName, interval, new CommandPipeline());
+    }
+
+    public TaskAliveWatcher(String cluster, String clusterType, String taskName, int interval,
+                            CommandPipeline commandPipeline) {
         super(cluster, clusterType, taskName, interval);
-        instId = DynamicApplicationConfig.getString(ConfigKeys.INST_ID);
-        boolean sameRegion = DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_SAME_REGION_STORAGE_BINLOG);
-        sameRegionFlag = new AtomicBoolean(sameRegion);
+        this.instId = getString(ConfigKeys.INST_ID);
+        boolean sameRegion = getBoolean(TASK_DUMP_SAME_REGION_STORAGE_BINLOG);
+        this.sameRegionFlag = new AtomicBoolean(sameRegion);
+        this.commandPipeline = commandPipeline;
     }
 
     @Override
     public synchronized void exec() {
         try {
-            if (log.isDebugEnabled()) {
-                log.debug("Task Alive Watcher execute.");
-            }
-
-            RuntimeMode runtimeMode = RuntimeMode.valueOf(DynamicApplicationConfig.getString(ConfigKeys.RUNTIME_MODE));
-            if (RuntimeMode.isLocalMode(runtimeMode)) {
+            if (RuntimeMode.isLocalMode(RuntimeMode.valueOf(getString(RUNTIME_MODE)))) {
                 return;
             }
 
-            boolean newSameRegion =
-                DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_SAME_REGION_STORAGE_BINLOG);
-            boolean changeRegion = false;
-            // master集群不需要关心切换就近访问
+            // 检查是否切换了region
+            final boolean newSameRegion = getBoolean(TASK_DUMP_SAME_REGION_STORAGE_BINLOG);
+            final AtomicBoolean regionChanged = new AtomicBoolean(false);
             if (CommonUtils.isGlobalBinlogSlave()) {
-                changeRegion = sameRegionFlag.get() != newSameRegion;
+                regionChanged.set(sameRegionFlag.get() != newSameRegion);
             }
-
-            final boolean filterTask = changeRegion;
 
             // 查询本机需要运行的任务列表
             List<BinlogTaskConfig> localTaskConfigs = taskConfigMapper.select(
                 s -> s.where(BinlogTaskConfigDynamicSqlSupport.containerId, SqlBuilder.isEqualTo(instId)));
-
             Set<String> localTasks = localTaskConfigs.stream()
-                .filter(b -> {
-                    if (filterTask && StringUtils
-                        .equalsAnyIgnoreCase(b.getRole(), TaskType.Final.name(), TaskType.Dispatcher.name())) {
-                        return false;
-                    }
-                    return true;
-                })
                 .map(BinlogTaskConfig::getTaskName).collect(Collectors.toSet());
 
             // 停止没有分配在本机上的正在运行的任务
-            stopNoLocalTasks(localTasks);
+            stopTasksNotBelongsToThisNode(localTasks);
 
             // 对已经不在本机运行的Task或Dumper遗留的资源进行GC
             tryCleanResource(localTasks);
 
-            if (changeRegion) {
+            // 停止或者启动任务
+            String executionInstruction = StringUtils.defaultIfEmpty(
+                getSystemDbConfig(CLUSTER_EXECUTION_INSTRUCTION), START_EXECUTION_INSTRUCTION);
+
+            if (executionInstruction.equals(STOP_EXECUTION_INSTRUCTION)) {
+                processStop(localTaskConfigs);
+            } else {
+                Set<String> forceRestartTaskSet = localTaskConfigs.stream()
+                    .filter(b -> regionChanged.get() && StringUtils.equalsAnyIgnoreCase(
+                        b.getRole(), TaskType.Relay.name(), TaskType.Final.name(), TaskType.Dispatcher.name()))
+                    .map(BinlogTaskConfig::getTaskName).collect(Collectors.toSet());
+                processStart(localTaskConfigs, forceRestartTaskSet);
+            }
+
+            if (regionChanged.get()) {
                 sameRegionFlag.set(newSameRegion);
             }
-
-            if (log.isDebugEnabled()) {
-                log.debug("local binlog task config is " + JSONObject.toJSONString(localTaskConfigs));
-            }
-
-            String executionInstruction =
-                StringUtils.defaultIfEmpty(SystemDbConfig.getSystemDbConfig(ConfigKeys.CLUSTER_EXECUTION_INSTRUCTION),
-                    START_EXECUTION_INSTRUCTION);
-            if (log.isDebugEnabled()) {
-                log.debug("binlog execution instruction is {}", executionInstruction);
-            }
-
-            // 跳过不自动调度的任务
-            List<BinlogTaskConfig> scheduleTasks = localTaskConfigs.stream()
-                .filter(config -> config.getStatus() != BinlogTaskConfigStatus.DISABLE_AUTO_SCHEDULE).collect(
-                    Collectors.toList());
-            if (executionInstruction.equals(STOP_EXECUTION_INSTRUCTION)) {
-                processStop(scheduleTasks);
-            } else {
-                processStart(scheduleTasks);
-            }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             log.error("TaskKeepAlive Fail {}", name, e);
             MonitorManager.getInstance()
                 .triggerAlarm(MonitorType.DAEMON_TASK_ALIVE_WATCHER_ERROR, ExceptionUtils.getStackTrace(e));
         }
     }
 
-    private void processStart(List<BinlogTaskConfig> taskConfigs) {
+    void processStart(List<BinlogTaskConfig> taskConfigs, Set<String> forceRestartTaskSet) {
         taskConfigs.forEach(config -> {
             try {
-                startTask(config);
+                tryStartTask(config, forceRestartTaskSet);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
     }
 
-    private void processStop(List<BinlogTaskConfig> taskConfigs) throws Exception {
-        CommandResult result = getAllTaskProcess();
+    void processStop(List<BinlogTaskConfig> taskConfigs) throws Exception {
+        Set<String> runningTaskSet = getAllTaskProcess();
         Set<String> whiteList = stopTaskWhitList();
-        if (result.getCode() == 0) {
-            Set<String> runningTaskSet =
-                new HashSet<>(Arrays.asList(StringUtils.split(result.getMsg(), System.getProperty("line.separator"))));
-            if (log.isDebugEnabled()) {
-                log.debug("local running tasks {}", runningTaskSet);
-            }
+
+        if (!runningTaskSet.isEmpty()) {
             for (BinlogTaskConfig config : taskConfigs) {
                 if (runningTaskSet.contains(config.getTaskName()) && !whiteList.contains(config.getTaskName())) {
-                    commander.stopTask(config.getTaskName());
-                    log.warn("stop local running task:{}", config.getTaskName());
+                    stopTask(config.getTaskName());
                 }
                 updateTaskStatus(config.getClusterId(), config.getTaskName(), config.getRole(),
                     BinlogTaskStatus.STOPPED);
             }
-        } else {
-            log.warn("check local running task fail!");
         }
     }
 
-    private void startTask(BinlogTaskConfig config) throws Exception {
+    void tryStartTask(BinlogTaskConfig config, Set<String> forceRestartTaskSet) throws Exception {
+        if (forceRestartTaskSet.contains(config.getTaskName())) {
+            log.info("prepare to force restart task {}", config.getTaskName());
+            restartTask(config, config.getTaskName(), config.getMem());
+            return;
+        }
+
         Optional<CommonInfo> infoOptional;
         if (TaskType.isTask(config.getRole())) {
             infoOptional = taskInfoMapper.selectOne(
                     s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                         .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
-                .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(), s.getVersion()));
+                .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(),
+                    s.getVersion(), s.getContainerId()));
         } else {
             infoOptional = dumperInfoMapper.selectOne(
                     s -> s.where(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
                         .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(config.getTaskName())))
-                .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(), s.getVersion()));
+                .map(s -> new CommonInfo(s.getTaskName(), s.getGmtHeartbeat(), s.getGmtCreated(),
+                    s.getVersion(), s.getContainerId()));
         }
 
         if (infoOptional.isPresent()) {
@@ -206,38 +193,46 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
             }
 
             CommonInfo info = infoOptional.get();
-            if (shouldRestartTask(config)) {
+            if (shouldRestartTask(config, infoOptional.get())) {
                 MonitorManager.getInstance().triggerAlarm(MonitorType.PROCESS_HEARTBEAT_TIMEOUT_WARNING, info.name);
                 restartTask(config, config.getTaskName(), config.getMem());
             }
 
             if (info.version < config.getVersion()) {
+                log.info("task {} version {} < {}, will restart.", config.getTaskName(),
+                    info.version, config.getVersion());
                 restartTask(config, config.getTaskName(), config.getMem());
             }
         } else {
-            startTask(config.getTaskName(), config.getMem(), false);
+            tryStartTask(config.getTaskName(), config.getMem(), false);
         }
     }
 
-    boolean shouldRestartTask(BinlogTaskConfig config) throws Exception {
+    boolean shouldRestartTask(BinlogTaskConfig config, CommonInfo commonInfo) throws Exception {
         int heartbeatTimeout = getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
         int forceKillTimeout = getInt(DAEMON_FORCE_KILL_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
         long heartbeatInterval = GmsTimeUtil.getHeartbeatInterval(
             config.getRole(), config.getClusterId(), config.getTaskName());
 
+        if (!StringUtils.equals(config.getContainerId(), commonInfo.containerId)) {
+            log.info("detect task {} container changed, should restart, {}:{}.", config.getTaskName(),
+                config.getContainerId(), commonInfo.containerId);
+            return true;
+        }
+
         if (heartbeatInterval > heartbeatTimeout) {
             //心跳超时，但进程还在，一个典型的场景：大数据量场景下GC很频繁，导致cpu使用率很高，Task进程的心跳会出现超时
             if (!isTaskProcessAlive(config.getTaskName())) {
-                log.info("detect heartbeat timeout {} ms, task is already down, prepare to restart, task name {}.",
+                log.info("detect heartbeat timeout {} ms, task {} is already down, should restart.",
                     heartbeatTimeout, config.getTaskName());
                 return true;
             } else {
                 if (heartbeatInterval > forceKillTimeout) {
-                    log.info("detect heartbeat timeout {} ms, task is still alive but exceed the force kill threshold, "
-                        + "prepare to force restart, task name {}.", heartbeatInterval, config.getTaskName());
+                    log.info("detect heartbeat timeout {} ms, task {} is still alive but exceed the force"
+                        + " kill threshold, should force restart.", heartbeatInterval, config.getTaskName());
                     return true;
                 } else {
-                    log.info("detect heartbeat timeout {} ms, task is still alive, will not restart, task name {}.",
+                    log.info("detect heartbeat timeout {} ms, task {} is still alive, should not restart.",
                         heartbeatInterval, config.getTaskName());
                 }
             }
@@ -245,7 +240,7 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         return false;
     }
 
-    private void updateTaskStatus(String clusterId, String taskName, String taskType, BinlogTaskStatus status) {
+    void updateTaskStatus(String clusterId, String taskName, String taskType, BinlogTaskStatus status) {
         if (TaskType.isDumper(taskType)) {
             dumperInfoMapper.update(s -> s.set(DumperInfoDynamicSqlSupport.status).equalTo(status.ordinal())
                 .where(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(taskName))
@@ -257,29 +252,24 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private void stopNoLocalTasks(Set<String> localTasks) throws Exception {
-        CommandResult result = getAllTaskProcess();
+    void stopTasksNotBelongsToThisNode(Set<String> localTasks) throws Exception {
+        Set<String> runningTasks = getAllTaskProcess();
         Set<String> whiteList = stopTaskWhitList();
-        if (result.getCode() == 0) {
-            String[] runningTasks = StringUtils.split(result.getMsg(), System.getProperty("line.separator"));
-            if (log.isDebugEnabled()) {
-                log.debug("local running tasks {}", Arrays.toString(runningTasks));
-            }
+
+        if (!runningTasks.isEmpty()) {
             for (String runningTask : runningTasks) {
                 if (!localTasks.contains(runningTask) && !whiteList.contains(runningTask)) {
-                    commander.stopTask(runningTask);
-                    log.warn("stop local running task {} not in {}", runningTask, localTasks);
+                    log.info("prepare to stop task not belongs to this node, task name -> {}.", runningTask);
+                    stopTask(runningTask);
+                    log.info("stop task not belongs to this node finished, task name -> {}.", runningTask);
                 }
             }
-        } else {
-            log.warn("check local running task fail!");
         }
     }
 
     boolean isTaskProcessAlive(String takName) throws Exception {
-        CommandResult result = getAllTaskProcess();
-        if (result.getCode() == 0) {
-            String[] runningTasks = StringUtils.split(result.getMsg(), System.getProperty("line.separator"));
+        Set<String> runningTasks = getAllTaskProcess();
+        if (!runningTasks.isEmpty()) {
             for (String runningTask : runningTasks) {
                 if (StringUtils.equals(runningTask, takName)) {
                     return true;
@@ -292,27 +282,44 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
     /**
      * 获得当前容器内运行的Task以及Dumper的名字
      */
-    private CommandResult getAllTaskProcess() throws Exception {
-        return commander.execCommand(
+    Set<String> getAllTaskProcess() throws Exception {
+        CommandResult result = commandPipeline.execCommand(
             new String[] {
                 "bash", "-c",
                 "ps -u `whoami` -f | grep 'com.aliyun.polardbx.binlog' | grep -v 'DaemonBootStrap' | grep -v 'grep' |"
                     + " sed 's/.*DtaskName=\\([A-Za-z]*[-]*[0-9]*\\).*/\\1/g'"},
             3000);
+
+        if (result.getCode() == 0) {
+            Set<String> runningTaskSet = new HashSet<>(
+                Arrays.asList(StringUtils.split(result.getMsg(), System.getProperty("line.separator"))));
+
+            if (log.isDebugEnabled()) {
+                log.debug("local running tasks {}", runningTaskSet);
+            }
+            return runningTaskSet;
+        } else {
+            log.warn("check local running task fail, {}:{}.", result.getCode(), result.getMsg());
+            return new HashSet<>();
+        }
     }
 
-    private void startTask(String taskName, int mem, boolean restart) throws Exception {
+    void tryStartTask(String taskName, int mem, boolean restart) throws Exception {
         //improve 这里可以用flock控制
-        log.warn("prepare to start task {}.", taskName);
-        CommandResult result = commander.execCommand(
+        log.info("prepare to start task {}.", taskName);
+        CommandResult result = commandPipeline.execCommand(
             new String[] {"bash", "-c", "ps -ef | grep taskName=" + taskName + " | grep -v grep | wc -l"}, 1000);
-        log.debug("{} {}: ps check result code={}, count={}", restart ? "Restart" : "Start", taskName, result.getCode(),
-            StringUtils.chomp(result.getMsg()));
+
+        if (log.isDebugEnabled()) {
+            log.debug("{} {}: ps check result code={}, count={}", restart ? "Restart" : "Start",
+                taskName, result.getCode(), StringUtils.chomp(result.getMsg()));
+        }
+
         if (result.getCode() == 0) {
             int count = Integer.parseInt(StringUtils.getDigits(result.getMsg()));
             switch (count) {
             case 0:
-                commander.startTask(taskName, mem);
+                commandPipeline.startTask(taskName, mem);
                 log.warn("task {} is started.", taskName);
                 break;
             case 1:
@@ -320,68 +327,58 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
                 break;
             default:
                 log.warn("task {} is repeat started, will force stop!", taskName);
-                commander.stopTask(taskName);
+                commandPipeline.stopTask(taskName);
                 break;
             }
         }
     }
 
-    private void restartTask(BinlogTaskConfig config, String taskName, int mem) throws Exception {
-        //检查最近启动时间，小于2分钟，则不重启
-        CommandResult result = commander.execCommand(
-            new String[] {
-                "bash", "-c",
-                "ps -eo etimes,cmd | grep taskName=" + taskName + " | grep -v grep | awk '{print $1}'"}, 1000);
-        if (result.getCode() == 0) {
-            String digits = StringUtils.getDigits(result.getMsg());
-            if (StringUtils.isNotBlank(digits)) {
-                int seconds = Integer.parseInt(digits);
-                if (seconds < 120) {
-                    log.info("start in 120 seconds, will not restart this time!");
-                    return;
-                }
-            }
-        } else {
-            log.warn("{} check start time fail, code={}, msg={}", taskName,
-                result.getCode(), StringUtils.chomp(result.getMsg()));
-        }
-
-        commander.stopTask(taskName);
+    void restartTask(BinlogTaskConfig config, String taskName, int mem) throws Exception {
+        log.info("prepare to restart task {}.", taskName);
+        stopTask(taskName);
         cleanInfo(config);
+        tryStartTask(taskName, mem, true);
         log.info("task {} is restarted.", taskName);
-        startTask(taskName, mem, true);
     }
 
-    private void cleanInfo(BinlogTaskConfig config) {
+    void stopTask(String taskName) throws Exception {
+        log.info("prepare to stop task {}.", taskName);
+        commandPipeline.stopTask(taskName);
+        log.info("task {} is stopped.", taskName);
+    }
+
+    void cleanInfo(BinlogTaskConfig config) {
+        log.info("prepare to clean task info {}.", config.getTaskName());
         if (TaskType.isTask(config.getRole())) {
             deleteTaskInfo(config.getTaskName());
         } else {
             deleteDumperInfo(config.getTaskName());
         }
-        log.info("Task(Dumper) info {} is cleaned.", config.getTaskName());
+        log.info("task info {} is cleaned.", config.getTaskName());
     }
 
-    private void deleteDumperInfo(String name) {
+    void deleteDumperInfo(String name) {
         dumperInfoMapper.delete(s ->
             s.where(DumperInfoDynamicSqlSupport.clusterId,
-                    SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
+                    SqlBuilder.isEqualTo(getString(ConfigKeys.CLUSTER_ID)))
                 .and(DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
     }
 
-    private void deleteTaskInfo(String name) {
+    void deleteTaskInfo(String name) {
         taskInfoMapper.delete(s ->
             s.where(BinlogTaskInfoDynamicSqlSupport.clusterId,
-                    SqlBuilder.isEqualTo(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID)))
+                    SqlBuilder.isEqualTo(getString(ConfigKeys.CLUSTER_ID)))
                 .and(BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isEqualTo(name)));
     }
 
-    private void tryCleanResource(Set<String> localTasks) {
-        tryCleanRocksDb(DynamicApplicationConfig.getString(STORAGE_PERSIST_BASE_PATH), localTasks);
-        tryCleanRocksDb(DynamicApplicationConfig.getString(BINLOGX_ROCKSDB_BASE_PATH), localTasks);
+    void tryCleanResource(Set<String> localTasks) {
+        tryCleanRocksDb(getString(STORAGE_PERSIST_BASE_PATH), localTasks);
+        tryCleanRocksDb(getString(BINLOGX_ROCKSDB_BASE_PATH), localTasks);
+        tryCleanRocksDb2();
         tryCleanRdsBinlog(localTasks);
     }
 
-    private void tryCleanRocksDb(String basePath, Set<String> localTasks) {
+    void tryCleanRocksDb(String basePath, Set<String> localTasks) {
         try {
             File baseDir = new File(basePath);
             if (baseDir.exists()) {
@@ -401,9 +398,32 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private void tryCleanRdsBinlog(Set<String> localTasks) {
+    void tryCleanRocksDb2() {
+        // 历史上出现过一个bug，StorageFactory中拼接persistPath的时候，使用了File.pathSeparator，实际上应该使用File.separator，此处做一下兼容性处理
+        // String persistPath = getString(STORAGE_PERSIST_BASE_PATH) + File.pathSeparator + getString(ConfigKeys.TASK_NAME) + File.pathSeparator + identifier;
+        String path = getString(STORAGE_PERSIST_BASE_PATH);
+        String parentPath = StringUtils.substringBeforeLast(path, File.separator);
+        String suffix = StringUtils.substringAfterLast(path, File.separator);
+
+        File parentDir = new File(parentPath);
+        if (parentDir.exists()) {
+            File[] files = parentDir.listFiles((dir, name) -> name.startsWith(suffix + File.pathSeparator));
+            if (files != null) {
+                Arrays.stream(files).forEach(f -> {
+                    try {
+                        FileUtils.forceDelete(f);
+                        log.info("rocks db directory {} is cleaned.", f.getAbsolutePath());
+                    } catch (IOException e) {
+                        throw new PolardbxException("delete failed.", e);
+                    }
+                });
+            }
+        }
+    }
+
+    void tryCleanRdsBinlog(Set<String> localTasks) {
         try {
-            String basePath = DynamicApplicationConfig.getString(TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR);
+            String basePath = getString(TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR);
             File baseDir = new File(basePath);
             if (baseDir.exists()) {
                 File[] files = baseDir
@@ -423,8 +443,8 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private Set<String> stopTaskWhitList() {
-        String whitListStr = DynamicApplicationConfig.getString(DAEMON_WATCH_WORK_PROCESS_BLACKLIST);
+    Set<String> stopTaskWhitList() {
+        String whitListStr = getString(DAEMON_WATCH_WORK_PROCESS_BLACKLIST);
         if (StringUtils.isNotBlank(whitListStr)) {
             return Sets.newHashSet(StringUtils.split(whitListStr, ","));
         }
@@ -436,12 +456,14 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
         Date heartbeatTime;
         Date startTime;
         long version;
+        String containerId;
 
-        public CommonInfo(String name, Date heartbeatTime, Date startTime, Long version) {
+        public CommonInfo(String name, Date heartbeatTime, Date startTime, Long version, String containerId) {
             this.name = name;
             this.heartbeatTime = heartbeatTime;
             this.startTime = startTime;
             this.version = version;
+            this.containerId = containerId;
         }
 
         @Override
@@ -450,6 +472,8 @@ public class TaskAliveWatcher extends AbstractBinlogTimerTask {
                 "name='" + name + '\'' +
                 ", heartbeatTime=" + heartbeatTime +
                 ", startTime=" + startTime +
+                ", version=" + version +
+                ", containerId='" + containerId + '\'' +
                 '}';
         }
     }

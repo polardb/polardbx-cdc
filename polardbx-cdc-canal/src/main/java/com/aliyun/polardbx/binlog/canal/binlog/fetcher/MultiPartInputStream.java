@@ -8,7 +8,6 @@ package com.aliyun.polardbx.binlog.canal.binlog.fetcher;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.canal.SearchMode;
 import com.aliyun.polardbx.binlog.canal.binlog.BinlogDumpContext;
 import com.aliyun.polardbx.binlog.canal.binlog.cache.Cache;
 import com.aliyun.polardbx.binlog.canal.binlog.cache.CacheProgressListener;
@@ -18,10 +17,16 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.CollectionUtils;
 
+import javax.net.ssl.SSLHandshakeException;
+import java.io.EOFException;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.ProtocolException;
 import java.net.URL;
+import java.security.cert.CertificateException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -31,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
-public class MultiPartInputStream {
+public class MultiPartInputStream extends InputStream {
 
     public static final String HEADER_RANGES_SUPPORT = "Accept-Ranges";
     public static final String SUPPORT_RANGE_FLAG = "bytes";
@@ -47,16 +52,20 @@ public class MultiPartInputStream {
     private final String storageInstance;
     private final String fileName;
     private final AtomicInteger sequencer = new AtomicInteger(0);
-    ;
     private final String uuid;
 
     private final ExecutorService executorService;
 
     private final List<Future> futureList = new ArrayList<>();
+    /**
+     * 单字节缓存
+     * 用于单字节读取
+     * 目前外部不会使用这个
+     */
+    private final byte[] singleByteCache = new byte[1];
 
     public MultiPartInputStream(String url, long fileSize, String storageInstanceId, String fileName,
-                                ExecutorService executorService)
-        throws IOException {
+                                ExecutorService executorService) throws IOException {
         this.url = url;
         this.fileSize = fileSize;
         this.storageInstance = storageInstanceId;
@@ -74,7 +83,12 @@ public class MultiPartInputStream {
     private void initMultiPart() throws IOException {
         this.partCount = getPartCount();
         if (partCount == 1) {
+            log.warn("not support multi part to download");
             return;
+        }
+        if (partSize > Integer.MAX_VALUE) {
+            log.error("part size is {}", partSize);
+            throw new IllegalArgumentException("part size should not be greater than Integer.MAX_VALUE");
         }
         int seq = 0;
         for (; seq < partCount - 1; seq++) {
@@ -84,14 +98,132 @@ public class MultiPartInputStream {
     }
 
     private HttpURLConnection connect() throws IOException {
+        return connectWithRetry(null);
+    }
+
+    private HttpURLConnection createConnection(String range) throws IOException {
+        // noinspection StartSSRFNetHookCheckingInspection
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-        connection.setConnectTimeout((int) TimeUnit.SECONDS.toMillis(20));
-        connection.setReadTimeout((int) TimeUnit.MINUTES.toMillis(5));
+        connection.setConnectTimeout(
+            DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CONNECT_TIMEOUT_MS));
+        connection.setReadTimeout(
+            DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_READ_TIMEOUT_MS));
         connection.setRequestProperty("User-Agent", "Mozilla/4.76");
         connection.setDoInput(true);
         connection.setDoOutput(false);
-        connection.connect();
+        if (range != null) {
+            connection.setRequestProperty("Range", range);
+        }
         return connection;
+    }
+
+    /**
+     * 建立连接，对 connect timed out 等瞬时网络异常做有限次数退避重试，重试耗尽后抛出最后一次建连的异常
+     */
+    private HttpURLConnection connectWithRetry(String range) throws IOException {
+        int maxRetryCount = DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CONNECT_RETRY_COUNT);
+        long backoffBaseMs =
+            DynamicApplicationConfig.getLong(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CONNECT_RETRY_BACKOFF_BASE_MS);
+        long backoffMaxMs =
+            DynamicApplicationConfig.getLong(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CONNECT_RETRY_BACKOFF_MAX_MS);
+        for (int attempt = 0; ; attempt++) {
+            HttpURLConnection connection = null;
+            try {
+                connection = createConnection(range);
+                connection.connect();
+                // connect() 仅完成 TCP 握手，发送请求与读取响应头实际发生在首次访问响应内容时；
+                // 而 getHeaderField 会吞掉这一阶段的 IOException 并返回 null，使得连接被重置这类瞬时故障
+                // 表现为“响应头缺失”，既不会在此处被重试，也会让上层拿到不带 cause 的
+                // NumberFormatException 而无法识别为网络异常。因此用 getResponseCode() 在重试范围内
+                // 强制完成响应头读取，让瞬时故障以 IOException 暴露出来
+                int responseCode = connection.getResponseCode();
+                // 5xx 属于服务端瞬时故障（如 OSS 503 SlowDown 限流），必须在此主动转成 IOException 才能走退避重试：
+                // getResponseCode() 本身不会因错误状态码抛异常，放过它等于把 5xx 当成建连成功，状态码信息随即丢失。
+                // 4xx 属于确定性错误（签名过期、对象不存在），不在此处转换，由后续 getInputStream 直接失败，避免无效重试
+                if (responseCode >= HttpURLConnection.HTTP_INTERNAL_ERROR) {
+                    throw new IOException("server returned http response code : " + responseCode + " for file : "
+                        + fileName + " uuid : " + uuid);
+                }
+                return connection;
+            } catch (IOException e) {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+                if (!isRetryableIOException(e) || attempt >= maxRetryCount) {
+                    throw e;
+                }
+                // attempt 过大时左移会溢出，超过可左移位数直接取退避上限
+                long backoffMs = attempt >= Long.SIZE - 2 ? backoffMaxMs
+                    : Math.min(backoffBaseMs << attempt, backoffMaxMs);
+                log.warn("connect failed for file : {} uuid : {} , attempt : {} , will retry in {} ms", fileName,
+                    uuid, attempt + 1, backoffMs, e);
+                try {
+                    TimeUnit.MILLISECONDS.sleep(backoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    /**
+     * 建连期的 IOException 默认当成瞬时网络异常重试，仅排除重试不会改变结果的确定性错误：
+     * ProtocolException 对应 getResponseCode 阶段的重定向过多，MalformedURLException 对应 url 本身不合法。
+     * FileNotFoundException 对应 404，保留作为防御：当前路径下 getResponseCode 已拿到状态行时不会再抛它，
+     * 404 实际在后续 getInputStream 阶段暴露，同样不会被重试。
+     * 注意不能反转为正向白名单：列举不全时会退化回“漏重试”，而那正是引入本重试逻辑要修的问题
+     */
+    private static boolean isRetryableIOException(IOException e) {
+        if (e instanceof FileNotFoundException || e instanceof ProtocolException
+            || e instanceof MalformedURLException) {
+            return false;
+        }
+        // SSL 握手失败必须区分成因，不能整类归为不可重试：证书不可信、主机名不匹配等属确定性错误，
+        // 但 "Remote host terminated the handshake"、"Received fatal alert: internal_error" 这类
+        // 握手期连接中断与服务端瞬时拒绝仍是可恢复故障，一并排除会把网络抖动升级成任务重启
+        if (e instanceof SSLHandshakeException) {
+            return !hasCertificateCause(e);
+        }
+        return true;
+    }
+
+    /**
+     * 回溯 cause 链判断握手失败是否源于证书校验（典型链为 SSLHandshakeException -> ValidatorException）
+     */
+    private static boolean hasCertificateCause(Throwable e) {
+        // 限制回溯深度，避免 cause 链自引用或成环时死循环；
+        // 配置值小于 1 时兜底为 1，保证至少检查异常自身，避免证书判定被误配置旁路后退化成无意义重试
+        int maxDepth =
+            Math.max(1, DynamicApplicationConfig.getInt(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_CAUSE_TRACE_MAX_DEPTH));
+        Throwable cause = e;
+        for (int depth = 0; cause != null && depth < maxDepth; depth++) {
+            if (cause instanceof CertificateException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * 读取并解析 Content-Length。
+     * 响应头缺失时抛 EOFException（响应未完整到达，属于上层可识别的可重试网络异常），
+     * 取值非法时抛 IOException（服务端协议异常，重试无意义）；
+     * 两者都避开了 Long.parseLong(null) 抛出的、cause 链为空的 NumberFormatException
+     */
+    private long parseContentLength(HttpURLConnection connection) throws IOException {
+        String value = connection.getHeaderField(HEADER_CONTENT_LENGTH);
+        if (value == null) {
+            throw new EOFException("missing response header " + HEADER_CONTENT_LENGTH + " for file : " + fileName
+                + " uuid : " + uuid);
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            throw new IOException("illegal response header " + HEADER_CONTENT_LENGTH + " : " + value + " for file : "
+                + fileName + " uuid : " + uuid, e);
+        }
     }
 
     private int getPartCount() throws IOException {
@@ -103,7 +235,7 @@ public class MultiPartInputStream {
                 //   不支持分段下载
                 return 1;
             }
-            this.fileSize = Long.parseLong(connection.getHeaderField(HEADER_CONTENT_LENGTH));
+            this.fileSize = parseContentLength(connection);
             return (int) ((fileSize / partSize) + (fileSize % partSize > 0 ? 1 : 0));
         } finally {
             if (connection != null) {
@@ -135,8 +267,16 @@ public class MultiPartInputStream {
         }
     }
 
-    public int read(byte b[], int off, int len)
-        throws IOException {
+    @Override
+    public int read() throws IOException {
+        // 外部目前不会调用
+        if (this.read(singleByteCache, 0, 1) == -1) {
+            return -1;
+        }
+        return singleByteCache[0] & 0xFF;
+    }
+
+    public int read(byte b[], int off, int len) throws IOException {
         if (this.partCount == 1) {
             return fin.read(b, off, len);
         }
@@ -157,23 +297,34 @@ public class MultiPartInputStream {
         return readLen;
     }
 
-    public void skip(long n) throws IOException {
+    public long skip(long n) throws IOException {
         if (this.partCount == 1) {
-            fin.skip(n);
+            return fin.skip(n);
         } else {
-            int skipPartNum = (int) (n / partSize);
-            for (int i = pos; i < skipPartNum; i++) {
-                this.partStreamList.get(i).close();
+            long skipCounter = 0;
+            for (; n > 0 && pos < this.partStreamList.size(); pos++) {
+                PartStream pis = this.partStreamList.get(pos);
+                long partSkipSize = pis.skip(n);
+                skipCounter += partSkipSize;
+                n -= partSkipSize;
+                if (!pis.hasRemain()) {
+                    pis.close();
+                } else {
+                    log.info("skip end part stream seq : {} , uuid : {} , read count : {}", pis.seq, uuid,
+                        pis.readCount);
+                    break;
+                }
             }
-            this.pos += skipPartNum;
+            if (this.pos >= this.partStreamList.size()) {
+                return skipCounter;
+            }
             int seq = sequencer.get();
             while (seq < pos && !sequencer.compareAndSet(seq, pos)) {
                 seq = sequencer.get();
             }
             log.warn("reset {} {} sequence from {} to {} , current sequencer is {} id {}", storageInstance, fileName,
                 seq, pos, sequencer.get(), uuid);
-            PartStream ps = this.partStreamList.get(pos);
-            ps.skip(n - ps.begin);
+            return skipCounter;
         }
     }
 
@@ -230,6 +381,14 @@ public class MultiPartInputStream {
         private Throwable t;
         private volatile boolean running = true;
         private volatile byte state = STATE_INIT;
+        /**
+         * 读取的字节数
+         * readCount 变量在 read 和 skip 中会修改， hasRemain方法读取
+         * hasRemain方法是私有方法，只会在skip中调用
+         * skip 方法只有在URLFetcher的open()方法内部打开链接后调用
+         * read 方法只会fetch方法时调用
+         * binlog消费总是先URLFetcher.open->stream.skip->URLFetcher.fetch->stream.read，所以不会有并发问题
+         */
         private int readCount = 0;
         private InputStream in;
 
@@ -242,7 +401,6 @@ public class MultiPartInputStream {
             this.seq = seq;
             long cacheSize = end - begin + 1;
             this.cache = new MemoryCache(storageInstance, url, seq, cacheSize, sequencer);
-            ;
         }
 
         public void setUuid(String uuid) {
@@ -277,12 +435,24 @@ public class MultiPartInputStream {
             return len;
         }
 
-        public void skip(long bytes) {
+        public long skip(long bytes) {
             if (!running) {
-                return;
+                return 0;
             }
-            readCount += bytes;
-            cache.skip((int) bytes);
+            long remain = end - begin + 1 - readCount;
+            long skip = 0;
+            if (remain > bytes) {
+                skip = bytes;
+            } else {
+                skip = remain;
+            }
+            readCount += (int) skip;
+            cache.skip((int) skip);
+            return skip;
+        }
+
+        private boolean hasRemain() {
+            return end - begin + 1 - readCount > 0;
         }
 
         public void close() throws IOException {
@@ -327,12 +497,6 @@ public class MultiPartInputStream {
             }
             try {
                 this.state = STATE_FETCH;
-                connection = (HttpURLConnection) new URL(url).openConnection();
-                connection.setConnectTimeout((int) TimeUnit.SECONDS.toMillis(20));
-                connection.setReadTimeout((int) TimeUnit.MINUTES.toMillis(5));
-                connection.setRequestProperty("User-Agent", "Mozilla/4.76");
-                connection.setDoInput(true);
-                connection.setDoOutput(false);
                 StringBuilder rangeBuilder = new StringBuilder();
                 rangeBuilder.append("bytes=").append(begin).append("-");
                 long end = this.end;
@@ -341,9 +505,8 @@ public class MultiPartInputStream {
                 } else {
                     end = fileSize - 1;
                 }
-                connection.setRequestProperty("Range", rangeBuilder.toString());
-                connection.connect();
-                Long contentLength = Long.parseLong(connection.getHeaderField("Content-Length"));
+                connection = connectWithRetry(rangeBuilder.toString());
+                long contentLength = parseContentLength(connection);
                 if (contentLength != end - begin + 1) {
                     String errorMsg =
                         "content length " + contentLength + "  is not equal request range " + (end - begin + 1) + "["

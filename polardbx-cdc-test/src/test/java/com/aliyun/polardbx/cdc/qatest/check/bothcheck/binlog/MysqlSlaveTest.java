@@ -81,9 +81,41 @@ public class MysqlSlaveTest extends RplBaseTestCase {
 
                 log.info("show slave status result for {} is \r\n {}", slaveType,
                     JSONObject.toJSONString(result, true));
-                Assert.assertTrue(JSONObject.toJSONString(result, true), StringUtils.isBlank(e1));
-                Assert.assertTrue(JSONObject.toJSONString(result, true), StringUtils.isBlank(e2));
+
+                boolean hasError = StringUtils.isNotBlank(e1) || StringUtils.isNotBlank(e2);
+                if (hasError) {
+                    String workerStatus = queryWorkerStatus(connection);
+                    log.error("slave error detected for {}, worker status: \r\n {}", slaveType, workerStatus);
+                    String assertMsg = JSONObject.toJSONString(result, true)
+                        + "\n\nreplication_applier_status_by_worker:\n" + workerStatus;
+                    Assert.assertTrue(assertMsg, StringUtils.isBlank(e1));
+                    Assert.assertTrue(assertMsg, StringUtils.isBlank(e2));
+                }
             }
+        }
+    }
+
+    /**
+     * 查询 performance_schema.replication_applier_status_by_worker 获取详细的 worker 级别报错信息
+     */
+    @SneakyThrows
+    private String queryWorkerStatus(Connection connection) {
+        try (Statement stmt = connection.createStatement()) {
+            ResultSet rs = stmt.executeQuery(
+                "select * from performance_schema.replication_applier_status_by_worker");
+            List<String> columns = getColumnNameList(rs);
+            List<List<Pair<String, String>>> rows = new ArrayList<>();
+            while (rs.next()) {
+                List<Pair<String, String>> row = new ArrayList<>();
+                for (String c : columns) {
+                    row.add(Pair.of(c, rs.getString(c)));
+                }
+                rows.add(row);
+            }
+            return JSONObject.toJSONString(rows, true);
+        } catch (Exception e) {
+            log.warn("failed to query replication_applier_status_by_worker", e);
+            return "query failed: " + e.getMessage();
         }
     }
 }

@@ -6,6 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.format;
 
+import com.aliyun.polardbx.binlog.enums.TransactionPayloadFiled;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.BinlogChecksumAlgConsts;
 import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
@@ -18,6 +19,7 @@ import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.FORMAT_DESC
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.IGNORABLE_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.INCIDENT_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.INTVAR_HEADER_LEN;
+import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.MYSQL_EVENTS_END;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.QUERY_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.RAND_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.ROTATE_HEADER_LEN;
@@ -26,6 +28,7 @@ import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.ROWS_HEADER
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.STOP_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.TABLE_MAP_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.TRANSACTION_CONTEXT_HEADER_LEN;
+import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.TRANSACTION_PAYLOAD_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.USER_VAR_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.VIEW_CHANGE_HEADER_LEN;
 import static com.aliyun.polardbx.binlog.format.EnumPostHeaderLength.XA_PREPARE_HEADER_LEN;
@@ -75,7 +78,10 @@ public class FormatDescriptionEvent extends BinlogBuilder {
         (byte) IGNORABLE_HEADER_LEN.getLength(),
         (byte) TRANSACTION_CONTEXT_HEADER_LEN.getLength(),
         (byte) VIEW_CHANGE_HEADER_LEN.getLength(),
-        (byte) XA_PREPARE_HEADER_LEN.getLength()};
+        (byte) XA_PREPARE_HEADER_LEN.getLength(),
+        (byte) MYSQL_EVENTS_END.getLength(),
+        /*COMPRESSION_EVENT*/
+        (byte) TRANSACTION_PAYLOAD_HEADER_LEN.getLength()};
     /**
      * 用于指示二进制日志文件是否已正确关闭。此标志仅对有意义 FORMAT_DESCRIPTION_EVENT。将事件写入日志文件时设置。以后关闭日志文件时，将清除该标志。（这是MySQL修改二进制日志文件中已写入部分的唯一情况）。
      */
@@ -89,7 +95,7 @@ public class FormatDescriptionEvent extends BinlogBuilder {
     /**
      * 0 is off checkAlg
      * > 5.6.1 会有校验
-     * 我们默认产生5.7 binlog，所以磁开关一定会有
+     * 我们默认产生5.7 binlog，所以此开关一定会有
      */
     private int checkSumAlg = BinlogChecksumAlgConsts.BINLOG_CHECKSUM_ALG_CRC32;
 

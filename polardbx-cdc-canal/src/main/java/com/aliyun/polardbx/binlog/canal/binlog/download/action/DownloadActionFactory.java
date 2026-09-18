@@ -11,13 +11,13 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 
 public class DownloadActionFactory {
     public static IDownloadAction create() {
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS)){
-            if (DynamicApplicationConfig.getBoolean(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH)){
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.DOWNLOAD_BINLOG_USE_DBS)) {
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH)) {
                 return new GarethAction();
-            }else {
+            } else {
                 return new DbsTaskAction();
             }
-        }else {
+        } else {
             return new HttpAction();
         }
     }

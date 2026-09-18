@@ -19,8 +19,8 @@ public enum EnumPostHeaderLength {
         + 4)), // this is FROZEN (the Rotate post-header is frozen)
     ROTATE_HEADER_LEN(8), INTVAR_HEADER_LEN(0), APPEND_BLOCK_HEADER_LEN(4), DELETE_FILE_HEADER_LEN(4),
     RAND_HEADER_LEN(0), USER_VAR_HEADER_LEN(
-        0), FORMAT_DESCRIPTION_HEADER_LEN((2 + 50 + 4) + 1 + BinlogEventType.values().length
-        - 1), XID_HEADER_LEN(0), BEGIN_LOAD_QUERY_HEADER_LEN(4), ROWS_HEADER_LEN_V1(
+        0), FORMAT_DESCRIPTION_HEADER_LEN((2 + 50 + 4) + 1 + BinlogEventType.values().length - 1), XID_HEADER_LEN(0),
+    BEGIN_LOAD_QUERY_HEADER_LEN(4), ROWS_HEADER_LEN_V1(
         8), TABLE_MAP_HEADER_LEN(8), EXECUTE_LOAD_QUERY_EXTRA_HEADER_LEN((4 + 4 + 4
         + 1)), EXECUTE_LOAD_QUERY_HEADER_LEN(
         ((4 + 4 + 1 + 2) + 2) + (4 + 4 + 4 + 1)), INCIDENT_HEADER_LEN(2), HEARTBEAT_HEADER_LEN(0),
@@ -35,7 +35,9 @@ public enum EnumPostHeaderLength {
 
     XA_PREPARE_HEADER_LEN(0),
 
-    TRANSACTION_PAYLOAD_HEADER_LEN(0);
+    MYSQL_EVENTS_END(10),
+
+    TRANSACTION_PAYLOAD_HEADER_LEN(40);
 
     private int length;
 

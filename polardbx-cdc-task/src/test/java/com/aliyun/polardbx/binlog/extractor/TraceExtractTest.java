@@ -8,9 +8,13 @@ package com.aliyun.polardbx.binlog.extractor;
 
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
 import com.aliyun.polardbx.binlog.extractor.binlog.BinlogGenerator;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.Arrays;
+
+@Slf4j
 public class TraceExtractTest {
 
     @Test
@@ -18,7 +22,7 @@ public class TraceExtractTest {
         BinlogGenerator generator = new BinlogGenerator("test_db",
             "test_tb",
             "create table tt(id bigint(20) default 1)");
-        Assert.assertArrayEquals(new String[] {"00000000020000000002", "1024"},
+        Assert.assertArrayEquals(new String[] {"00000000020000000002", "1024", null, "2"},
             LogEventUtil.buildTrace(generator.generateRowQueryLogEvent()));
     }
 
@@ -27,11 +31,15 @@ public class TraceExtractTest {
         BinlogGenerator generator = new BinlogGenerator("test_db",
             "test_tb",
             "create table tt(id bigint(20) default 1)");
-        Assert.assertArrayEquals(new String[] {"00000000000000000000", "1390188355"}, LogEventUtil.buildTrace(
-            generator.generateRowQueryLogEvent("/*DRDS /11.196.59.141/1322a3c35bc01000/0/1390188355/ */")));
 
-        Assert.assertArrayEquals(new String[] {"00000000030000000001", null}, LogEventUtil.buildTrace(
-            generator.generateRowQueryLogEvent("/*DRDS /11.196.49.49/1322a3c37f401001-3/1// */")));
+        String trace = "/*DRDS /127.0.0.1/19df98715b401000/0// */";
+
+        Assert.assertArrayEquals(new String[] {"00000000000000000000", "1390188355", null, "0"},
+            LogEventUtil.buildTrace(
+                generator.generateRowQueryLogEvent("/*DRDS /192.0.2.1/1322a3c35bc01000/0/1390188355/ */")));
+
+        Assert.assertArrayEquals(new String[] {"00000000030000000001", null, null, "3"}, LogEventUtil.buildTrace(
+            generator.generateRowQueryLogEvent("/*DRDS /192.0.2.1/1322a3c37f401001-3/1// */")));
     }
 
     @Test

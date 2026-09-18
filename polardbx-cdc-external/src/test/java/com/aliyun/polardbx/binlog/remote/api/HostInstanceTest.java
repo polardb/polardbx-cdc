@@ -9,6 +9,7 @@ package com.aliyun.polardbx.binlog.remote.api;
 import com.aliyun.polardbx.binlog.api.HostInstance;
 import com.aliyun.polardbx.binlog.api.rds.BinlogFile;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -28,7 +29,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-public class HostInstanceTest {
+public class HostInstanceTest extends BaseTest {
     @Test
     public void duplicateAddBinlog() throws ParseException {
         HostInstance instance = new HostInstance();
@@ -106,7 +107,7 @@ public class HostInstanceTest {
         assertEquals(0x78563412L, result);
     }
 
-    private BinlogFile newBinlogFile(String fileName, long serverId, long instanceId){
+    private BinlogFile newBinlogFile(String fileName, long serverId, long instanceId) {
         BinlogFile binlogFile = new BinlogFile();
         binlogFile.setLogname(fileName);
         binlogFile.setServerId(serverId);

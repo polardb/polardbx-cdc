@@ -6,9 +6,10 @@
  */
 package com.aliyun.polardbx.binlog.scheduler.model;
 
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_ADAPTIVE_USE_RATIO_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_USE_RATIO;
@@ -20,6 +21,8 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getDouble;
  */
 @Builder
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class Resource {
     //cpu核心个数，在数据链路中，非cpu密集，故这里应该是虚拟cpu，物理cpu*4，即最多分配4*cpu个任务
     private int cpu;

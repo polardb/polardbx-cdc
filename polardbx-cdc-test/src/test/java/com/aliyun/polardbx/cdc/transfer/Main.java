@@ -72,7 +72,7 @@ public class Main {
         boolean usetso = Boolean.parseBoolean(getValue(paramHashMap, "useTSO", "true"));
 
         System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", poolAccount + "");
-        Class.forName("com.mysql.jdbc.Driver");
+        Class.forName("com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver");
 
         logger.info("use TSO " + usetso);
         String url = String.format(

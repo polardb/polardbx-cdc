@@ -23,6 +23,7 @@ public class LogicTableMeta {
     private List<FieldMetaExt> logicFields = new ArrayList<>();
     private List<FieldMetaExt> pkList = new ArrayList<>();
     private boolean hasHiddenPk = false;
+    private boolean externalizedFields;
 
     public void addPk(FieldMetaExt fieldMetaExt) {
         pkList.add(fieldMetaExt);
@@ -86,10 +87,22 @@ public class LogicTableMeta {
 
     public void setLogicFields(List<FieldMetaExt> logicFields) {
         this.logicFields = logicFields;
+        this.externalizedFields = false;
+        for (FieldMetaExt field : logicFields) {
+            if (field.isExternalized()) {
+                this.externalizedFields = true;
+                break;
+            }
+        }
     }
 
     public void add(FieldMetaExt metaExt) {
         this.logicFields.add(metaExt);
+        this.externalizedFields |= metaExt.isExternalized();
+    }
+
+    public boolean hasExternalizedFields() {
+        return externalizedFields;
     }
 
     @Override
@@ -110,10 +123,12 @@ public class LogicTableMeta {
         private final int phyIndex;
         private FieldMeta phyFieldMeta;
         private boolean typeMatch = true;
+        private String externalMappingError;
 
         public FieldMetaExt(FieldMeta fieldMeta, int logicIndex, int phyIndex) {
             super(fieldMeta.getColumnName(), fieldMeta.getColumnType(), fieldMeta.isNullable(), fieldMeta.isKey(),
                 fieldMeta.getDefaultValue(), fieldMeta.isUnique(), fieldMeta.getCharset());
+            setExternalized(fieldMeta.isExternalized());
             this.logicIndex = logicIndex;
             this.phyIndex = phyIndex;
         }
@@ -134,6 +149,18 @@ public class LogicTableMeta {
             return typeMatch;
         }
 
+        public void markExternalMappingUnavailable(String externalMappingError) {
+            this.externalMappingError = externalMappingError;
+        }
+
+        public boolean isExternalMappingUnavailable() {
+            return externalMappingError != null;
+        }
+
+        public String getExternalMappingError() {
+            return externalMappingError;
+        }
+
         public int getLogicIndex() {
             return logicIndex;
         }
@@ -148,6 +175,8 @@ public class LogicTableMeta {
                 "logicIndex=" + logicIndex +
                 ", phyIndex=" + phyIndex +
                 ", typeMatch=" + typeMatch +
+                ", externalized=" + isExternalized() +
+                ", externalMappingError='" + externalMappingError + '\'' +
                 '}';
         }
     }

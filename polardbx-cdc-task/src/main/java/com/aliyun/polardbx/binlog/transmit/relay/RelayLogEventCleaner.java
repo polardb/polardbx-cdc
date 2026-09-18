@@ -9,11 +9,9 @@ package com.aliyun.polardbx.binlog.transmit.relay;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
-import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.XStreamMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
-import com.aliyun.polardbx.binlog.domain.po.XStream;
-import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -24,14 +22,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_CLEAN_RELAY_DATA_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_CLEAN_RELAY_DATA_INTERVAL_MINUTE;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_COUNT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_RELAY_CLEANUP_AGGRESSIVE_BUFFER_MINUTES;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_RELAY_CLEANUP_CHECKPOINT_MAX_LAG_MINUTES;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_RELAY_CLEANUP_SPACE_SLOWDOWN_RATIO;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_WRITE_SLOWDOWN_THRESHOLD;
+import static com.aliyun.polardbx.binlog.transmit.relay.RelayStreamUtils.getStreamListAndCheck;
 import static io.grpc.internal.GrpcUtil.getThreadFactory;
-import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
 /**
  * created by ziyang.lb
@@ -82,35 +81,102 @@ public class RelayLogEventCleaner {
         }
     }
 
-    private void doClean() {
-        String streamGroupName = DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME);
-        int streamCount = DynamicApplicationConfig.getInt(BINLOGX_STREAM_COUNT);
+    void doClean() {
 
         //check
-        List<String> streamsList = X_STREAM_MAPPER.select(
-            s -> s.where(XStreamDynamicSqlSupport.groupName, isEqualTo(streamGroupName))
-                .orderBy(XStreamDynamicSqlSupport.streamName)).stream().map(
-            XStream::getStreamName).collect(Collectors.toList());
-        if (streamsList.size() != streamCount) {
-            throw new PolardbxException("find mismatched stream count, configuration count is " + streamCount
-                + ", count in binlog_x_stream table is " + streamsList.size());
-        }
+        List<String> streamsList = getStreamListAndCheck();
 
-        // 以binlog_oss_record表作为checkpoint的依据
-        // 1.如果没有启用备份策略，即binlog.backup.type配置的值为NULL，此时集群不具备HA能力，只要一个全局binlog文件写完，
-        //   就可以立即对hash log event执行clean操作，判断写完的依据是binlog_oss_record表的last_tso不为空且upload_status=3
-        // 2.如果启用了备份策略，即binlog.backup.type配置的值不为NULL，此时集群具备HA能力，需要等待binlog已经成功上传到备份存储之后
-        //   才可以对hash log event执行clean操作，以保证当Stream在节点间发生漂移导致全局binlog位点回退到最后一个备份成功的binlog文件时，
-        //   hash log event不会被误删除，换句话说就是不能认为binlog文件写完就可以作为checkpoint了，因为在HA场景可能会发生回退。判断备份
-        //   成功的依据是last_tso不为空且upload_status=2
+        // 简化的relay log清理算法，三条规则按优先级依次判断：
+        // Rule 1: 优先使用getCheckpointTsoFromBackup作为cleanupTso（最安全，有upload_status校验）
+        // Rule 2: 当checkpoint距离maxReadTso超过指定时间阈值时，清理阈值时间之前的数据
+        // Rule 3: 当空间压力达到阈值时，使用aggressive buffer进行清理
+        // 安全兜底：RelayDataReaderBase.checkValid() 在DumperX请求TSO < relay log min(TSO)时触发JVM halt
         for (String streamName : streamsList) {
             int streamSeq = Integer.parseInt(StringUtils.substringAfterLast(streamName, "_"));
-            BinlogOssRecord record = logEventTransmitter.getCheckpointTsoFromBackup(streamName);
-            if (record != null) {
-                String lastTso = record.getLastTso();
-                StoreEngine storeEngine = storeEngines.get(streamSeq);
-                storeEngine.clean(lastTso);
-                log.info("stream : " + streamName + ", relay log event is cleaned which tso is less than " + lastTso);
+            StoreEngine storeEngine = storeEngines.get(streamSeq);
+
+            // Step 0: maxReadTso为空则不触发清理
+            String maxReadTso = storeEngine.getMaxReadTso();
+            if (StringUtils.isBlank(maxReadTso)) {
+                log.info("stream : {} , maxReadTso is blank, skip cleaning.", streamName);
+                continue;
+            }
+
+            // Step 1: 优先使用getCheckpointTsoFromBackup（最安全策略）
+            // 该方法查询upload_status=SUCCESS/IGNORE的记录，确保数据已完整上传到备份存储
+            BinlogOssRecord checkpointRecord = logEventTransmitter.getCheckpointTsoFromBackup(streamName);
+            String cleanupTso;
+            String cleanupReason;
+
+            if (checkpointRecord != null && StringUtils.isNotBlank(checkpointRecord.getLastTso())
+                && checkpointRecord.getLastTso().compareTo(maxReadTso) < 0) {
+                // Step 2: 判断checkpoint是否距离maxReadTso过远
+                long checkpointLagMs = CommonUtils.getTsoPhysicalTime(maxReadTso, TimeUnit.MILLISECONDS)
+                    - CommonUtils.getTsoPhysicalTime(checkpointRecord.getLastTso(), TimeUnit.MILLISECONDS);
+                long maxLagMinutes = DynamicApplicationConfig.getInt(BINLOGX_RELAY_CLEANUP_CHECKPOINT_MAX_LAG_MINUTES);
+                long checkpointLagMinutes = checkpointLagMs / (60 * 1000L);
+
+                if (checkpointLagMinutes >= maxLagMinutes) {
+                    // Rule 2: checkpoint距离maxReadTso超过阈值，清理阈值时间之前的数据
+                    cleanupTso = RelayLogEventTransmitter.computeTsoBefore(maxReadTso,
+                        (int) maxLagMinutes);
+                    cleanupReason = String.format("checkpoint_lag_too_large(checkpointLag=%dm, maxLag=%dm)",
+                        checkpointLagMinutes, maxLagMinutes);
+                } else {
+                    // Rule 1: checkpoint在安全范围内，直接使用checkpoint的lastTso作为cleanupTso
+                    // getCheckpointTsoFromBackup已确保upload_status=SUCCESS/IGNORE，可安全清理
+                    // lastTso是已完成文件的结束TSO，即使deleteRange包含边界也不会影响DumperX重启
+                    // （DumperX用lastTso做seek时，>= lastTso会自动找到下一个文件的起始数据）
+                    cleanupTso = checkpointRecord.getLastTso();
+                    cleanupReason = String.format("checkpoint(checkpointTso=%s)",
+                        checkpointRecord.getLastTso());
+                }
+            } else {
+                // 没有可用的checkpoint，降级为基于maxReadTso的时间窗口清理
+                long maxLagMinutes = DynamicApplicationConfig.getInt(BINLOGX_RELAY_CLEANUP_CHECKPOINT_MAX_LAG_MINUTES);
+                cleanupTso = RelayLogEventTransmitter.computeTsoBefore(maxReadTso,
+                    (int) maxLagMinutes);
+                cleanupReason = String.format("no_checkpoint(maxLag=%dm)", maxLagMinutes);
+            }
+
+            // Step 3: 空间压力覆盖
+            // 当文件数/slowdown阈值 >= 配置比例时，使用aggressive buffer进行更积极的清理
+            try {
+                int currentFileCount = RelayFileStoreEngine.getRelayFileCounter().getTotalRelayFileCount();
+                int slowdownThreshold = DynamicApplicationConfig.getInt(BINLOGX_TRANSMIT_WRITE_SLOWDOWN_THRESHOLD);
+                double slowdownRatio = slowdownThreshold > 0 ? (double) currentFileCount / slowdownThreshold : 0;
+                double spaceSlowdownRatio = DynamicApplicationConfig.getDouble(
+                    BINLOGX_RELAY_CLEANUP_SPACE_SLOWDOWN_RATIO);
+
+                if (slowdownRatio >= spaceSlowdownRatio) {
+                    // Rule 3: 空间压力触发，使用aggressive buffer
+                    int aggressiveBuffer = DynamicApplicationConfig.getInt(
+                        BINLOGX_RELAY_CLEANUP_AGGRESSIVE_BUFFER_MINUTES);
+                    String spaceCleanupTso = RelayLogEventTransmitter.computeTsoBefore(
+                        maxReadTso, aggressiveBuffer);
+                    // 空间压力下取更激进的（更大的）cleanupTso
+                    if (StringUtils.isNotBlank(spaceCleanupTso)
+                        && (StringUtils.isBlank(cleanupTso) || spaceCleanupTso.compareTo(cleanupTso) > 0)) {
+                        cleanupTso = spaceCleanupTso;
+                        cleanupReason = String.format(
+                            "space_pressure(slowdownRatio=%.2f, threshold=%.2f, buffer=%dm)",
+                            slowdownRatio, spaceSlowdownRatio, aggressiveBuffer);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("failed to assess space pressure, skip space override", e);
+            }
+
+            // Step 4: 执行清理（只在有推进时才执行）
+            String maxCleanTso = storeEngine.getMaxCleanTso();
+            if (StringUtils.isNotBlank(cleanupTso)
+                && (StringUtils.isBlank(maxCleanTso) || cleanupTso.compareTo(maxCleanTso) > 0)) {
+                storeEngine.clean(cleanupTso);
+                log.info("stream : {} , relay log event is cleaned which tso is less than {} , reason={}",
+                    streamName, cleanupTso, cleanupReason);
+            } else {
+                log.info("stream : {} , no progress for cleaning, cleanupTso={} , maxCleanTso={}",
+                    streamName, cleanupTso, maxCleanTso);
             }
         }
     }

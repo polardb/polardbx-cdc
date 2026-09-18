@@ -6,6 +6,8 @@
  */
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.LabEventManager;
@@ -29,7 +31,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -43,6 +47,7 @@ public class LabTestJob extends AbstractBinlogTimerTask {
     public LabTestJob(String cluster, String clusterType, String name, int interval) {
         super(cluster, clusterType, name, interval);
         jobList.add(new RandomFlushJob(TimeUnit.MINUTES.toMillis(15), false));
+        jobList.add(new RandomSetCompressionJob(TimeUnit.MINUTES.toMillis(15), false));
     }
 
     @Override
@@ -161,6 +166,66 @@ public class LabTestJob extends AbstractBinlogTimerTask {
                 triggerCount *= streamCount;
             }
             return triggerCount > flushCount;
+        }
+
+        void execOnCn(String ddl) {
+            JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
+            jdbcTemplate.execute(ddl);
+        }
+    }
+
+    class RandomSetCompressionJob extends AbstractTestJob {
+        private boolean compressionEnabled = true;
+
+        public RandomSetCompressionJob(long jobInterval, boolean random) {
+            super(jobInterval, random);
+        }
+
+        @Override
+        void doExec() {
+            if (!DynamicApplicationConfig.getBoolean(ConfigKeys.DAEMON_AUTO_SET_COMPRESSION_TEST)) {
+                return;
+            }
+
+            String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
+
+            if (clusterId.contains("-re-")) {
+                return;
+            }
+
+            String clusterType = DynamicApplicationConfig.getClusterType();
+            if (StringUtils.equals(clusterType, ClusterType.BINLOG.name())) {
+                String param = compressionEnabled ? "ON" : "OFF";
+                compressionEnabled = !compressionEnabled;
+                if (checkBefore()) {
+                    return;
+                }
+                execOnCn("set cdc global binlog_transaction_compression = " + param);
+                LabEventManager.logEvent(LabEventType.SCHEDULE_SET_COMPRESSION, param);
+            }
+        }
+
+        boolean checkBefore() {
+            BinlogLabEventMapper mapper = SpringContextHolder.getObject(BinlogLabEventMapper.class);
+            int triggerCount = mapper.countEvent(LabEventType.SCHEDULE_SET_COMPRESSION.ordinal());
+            AtomicInteger applyCount = new AtomicInteger();
+
+            JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
+            metaTemplate
+                .query("select change_env_content from binlog_env_config_history",
+                    resultSet -> {
+                        while (resultSet.next()) {
+                            String content = resultSet.getString(1);
+                            JSONObject jsonObject = JSON.parseObject(content);
+                            for (Map.Entry<String, Object> entry : jsonObject.entrySet()) {
+                                if (entry.getKey().equalsIgnoreCase(ConfigKeys.BINLOG_TRANSACTION_COMPRESSION)) {
+                                    applyCount.getAndIncrement();
+                                }
+                            }
+                        }
+                    });
+
+            return triggerCount > applyCount.get();
         }
 
         void execOnCn(String ddl) {

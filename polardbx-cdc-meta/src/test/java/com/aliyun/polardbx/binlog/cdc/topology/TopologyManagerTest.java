@@ -10,6 +10,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.google.common.collect.Sets;
+import org.apache.commons.lang3.tuple.Pair;
 import org.hamcrest.CoreMatchers;
 import org.junit.Assert;
 import org.junit.Before;
@@ -114,5 +115,19 @@ public class TopologyManagerTest extends BaseTest {
         tables = manager.getPhyTables("polardbx-storage-1-master", Sets.newHashSet(), Sets.newHashSet()).stream()
             .flatMap(p -> p.getPhyTables().stream()).collect(Collectors.toList());
         Assert.assertThat(tables, CoreMatchers.hasItems("t1_TRwG_02", "t1_TRwG_03", "t2_N6ql_02", "t2_N6ql_03"));
+    }
+
+    @Test
+    public void testApplyHistory() {
+        TopologyManager manager = new TopologyManager();
+        manager.applyHistory(null, "d1", "t1", null);
+        Assert.assertNull(manager.getTopology());
+    }
+
+    @Test
+    public void testSetTableIdForVirtualTable() {
+        TopologyManager manager = new TopologyManager();
+        manager.setTableIdForVirtualTable(Pair.of("d1", "t1"), 1L);
+        Assert.assertEquals(1L, manager.getTableId("d1", "t1").longValue());
     }
 }

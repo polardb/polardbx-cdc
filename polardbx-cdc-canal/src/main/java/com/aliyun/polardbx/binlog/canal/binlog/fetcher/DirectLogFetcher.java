@@ -6,6 +6,8 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog.fetcher;
 
+import com.alibaba.polardbx.core.cj.jdbc.ConnectionImpl;
+import com.alibaba.polardbx.core.cj.protocol.SocketConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,12 +108,9 @@ public final class DirectLogFetcher extends LogFetcher {
 
             try {
                 if (conn instanceof java.sql.Wrapper) {
-                    Class<?> connIface = Class.forName("com.mysql.jdbc.Connection");
-                    conn = ((java.sql.Wrapper) conn).unwrap(connIface);
+                    conn = ((java.sql.Wrapper) conn).unwrap(connClazz);
                     continue;
                 }
-            } catch (ClassNotFoundException e) {
-                // com.mysql.jdbc.Connection not found.
             } catch (SQLException e) {
                 logger.warn("Unwrap " + conn.getClass().getName() + " to " + connClazz.getName() + " failed: "
                         + e.getMessage(),
@@ -138,15 +137,26 @@ public final class DirectLogFetcher extends LogFetcher {
     }
 
     private static final Object getDeclaredField(Object obj, Class<?> objClazz, String name) {
+        Field field = findDeclaredField(objClazz, name);
+        field.setAccessible(true);
         try {
-            Field field = objClazz.getDeclaredField(name);
-            field.setAccessible(true);
             return field.get(obj);
-        } catch (NoSuchFieldException e) {
-            throw new IllegalArgumentException("No such field: \'" + name + "\' @ " + objClazz.getName(), e);
         } catch (IllegalAccessException e) {
-            throw new IllegalArgumentException("Cannot get field: \'" + name + "\' @ " + objClazz.getName(), e);
+            throw new IllegalArgumentException("Cannot get field: \'" + name + "\' @ "
+                + field.getDeclaringClass().getName(), e);
         }
+    }
+
+    static Field findDeclaredField(Class<?> objClazz, String name) {
+        Class<?> currentClazz = objClazz;
+        while (currentClazz != null) {
+            try {
+                return currentClazz.getDeclaredField(name);
+            } catch (NoSuchFieldException e) {
+                currentClazz = currentClazz.getSuperclass();
+            }
+        }
+        throw new IllegalArgumentException("No such field: \'" + name + "\' @ " + objClazz.getName());
     }
 
     /**
@@ -177,20 +187,19 @@ public final class DirectLogFetcher extends LogFetcher {
         throws IOException {
         try {
             this.conn = conn;
-            Class<?> connClazz = Class.forName("com.mysql.jdbc.ConnectionImpl");
-            Object unwrapConn = unwrapConnection(conn, connClazz);
+            ConnectionImpl unwrapConn = (ConnectionImpl) unwrapConnection(conn, ConnectionImpl.class);
             if (unwrapConn == null) {
                 throw new IOException("Unable to unwrap " + conn.getClass().getName()
-                    + " to com.mysql.jdbc.ConnectionImpl");
+                    + " to " + ConnectionImpl.class.getName());
             }
 
             // Get underlying IO streams for network communications.
-            Object connIo = getDeclaredField(unwrapConn, connClazz, "io");
-            if (connIo == null) {
-                throw new IOException("Get null field:" + conn.getClass().getName() + "#io");
+            SocketConnection socketConnection = unwrapConn.getSession().getProtocol().getSocketConnection();
+            if (socketConnection == null) {
+                throw new IOException("Get null socket connection from:" + conn.getClass().getName());
             }
-            mysqlOutput = (OutputStream) getDeclaredField(connIo, connIo.getClass(), "mysqlOutput");
-            mysqlInput = (InputStream) getDeclaredField(connIo, connIo.getClass(), "mysqlInput");
+            mysqlOutput = socketConnection.getMysqlOutput();
+            mysqlInput = socketConnection.getMysqlInput();
 
             if (filePosition == 0) {
                 filePosition = BIN_LOG_HEADER_SIZE;
@@ -201,9 +210,6 @@ public final class DirectLogFetcher extends LogFetcher {
             close(); /* Do cleanup */
             logger.error("Error on COM_BINLOG_DUMP: file = " + fileName + ", position = " + filePosition);
             throw e;
-        } catch (ClassNotFoundException e) {
-            close(); /* Do cleanup */
-            throw new IOException("Unable to load com.mysql.jdbc.ConnectionImpl", e);
         }
     }
 
@@ -331,7 +337,7 @@ public final class DirectLogFetcher extends LogFetcher {
             // The first packet is a multi-packet, concatenate the packets.
             while (netlen == MAX_PACKET_LENGTH) {
                 if (!fetch0(0, NET_HEADER_SIZE)) {
-                    logger.warn("Reached end of input stream while fetching header");
+                    logger.warn("Reached end of input stream while fetching header in multi-packet");
                     return false;
                 }
 

@@ -12,6 +12,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -49,7 +50,12 @@ public class DataImportFilter extends BaseFilter {
         ignoreServerIds = initIgnoreServerIds(importMeta.getIgnoreServerIds());
         log.warn("ignore server ids: {}", ignoreServerIds);
         filterCache = new HashMap<>(128);
-        logicalFilterTables = initFilterSet(DynamicApplicationConfig.getString(ConfigKeys.RPL_INC_BLACK_TABLE_LIST));
+        Set<Pair<String, String>> logicalFilterTablesPair = initFilterPairSet(DynamicApplicationConfig
+            .getString(ConfigKeys.RPL_INC_BLACK_TABLE_LIST));
+        logicalFilterTables = new HashSet<>();
+        for (Pair<String, String> pair : logicalFilterTablesPair) {
+            logicalFilterTables.add(pair.getLeft() + "." + pair.getRight());
+        }
         log.warn("filter tables: {}", logicalFilterTables);
     }
 
@@ -64,12 +70,7 @@ public class DataImportFilter extends BaseFilter {
         }
 
         String logicalKey = getRewriteDb(schema, action) + "." + getRewriteTable(schema, tbName);
-        if (logicalFilterTables.contains(logicalKey)) {
-            filterCache.put(key, true);
-            return true;
-        }
-
-        boolean skip = !dbOk(schema) || !tableOk(schema, tbName);
+        boolean skip = !dbOk(schema) || !tableOk(schema, tbName) || logicalFilterTables.contains(logicalKey);
         filterCache.put(key, skip);
 
         return skip;
@@ -83,14 +84,7 @@ public class DataImportFilter extends BaseFilter {
         if (!doTables.containsKey(db)) {
             return false;
         }
-        if (doTables.get(db).contains(tb)) {
-            return true;
-        }
-        // 如果doTables没有（源库为空或者广播表）
-        if (doTables.get(db).isEmpty()) {
-            return false;
-        }
-        return doTables.get(db).isEmpty();
+        return doTables.get(db).contains(tb);
     }
 
     /**

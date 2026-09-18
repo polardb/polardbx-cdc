@@ -153,12 +153,15 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
                 return thread;
             });
             scheduledExecutorService
-                .scheduleAtFixedRate(this::scan, 10, SERVER_CHECK_INTERVAL, TimeUnit.MILLISECONDS);
+                .scheduleWithFixedDelay(this::scan, 10, SERVER_CHECK_INTERVAL, TimeUnit.MILLISECONDS);
         }
     }
 
     private void scan() {
         try {
+            if (logger.isDebugEnabled()) {
+                logger.debug("[-] before server node scan: {}", nestedAddresses);
+            }
             Set<String> latestServers = getLatestServerAddress();
             Set<String> holdingServers = Sets.newHashSet(nestedAddresses);
             Set<String> toBeAddedServers =
@@ -200,6 +203,9 @@ public class CnDataSource implements PoolConfiguration, javax.sql.DataSource, ja
                             DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID));
                     CnDataSourceFileCache.getInstance().write(struct);
                 }
+            }
+            if (logger.isDebugEnabled()) {
+                logger.debug("[+] after server node scan: {}", nestedAddresses);
             }
         } catch (Throwable e) {
             logger.error("something goes wrong in server node scan!", e);

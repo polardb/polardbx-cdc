@@ -32,10 +32,12 @@ import com.aliyun.polardbx.binlog.enums.BinlogTaskStatus;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
+import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.service.StorageInfoService;
 import com.aliyun.polardbx.binlog.util.PasswdUtil;
 import com.aliyun.polardbx.binlog.util.PooledHttpHelper;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
+import com.aliyun.securitysdk.SecurityUtil;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.SimpleTimeLimiter;
 import com.google.common.util.concurrent.TimeLimiter;
@@ -70,6 +72,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_ROCKSDB_BASE_PATH;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
@@ -78,6 +81,7 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TOPOLOGY_DUMPER_MAST
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TOPOLOGY_EXCLUDE_NODES_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.EXPECTED_STORAGE_TSO_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.GLOBAL_BINLOG_LATEST_CURSOR;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getClusterType;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.id;
 import static com.aliyun.polardbx.binlog.dao.StorageInfoDynamicSqlSupport.instKind;
@@ -214,7 +218,7 @@ public class SystemControlResource {
             }
         }
 
-        ClusterType clusterType = ClusterType.valueOf(DynamicApplicationConfig.getClusterType());
+        ClusterType clusterType = ClusterType.valueOf(getClusterType());
         if (Objects.equals(clusterType, ClusterType.BINLOG_X)) {
             //多流清理
             closeBinlogXAutoInit();
@@ -236,6 +240,13 @@ public class SystemControlResource {
             logger.info("try to clean local binlog file");
             String binlogPath = DynamicApplicationConfig.getString(ConfigKeys.BINLOG_DIR_PATH);
             FileUtils.cleanDirectory(new File(binlogPath));
+
+            String rocksdbPath = DynamicApplicationConfig.getString(BINLOGX_ROCKSDB_BASE_PATH);
+            File rocksdbDir = new File(rocksdbPath);
+            if (rocksdbDir.exists()) {
+                FileUtils.cleanDirectory(rocksdbDir);
+            }
+
             Integer timeout = DynamicApplicationConfig.getInt(ConfigKeys.DAEMON_WAIT_CLEAN_BINLOG_TIMEOUT_SECOND);
 
             if (RuntimeLeaderElector.isDaemonLeader()) {
@@ -271,6 +282,7 @@ public class SystemControlResource {
         initResetMetaCleanSql(sqlList);
         executeMetaSqlList(sqlList);
         flushDNLogs();
+        cleanRemoteFiles();
     }
 
     private List<String> initCommonMetaCleanSql(List<String> sqlList) {
@@ -414,8 +426,9 @@ public class SystemControlResource {
             String passwordEnc = masterStorageInfoForOneDn.getPasswdEnc();
             String password = PasswdUtil.decryptBase64(passwordEnc);
             try {
-                Class.forName("com.mysql.jdbc.Driver");
-                String url = String.format("jdbc:mysql://%s:%s/mysql?useSSL=false", ip, port);
+                Class.forName("com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver");
+                String url = SecurityUtil.filterJdbcConnectionSource(
+                    String.format("jdbc:mysql://%s:%s/mysql?useSSL=false", ip, port));
                 try (Connection conn = DriverManager
                     .getConnection(url, user, password)) {
                     try (Statement stmt = conn.createStatement()) {
@@ -428,6 +441,17 @@ public class SystemControlResource {
             }
 
             logger.info("storage node is reset for id : " + storageInfo.getStorageInstId());
+        }
+    }
+
+    void cleanRemoteFiles() {
+        if (RemoteBinlogProxy.getInstance().isBackupOn()) {
+            if (getClusterType().equals(ClusterType.BINLOG_X.name())) {
+                String groupName = getGroupName();
+                RemoteBinlogProxy.getInstance().deleteAll(groupName + "/");
+            } else if (getClusterType().equals(ClusterType.BINLOG.name())) {
+                RemoteBinlogProxy.getInstance().deleteAll("binlog.");
+            }
         }
     }
 

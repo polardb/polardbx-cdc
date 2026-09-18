@@ -32,6 +32,7 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -56,11 +57,11 @@ public class BinlogCleanerTest extends BaseTest {
     @Before
     public void before() {
         log.info("init binlogCleanerTest ...");
-        List<String> streamList = new ArrayList<>();
-        streamList.add(stream);
+        Set<String> streamSet = new TreeSet<>();
+        streamSet.add(stream);
 
         log.info("init streamContext...");
-        streamContext = new StreamContext(group, streamList, cluster, "task_global",
+        streamContext = new StreamContext(group, streamSet, cluster, "task_global",
             TaskType.Dumper, version);
 
         log.info("init binlogCleaner...");
@@ -70,7 +71,7 @@ public class BinlogCleanerTest extends BaseTest {
         mockConfig(ConfigKeys.BINLOG_DISK_SPACE_MAX_SIZE_MB, "524288000");
         mockConfig(ConfigKeys.CLUSTER_ID, cluster);
         log.info(DynamicApplicationConfig.getString(ConfigKeys.DISK_SIZE));
-        logFileLockManager = new LogFileLockManager(stream, streamContext);
+        logFileLockManager = new LogFileLockManager(stream, streamContext.getTaskType(), version, group);
         binlogCleaner = new BinlogCleaner(stream, streamContext, logFileLockManager);
         mockConfig(ConfigKeys.IS_LAB_ENV, "true");
 

@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS rpl_full_valid_task
     create_time             datetime   default CURRENT_TIMESTAMP not null,
     update_time             datetime   default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
     primary key(`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS rpl_full_valid_sub_task
 (
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS rpl_full_valid_sub_task
     create_time             datetime   default CURRENT_TIMESTAMP not null,
     update_time             datetime   default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
     primary key(`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS rpl_full_valid_diff
 (
@@ -45,4 +45,4 @@ CREATE TABLE IF NOT EXISTS rpl_full_valid_diff
     create_time             datetime   default CURRENT_TIMESTAMP not null,
     update_time             datetime   default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
     primary key(`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;

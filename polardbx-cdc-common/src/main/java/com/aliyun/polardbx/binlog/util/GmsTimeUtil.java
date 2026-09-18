@@ -10,6 +10,7 @@ import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.BinlogDumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.TaskInfoMapper;
 import com.aliyun.polardbx.binlog.domain.TaskType;
+import org.joda.time.DateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -29,6 +30,10 @@ public class GmsTimeUtil {
         } catch (Exception e) {
             throw new RuntimeException("get current time from GMS error", e);
         }
+    }
+
+    public static DateTime getCurrentDateTime() {
+        return new DateTime(getCurrentTimeMillis());
     }
 
     public static long getHeartbeatInterval(String taskType, String clusterId, String taskName) {

@@ -56,11 +56,15 @@ public class BaseApplier {
     }
 
     public void logTransactionCommit() {
-        LogUtil.getCommitLogger().info("{} : COMMIT", CommonUtil.getCurrentTime());
+        if (applierConfig.getLogCommitLevel() == RplConstants.LOG_ALL_COMMIT) {
+            LogUtil.getCommitLogger().info("{} : COMMIT", CommonUtil.getCurrentTime());
+        }
     }
 
     public void logTransactionRollback() {
-        LogUtil.getCommitLogger().info("{} : ROLLBACK", CommonUtil.getCurrentTime());
+        if (applierConfig.getLogCommitLevel() == RplConstants.LOG_ALL_COMMIT) {
+            LogUtil.getCommitLogger().info("{} : ROLLBACK", CommonUtil.getCurrentTime());
+        }
     }
 
     public void start() {

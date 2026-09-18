@@ -86,68 +86,69 @@ public final class TxnStream {
     java.lang.String[] descriptorData = {
       "\n\017TxnStream.proto\022#com.aliyun.polardbx.b" +
       "inlog.protocol\032\036google/protobuf/wrappers" +
-      ".proto\"i\n\013DumpRequest\022\013\n\003tso\030\001 \001(\t\022\022\n\ndu" +
+      ".proto\"}\n\013DumpRequest\022\013\n\003tso\030\001 \001(\t\022\022\n\ndu" +
       "mperName\030\002 \001(\t\022\021\n\tstreamSeq\030\003 \001(\005\022\017\n\007ver" +
-      "sion\030\004 \001(\003\022\025\n\rstorageInstId\030\005 \001(\t\"\256\001\n\tDu" +
-      "mpReply\022C\n\ntxnMessage\030\001 \003(\0132/.com.aliyun" +
-      ".polardbx.binlog.protocol.TxnMessage\022\027\n\017" +
-      "txnMessageBytes\030\002 \003(\014\022C\n\npacketMode\030\003 \001(" +
-      "\0162/.com.aliyun.polardbx.binlog.protocol." +
-      "PacketMode\"\306\002\n\nTxnMessage\022>\n\004type\030\001 \001(\0162" +
-      "0.com.aliyun.polardbx.binlog.protocol.Me" +
-      "ssageType\022?\n\010txnBegin\030\002 \001(\0132-.com.aliyun" +
-      ".polardbx.binlog.protocol.TxnBegin\022=\n\007tx" +
-      "nData\030\003 \001(\0132,.com.aliyun.polardbx.binlog" +
-      ".protocol.TxnData\022;\n\006txnEnd\030\004 \001(\0132+.com." +
-      "aliyun.polardbx.binlog.protocol.TxnEnd\022;" +
-      "\n\006txnTag\030\005 \001(\0132+.com.aliyun.polardbx.bin" +
-      "log.protocol.TxnTag\"\253\001\n\010TxnBegin\022A\n\010txnT" +
-      "oken\030\001 \001(\0132-.com.aliyun.polardbx.binlog." +
-      "protocol.TxnTokenH\000\022M\n\016txnMergedToken\030\002 " +
-      "\001(\01323.com.aliyun.polardbx.binlog.protoco" +
-      "l.TxnMergedTokenH\000B\r\n\013token_oneof\"I\n\007Txn" +
-      "Data\022>\n\010txnItems\030\001 \003(\0132,.com.aliyun.pola" +
-      "rdbx.binlog.protocol.TxnItem\"\010\n\006TxnEnd\"\251" +
-      "\001\n\006TxnTag\022A\n\010txnToken\030\001 \001(\0132-.com.aliyun" +
-      ".polardbx.binlog.protocol.TxnTokenH\000\022M\n\016" +
-      "txnMergedToken\030\002 \001(\01323.com.aliyun.polard" +
-      "bx.binlog.protocol.TxnMergedTokenH\000B\r\n\013t" +
-      "oken_oneof\"\262\003\n\010TxnToken\022\013\n\003tso\030\001 \001(\t\022\r\n\005" +
-      "txnId\030\002 \001(\003\022\023\n\013partitionId\030\003 \001(\t\022\033\n\023orig" +
-      "inMergeSourceId\030\004 \001(\t\022:\n\004type\030\005 \001(\0162,.co" +
-      "m.aliyun.polardbx.binlog.protocol.TxnTyp" +
-      "e\022\r\n\005xaTxn\030\006 \001(\010\022\026\n\016tsoTransaction\030\007 \001(\010" +
-      "\022\017\n\007txnSize\030\010 \001(\005\022\016\n\006schema\030\t \001(\t\022\022\n\nall" +
-      "Parties\030\n \003(\t\022\017\n\007payload\030\013 \001(\014\022\023\n\013snapsh" +
-      "otSeq\030\014 \001(\003\022\r\n\005table\030\r \001(\t\022-\n\010serverId\030\016" +
-      " \001(\0132\033.google.protobuf.Int64Value\022\013\n\003ddl" +
-      "\030\017 \001(\t\022\020\n\010ddlScope\030\020 \001(\005\022=\n\007txnFlag\030\021 \001(" +
-      "\0162,.com.aliyun.polardbx.binlog.protocol." +
-      "TxnFlag\"\367\001\n\016TxnMergedToken\022\013\n\003tso\030\001 \001(\t\022" +
-      ":\n\004type\030\002 \001(\0162,.com.aliyun.polardbx.binl" +
-      "og.protocol.TxnType\022\016\n\006schema\030\003 \001(\t\022\017\n\007p" +
-      "ayload\030\004 \001(\014\022\r\n\005table\030\005 \001(\t\022-\n\010serverId\030" +
-      "\006 \001(\0132\033.google.protobuf.Int64Value\022=\n\007tx" +
-      "nFlag\030\007 \001(\0162,.com.aliyun.polardbx.binlog" +
-      ".protocol.TxnFlag\"\225\001\n\007TxnItem\022\017\n\007traceId" +
-      "\030\001 \001(\t\022\021\n\teventType\030\002 \001(\005\022\017\n\007payload\030\003 \001" +
-      "(\014\022\021\n\trowsQuery\030\004 \001(\t\022\016\n\006schema\030\005 \001(\t\022\r\n" +
-      "\005table\030\006 \001(\t\022\017\n\007hashKey\030\007 \001(\005\022\022\n\nprimary" +
-      "Key\030\010 \003(\014\"V\n\tEventData\022\021\n\trowsQuery\030\001 \001(" +
-      "\t\022\017\n\007payload\030\002 \001(\014\022\022\n\nschemaName\030\003 \001(\t\022\021" +
-      "\n\ttableName\030\004 \001(\t*/\n\nPacketMode\022\n\n\006OBJEC" +
-      "T\020\000\022\t\n\005BYTES\020\001\022\n\n\006RANDOM\020\002*\"\n\007TxnFlag\022\n\n" +
-      "\006NORMAL\020\000\022\013\n\007ARCHIVE\020\001*?\n\013MessageType\022\t\n" +
-      "\005WHOLE\020\000\022\t\n\005BEGIN\020\001\022\010\n\004DATA\020\002\022\007\n\003END\020\003\022\007" +
-      "\n\003TAG\020\004*\220\001\n\007TxnType\022\007\n\003DML\020\000\022\017\n\013FORMAT_D" +
-      "ESC\020\001\022\014\n\010META_DDL\020\002\022\016\n\nMETA_SCALE\020\003\022\022\n\016M" +
-      "ETA_HEARTBEAT\020\005\022\032\n\026META_CONFIG_ENV_CHANG" +
-      "E\020\006\022\r\n\tFLUSH_LOG\020\007\022\016\n\nSYNC_POINT\020\0102z\n\nTx" +
-      "nService\022l\n\004dump\0220.com.aliyun.polardbx.b" +
-      "inlog.protocol.DumpRequest\032..com.aliyun." +
-      "polardbx.binlog.protocol.DumpReply\"\0000\001B)" +
-      "\n#com.aliyun.polardbx.binlog.protocolH\001P" +
-      "\001b\006proto3"
+      "sion\030\004 \001(\003\022\025\n\rstorageInstId\030\005 \001(\t\022\022\n\nsub" +
+      "Version\030\006 \001(\003\"\256\001\n\tDumpReply\022C\n\ntxnMessag" +
+      "e\030\001 \003(\0132/.com.aliyun.polardbx.binlog.pro" +
+      "tocol.TxnMessage\022\027\n\017txnMessageBytes\030\002 \003(" +
+      "\014\022C\n\npacketMode\030\003 \001(\0162/.com.aliyun.polar" +
+      "dbx.binlog.protocol.PacketMode\"\306\002\n\nTxnMe" +
+      "ssage\022>\n\004type\030\001 \001(\01620.com.aliyun.polardb" +
+      "x.binlog.protocol.MessageType\022?\n\010txnBegi" +
+      "n\030\002 \001(\0132-.com.aliyun.polardbx.binlog.pro" +
+      "tocol.TxnBegin\022=\n\007txnData\030\003 \001(\0132,.com.al" +
+      "iyun.polardbx.binlog.protocol.TxnData\022;\n" +
+      "\006txnEnd\030\004 \001(\0132+.com.aliyun.polardbx.binl" +
+      "og.protocol.TxnEnd\022;\n\006txnTag\030\005 \001(\0132+.com" +
+      ".aliyun.polardbx.binlog.protocol.TxnTag\"" +
+      "\253\001\n\010TxnBegin\022A\n\010txnToken\030\001 \001(\0132-.com.ali" +
+      "yun.polardbx.binlog.protocol.TxnTokenH\000\022" +
+      "M\n\016txnMergedToken\030\002 \001(\01323.com.aliyun.pol" +
+      "ardbx.binlog.protocol.TxnMergedTokenH\000B\r" +
+      "\n\013token_oneof\"I\n\007TxnData\022>\n\010txnItems\030\001 \003" +
+      "(\0132,.com.aliyun.polardbx.binlog.protocol" +
+      ".TxnItem\"\010\n\006TxnEnd\"\251\001\n\006TxnTag\022A\n\010txnToke" +
+      "n\030\001 \001(\0132-.com.aliyun.polardbx.binlog.pro" +
+      "tocol.TxnTokenH\000\022M\n\016txnMergedToken\030\002 \001(\013" +
+      "23.com.aliyun.polardbx.binlog.protocol.T" +
+      "xnMergedTokenH\000B\r\n\013token_oneof\"\262\003\n\010TxnTo" +
+      "ken\022\013\n\003tso\030\001 \001(\t\022\r\n\005txnId\030\002 \001(\003\022\023\n\013parti" +
+      "tionId\030\003 \001(\t\022\033\n\023originMergeSourceId\030\004 \001(" +
+      "\t\022:\n\004type\030\005 \001(\0162,.com.aliyun.polardbx.bi" +
+      "nlog.protocol.TxnType\022\r\n\005xaTxn\030\006 \001(\010\022\026\n\016" +
+      "tsoTransaction\030\007 \001(\010\022\017\n\007txnSize\030\010 \001(\005\022\016\n" +
+      "\006schema\030\t \001(\t\022\022\n\nallParties\030\n \003(\t\022\017\n\007pay" +
+      "load\030\013 \001(\014\022\023\n\013snapshotSeq\030\014 \001(\003\022\r\n\005table" +
+      "\030\r \001(\t\022-\n\010serverId\030\016 \001(\0132\033.google.protob" +
+      "uf.Int64Value\022\013\n\003ddl\030\017 \001(\t\022\020\n\010ddlScope\030\020" +
+      " \001(\005\022=\n\007txnFlag\030\021 \001(\0162,.com.aliyun.polar" +
+      "dbx.binlog.protocol.TxnFlag\"\367\001\n\016TxnMerge" +
+      "dToken\022\013\n\003tso\030\001 \001(\t\022:\n\004type\030\002 \001(\0162,.com." +
+      "aliyun.polardbx.binlog.protocol.TxnType\022" +
+      "\016\n\006schema\030\003 \001(\t\022\017\n\007payload\030\004 \001(\014\022\r\n\005tabl" +
+      "e\030\005 \001(\t\022-\n\010serverId\030\006 \001(\0132\033.google.proto" +
+      "buf.Int64Value\022=\n\007txnFlag\030\007 \001(\0162,.com.al" +
+      "iyun.polardbx.binlog.protocol.TxnFlag\"\252\001" +
+      "\n\007TxnItem\022\017\n\007traceId\030\001 \001(\t\022\021\n\teventType\030" +
+      "\002 \001(\005\022\017\n\007payload\030\003 \001(\014\022\021\n\trowsQuery\030\004 \001(" +
+      "\t\022\016\n\006schema\030\005 \001(\t\022\r\n\005table\030\006 \001(\t\022\017\n\007hash" +
+      "Key\030\007 \001(\005\022\022\n\nprimaryKey\030\010 \003(\014\022\023\n\013partitio" +
+      "nId\030\t \001(\t\"V\n\tEventDa" +
+      "ta\022\021\n\trowsQuery\030\001 \001(\t\022\017\n\007payload\030\002 \001(\014\022\022" +
+      "\n\nschemaName\030\003 \001(\t\022\021\n\ttableName\030\004 \001(\t*/\n" +
+      "\nPacketMode\022\n\n\006OBJECT\020\000\022\t\n\005BYTES\020\001\022\n\n\006RA" +
+      "NDOM\020\002*\"\n\007TxnFlag\022\n\n\006NORMAL\020\000\022\013\n\007ARCHIVE" +
+      "\020\001*?\n\013MessageType\022\t\n\005WHOLE\020\000\022\t\n\005BEGIN\020\001\022" +
+      "\010\n\004DATA\020\002\022\007\n\003END\020\003\022\007\n\003TAG\020\004*\220\001\n\007TxnType\022" +
+      "\007\n\003DML\020\000\022\017\n\013FORMAT_DESC\020\001\022\014\n\010META_DDL\020\002\022" +
+      "\016\n\nMETA_SCALE\020\003\022\022\n\016META_HEARTBEAT\020\005\022\032\n\026M" +
+      "ETA_CONFIG_ENV_CHANGE\020\006\022\r\n\tFLUSH_LOG\020\007\022\016" +
+      "\n\nSYNC_POINT\020\0102z\n\nTxnService\022l\n\004dump\0220.c" +
+      "om.aliyun.polardbx.binlog.protocol.DumpR" +
+      "equest\032..com.aliyun.polardbx.binlog.prot" +
+      "ocol.DumpReply\"\0000\001B)\n#com.aliyun.polardb" +
+      "x.binlog.protocolH\001P\001b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -159,7 +160,7 @@ public final class TxnStream {
     internal_static_com_aliyun_polardbx_binlog_protocol_DumpRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_com_aliyun_polardbx_binlog_protocol_DumpRequest_descriptor,
-        new java.lang.String[] { "Tso", "DumperName", "StreamSeq", "Version", "StorageInstId", });
+        new java.lang.String[] { "Tso", "DumperName", "StreamSeq", "Version", "StorageInstId", "SubVersion", });
     internal_static_com_aliyun_polardbx_binlog_protocol_DumpReply_descriptor =
       getDescriptor().getMessageTypes().get(1);
     internal_static_com_aliyun_polardbx_binlog_protocol_DumpReply_fieldAccessorTable = new
@@ -213,7 +214,7 @@ public final class TxnStream {
     internal_static_com_aliyun_polardbx_binlog_protocol_TxnItem_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_com_aliyun_polardbx_binlog_protocol_TxnItem_descriptor,
-        new java.lang.String[] { "TraceId", "EventType", "Payload", "RowsQuery", "Schema", "Table", "HashKey", "PrimaryKey", });
+        new java.lang.String[] { "TraceId", "EventType", "Payload", "RowsQuery", "Schema", "Table", "HashKey", "PrimaryKey", "PartitionId", });
     internal_static_com_aliyun_polardbx_binlog_protocol_EventData_descriptor =
       getDescriptor().getMessageTypes().get(10);
     internal_static_com_aliyun_polardbx_binlog_protocol_EventData_fieldAccessorTable = new

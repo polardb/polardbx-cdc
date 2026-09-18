@@ -11,6 +11,7 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.channel.BinlogFileReadChannel;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
@@ -20,6 +21,7 @@ import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg;
+import com.aliyun.polardbx.binlog.dumper.metrics.DumpClientMetric;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
@@ -42,8 +44,12 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ArrayUtils;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -85,7 +91,7 @@ public class BinlogDumpReader {
      * Maximum Value	1073741824
      */
     final int readBufferSize;
-    private final EnumBinlogChecksumAlg slaveChecksumAlg;
+    protected final EnumBinlogChecksumAlg slaveChecksumAlg;
     protected List<BinlogDumpRotateObserver> rotateObservers;
     // https://dev.mysql.com/doc/refman/5.7/en/replication-options-binary-log.html
     String fileName;
@@ -98,22 +104,38 @@ public class BinlogDumpReader {
     ByteBuffer buffer;
     LogFileManager logFileManager;
     int left = 0;
+    boolean leftFiltered = false;
     long timestamp;
     private byte packetSequence = 1;
     private boolean rotateNext = true;
     private final boolean smallerByteBuffer;
     @Getter
-    private BinlogDumpDownloader dumpDownloader = null;
-    private EnumBinlogChecksumAlg eventChecksumAlg;
+    protected BinlogDumpDownloader dumpDownloader = null;
+    protected EnumBinlogChecksumAlg eventChecksumAlg;
     private final NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
     private final DumperInfoMapper dumperInfoMapper = SpringContextHolder.getObject(DumperInfoMapper.class);
-    private final boolean supportQuickDownload;
+    protected final boolean supportQuickDownload;
     private final boolean limitBufferEnabled =
         DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_DUMP_LIMIT_BUFFER_ENABLED);
+    @Setter
+    private BinlogDumpFilter binlogDumpFilter;
     private final boolean labEnvEnabled;
+    /**
+     * 文件身份标识（inode），用于检测文件是否被 rename/delete/recreate。
+     * 参考 BinlogFileReader 中的 fileKey 方案，通过 BasicFileAttributes.fileKey() 获取。
+     */
+    private Object fileKey;
+    /**
+     * 文件状态检查开关，在链路初始化时读取配置，避免 read() 热路径中反复调用 getBoolean。
+     */
+    private final boolean fileStatusCheckEnabled;
+    private final boolean useLegacySizeCheck;
+    @Setter
+    protected DumpClientMetric metric;
+    protected final String clientTraceMark;
 
     public BinlogDumpReader(LogFileManager logFileManager, String fileName, long startPosition, int maxPacketSize,
-                            int readBufferSize, EnumBinlogChecksumAlg slaveChecksumAlg) {
+                            int readBufferSize, EnumBinlogChecksumAlg slaveChecksumAlg, String clientTraceMark) {
         if (startPosition <= 0) {
             startPosition = 4;
         }
@@ -134,6 +156,11 @@ public class BinlogDumpReader {
         this.rotateObservers = new ArrayList<>();
         supportQuickDownload = getBoolean(ConfigKeys.BINLOG_DUMP_DOWNLOAD_FIRST_MODE);
         this.labEnvEnabled = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
+        this.fileStatusCheckEnabled = DynamicApplicationConfig.getBoolean(
+            ConfigKeys.BINLOG_DUMP_FILE_STATUS_CHECK_ENABLED);
+        this.useLegacySizeCheck = DynamicApplicationConfig.getBoolean(
+            ConfigKeys.BINLOG_DUMP_FILE_STATUS_USE_LEGACY_SIZE_CHECK);
+        this.clientTraceMark = clientTraceMark;
     }
 
     /**
@@ -179,11 +206,34 @@ public class BinlogDumpReader {
             }
         }
 
-        cdcFile = logFileManager.getBinlogFileByName(fileName);
+        initCdcFile();
         if (cdcFile == null) {
             throw new PolardbxException("invalid log file:" + fileName);
         } else {
+            // 先获取 fileKey 再打开 channel，避免在两者之间文件被重建导致无法检测
+            initFileKey();
             channel = cdcFile.getReadChannel();
+        }
+    }
+
+    protected void initCdcFile() throws Exception {
+        cdcFile = logFileManager.getBinlogFileByName(fileName);
+    }
+
+    /**
+     * 初始化文件身份标识（fileKey/inode），用于检测文件是否被 rename/delete/recreate。
+     * 参考 BinlogFileReader 中的实现。
+     */
+    private void initFileKey() {
+        try {
+            File localFile = cdcFile.newFile();
+            if (localFile.exists()) {
+                BasicFileAttributes attrs = Files.readAttributes(
+                    localFile.toPath(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                this.fileKey = attrs.fileKey();
+            }
+        } catch (Exception e) {
+            log.warn("failed to init fileKey for {}", fileName, e);
         }
     }
 
@@ -224,13 +274,15 @@ public class BinlogDumpReader {
         if (timestamp < 0) {
             throw new PolardbxException("invalid event timestamp:" + timestamp);
         }
-        if (eventType < 0 || eventType > 0x23) {
+        // 40: 压缩事件
+        if ((eventType < 0 || eventType > 0x23) && eventType != 40) {
             throw new PolardbxException("invalid event type:" + eventType);
         }
         if (eventSize != endPos - startPosition) {
             throw new PolardbxException(
-                "invalid event size! next_position:" + endPos + ", cur_position:" + startPosition + ", event_size:"
-                    + eventSize);
+                "[" + clientTraceMark + "] invalid event size! next_position:" + endPos + ", cur_position:"
+                    + startPosition
+                    + ", event_size:" + eventSize);
         }
     }
 
@@ -255,7 +307,7 @@ public class BinlogDumpReader {
                 }
             }
             // 主节点位点比请求的小或者从节点没有同步到请求位点
-            log.info("request binlog={}:{}, local cursor={}", fileName, startPosition,
+            log.info("[{}] request binlog={}:{}, local cursor={}", clientTraceMark, fileName, startPosition,
                 logFileManager.getLatestFileCursor());
             return -1;
         } else if (ret == 0) {
@@ -291,22 +343,24 @@ public class BinlogDumpReader {
                     try {
                         retryer.call(() -> compareBinlogPos() <= 0);
                     } catch (RetryException | ExecutionException e) {
-                        log.info("can not sync {}:{} during last {}s", fileName, startPosition, maxRetryTimes);
+                        log.info("[{}] can not sync {}:{} during last {}s", clientTraceMark, fileName, startPosition,
+                            maxRetryTimes);
                         return false;
                     }
                 } else {
                     // 主节点的binlog pos比请求的小，异常
-                    log.info("request binlog={}:{},master cursor={}", fileName, startPosition, cursor);
+                    log.info("[{}] request binlog={}:{},master cursor={}", clientTraceMark, fileName, startPosition,
+                        cursor);
                     return false;
                 }
             } else {
                 List<NodeInfo> nodeInfoList = nodeInfoMapper.select(s -> s);
-                log.info("all node in binlog_node_info:{}", nodeInfoList);
+                log.info("[{}] all node in binlog_node_info:{}", clientTraceMark, nodeInfoList);
                 return false;
             }
         } else {
             List<DumperInfo> dumperInfoList = dumperInfoMapper.select(s -> s);
-            log.info("all dumper in binlog_dumper_info:{}", dumperInfoList);
+            log.info("[{}] all dumper in binlog_dumper_info:{}", clientTraceMark, dumperInfoList);
             return false;
         }
         return true;
@@ -320,7 +374,7 @@ public class BinlogDumpReader {
         return ByteString.copyFrom(ArrayUtils.addAll(packetHeader, fakeRotateEvent));
     }
 
-    private boolean eventChecksumOn() {
+    protected boolean eventChecksumOn() {
         return (this.eventChecksumAlg == EnumBinlogChecksumAlg.BINLOG_CHECKSUM_ALG_CRC32);
     }
 
@@ -383,6 +437,11 @@ public class BinlogDumpReader {
         }
 
         byteArray.writeLong(FLAGS_OFFSET, 0, FLAG_LEN);
+        if (binlogDumpFilter.isBinlogDumpFilterEnabled() && binlogDumpFilter.isIgnoreBySetFlag()) {
+            // set flag方式过滤不能让下游校验
+            byteArray.writeByte(eventLen - LogEvent.BINLOG_CHECKSUM_LEN - LogEvent.BINLOG_CHECKSUM_ALG_DESC_LEN,
+                (byte) (LogEvent.BINLOG_CHECKSUM_ALG_OFF & 0xff));
+        }
         byte[] eventData = new byte[eventLen];
         buffer.position(0);
         buffer.get(eventData, 0, eventLen);
@@ -425,7 +484,7 @@ public class BinlogDumpReader {
         read();
     }
 
-    private int nextDumpPackLength() {
+    int nextDumpPackLength() {
         if (buffer.remaining() < 13) {
             return 0;
         }
@@ -538,11 +597,11 @@ public class BinlogDumpReader {
             }
 
             lastPosition += eventLength;
-            // ByteString bytes = ByteString.copyFrom(data);
-            ByteString bytes = UnsafeByteOperations.unsafeWrap(data);
+
             if (log.isDebugEnabled()) {
                 log.debug("dumpPack {}@{}#{}", fileName, lastPosition - eventLength, lastPosition);
             }
+
             // try parse event header timestamp
             try {
                 if (withStatus && data.length > 8) {
@@ -552,6 +611,37 @@ public class BinlogDumpReader {
             } catch (Exception e) {
                 log.error("dump reader parser timestamp failed", e);
             }
+
+            DumpClientMetric.addReadBytes(data.length, metric);
+            if (binlogDumpFilter.isBinlogDumpFilterEnabled()) {
+                // withStatus 表明这是一个事件的开头
+                if (withStatus) {
+                    // event 开始位置
+                    int offset = ba.getPos();
+                    // 是否过滤本事件
+                    if (binlogDumpFilter.filter(ba)) {
+                        // 选择事件被过滤的方式
+                        if (binlogDumpFilter.isIgnoreBySetFlag()) {
+                            // 通过set flag过滤
+                            return binlogDumpFilter.getFilteredData(data, offset);
+                        } else {
+                            // 通过不发送事件过滤
+                            leftFiltered = true;
+                            packetSequence--;
+                            return ByteString.EMPTY;
+                        }
+                    } else {
+                        leftFiltered = false;
+                    }
+                } else if (leftFiltered && !binlogDumpFilter.isIgnoreBySetFlag()) {
+                    // 上一次没读完的大事件，且开头被跳过了，这次也跳过
+                    packetSequence--;
+                    return ByteString.EMPTY;
+                }
+            }
+
+            // ByteString bytes = ByteString.copyFrom(data);
+            ByteString bytes = UnsafeByteOperations.unsafeWrap(data);
 
             return bytes;
         } catch (InterruptedException e) {
@@ -570,12 +660,19 @@ public class BinlogDumpReader {
     public ByteString nextDumpPacks(ServerCallStreamObserver<DumpStream> serverCallStreamObserver) throws Exception {
         ByteString result = ByteString.EMPTY;
         while (hasNext() & !serverCallStreamObserver.isCancelled()) {
-            result = result.concat(nextDumpPack());
+            if (Thread.interrupted()) {
+                throw new InterruptedException("thread is interrupted in loop read dump packets");
+            }
+
+            ByteString pack = nextDumpPack();
+            if (!pack.isEmpty()) {
+                result = result.concat(pack);
+            }
             if (result.size() > maxPacketSize) {
                 break;
             }
             int nextDumpPackLength = nextDumpPackLength();
-            if (nextDumpPackLength == 0) {
+            if (nextDumpPackLength == 0 && !result.isEmpty()) {
                 break;
             }
             if (nextDumpPackLength + result.size() > maxPacketSize) {
@@ -621,16 +718,29 @@ public class BinlogDumpReader {
                 throw new PolardbxException(
                     String.format("the dumped file %s not exists!, fp: %s", fileName, lastPosition));
             }
-            if (channel.size() < cdcFile.size() && (read = channel.read(buffer)) <= 0) {
-                // cursor更新了，却读不出数据
-                String info = String.format(
-                    "unexpected channel stat!! fp = %s , fileName = %s, channel size = %s, cdcFile size = %s, buffer = %s.",
-                    lastPosition, fileName, channel.size(), cdcFile.size(), buffer);
-                if (labEnvEnabled) {
-                    LabEventManager.logEvent(LabEventType.DUMPER_FILE_STATUS_CHECK, info);
+
+            if (fileStatusCheckEnabled && cdcFile.isLocal()) {
+                if (useLegacySizeCheck) {
+                    // @deprecated 旧方案：通过比较 channel.size() 与 cdcFile.size() 检测文件变化。
+                    // 已废弃，原因：当 binlog 重建后 cdcFile.size()（基于 DB 中的 logSize）与实际磁盘文件大小
+                    // 不一致时会误抛异常。仅作为回退方案保留，可通过设置
+                    // BINLOG_DUMP_FILE_STATUS_USE_LEGACY_SIZE_CHECK=true 启用。
+                    long channelSize = channel.size();
+                    long cdcFileSize = cdcFile.size();
+                    if (channelSize < cdcFileSize && (read = channel.read(buffer)) <= 0) {
+                        String info = getUnexpectedChannelInfo(channelSize, cdcFileSize);
+                        if (labEnvEnabled) {
+                            LabEventManager.logEvent(LabEventType.DUMPER_FILE_STATUS_CHECK, info);
+                        }
+                        throw new PolardbxException(info);
+                    }
+                } else {
+                    // 新方案：通过 fileKey（inode）检测文件是否被重建，与 BinlogFileReader 保持一致。
+                    // 参见 BinlogFileReader.java L102-L113
+                    read = checkAndHandleFileRebuild(read);
                 }
-                throw new PolardbxException(info);
             }
+            // fileStatusCheckEnabled = false 时，跳过文件身份校验，仅保留上面的 checkFileStatus() 文件存在性检查
         }
 
         buffer.flip();
@@ -638,6 +748,52 @@ public class BinlogDumpReader {
         if (log.isDebugEnabled()) {
             log.debug("read from {}, read={},buffer={}", fileName, read, bufferMessage(buffer));
         }
+    }
+
+    private String getUnexpectedChannelInfo(long channelSize, long cdcFileSize) {
+        String cursorFile = logFileManager.getLatestFileCursor().getFileName();
+        long cursorPos = logFileManager.getLatestFileCursor().getFilePosition();
+        String info = String.format(
+            "unexpected channel stat!! fp = %s , fileName = %s, channel size = %s, cdcFile size = %s, buffer = %s， cursor = %s:%s.",
+            lastPosition, fileName, channelSize, cdcFileSize, buffer,
+            cursorFile, cursorPos);
+        return info;
+    }
+
+    /**
+     * 通过 fileKey（inode）检测文件是否被 rename/delete/recreate。
+     * 如果 fileKey 发生变化，说明文件被重建了（如 LogFileGenerator.prepare），需要重新打开 channel 并 seek。
+     * 如果 fileKey 未变化，说明是正常的等待数据写入场景。
+     * 参见 BinlogFileReader.java L102-L113。
+     *
+     * @param read 当前 channel.read() 的返回值
+     * @return 重新读取后的 read 值
+     */
+    private int checkAndHandleFileRebuild(int read) throws IOException {
+        try {
+            File localFile = cdcFile.newFile();
+            BasicFileAttributes attrs = Files.readAttributes(
+                localFile.toPath(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            Object currentFileKey = attrs.fileKey();
+            if (fileKey != null && !fileKey.equals(currentFileKey)) {
+                // 文件被重建了，重新打开 channel 并 seek 到之前的 position
+                log.info("file {} has been rebuilt, fileKey changed from {} to {}, reopening channel at position {}",
+                    fileName, fileKey, currentFileKey, channel.position());
+                this.fileKey = currentFileKey;
+                long position = channel.position();
+                this.channel.close();
+                this.channel = cdcFile.getReadChannel();
+                this.channel.position(position);
+            }
+            // 1. fileKey 变化：文件经历重建，重新打开文件后读取后续数据
+            // 2. fileKey 未变化：hasNext()为true说明文件可能有新写入，再读一次，没读到说明文件写完了，等待rotate
+            read = channel.read(buffer);
+        } catch (PolardbxException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("failed to check fileKey for {}", fileName, e);
+        }
+        return read;
     }
 
     public boolean checkFileStatus() {
@@ -661,6 +817,10 @@ public class BinlogDumpReader {
         }
     }
 
+    public boolean hasNextFile() {
+        return hasNext();
+    }
+
     protected void rotate() throws Exception {
         this.close();
         String preFileName = fileName;
@@ -671,24 +831,31 @@ public class BinlogDumpReader {
         this.startPosition = 4;
 
         if (supportQuickDownload) {
-            log.info("try get {} from local in quick mode", fileName);
-            cdcFile = logFileManager.getLocalBinlogFileByName(fileName);
-            if (cdcFile == null) {
-                if (dumpDownloader == null || dumpDownloader.isFinished()) {
-                    initDumpDownloader();
-                }
-                log.info("{} does not exist in local, try get from downloader", fileName);
-                cdcFile = dumpDownloader.getFile(fileName);
-                log.info("{} is got from downloader", fileName);
-            }
+            getFile();
         } else {
             // 在normal模式下不会切换用download，直接直连
             cdcFile = logFileManager.getBinlogFileByName(fileName);
         }
 
+        // 先获取 fileKey 再打开 channel，避免在两者之间文件被重建导致无法检测
+        initFileKey();
         this.channel = cdcFile.getReadChannel();
         log.info("rotate to next file {}", this.fileName);
         this.read();
+    }
+
+    protected void getFile() throws Exception {
+        cdcFile = logFileManager.getLocalBinlogFileByName(fileName);
+        if (cdcFile == null) {
+            if (dumpDownloader == null || dumpDownloader.isFinished()) {
+                initDumpDownloader(clientTraceMark);
+            }
+            log.info("[{}] {} does not exist in local, try get from downloader", clientTraceMark, fileName);
+            cdcFile = dumpDownloader.getFile(fileName);
+            log.info("[{}] {} is got from downloader", clientTraceMark, fileName);
+        } else {
+            log.info("[{}] {} is got from local", clientTraceMark, fileName);
+        }
     }
 
     private boolean checkLocalFileExist() {
@@ -699,9 +866,9 @@ public class BinlogDumpReader {
     /**
      * 检测到本地文件不存在，初始化下载器，开始下载
      */
-    private void initDumpDownloader() {
+    protected void initDumpDownloader(String trace) {
         log.info("init dump downloader...");
-        dumpDownloader = BinlogDumpDownloader.buildBinlogDumpDownloader(dumpDownloader, fileName);
+        dumpDownloader = BinlogDumpDownloader.buildBinlogDumpDownloader(dumpDownloader, fileName, trace);
         dumpDownloader.init();
         this.registerRotateObserver(dumpDownloader);
     }
@@ -717,7 +884,7 @@ public class BinlogDumpReader {
                 channel.close();
             }
         } catch (Exception e) {
-            log.warn("{} close fail ", fileName, e);
+            log.warn("[{}] {} close fail ", clientTraceMark, fileName, e);
         } finally {
             logFileManager.getLogFileLockManager().unLockRead(fileName);
         }
@@ -738,7 +905,6 @@ public class BinlogDumpReader {
         this.dumpDownloader = downloader;
     }
 
-
     public enum DumpMode {
         NORMAL,
         QUICK
@@ -747,7 +913,7 @@ public class BinlogDumpReader {
     /**
      * 限制读取的长度不要超过lastCursor，以免读到刚刚写入的不完整的事件
      */
-    private void limitBuffer() throws IOException {
+    public void limitBuffer() throws IOException {
         BinlogCursor cursor = logFileManager.getLatestFileCursor();
         if (cursor.getFileSequence() == fileSequence) {
             if (cursor.getFilePosition() < 4) {
@@ -755,7 +921,8 @@ public class BinlogDumpReader {
                 buffer.limit(buffer.position());
             } else {
                 long maxBytesCanRead = cursor.getFilePosition() - channel.position();
-                if (buffer.remaining() > maxBytesCanRead) {
+                long maxRemaining = buffer.capacity() - buffer.position();
+                if (maxRemaining > maxBytesCanRead) {
                     buffer.limit(buffer.position() + (int) maxBytesCanRead);
                 }
             }

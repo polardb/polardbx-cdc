@@ -145,6 +145,10 @@ public class StreamMetrics implements MetricsObserver {
         return METRICS_MAP.getUnchecked(streamId);
     }
 
+    public static void remove(String streamId) {
+        METRICS_MAP.invalidate(streamId);
+    }
+
     public StreamMetrics snapshot() {
         StreamMetrics result = new StreamMetrics(this.streamId);
         result.totalWriteDdlEventCount = this.totalWriteDdlEventCount;

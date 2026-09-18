@@ -79,7 +79,7 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
             s -> s.where(ColumnarTaskConfigDynamicSqlSupport.containerId, SqlBuilder.isEqualTo(instId)));
 
         processStart(localTaskConfigs);
-        watchMemory();
+//        watchMemory();
     }
 
     private void processStart(List<ColumnarTaskConfig> taskConfigs) {
@@ -236,8 +236,11 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
         log.warn("prepare to start task {}.", taskName);
         CommandResult launcherResult = commander.execCommand(
             new String[] {"bash", "-c", "ps -ef | grep 'ColumnarLauncher' | grep -v grep | wc -l"}, 1000);
-        log.debug("{} {}: ps check result launcher code={}, launcher count={}", restart ? "Restart" : "Start", taskName,
-            launcherResult.getCode(), StringUtils.chomp(launcherResult.getMsg()));
+        if (log.isDebugEnabled()) {
+            log.debug("{} {}: ps check result launcher code={}, launcher count={}", restart ? "Restart" : "Start",
+                taskName,
+                launcherResult.getCode(), StringUtils.chomp(launcherResult.getMsg()));
+        }
         if (launcherResult.getCode() == 0) {
             int launcherCount = Integer.parseInt(StringUtils.getDigits(launcherResult.getMsg()));
             switch (launcherCount) {
@@ -343,6 +346,7 @@ public class ColumnarWatcher extends AbstractBinlogTimerTask {
         }
     }
 
+    @Deprecated
     public void watchMemory() {
         try {
             int memoryUsage = 0;

@@ -44,13 +44,13 @@ public class BinlogExtractorTest extends BaseTest {
 
             List<DnHost> dnHostList = new ArrayList<>();
             dnHostList.add(
-                new DnHost("127.0.0.1", 3306, "root", "123456", "utf8", "xrelease-230821142340-71dc-rdkw-dn-0"));
+                new DnHost("127.0.0.1", 3306, "test_user", "test_password", "utf8", "test-cluster-dn-0"));
             dnHostList.add(
-                new DnHost("127.0.0.1", 3307, "root", "123456", "utf8", "xrelease-230821142340-71dc-rdkw-dn-1"));
+                new DnHost("127.0.0.1", 3307, "test_user", "test_password", "utf8", "test-cluster-dn-1"));
             when(extractor.buildDnHost(anyString())).thenReturn(dnHostList);
 
             BinlogParameter parameter = new BinlogParameter();
-            parameter.setStorageInstId("xrelease-230821142340-71dc-rdkw-dn-0");
+            parameter.setStorageInstId("test-cluster-dn-0");
             String rdsBinlogPath = "";
             long serverId = 1;
 

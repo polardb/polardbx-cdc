@@ -14,6 +14,7 @@ import com.aliyun.polardbx.binlog.domain.EnvConfigChangeInfo;
 import com.aliyun.polardbx.binlog.domain.po.BinlogEnvConfigHistory;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.collect.Lists;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.DuplicateKeyException;
@@ -23,6 +24,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
@@ -30,7 +32,12 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 @Slf4j
 public class TimelineEnvConfig {
 
+    @Getter
     private final ConcurrentHashMap<String, String> configMap = new ConcurrentHashMap<>();
+
+    public boolean containsKey(String key) {
+        return configMap.containsKey(key);
+    }
 
     public String getValue(String key) {
         String value = configMap.get(key);
@@ -49,12 +56,22 @@ public class TimelineEnvConfig {
         return StringUtils.isBlank(value) ? defaultValue : value;
     }
 
+    public String getStringIgnoreMetaDb(String key, String defaultValue) {
+        String value = configMap.get(key);
+        return StringUtils.isBlank(value) ? defaultValue : value;
+    }
+
     public Integer getInt(String key) {
         return Integer.parseInt(getValue(key));
     }
 
     public Integer getInt(String key, int defaultValue) {
         String value = getValue(key);
+        return StringUtils.isBlank(value) ? defaultValue : Integer.parseInt(value);
+    }
+
+    public Integer getIntIgnoreMetaDb(String key, int defaultValue) {
+        String value = configMap.get(key);
         return StringUtils.isBlank(value) ? defaultValue : Integer.parseInt(value);
     }
 
@@ -67,13 +84,31 @@ public class TimelineEnvConfig {
         return StringUtils.isBlank(value) ? defaultValue : Long.parseLong(value);
     }
 
+    private Boolean parseBoolean(String value) {
+        if ("RANDOM".equalsIgnoreCase(value)) {
+            return new Random().nextBoolean();
+        } else if ("ON".equalsIgnoreCase(value)) {
+            return true;
+        } else if ("OFF".equalsIgnoreCase(value)) {
+            return false;
+        } else {
+            return Boolean.parseBoolean(value);
+        }
+    }
+
     public Boolean getBoolean(String key) {
-        return Boolean.parseBoolean(getValue(key));
+        String value = getValue(key);
+        return parseBoolean(value);
     }
 
     public Boolean getBoolean(String key, boolean defaultValue) {
         String value = getValue(key);
-        return StringUtils.isBlank(value) ? defaultValue : Boolean.parseBoolean(value);
+        return StringUtils.isBlank(value) ? defaultValue : parseBoolean(value);
+    }
+
+    public Boolean getBooleanIgnoreMetaDb(String key, boolean defaultValue) {
+        String value = configMap.get(key);
+        return StringUtils.isBlank(value) ? defaultValue : parseBoolean(value);
     }
 
     public Double getDouble(String key) {
@@ -101,10 +136,35 @@ public class TimelineEnvConfig {
             JSONObject jsonObject = JSON.parseObject(content);
             for (Map.Entry<String, Object> entry : jsonObject.entrySet()) {
                 configMap.put(entry.getKey(), (String) entry.getValue());
+                log.info("time env config refreshed set {} = {}, tso: {}", entry.getKey(), entry.getValue(), tso);
             }
         } else {
             throw new PolardbxException("time line env config is not exists for tso " + tso);
         }
+    }
+
+    public boolean configExistsAlready(String configKey, boolean configValue, String tso) {
+        JdbcTemplate metaTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
+        List<String> contentList = metaTemplate
+            .query(
+                "select change_env_content from binlog_env_config_history where tso <= ? order by tso asc",
+                new ArgumentPreparedStatementSetter(new Object[] {tso}),
+                resultSet -> {
+                    List<String> resultList = Lists.newArrayList();
+                    while (resultSet.next()) {
+                        resultList.add(resultSet.getString(1));
+                    }
+                    return resultList;
+                });
+        if (contentList != null) {
+            for (String content : contentList) {
+                JSONObject jsonObject = JSON.parseObject(content);
+                if (parseBoolean(jsonObject.getString(configKey)) == configValue) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public void initConfigByTso(String tso) {
@@ -129,6 +189,8 @@ public class TimelineEnvConfig {
                 }
             });
         }
+        log.info("time env config init with compression: {}, tso: {}",
+            getBoolean(ConfigKeys.BINLOG_TRANSACTION_COMPRESSION), tso);
     }
 
     public void tryRecordEnvConfigHistory(final String tso,

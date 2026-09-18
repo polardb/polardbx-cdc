@@ -27,6 +27,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_CONNECTION_INIT_SQL;
@@ -49,44 +50,59 @@ public class DbMetaCache {
     private final int maxPoolSize;
     private final String sqlMode;
     private final boolean longSql;
+    private final boolean isLabEnv;
+    private final boolean isLab80;
+    private final Map<String, String> customizedUsingUkAsPkTables;
+    private final LoadingCache<String, DruidDataSource> dataSources;
+    private final LoadingCache<String, TableInfo> tableInfos;
 
-    private final LoadingCache<String, DruidDataSource> dataSources = CacheBuilder.newBuilder()
-        .expireAfterAccess(120, TimeUnit.SECONDS)
-        .removalListener(
-            (RemovalListener<String, DruidDataSource>) notification -> {
-                try {
-                    DbMetaCache.this.tableInfos.invalidateAll();
-                    DruidDataSource ds = notification.getValue();
-                    ds.close();
-                    log.info("DbMetaCache: successfully closed datasource for " + notification.getKey());
-                } catch (Exception e) {
-                    log.error("DbMetaCache: try close datasource failed for " + notification.getKey());
-                }
-            })
-        .build(new CacheLoader<String, DruidDataSource>() {
+    public DbMetaCache(HostInfo hostInfo, int minPoolSize, int maxPoolSize, boolean longSql,
+                       Map<String, String> customizedUsingUkAsPkTables) {
+        this.hostInfo = hostInfo;
+        this.minPoolSize = Math.min(minPoolSize, maxPoolSize);
+        this.maxPoolSize = maxPoolSize;
+        this.sqlMode = DynamicApplicationConfig.getString(ConfigKeys.RPL_DEFAULT_SQL_MODE);
+        this.longSql = longSql;
+        this.isLabEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
+        this.isLab80 = DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_LAB_80_ENABLED);
+        this.customizedUsingUkAsPkTables = customizedUsingUkAsPkTables;
+
+        CacheBuilder<String, DruidDataSource> builder = CacheBuilder.newBuilder()
+            .removalListener(
+                notification -> {
+                    try {
+                        DbMetaCache.this.tableInfos.invalidateAll();
+                        DruidDataSource ds = notification.getValue();
+                        ds.close();
+                        log.info("DbMetaCache: successfully closed datasource for " + notification.getKey());
+                    } catch (Exception e) {
+                        log.error("DbMetaCache: try close datasource failed for " + notification.getKey());
+                    }
+                });
+        if (isLabEnv) {
+            builder.expireAfterAccess(120, TimeUnit.SECONDS);
+        }
+        this.dataSources = builder.build(new CacheLoader<String, DruidDataSource>() {
             @Override
             public DruidDataSource load(@NotNull String key) throws Exception {
                 return loadDataSource(key);
             }
         });
 
-    private final LoadingCache<String, TableInfo> tableInfos = CacheBuilder.newBuilder().build(
-        new CacheLoader<String, TableInfo>() {
-            @Override
-            public TableInfo load(@NotNull String key) throws Exception {
-                String schema = StringUtils.substringBefore(key, ".");
-                String tbName = StringUtils.substringAfter(key, ".");
-                DataSource dataSource = getDataSource(schema);
-                return DbMetaManager.getTableInfo(dataSource, schema, tbName, hostInfo.getType());
-            }
-        });
+        this.tableInfos = CacheBuilder.newBuilder().build(
+            new CacheLoader<String, TableInfo>() {
+                @Override
+                public TableInfo load(@NotNull String key) throws Exception {
+                    String schema = StringUtils.substringBefore(key, ".");
+                    String tbName = StringUtils.substringAfter(key, ".");
+                    DataSource dataSource = getDataSource(schema);
+                    return DbMetaManager.getTableInfo(dataSource, schema, tbName, hostInfo.getType());
+                }
+            });
+    }
 
     public DbMetaCache(HostInfo hostInfo, int minPoolSize, int maxPoolSize, boolean longSql) {
-        this.hostInfo = hostInfo;
-        this.minPoolSize = Math.min(minPoolSize, maxPoolSize);
-        this.maxPoolSize = maxPoolSize;
-        this.sqlMode = DynamicApplicationConfig.getString(ConfigKeys.RPL_DEFAULT_SQL_MODE);
-        this.longSql = longSql;
+        this(hostInfo, minPoolSize, maxPoolSize, longSql, null);
     }
 
     public DataSource getDataSource(String schema) {
@@ -149,6 +165,9 @@ public class DbMetaCache {
             String connInitSqlConfig = DynamicApplicationConfig.getString(RPL_CONNECTION_INIT_SQL);
             String[] array = StringUtils.split(connInitSqlConfig, ";");
             connectionInitSqls.addAll(Lists.newArrayList(array));
+            if (isLabEnv && isLab80) {
+                connectionInitSqls.add("set sql_require_primary_key = 0");
+            }
         }
         return connectionInitSqls;
     }
@@ -194,6 +213,16 @@ public class DbMetaCache {
         } catch (Exception e) {
             log.error("failed in getTableInfo, host: {}, port: {}, schema: {}, tbName: {}",
                 hostInfo.getHost(), hostInfo.getPort(), schema, tbName);
+            throw e;
+        }
+    }
+
+    public TableInfo getTableInfo(String fullTableName) throws Exception {
+        try {
+            return tableInfos.getUnchecked(fullTableName.toLowerCase());
+        } catch (Exception e) {
+            log.error("failed in getTableInfo, host: {}, port: {}, fullTbName: {}",
+                hostInfo.getHost(), hostInfo.getPort(), fullTableName);
             throw e;
         }
     }

@@ -30,7 +30,7 @@ public interface IFileReader {
      * @param buffer 缓冲区
      * @return 本地读取的字节数
      */
-    int read(byte[] buffer) throws IOException;
+    int read(byte[] buffer) throws IOException, InterruptedException;
 
     /**
      * 检查该binlog是否已经完成了所有的写入

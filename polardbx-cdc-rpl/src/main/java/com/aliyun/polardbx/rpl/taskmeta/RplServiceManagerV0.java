@@ -6,8 +6,6 @@
  */
 package com.aliyun.polardbx.rpl.taskmeta;
 
-
-
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.TypeReference;
 import com.aliyun.polardbx.binlog.ResultCode;

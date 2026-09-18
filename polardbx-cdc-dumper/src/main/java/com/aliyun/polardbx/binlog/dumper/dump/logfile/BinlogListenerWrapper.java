@@ -27,6 +27,17 @@ public class BinlogListenerWrapper implements IBinlogListener {
     }
 
     @Override
+    public void stop() {
+        for (IBinlogListener listener : binlogListeners) {
+            try {
+                listener.stop();
+            } catch (Exception e) {
+                logger.error("stop binlog listener error", e);
+            }
+        }
+    }
+
+    @Override
     public void onCreateFile(File file) {
         try {
             logger.info("file:{} is created", file.getName());

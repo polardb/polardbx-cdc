@@ -1,0 +1,374 @@
+#!/usr/bin/env bash
+#
+# PolarDB-X CDC 开发环境脚本
+# 用法: ./dev.sh <command> [options]
+#
+# 命令:
+#   build                       全量编译 (clean install)
+#   rebuild [module]            增量编译
+#   start [-d PORT] [--jvm-mem=SIZE]  启动 CDC Daemon 服务
+#   stop                        停止服务
+#   check                       检查服务是否就绪 (退出码: 0=就绪, 1=未启动, 2=启动中)
+#   log [-f] [grep PATTERN]     查看日志
+#
+# 首次使用:
+#   1. cp dev.sh.example dev.sh
+#   2. cp env/env.properties.example env/env.properties && vim env/env.properties
+#   3. ./dev.sh build && ./dev.sh start
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
+ASSEMBLE_MODULE="polardbx-cdc-assemble"
+DIST_DIR="$PROJECT_DIR/$ASSEMBLE_MODULE/target/polardbx-binlog.standalone"
+PID_FILE="$DIST_DIR/daemon.pid"
+LOG_FILE="$HOME/logs/polardbx-binlog/Daemon/default.log"
+ENV_DIR="$PROJECT_DIR/env"
+ENV_FILE="$ENV_DIR/env.properties"
+
+# ============================================================
+# JVM 配置 (仅此处可按需调整)
+# ============================================================
+JVM_MEM="512m"
+DEBUG_PORT=""
+
+# ============================================================
+# 工具函数
+# ============================================================
+log_info()  { echo "[dev.sh] $*"; }
+log_error() { echo "[dev.sh] ERROR: $*" >&2; }
+
+# 从 env/env.properties 读取指定 key 的值
+# 用法: read_env_prop <key> [default_value]
+read_env_prop() {
+    local key="$1"
+    local default_val="${2:-}"
+    if [ -f "$ENV_FILE" ]; then
+        local val
+        val=$(grep -m1 "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2-)
+        if [ -n "$val" ]; then
+            echo "$val"
+            return
+        fi
+    fi
+    echo "$default_val"
+}
+
+MVN_SETTINGS=""
+if [ -f "$HOME/.m2/settings.xml" ]; then
+    MVN_SETTINGS="-s $HOME/.m2/settings.xml"
+fi
+
+mvn_run() {
+    # shellcheck disable=SC2086
+    mvn $MVN_SETTINGS "$@"
+}
+
+get_pid() {
+    if [ -f "$PID_FILE" ]; then
+        local pid
+        pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "$pid"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+usage() {
+    sed -n '3,18p' "$0" | sed 's/^# *//'
+    exit 1
+}
+
+# 解压 assembly 产物到 DIST_DIR
+extract_dist() {
+    local tar_file="$PROJECT_DIR/$ASSEMBLE_MODULE/target/polardbx-binlog.tar.gz"
+    local target_dir="$PROJECT_DIR/$ASSEMBLE_MODULE/target"
+    if [ -f "$tar_file" ]; then
+        rm -rf "$DIST_DIR"
+        tar -xzf "$tar_file" -C "$target_dir"
+        log_info "已解压分发包到: $DIST_DIR"
+    else
+        log_error "未找到 tar.gz: $tar_file"
+        exit 1
+    fi
+}
+
+# ============================================================
+# build - 全量编译
+# ============================================================
+cmd_build() {
+    log_info "全量编译 (mvn clean install -Pdev -DskipTests) ..."
+    cd "$PROJECT_DIR"
+    local build_log="$PROJECT_DIR/build.log"
+    if mvn_run clean install -Pdev -DskipTests 2>&1 \
+        | tee "$build_log" \
+        | grep --line-buffered -E 'Building .* \[|BUILD (SUCCESS|FAILURE)|\[ERROR\]'; then
+        extract_dist
+        log_info "编译完成。输出目录: $DIST_DIR"
+    else
+        log_error "编译失败，完整日志: $build_log"
+        exit 1
+    fi
+}
+
+# ============================================================
+# rebuild - 增量编译
+# ============================================================
+cmd_rebuild() {
+    local module="${1:-}"
+    cd "$PROJECT_DIR"
+
+    if [ -z "$module" ]; then
+        log_info "增量编译 assemble 及其依赖链 ..."
+        local build_log="$PROJECT_DIR/build.log"
+        if mvn_run install -Pdev -pl "$ASSEMBLE_MODULE" -am -DskipTests 2>&1 \
+            | tee "$build_log" \
+            | grep --line-buffered -E 'Building .* \[|BUILD (SUCCESS|FAILURE)|\[ERROR\]'; then
+            extract_dist
+            log_info "增量编译完成。"
+        else
+            log_error "编译失败，完整日志: $build_log"
+            exit 1
+        fi
+    else
+        log_info "增量编译模块: $module ..."
+        local build_log="$PROJECT_DIR/build.log"
+        if ! mvn_run install -Pdev -pl "$module" -DskipTests 2>&1 \
+            | tee "$build_log" \
+            | grep --line-buffered -E 'Building .* \[|BUILD (SUCCESS|FAILURE)|\[ERROR\]'; then
+            log_error "编译失败，完整日志: $build_log"
+            exit 1
+        fi
+
+        # 将编译产物复制到 dist 的 lib/ 目录
+        local jar_file
+        jar_file=$(ls "$PROJECT_DIR/$module/target/$module"-*.jar 2>/dev/null | grep -v sources | grep -v javadoc | head -1)
+        if [ -n "$jar_file" ] && [ -d "$DIST_DIR/lib" ]; then
+            local base_name
+            base_name=$(basename "$jar_file")
+            # 删除旧版本 JAR（模块名相同的）
+            rm -f "$DIST_DIR/lib/$module"-*.jar
+            cp "$jar_file" "$DIST_DIR/lib/$base_name"
+            log_info "已更新: lib/$base_name"
+        else
+            log_error "找不到编译产物或 lib 目录，请先运行 ./dev.sh build"
+            exit 1
+        fi
+        log_info "增量编译完成。"
+    fi
+}
+
+# ============================================================
+# start - 后台启动
+# ============================================================
+cmd_start() {
+    # 解析仅限 JVM 级别的启动参数
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --jvm-mem=*) JVM_MEM="${1#*=}" ;;
+            -d)          shift; DEBUG_PORT="$1" ;;
+            *) log_error "未知参数: $1"; exit 1 ;;
+        esac
+        shift
+    done
+
+    # 预检: env.properties 是否存在
+    if [ ! -f "$ENV_FILE" ]; then
+        log_error "未找到配置文件: env/env.properties"
+        log_info "请先准备配置:"
+        log_info "  cp env/env.properties.example env/env.properties"
+        log_info "  编辑 env/env.properties 填入你的 MetaDB/CN 连接信息"
+        exit 1
+    fi
+
+    # 从 env.properties 读取脚本自身需要的值 (Java 通过 classpath 直接读取)
+    local DAEMON_PORT
+    DAEMON_PORT=$(read_env_prop daemon_port 3007)
+    local METADB_URL_DISPLAY
+    METADB_URL_DISPLAY=$(read_env_prop metaDb_url)
+    local POLARX_URL_DISPLAY
+    POLARX_URL_DISPLAY=$(read_env_prop polarx_url)
+
+    if [ -z "$METADB_URL_DISPLAY" ]; then
+        log_error "metaDb_url 未在 env/env.properties 中配置"
+        exit 1
+    fi
+
+    # 检查是否已在运行
+    if pid=$(get_pid 2>/dev/null); then
+        log_error "服务已在运行 (PID: $pid)。先执行 ./dev.sh stop"
+        exit 1
+    fi
+
+    # 检查 dist 目录
+    if [ ! -d "$DIST_DIR/lib" ]; then
+        log_error "未找到编译产物，请先运行 ./dev.sh build"
+        exit 1
+    fi
+
+    cd "$DIST_DIR"
+
+    # 构建 JVM 参数 (仅 JVM 基础设施, 不含 CDC 应用配置)
+    local JAVA_OPTS="-server -Xms${JVM_MEM} -Xmx${JVM_MEM} -Xss1m"
+    JAVA_OPTS="$JAVA_OPTS -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+    JAVA_OPTS="$JAVA_OPTS -Djava.net.preferIPv4Stack=true"
+    JAVA_OPTS="$JAVA_OPTS -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$HOME/logs"
+    JAVA_OPTS="$JAVA_OPTS -XX:+CrashOnOutOfMemoryError"
+    JAVA_OPTS="$JAVA_OPTS -Dlogback.configurationFile=conf/logback.xml"
+    JAVA_OPTS="$JAVA_OPTS -DtaskName=Daemon"
+    JAVA_OPTS="$JAVA_OPTS -Dcdc.home.dir=$DIST_DIR"
+    # 本地开发安全覆盖 (release profile 默认值不适用于本地)
+    JAVA_OPTS="$JAVA_OPTS -Dmetadb_scan_switch=false"
+    JAVA_OPTS="$JAVA_OPTS -Dlatest_server_address_persist_file=$HOME/logs/latest_server_addr.json"
+
+    # 远程调试
+    if [ -n "$DEBUG_PORT" ]; then
+        JAVA_OPTS="$JAVA_OPTS -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:$DEBUG_PORT"
+        log_info "远程调试端口: $DEBUG_PORT"
+    fi
+
+    # Classpath: env/ (env.properties 覆盖) > conf/ (config.properties 默认) > lib/
+    local CLASSPATH="$ENV_DIR:conf:lib/*"
+
+    log_info "启动 PolarDB-X CDC Daemon ..."
+    log_info "  metaDb_url:   $METADB_URL_DISPLAY"
+    log_info "  polarx_url:   ${POLARX_URL_DISPLAY:-<未配置>}"
+    log_info "  daemon_port:  $DAEMON_PORT"
+    log_info "  JVM 内存:     $JVM_MEM"
+    log_info "  日志文件:     $LOG_FILE"
+
+    # 后台启动
+    local LOG_DIR="$HOME/logs/polardbx-binlog/Daemon"
+    mkdir -p "$LOG_DIR"
+    # shellcheck disable=SC2086
+    java $JAVA_OPTS \
+        -classpath "$CLASSPATH" \
+        com.aliyun.polardbx.binlog.daemon.DaemonBootStrap \
+        >> "$LOG_DIR/daemon-stdout.log" 2>&1 &
+
+    local pid=$!
+    echo "$pid" > "$PID_FILE"
+    log_info "已启动 (PID: $pid)。使用 ./dev.sh check 检查就绪状态"
+}
+
+# ============================================================
+# stop - 停止服务
+# ============================================================
+cmd_stop() {
+    local pid
+    if ! pid=$(get_pid 2>/dev/null); then
+        log_info "服务未在运行。"
+        rm -f "$PID_FILE"
+        return 0
+    fi
+
+    log_info "停止服务 (PID: $pid) ..."
+    kill "$pid" 2>/dev/null || true
+
+    # 等待最多 30 秒
+    local timeout=30
+    while [ $timeout -gt 0 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$PID_FILE"
+            log_info "服务已停止。"
+            return 0
+        fi
+        sleep 1
+        timeout=$((timeout - 1))
+    done
+
+    # 超时，强制杀死
+    log_info "优雅关闭超时，执行 kill -9 ..."
+    kill -9 "$pid" 2>/dev/null || true
+    rm -f "$PID_FILE"
+    log_info "服务已强制停止。"
+}
+
+# ============================================================
+# check - 健康检查 (通过 CN 执行 SHOW MASTER STATUS 判断)
+# ============================================================
+cmd_check() {
+    local pid
+    if ! pid=$(get_pid 2>/dev/null); then
+        log_info "服务未在运行。"
+        exit 1
+    fi
+
+    log_info "进程存活 (PID: $pid)，通过 CN 检查 CDC 状态 ..."
+
+    # 从 env.properties 解析 CN 连接信息
+    local polarx_url polarx_user polarx_pass
+    polarx_url=$(read_env_prop polarx_url)
+    polarx_user=$(read_env_prop polarx_username polardbx_root)
+    polarx_pass=$(read_env_prop polarx_password)
+
+    if [ -z "$polarx_url" ]; then
+        log_error "polarx_url 未配置，无法检查"
+        exit 1
+    fi
+
+    # 从 jdbc:mysql://host:port/db?params 中提取 host 和 port
+    local host_port
+    host_port=$(echo "$polarx_url" | sed 's|jdbc:mysql://||' | cut -d'/' -f1)
+    local cn_host cn_port
+    cn_host=$(echo "$host_port" | cut -d':' -f1)
+    cn_port=$(echo "$host_port" | cut -d':' -f2)
+
+    if mysql -h"$cn_host" -P"$cn_port" -u"$polarx_user" -p"$polarx_pass" \
+        -e "SHOW MASTER STATUS" >/dev/null 2>&1; then
+        log_info "CDC 服务就绪 (SHOW MASTER STATUS 成功)。"
+        exit 0
+    fi
+
+    log_info "CDC 服务启动中，尚未就绪 ..."
+    exit 2
+}
+
+# ============================================================
+# log - 查看日志
+# ============================================================
+cmd_log() {
+    if [ ! -f "$LOG_FILE" ]; then
+        log_error "日志文件不存在: $LOG_FILE"
+        log_info "可能还未启动过服务，或日志位于: $HOME/logs/polardbx-binlog/Daemon/"
+        exit 1
+    fi
+
+    if [ "${1:-}" = "-f" ]; then
+        tail -f "$LOG_FILE"
+    elif [ "${1:-}" = "grep" ]; then
+        shift
+        grep "${1:-ERROR}" "$LOG_FILE" | tail -100
+    else
+        tail -200 "$LOG_FILE"
+    fi
+}
+
+# ============================================================
+# 主入口
+# ============================================================
+COMMAND="${1:-}"
+
+if [ -z "$COMMAND" ]; then
+    usage
+fi
+
+shift
+
+case "$COMMAND" in
+    build)   cmd_build ;;
+    rebuild) cmd_rebuild "$@" ;;
+    start)   cmd_start "$@" ;;
+    stop)    cmd_stop ;;
+    check)   cmd_check ;;
+    log)     cmd_log "$@" ;;
+    -h|--help|help) usage ;;
+    *)
+        log_error "未知命令: $COMMAND"
+        usage
+        ;;
+esac

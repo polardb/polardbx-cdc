@@ -48,6 +48,10 @@ public class ExecutionConfig {
      */
     private long runtimeVersion;
     /**
+     * 运行时子版本号，主要用于 light re-balance
+     */
+    private long subRuntimeVersion;
+    /**
      * recover tso for each stream
      */
     private Map<String, String> recoverTsoMap;

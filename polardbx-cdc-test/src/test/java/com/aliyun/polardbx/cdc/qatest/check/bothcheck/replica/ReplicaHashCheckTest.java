@@ -10,9 +10,11 @@ import com.aliyun.polardbx.cdc.qatest.base.BaseTestCase;
 import com.aliyun.polardbx.cdc.qatest.base.JdbcUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -27,13 +29,16 @@ import java.util.List;
 @Slf4j
 public class ReplicaHashCheckTest extends BaseTestCase {
     private static final String REPLICA_HASH_CHECK = "REPLICA HASHCHECK * FROM `%s`.`%s`";
+    private static final String SHOW_CREATE_TABLE = "SHOW CREATE TABLE `%s`.`%s`";
 
     @Test
     @SneakyThrows
     public void baseTest() {
         List<String> failedTables = new ArrayList<>();
+        List<String> skippedTables = new ArrayList<>();
         int total = 0;
         int failed = 0;
+        int skipped = 0;
         try (Connection conn = getPolardbxConnection();
             Statement stmt = conn.createStatement()) {
             List<String> dbList = getDatabaseList();
@@ -43,16 +48,37 @@ public class ReplicaHashCheckTest extends BaseTestCase {
                     total++;
                     String sql = String.format(REPLICA_HASH_CHECK, escape(db), escape(tb));
                     try {
+                        if (isExternalizedTable(stmt, db, tb)) {
+                            log.info("skip replica hashcheck for externalized table:{}.{}", db, tb);
+                            skipped++;
+                            skippedTables.add(String.format("%s.%s", db, tb));
+                            continue;
+                        }
                         stmt.execute(sql);
                     } catch (Exception e) {
-                        log.error("replica hashcheck table:{}.{} failed!", db, tb);
+                        log.error("replica hashcheck table:{}.{} failed!", db, tb, e);
                         failed++;
                         failedTables.add(String.format("%s.%s", db, tb));
                     }
                 }
             }
         }
-        log.info("replica hashcheck total:{}, failed:{}, failedTables:{}", total, failed, failedTables);
+        log.info("replica hashcheck total:{}, skipped:{}, skippedTables:{}, failed:{}, failedTables:{}",
+            total, skipped, skippedTables, failed, failedTables);
+    }
+
+    private static boolean isExternalizedTable(Statement stmt, String db, String tb) throws SQLException {
+        String sql = String.format(SHOW_CREATE_TABLE, escape(db), escape(tb));
+        try (ResultSet resultSet = stmt.executeQuery(sql)) {
+            if (!resultSet.next()) {
+                throw new SQLException(String.format("SHOW CREATE TABLE returned no row for %s.%s", db, tb));
+            }
+            String createTable = resultSet.getString(2);
+            if (StringUtils.isBlank(createTable)) {
+                throw new SQLException(String.format("SHOW CREATE TABLE returned empty DDL for %s.%s", db, tb));
+            }
+            return StringUtils.containsIgnoreCase(createTable, "EXTERNALIZE");
+        }
     }
 
     private List<String> getDatabaseList() throws SQLException {

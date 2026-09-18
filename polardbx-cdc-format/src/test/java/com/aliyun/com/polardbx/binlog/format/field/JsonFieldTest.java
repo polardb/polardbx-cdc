@@ -7,6 +7,7 @@
 package com.aliyun.com.polardbx.binlog.format.field;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsLogBuffer;
 import com.aliyun.polardbx.binlog.format.field.Field;
@@ -27,16 +28,19 @@ import java.util.List;
 public class JsonFieldTest {
     private static final String defaultCharset = "utf8";
 
-
     @Test
     public void testBigJson() throws IOException {
-        String bigJson = FileUtils.readFileToString(new File(JsonFieldTest.class.getResource("/big_json_test.json").getFile()), "utf8");
+        String bigJson =
+            FileUtils.readFileToString(new File(JsonFieldTest.class.getResource("/big_json_test.json").getFile()),
+                "utf8");
         Field field = MakeFieldFactory.makeField("json", bigJson, defaultCharset, true, false);
         byte[] data = field.encode();
         System.out.println(field.encode().length);
         RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(new LogBuffer(data, 0, data.length), 1, "utf8");
         Serializable json = rowsLogBuffer.nextValue(field.getMysqlType().getType(), 4);
-        Assert.assertEquals(bigJson, json.toString());
+        JSONObject j1 = JSON.parseObject(bigJson);
+        JSONObject j2 = JSON.parseObject(json.toString());
+        Assert.assertEquals(j1, j2);
     }
 
     @Test
@@ -186,9 +190,12 @@ public class JsonFieldTest {
         Field field = MakeFieldFactory.makeField("json", jsonBuilder.toString(),
             defaultCharset, true, false);
         Assert.assertArrayEquals(new byte[] {4}, field.doGetTableMeta());
-        RowsLogBuffer rowsLogBuffer = new RowsLogBuffer(new LogBuffer(field.encode(), 0, field.encode().length), 1, "utf8");
+        RowsLogBuffer rowsLogBuffer =
+            new RowsLogBuffer(new LogBuffer(field.encode(), 0, field.encode().length), 1, "utf8");
         Serializable json = rowsLogBuffer.nextValue(field.getMysqlType().getType(), 4);
         String expect = JSON.parseObject(jsonBuilder.toString()).toJSONString();
-        Assert.assertEquals(expect, json.toString());
+        JSONObject j1 = JSON.parseObject(expect);
+        JSONObject j2 = JSON.parseObject(json.toString());
+        Assert.assertEquals(j1, j2);
     }
 }

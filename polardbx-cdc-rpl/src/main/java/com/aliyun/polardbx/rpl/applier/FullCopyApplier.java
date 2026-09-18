@@ -7,6 +7,8 @@
 
 package com.aliyun.polardbx.rpl.applier;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
@@ -62,7 +64,8 @@ public class FullCopyApplier extends MysqlApplier {
             return;
         }
         try {
-            parallelExecuteDML((List<DefaultRowChange>) (List<?>) dbmsEvents, false);
+            boolean directIgnore = DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_FULL_COPY_DIRECT_IGNORE);
+            parallelExecuteDML((List<DefaultRowChange>) (List<?>) dbmsEvents, directIgnore);
         } catch (Exception e) {
             parallelExecuteDML((List<DefaultRowChange>) (List<?>) dbmsEvents, true);
         }

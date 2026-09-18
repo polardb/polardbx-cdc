@@ -159,7 +159,16 @@ public class LocalBinLogConnection implements ErosaConnection {
                         }
                         mindTimestamp = false;
                     }
-                    if (!func.sink(event, context.getLogPosition())) {
+
+                    if (event.getHeader().getType() == LogEvent.TRANSACTION_PAYLOAD_EVENT) {
+                        log.info("parse compression log at {}", event.getHeader().getLogPos());
+                        List<LogEvent> eventList = decoder.processIterateDecode(event, context);
+                        for (LogEvent e : eventList) {
+                            if (!func.sink(e, context.getLogPosition())) {
+                                break;
+                            }
+                        }
+                    } else if (!func.sink(event, context.getLogPosition())) {
                         needContinue = false;
                         break;
                     }

@@ -38,6 +38,7 @@ import java.sql.Timestamp;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_APPLY_DRY_RUN_ENABLED;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -53,6 +54,14 @@ public class StatisticalProxyTest extends RplWithGmsTablesBaseTest {
 
     @Test
     public void testFill() {
+        // 清除残留数据，避免其他测试通过静态单例污染计数器
+        StatMetrics.getInstance().getApplyCount().set(0);
+        StatMetrics.getInstance().getRt().set(0);
+        StatMetrics.getInstance().getInMessageCount().set(0);
+        StatMetrics.getInstance().getOutMessageCount().set(0);
+        StatMetrics.getInstance().getMergeBatchSize().set(0);
+        StatMetrics.getInstance().getSkipCounter().set(0);
+
         int i = 1;
         int avgSeconds = DynamicApplicationConfig.getInt(ConfigKeys.RPL_STATE_METRICS_FLUSH_INTERVAL_SECOND);
         while (i++ <= avgSeconds) {
@@ -207,14 +216,16 @@ public class StatisticalProxyTest extends RplWithGmsTablesBaseTest {
         SerialPipeline pipeline = new SerialPipeline(new PipelineConfig(), extractor, null);
         TaskContext.getInstance().setPipeline(pipeline);
         TaskContext.getInstance().setTask(new RplTask());
-        TaskContext.getInstance().getTask().setPosition("binlog.007113:0395877467#1434251977.1721277503.rtso(721956111966325971217506263351406223450000002488321155)");
+        TaskContext.getInstance().getTask().setPosition(
+            "binlog.007113:0395877467#1434251977.1721277503.rtso(721956111966325971217506263351406223450000002488321155)");
         StatisticalProxy.getInstance().init();
-        Assert.assertEquals(StatisticalProxy.getInstance().getPosition(), "binlog.007113:0395877467#1434251977.1721277503.rtso(721956111966325971217506263351406223450000002488321155)");
+        Assert.assertEquals(StatisticalProxy.getInstance().getPosition(),
+            "binlog.007113:0395877467#1434251977.1721277503.rtso(721956111966325971217506263351406223450000002488321155)");
     }
 
     @Test
     public void testInnerApplyWithCommitCount() throws Exception {
-        try(MockedStatic<StatMetrics> statMetricsMock = mockStatic(StatMetrics.class)){
+        try (MockedStatic<StatMetrics> statMetricsMock = mockStatic(StatMetrics.class)) {
             StatMetrics statMetrics = new StatMetrics();
             statMetricsMock.when(StatMetrics::getInstance).thenReturn(statMetrics);
             BaseExtractor extractor = new BaseExtractor();
@@ -227,11 +238,124 @@ public class StatisticalProxyTest extends RplWithGmsTablesBaseTest {
             mockConfig(ConfigKeys.IS_LAB_ENV, "true");
             List<DBMSEvent> dbmsEventList = Lists.newArrayList();
             for (int i = 0; i < 5; i++) {
-                dbmsEventList.add(new DefaultQueryLog("polardbx", "select 1", new Timestamp(System.currentTimeMillis()), 1, 1));
+                dbmsEventList.add(
+                    new DefaultQueryLog("polardbx", "select 1", new Timestamp(System.currentTimeMillis()), 1, 1));
             }
-            dbmsEventList.add(new DefaultRowChange(DBMSAction.INSERT, "polardbx", "t1", new DefaultColumnSet(Lists.newArrayList()), Lists.newArrayList(), Lists.newArrayList()));
+            dbmsEventList.add(
+                new DefaultRowChange(DBMSAction.INSERT, "polardbx", "t1", new DefaultColumnSet(Lists.newArrayList()),
+                    Lists.newArrayList(), Lists.newArrayList()));
             statisticalProxy.innerApply(dbmsEventList);
             Assert.assertEquals(1L, StatMetrics.getInstance().getPeriodCommitCount().get());
         }
     }
+
+    /**
+     * 测试 fill 方法中延迟计算逻辑：当 totalApplyDelay > 0 时使用该值
+     */
+    @Test
+    public void testFill_trueDelay_useApplyDelay() {
+        StatMetrics statMetrics = new StatMetrics();
+        statMetrics.getApplyCount().set(1);
+        statMetrics.setTotalApplyDelay(500);
+        statMetrics.addApplyAttemptCount(1);
+        statMetrics.setReceiveDelay(200);
+        statMetrics.addHeartbeatCount(3);
+
+        RplStatMetrics rplStatMetrics = new RplStatMetrics();
+        StatisticalProxy.getInstance().flushInterval = 1;
+        StatisticalProxy.getInstance().fill(rplStatMetrics, statMetrics, null, null);
+
+        // totalApplyDelay > 0 时优先使用
+        Assert.assertEquals(Long.valueOf(500L), rplStatMetrics.getTrueDelayMills());
+    }
+
+    /**
+     * 测试 fill 方法中延迟计算逻辑：totalApplyDelay=0 但 applyAttemptCount > 0 时用 position 时间差
+     */
+    @Test
+    public void testFill_trueDelay_usePositionTimestamp() {
+        StatMetrics statMetrics = new StatMetrics();
+        statMetrics.getApplyCount().set(1);
+        statMetrics.setTotalApplyDelay(0);
+        statMetrics.addApplyAttemptCount(1);
+        statMetrics.setReceiveDelay(0);
+        statMetrics.addHeartbeatCount(0);
+
+        long positionTimestamp = System.currentTimeMillis() / 1000 - 5;
+        StatisticalProxy.getInstance().recordPosition(
+            "binlog.000001:0000000004#1." + positionTimestamp);
+        RplStatMetrics rplStatMetrics = new RplStatMetrics();
+        StatisticalProxy.getInstance().flushInterval = 1;
+        StatisticalProxy.getInstance().fill(rplStatMetrics, statMetrics, null, null);
+
+        // applyAttemptCount > 0, totalApplyDelay=0 => 用 position 时间差
+        Assert.assertTrue(rplStatMetrics.getTrueDelayMills() >= 5000);
+        Assert.assertTrue(rplStatMetrics.getTrueDelayMills() < 7000);
+    }
+
+    /**
+     * 测试 fill 方法中延迟计算逻辑：仅有 receiveDelay > 0 时使用 receiveDelay
+     */
+    @Test
+    public void testFill_trueDelay_useReceiveDelay() {
+        StatMetrics statMetrics = new StatMetrics();
+        statMetrics.getApplyCount().set(1);
+        statMetrics.setTotalApplyDelay(0);
+        statMetrics.addApplyAttemptCount(0);
+        statMetrics.setReceiveDelay(300);
+        statMetrics.addHeartbeatCount(0);
+
+        RplStatMetrics rplStatMetrics = new RplStatMetrics();
+        StatisticalProxy.getInstance().flushInterval = 1;
+        StatisticalProxy.getInstance().fill(rplStatMetrics, statMetrics, null, null);
+
+        // receiveDelay > 0 时使用 receiveDelay
+        Assert.assertEquals(Long.valueOf(300L), rplStatMetrics.getTrueDelayMills());
+    }
+
+    /**
+     * 测试 fill 方法中延迟计算逻辑：仅收到心跳event时延迟为0
+     * 对应 commit 167deb9e 新增的心跳延迟逻辑
+     */
+    @Test
+    public void testFill_trueDelay_heartbeatOnly_delayIsZero() {
+        StatMetrics statMetrics = new StatMetrics();
+        statMetrics.getApplyCount().set(1);
+        statMetrics.setTotalApplyDelay(0);
+        statMetrics.addApplyAttemptCount(0);
+        statMetrics.setReceiveDelay(0);
+        statMetrics.addHeartbeatCount(5);  // 仅收到心跳
+
+        RplStatMetrics rplStatMetrics = new RplStatMetrics();
+        StatisticalProxy.getInstance().flushInterval = 1;
+        StatisticalProxy.getInstance().fill(rplStatMetrics, statMetrics, null, null);
+
+        // 仅收到心跳 => master空闲 => slave已追上 => 延迟为0
+        Assert.assertEquals(Long.valueOf(0L), rplStatMetrics.getTrueDelayMills());
+    }
+
+    /**
+     * 测试 fill 方法中延迟计算逻辑：完全没收到event时用 position 时间差兜底
+     */
+    @Test
+    public void testFill_trueDelay_noEvents_fallbackToPosition() {
+        StatMetrics statMetrics = new StatMetrics();
+        statMetrics.getApplyCount().set(1);
+        statMetrics.setTotalApplyDelay(0);
+        statMetrics.addApplyAttemptCount(0);
+        statMetrics.setReceiveDelay(0);
+        statMetrics.addHeartbeatCount(0);  // 没有心跳也没有数据
+
+        long positionTimestamp = System.currentTimeMillis() / 1000 - 5;
+        StatisticalProxy.getInstance().recordPosition(
+            "binlog.000001:0000000004#1." + positionTimestamp);
+        RplStatMetrics rplStatMetrics = new RplStatMetrics();
+        StatisticalProxy.getInstance().flushInterval = 1;
+        StatisticalProxy.getInstance().fill(rplStatMetrics, statMetrics, null, null);
+
+        // 完全没收到event => 用 position 时间差兜底
+        Assert.assertTrue(rplStatMetrics.getTrueDelayMills() >= 5000);
+        Assert.assertTrue(rplStatMetrics.getTrueDelayMills() < 7000);
+    }
+
 }

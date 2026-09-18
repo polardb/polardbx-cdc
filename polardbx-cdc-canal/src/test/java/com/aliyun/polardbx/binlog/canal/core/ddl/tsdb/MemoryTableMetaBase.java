@@ -6,6 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.canal.core.ddl.tsdb;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,24 @@ public class MemoryTableMetaBase extends BaseTest {
 
     protected void applySql(MemoryTableMeta m, String db, String sql) {
         m.apply(null, db, sql, null);
+    }
+
+    @Test
+    public void testCreateDatabase() {
+        String sql1 = "create database if not exists `a`";
+        String sql2 = "create table `b` (id int, value int, primary key (`id`));";
+        String sql3 = "create database if not exists `a`";
+        MemoryTableMeta memoryTableMeta = newMemoryTableMeta();
+        memoryTableMeta.init(null);
+        applySql(memoryTableMeta, "a", sql1);
+        applySql(memoryTableMeta, "a", sql2);
+        // 第二次create database if not exists之前，schema应该存在
+        TableMeta meta = memoryTableMeta.find("a", "b");
+        Assert.assertNotNull(meta);
+        applySql(memoryTableMeta, "a", sql3);
+        meta = memoryTableMeta.find("a", "b");
+        // 第二次create database if not exists之后，schema就没有了
+        Assert.assertNotNull(meta);
     }
 
     @Test

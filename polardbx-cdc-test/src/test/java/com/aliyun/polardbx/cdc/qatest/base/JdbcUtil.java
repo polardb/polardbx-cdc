@@ -8,6 +8,7 @@ package com.aliyun.polardbx.cdc.qatest.base;
 
 import com.alibaba.druid.pool.DruidDataSource;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang3.StringUtils;
@@ -1413,6 +1414,7 @@ public class JdbcUtil {
 
     public static DruidDataSource getDruidDataSource(String url, String user, String password) {
         DruidDataSource druidDs = new DruidDataSource();
+        druidDs.setDriverClassName(PolarDbxCompatDriver.class.getName());
         druidDs.setUrl(url);
         druidDs.setUsername(user);
         druidDs.setPassword(password);
@@ -1507,7 +1509,8 @@ public class JdbcUtil {
         Long ret = null;
         try {
             while (rs.next()) {
-                ret = (Long) rs.getObject(1);
+                long value = rs.getLong(1);
+                ret = rs.wasNull() ? null : value;
             }
         } catch (SQLException e) {
             log.error(e.getMessage(), e);
@@ -1569,7 +1572,7 @@ public class JdbcUtil {
     }
 
     public static void useDb(Connection connection, String db) {
-        executeQuery("use `" + db + "`", connection);
+        executeUpdate(connection, "use `" + db + "`");
     }
 
     public static String createLikeTable(
@@ -1641,7 +1644,7 @@ public class JdbcUtil {
 
     public static void analyzeTable(Connection tddlConnection, String tableName) {
         try (Statement stmt = tddlConnection.createStatement()) {
-            stmt.executeUpdate("analyze table " + tableName);
+            stmt.execute("analyze table " + tableName);
         } catch (Throwable t) {
             throw new RuntimeException(t);
         }
@@ -1649,14 +1652,7 @@ public class JdbcUtil {
 
     public static int getDriverMajorVersion(Connection tddlConnection) {
         try {
-            String driverVersion = tddlConnection.getMetaData().getDriverVersion();
-            Pattern compile = Pattern.compile("\\d\\.\\d\\.\\d+");
-            Matcher matcher = compile.matcher(driverVersion);
-            if (!matcher.find()) {
-                Assert.fail("unrecognized driver version: " + driverVersion);
-            }
-            String version = matcher.group();
-            return Integer.parseInt(version.substring(0, 1));
+            return tddlConnection.getMetaData().getDriverMajorVersion();
         } catch (Exception e) {
             log.error("Failed to get driver version");
             Assert.fail(e.getMessage());
@@ -1694,7 +1690,7 @@ public class JdbcUtil {
 
     public static Connection createConnection(String url, String username, String password) {
         try {
-            Class.forName("com.mysql.jdbc.Driver");
+            Class.forName("com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver");
             return DriverManager.getConnection(url, username, password);
         } catch (Throwable ex) {
             throw new PolardbxException(String.format("Failed to create connection to [%s]", url), ex);
@@ -1705,7 +1701,7 @@ public class JdbcUtil {
                                               String password) {
         String url = String.format(URL_PATTERN, host, port, db, props);
         try {
-            Class.forName("com.mysql.jdbc.Driver");
+            Class.forName("com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver");
             return DriverManager.getConnection(url, username, password);
         } catch (Throwable ex) {
             throw new PolardbxException(
@@ -1850,6 +1846,17 @@ public class JdbcUtil {
             }
         }
         return databases;
+    }
+
+    public static boolean checkIfTableNotExistError(String message) {
+        // 正则表达式
+        String regex = ".*?Table '(.+?)'.*?doesn't exist.*";
+
+        // 编译正则表达式
+        Pattern pattern = Pattern.compile(regex);
+        Matcher matcher = pattern.matcher(message);
+
+        return matcher.matches();
     }
 
     public static class MyNumber {

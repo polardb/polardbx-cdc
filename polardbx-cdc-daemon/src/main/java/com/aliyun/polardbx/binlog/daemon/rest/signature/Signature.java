@@ -9,6 +9,7 @@ package com.aliyun.polardbx.binlog.daemon.rest.signature;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
@@ -23,7 +24,7 @@ import java.util.TreeMap;
 public class Signature {
 
     private static final String ALGORITHM = "HmacSHA1";
-    private static final Charset charset = Charset.forName("UTF-8");
+    private static final Charset charset = StandardCharsets.UTF_8;
 
     private static Mac mac;
 

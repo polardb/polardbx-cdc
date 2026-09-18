@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.client;
@@ -18,7 +18,7 @@ public class LogEventHandler implements EventHandler<LogEventWrapper> {
 
     @Override
     public void onEvent(LogEventWrapper event, long sequence, boolean endOfBatch) throws Exception {
-        if (event.getId() == this.id){
+        if (event.getId() == this.id) {
 
         }
     }

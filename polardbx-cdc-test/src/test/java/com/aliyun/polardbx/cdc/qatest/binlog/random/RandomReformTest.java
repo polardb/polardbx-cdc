@@ -141,7 +141,7 @@ public class RandomReformTest extends BaseTestCase {
             Statement st = conn.createStatement();
             st.executeUpdate(DROP_DB_DDL);
             st.executeUpdate(INIT_DB_DDL);
-            st.executeQuery(USE_DB);
+            st.execute(USE_DB);
             logger.info("prepare database random_dml_test  successed !");
             logicTableMeta.initTable(conn);
             logger.info("prepare table " + logicTableMeta.getTableName() + " successed !");
@@ -160,7 +160,8 @@ public class RandomReformTest extends BaseTestCase {
             try {
                 logicTableMeta.insert(conn);
             } catch (Throwable t) {
-                if (t.getMessage().contains("Unknown target column")) {
+                if (t.getMessage().contains("Unknown target column")
+                    || t.getMessage().contains("generated column")) {
                     continue;
                 }
                 logger.error("do dml failed!", t);
@@ -181,16 +182,19 @@ public class RandomReformTest extends BaseTestCase {
         while (runnable.get()) {
             try {
                 int randomValue = RandomUtils.nextInt(0, 100);
-                //调整概率
-                //50% changetype
-                //25% dropColumn
-                //25% addColumn
-                if (randomValue < 50) {
+                // 调整概率
+                // 40% changetype
+                // 20% dropColumn
+                // 25% addColumn
+                // 15% addGeneratedColumn
+                if (randomValue < 40) {
                     logicTableMeta.randomModifyColumnType(conn);
-                } else if (randomValue < 75) {
+                } else if (randomValue < 60) {
                     logicTableMeta.randomDropColumn(conn);
-                } else {
+                } else if (randomValue < 85) {
                     logicTableMeta.randomAddColumn(conn);
+                } else {
+                    logicTableMeta.randomAddGeneratedColumn(conn);
                 }
                 Thread.sleep(1000L);
             } catch (Throwable t) {

@@ -9,6 +9,8 @@ package com.aliyun.polardbx.binlog.format;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
 
+import java.nio.charset.StandardCharsets;
+
 public class RowsQueryEventBuilder extends BinlogBuilder {
 
     private String text;
@@ -20,7 +22,7 @@ public class RowsQueryEventBuilder extends BinlogBuilder {
 
     @Override
     protected void writePayload(AutoExpandBuffer outputData) throws Exception {
-        byte[] data = text.getBytes(ISO_8859_1);
+        byte[] data = text.getBytes(StandardCharsets.ISO_8859_1);
         numberToBytes(outputData, data.length, INT8);
         writeBytes(outputData, data);
     }

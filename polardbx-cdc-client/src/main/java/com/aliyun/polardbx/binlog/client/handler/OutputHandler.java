@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.client.handler;
@@ -20,10 +20,10 @@ import java.util.List;
 
 public class OutputHandler implements EventHandler<LogEventWrapper> {
 
-    private final IEventHandler handle;
-    private boolean shouldSkip = true;
-    private volatile LogPosition lastPushLogPosition;
-    private final BinlogPosition startPosition;
+    protected final IEventHandler handle;
+    protected boolean shouldSkip = true;
+    protected volatile LogPosition lastPushLogPosition;
+    protected final BinlogPosition startPosition;
 
     public OutputHandler(IEventHandler handle, BinlogPosition startPosition) {
         this.handle = handle;

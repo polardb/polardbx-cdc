@@ -43,6 +43,7 @@ public class BackupUtilsTest extends BaseTest {
         nodeInfo.setAvailablePorts("");
         nodeInfo.setLatestCursor("");
         nodeInfo.setRole("M");
+        nodeInfo.setEnableLightRebalance(true);
         nodeInfoMapper.insert(nodeInfo);
     }
 

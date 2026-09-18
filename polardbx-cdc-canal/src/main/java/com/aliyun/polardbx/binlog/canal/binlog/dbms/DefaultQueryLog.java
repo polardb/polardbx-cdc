@@ -7,6 +7,8 @@
 package com.aliyun.polardbx.binlog.canal.binlog.dbms;
 
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.io.Serializable;
 import java.sql.Timestamp;
@@ -39,6 +41,30 @@ public class DefaultQueryLog extends DBMSQueryLog {
     protected AtomicBoolean firstDdl;
     protected int parallelSeq;
     protected TableMeta tableMeta;
+    /**
+     * 标记该DDL事件是否已经被下游处理完成。
+     * 在列存并行解析场景中，DDL事件需要阻塞后续binlog事件的处理，
+     * 直到下游确认该DDL已执行完毕后，才会将此标志设为true以放行。
+     */
+    @Setter
+    @Getter
+    protected volatile boolean completed = false;
+    /**
+     * 标记处理该DDL后是否需要重置其他并行解析线程。
+     * 某些DDL（如表结构变更）会影响后续事件的解析逻辑，
+     * 需要重建其他parser以使用最新的schema信息。
+     */
+    @Setter
+    @Getter
+    protected volatile boolean shouldResetParser = false;
+    /**
+     * 标记该DDL事件仅用于触发schema缓存刷新，不执行DDL SQL。
+     * 双向复制场景下，被server_id过滤的DDL需要通知Applier刷新DbMetaCache，
+     * 但不需要实际执行DDL语句（因为本地已经执行过了）。
+     */
+    @Setter
+    @Getter
+    protected boolean schemaRefreshOnly = false;
 
     public DefaultQueryLog() {
     }

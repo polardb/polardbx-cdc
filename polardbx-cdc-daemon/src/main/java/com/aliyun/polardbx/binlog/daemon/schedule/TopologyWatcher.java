@@ -8,6 +8,7 @@ package com.aliyun.polardbx.binlog.daemon.schedule;
 
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.daemon.cluster.topology.BinlogXTopologyBuilder;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.BinlogXTopologyService;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.ColumnarTopologyService;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.GlobalBinlogTopologyService;
@@ -20,6 +21,7 @@ import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.scheduler.ClusterSnapshot;
+import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
 import com.aliyun.polardbx.binlog.task.AbstractBinlogTimerTask;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -62,11 +64,11 @@ public class TopologyWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private void tryInit() {
+    void tryInit() {
         if (!initFlag) {
             try {
                 ClusterSnapshot clusterSnapshot = new ClusterSnapshot(1, null, null,
-                    null, null, null, null, clusterType, null);
+                    null, null, null, null, clusterType, null, 1, null);
                 SystemConfigInfo info = new SystemConfigInfo();
                 info.setConfigKey(CLUSTER_SNAPSHOT_VERSION_KEY);
                 info.setConfigValue(JSONObject.toJSONString(clusterSnapshot));
@@ -78,11 +80,13 @@ public class TopologyWatcher extends AbstractBinlogTimerTask {
         }
     }
 
-    private TopologyService getTopologyService() {
+    TopologyService getTopologyService() {
         if (StringUtils.equals(clusterType, ClusterType.BINLOG.name())) {
             return new GlobalBinlogTopologyService(clusterId, clusterType);
         } else if (StringUtils.equals(clusterType, ClusterType.BINLOG_X.name())) {
-            return new BinlogXTopologyService(clusterId, clusterType);
+            return new BinlogXTopologyService(clusterId, clusterType,
+                new BinlogXTopologyBuilder(clusterId),
+                new ResourceManager(clusterId));
         } else if (StringUtils.equals(clusterType, ClusterType.COLUMNAR.name())) {
             return new ColumnarTopologyService(clusterId, clusterType);
         } else {

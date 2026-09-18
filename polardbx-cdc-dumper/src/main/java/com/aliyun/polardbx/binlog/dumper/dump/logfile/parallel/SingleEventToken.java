@@ -6,11 +6,15 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile.parallel;
 
+import com.aliyun.polardbx.binlog.enums.CompressionType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * created by ziyang.lb
@@ -34,6 +38,11 @@ public class SingleEventToken extends EventToken {
     private boolean useTokenData;
     private int offset;
     private Boolean checkServerId;
+    private CompressionType compressionType;
+    private int compressionLevel;
+    private boolean useCompression;
+
+
 
     public enum Type {
         /**
@@ -59,7 +68,11 @@ public class SingleEventToken extends EventToken {
         /**
          *
          */
-        HEARTBEAT
+        HEARTBEAT,
+        /**
+         * 开启压缩后，事务被压缩为一个EVENT
+         */
+        TRANSACTION_PAYLOAD
     }
 
     public void checkLength(int length) {

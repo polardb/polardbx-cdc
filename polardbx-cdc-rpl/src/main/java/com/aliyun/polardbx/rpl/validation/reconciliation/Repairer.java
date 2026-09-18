@@ -16,6 +16,7 @@ import com.aliyun.polardbx.binlog.domain.po.ValidationDiff;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
+import com.aliyun.polardbx.rpl.common.JdbcParameterBinder;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
 import com.aliyun.polardbx.rpl.dbmeta.ColumnInfo;
@@ -84,7 +85,7 @@ public class Repairer {
         }
     }
 
-    private DruidDataSource createDataSourceHelper(DataImportMeta.ConnInfo connInfo, String dbName)
+    public DruidDataSource createDataSourceHelper(DataImportMeta.ConnInfo connInfo, String dbName)
         throws Exception {
         return DataSourceUtil.createDruidMySqlDataSource(false, connInfo.getHost(), connInfo.getPort(),
             dbName, connInfo.getUser(), connInfo.getPassword(), "", parallelism, parallelism, true,
@@ -110,11 +111,12 @@ public class Repairer {
         }
     }
 
-    private void repairTable(String srcDbName, String dstDbName, String tableName) throws Exception {
+    public void repairTable(String srcDbName, String dstDbName, String tableName) throws Exception {
         log.info("start repairing table:{}.{}", srcDbName, tableName);
         List<Future<Void>> futures = new ArrayList<>();
         TableInfo srcTableInfo =
-            DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, HostType.POLARX1, false);
+            DbMetaManager.getTableInfo(srcDs.get(srcDbName), srcDbName, tableName, meta.getSrcLogicalConnInfo()
+                .getType(), false);
         while (true) {
             StatisticalProxy.getInstance().heartbeat();
             List<ValidationDiff> diffList = ValidationTaskRepository.getValDiffListWithLimit(srcDbName, tableName);
@@ -142,7 +144,7 @@ public class Repairer {
         }
     }
 
-    private void repairOneRecord(String dstDbName, String tableName, TableInfo tableInfo, ValidationDiff diff) {
+    public void repairOneRecord(String dstDbName, String tableName, TableInfo tableInfo, ValidationDiff diff) {
         try {
             StatisticalProxy.getInstance().heartbeat();
             DiffRecord.DiffType diffType = DiffRecord.DiffType.valueOf(diff.getType());
@@ -165,7 +167,7 @@ public class Repairer {
                 PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql())) {
                 int i = 1;
                 for (Object v : sqlContext.getParams()) {
-                    stmt.setObject(i, v);
+                    JdbcParameterBinder.bind(stmt, i, v);
                     i++;
                 }
                 affectedRows = stmt.executeUpdate();
@@ -188,7 +190,7 @@ public class Repairer {
             PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql())) {
             int i = 1;
             for (Object v : sqlContext.getParams()) {
-                stmt.setObject(i, v);
+                JdbcParameterBinder.bind(stmt, i, v);
                 i++;
             }
 
@@ -218,7 +220,7 @@ public class Repairer {
         diffMapper.updateByPrimaryKeySelective(diff);
     }
 
-    private void initThreadPool() {
+    public void initThreadPool() {
         repairThreadPool = ThreadPoolUtil.createExecutorWithFixedNum(parallelism, "src-dst-repair-thread");
     }
 

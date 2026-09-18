@@ -5,7 +5,6 @@
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 
-
 package com.aliyun.polardbx.rpl.extractor;
 
 import com.aliyun.polardbx.binlog.api.BinlogProcessor;
@@ -210,6 +209,8 @@ public class RdsBinlogExtractor extends MysqlBinlogExtractor {
     private void initRemoteEventParser() {
         remoteParser = new RdsEventParser(extractorConfig.getEventBufferSize(),
             new RplEventRepository(pipeline.getPipeLineConfig().getPersistConfig()));
+        remoteParser.setCreateHeartbeatTable(extractorConfig.isCreateHeartbeatTable());
+        remoteParser.setDetectingEnable(extractorConfig.isEnableDetectHeartbeat());
         remoteParser.setNeedTransactionPosition(new AtomicBoolean(!supportXa));
     }
 

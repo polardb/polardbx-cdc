@@ -17,6 +17,7 @@ message DumpRequest{
   int32 streamSeq = 3;
   int64 version = 4;
   string storageInstId = 5;
+  int64 subVersion = 6;
 }
 
 message DumpReply{
@@ -190,6 +191,11 @@ message TxnItem{
     主键信息
    */
   repeated bytes  primaryKey = 8;
+  /**
+    DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+    保证不同Dispatcher拓扑下输出顺序一致
+   */
+  string          partitionId = 9;
 }
 
 message EventData{

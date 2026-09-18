@@ -28,14 +28,13 @@ import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 
-import static com.aliyun.polardbx.binlog.CommonConstants.FAILURE_CODE;
 import static com.aliyun.polardbx.binlog.CommonConstants.SUCCESS_CODE;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.when;
@@ -55,6 +54,8 @@ public class DumperApiResourceTest extends BaseTest {
     @SneakyThrows
     public void testGetTarget() {
         setConfig(ConfigKeys.BINLOG_DUMP_API_SESSION_COUNT_CACHE_EXPIRE_MILLISECOND, "2000");
+        mockConfig(ConfigKeys.POLARX_INST_ID, "pxc-test-get-dumper-target");
+        mockConfig(ConfigKeys.CLUSTER_ID, "cluster-test-get-dumper-target");
         final DumperApiResource dumperApiResource = new DumperApiResource();
         setConfig(ConfigKeys.BINLOG_DUMP_FROM_SLAVE_ENABLED, "true");
         Map<String, String> params = new HashMap<>(3);
@@ -99,6 +100,8 @@ public class DumperApiResourceTest extends BaseTest {
     @SneakyThrows
     public void testShowBinlogDumperStatus() {
         setConfig(ConfigKeys.BINLOG_DUMP_API_SESSION_COUNT_CACHE_EXPIRE_MILLISECOND, "2000");
+        mockConfig(ConfigKeys.POLARX_INST_ID, "pxc-test-get-dumper-target");
+        mockConfig(ConfigKeys.CLUSTER_ID, "cluster-test-get-dumper-target");
         final DumperApiResource dumperApiResource = new DumperApiResource();
         Map<String, String> params = new HashMap<>(1);
         params.put("instId", "pxc-test-get-dumper-target");
@@ -126,6 +129,8 @@ public class DumperApiResourceTest extends BaseTest {
         dumperInfo.setDelay(0L);
         dumperInfo.setContainerId("45862");
         dumperInfo.setVersion(3L);
+        dumperInfo.setSubVersion(1L);
+        dumperInfo.setEnableLightRebalance(true);
         dumperInfoMapper.insert(dumperInfo);
         dumperInfo.setIp("127.0.0.2");
         dumperInfo.setTaskName("Dumper-2");
@@ -155,7 +160,10 @@ public class DumperApiResourceTest extends BaseTest {
         taskInfo.setPort(5555);
         taskInfo.setContainerId("45862");
         taskInfo.setVersion(3L);
-        taskInfoMapper.insert(taskInfo);
+        taskInfo.setSubVersion(1L);
+        taskInfo.setEnableLightRebalance(true);
+        taskInfo.setExt("");
+        taskInfoMapper.insertSelective(taskInfo);
     }
 
     private void prepareGetDumperInfoResponse() {

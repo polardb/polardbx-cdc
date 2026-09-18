@@ -7,6 +7,7 @@
 package com.aliyun.polardbx.cdc.qatest.base;
 
 import com.alibaba.druid.pool.DruidDataSource;
+import com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver;
 import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import lombok.Getter;
@@ -158,6 +159,7 @@ public class ConnectionManager {
 
     private static DruidDataSource getDruidDataSourceInternal(String url, String user, String password) {
         DruidDataSource druidDs = new DruidDataSource();
+        druidDs.setDriverClassName(PolarDbxCompatDriver.class.getName());
         druidDs.setUrl(url);
         druidDs.setUsername(user);
         druidDs.setPassword(password);

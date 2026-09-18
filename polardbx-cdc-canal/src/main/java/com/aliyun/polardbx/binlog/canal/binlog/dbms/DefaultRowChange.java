@@ -58,6 +58,11 @@ public class DefaultRowChange extends DBMSRowChange {
     protected boolean hasHiddenPk = false;
 
     /**
+     * 标记此事件是否必须使用全列 apply（用于 supersede 链中幸存的 UPDATE）
+     */
+    protected boolean forceAllColumns = false;
+
+    /**
      * trace信息，for columnar
      */
     protected String traceInfo;
@@ -140,6 +145,14 @@ public class DefaultRowChange extends DBMSRowChange {
 
     public void setHasHiddenPk(boolean hasHiddenPk) {
         this.hasHiddenPk = hasHiddenPk;
+    }
+
+    public boolean isForceAllColumns() {
+        return forceAllColumns;
+    }
+
+    public void setForceAllColumns(boolean forceAllColumns) {
+        this.forceAllColumns = forceAllColumns;
     }
 
     public Map<String, String> getDynamicPluginMap() {

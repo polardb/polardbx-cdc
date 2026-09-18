@@ -6,7 +6,6 @@
  */
 package com.aliyun.polardbx.binlog.domain;
 
-import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 
@@ -20,10 +19,10 @@ public class TaskRuntimeConfig {
     private String name;
     private TaskType type;
     private Integer serverPort;
-    private String startTSO;
     private boolean forceCompleteHbWindow;
     private List<MergeSourceInfo> mergeSourceInfos;
     private BinlogTaskConfig binlogTaskConfig;
+    private ExecutionConfig executionConfig;
 
     public Long getId() {
         return id;
@@ -57,14 +56,6 @@ public class TaskRuntimeConfig {
         this.serverPort = serverPort;
     }
 
-    public String getStartTSO() {
-        return startTSO;
-    }
-
-    public void setStartTSO(String startTSO) {
-        this.startTSO = startTSO;
-    }
-
     public boolean isForceCompleteHbWindow() {
         return forceCompleteHbWindow;
     }
@@ -89,8 +80,12 @@ public class TaskRuntimeConfig {
         this.binlogTaskConfig = binlogTaskConfig;
     }
 
+    public void setExecutionConfig(ExecutionConfig executionConfig) {
+        this.executionConfig = executionConfig;
+    }
+
     public ExecutionConfig getExecutionConfig() {
-        return JSONObject.parseObject(binlogTaskConfig.getConfig(), ExecutionConfig.class);
+        return executionConfig;
     }
 
     @Override
@@ -99,7 +94,6 @@ public class TaskRuntimeConfig {
             "name='" + name + '\'' +
             ", type=" + type +
             ", serverPort=" + serverPort +
-            ", startTSO='" + startTSO + '\'' +
             ", mergeSourceInfos=" + mergeSourceInfos +
             '}';
     }

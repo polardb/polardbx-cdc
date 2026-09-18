@@ -23,10 +23,8 @@ import lombok.Data;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -42,6 +40,8 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_SLA
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_DUMPER_WEIGHT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_RESOURCE_TASK_WEIGHT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TOPOLOGY_USE_RELAY_TASK_THRESHOLD_WITH_DN_NUM;
+import static com.aliyun.polardbx.binlog.scheduler.model.Container.compareResource;
+import static com.aliyun.polardbx.binlog.scheduler.model.Container.sortByResourceDesc;
 
 /**
  * Created by ziyang.lb
@@ -57,10 +57,14 @@ public class GlobalBinlogTopologyBuilder {
     /**
      * 给定一个容器列表，确定每个容器中运行哪些Task或Dumper
      */
-    public Pair<Long, List<BinlogTaskConfig>> buildTopology(List<Container> containerList,
-                                                            List<StorageInfo> storageInfoList,
-                                                            String expectedStorageTso, long newVersion,
-                                                            String dumperMasterNodeId, long serverId) {
+    public TopologyEntity buildTopology(List<Container> containerList,
+                                        List<StorageInfo> storageInfoList,
+                                        String expectedStorageTso,
+                                        long newVersion,
+                                        long newSubVersion,
+                                        String dumperMasterNodeId,
+                                        long serverId,
+                                        String preFinalTaskNode) {
         int containerCount = containerList.size();
 
         // (m * Dumper) + (1 * Final) + (n * Relay)
@@ -94,6 +98,7 @@ public class GlobalBinlogTopologyBuilder {
             tc.setForceDownload(forceDownload);
             tc.setTimestamp(System.currentTimeMillis());
             tc.setRuntimeVersion(newVersion);
+            tc.setSubRuntimeVersion(newSubVersion);
             tc.setServerId(serverId);
 
             Container container = containerList.get(i);
@@ -105,8 +110,9 @@ public class GlobalBinlogTopologyBuilder {
             container.deductMem(cpuMemoryItem.memPerDumper);
             tc.setReservedMemMb(container.getCapability().getReservedMemMb());
 
-            BinlogTaskConfig dumperConfig =
-                makeTask((long) (i + 1), TaskType.Dumper, container, JSONObject.toJSONString(tc), newVersion);
+            long identifier = RebalanceUtil.buildTaskNameIdentifier(container.getContainerId(), container.getIp());
+            BinlogTaskConfig dumperConfig = makeTask(identifier, TaskType.Dumper, container,
+                JSONObject.toJSONString(tc), newVersion, newSubVersion);
             dumperConfig.setClusterId(clusterId);
             dumperConfig.setMem(cpuMemoryItem.memPerDumper);
             dumperConfig.setVcpu(cpuMemoryItem.vcpu);
@@ -114,7 +120,8 @@ public class GlobalBinlogTopologyBuilder {
         }
 
         // 如果DN节点数目超过阈值，启用RelayTask，计算每个RelayTask的配置
-        Container finalContainer = selectContainer4Final(containerList, dumperMasterNodeId);
+        Container finalContainer = selectContainer4Final(
+            containerList, dumperMasterNodeId, preFinalTaskNode, newVersion, newSubVersion);
         List<BinlogTaskConfig> relayTaskList = new ArrayList<>();
         if (!relayStorageList.isEmpty()) {
             AtomicLong index = new AtomicLong(0);
@@ -123,10 +130,10 @@ public class GlobalBinlogTopologyBuilder {
                 CpuMemoryItem cpuMemoryItem = calcCpuMemoryItem(container, relayStorageList.size());
 
                 relayTaskList.add(buildRelayTask(clusterId, cpuMemoryItem.memPerTask, cpuMemoryItem.vcpu,
-                    expectedStorageTso, newVersion, container, index, iterator.next(), serverId));
+                    expectedStorageTso, newVersion, newSubVersion, container, index, iterator.next(), serverId));
                 if (container != finalContainer) {
                     relayTaskList.add(buildRelayTask(clusterId, cpuMemoryItem.memPerTask, cpuMemoryItem.vcpu,
-                        expectedStorageTso, newVersion, container, index, iterator.next(), serverId));
+                        expectedStorageTso, newVersion, newSubVersion, container, index, iterator.next(), serverId));
                 }
             }
             if (iterator.hasNext()) {
@@ -148,10 +155,11 @@ public class GlobalBinlogTopologyBuilder {
         }
         config.setTso(expectedStorageTso);
         config.setRuntimeVersion(newVersion);
+        config.setSubRuntimeVersion(newSubVersion);
         config.setServerId(serverId);
         config.setReservedMemMb(finalContainer.getCapability().getReservedMemMb());
         BinlogTaskConfig finalConfig = makeTask(0L, TaskType.Final, finalContainer,
-            JSONObject.toJSONString(config), newVersion);
+            JSONObject.toJSONString(config), newVersion, newSubVersion);
         finalConfig.setClusterId(clusterId);
         finalConfig.setMem(finalCpuMemoryItem.memPerTask);
         finalConfig.setVcpu(finalCpuMemoryItem.vcpu);
@@ -192,12 +200,13 @@ public class GlobalBinlogTopologyBuilder {
                 }
             }
         }
-        return Pair.of(serverId, result);
+        return TopologyEntity.builder().serverId(serverId).taskConfigs(result)
+            .finalTaskNode(finalContainer.getContainerId()).build();
     }
 
     private static BinlogTaskConfig buildRelayTask(String clusterId, int mem, int vcpu, String expectedStorageTso,
-                                                   long newVersion, Container container, AtomicLong index,
-                                                   List<StorageInfo> storageInfoList, long serverId) {
+                                                   long newVersion, long newSubVersion, Container container,
+                                                   AtomicLong index, List<StorageInfo> storageInfoList, long serverId) {
         container.deductMem(mem);
         ExecutionConfig config = new ExecutionConfig();
         config.setType(MergeSourceType.BINLOG.name());
@@ -207,8 +216,8 @@ public class GlobalBinlogTopologyBuilder {
         config.setServerId(serverId);
         config.setReservedMemMb(container.getCapability().getReservedMemMb());
 
-        BinlogTaskConfig relayTaskConfig =
-            makeTask(index.incrementAndGet(), TaskType.Relay, container, JSONObject.toJSONString(config), newVersion);
+        BinlogTaskConfig relayTaskConfig = makeTask(index.incrementAndGet(), TaskType.Relay, container,
+            JSONObject.toJSONString(config), newVersion, newSubVersion);
         relayTaskConfig.setClusterId(clusterId);
         relayTaskConfig.setMem(mem);
         relayTaskConfig.setVcpu(vcpu);
@@ -217,7 +226,7 @@ public class GlobalBinlogTopologyBuilder {
     }
 
     private static BinlogTaskConfig makeTask(Long id, TaskType taskType, Container container, String ext,
-                                             long version) {
+                                             long version, long subVersion) {
         return BinlogTaskConfig.builder()
             .taskName(id == 0 ? taskType.name() : taskType.name() + "-" + id)
             .containerId(container.getContainerId())
@@ -227,18 +236,45 @@ public class GlobalBinlogTopologyBuilder {
             .role(taskType.name())
             .status(BinlogTaskConfigStatus.ENABLE_AUTO_SCHEDULE)
             .version(version)
+            .subVersion(subVersion)
             .build();
     }
 
     /**
      * 资源扣减
      */
-    private static Container selectContainer4Final(List<Container> containers, String dumperMasterNode) {
-        //将Task和DumperMaster分配到不同容器
-        Collections.sort(containers);
-        return containers.size() > 1 ?
-            containers.stream().filter(c -> !c.getContainerId().equals(dumperMasterNode))
-                .collect(Collectors.toList()).get(0) : containers.get(0);
+    private static Container selectContainer4Final(List<Container> containers, String dumperMasterNode,
+                                                   String preFinalTaskNode, long newVersion, long newSubVersion) {
+        // 几个原则：
+        // 1. 将FinalTask和DumperMaster分配到不同容器
+        // 2. 将FinalTask分配到可用资源更多的容器
+        // 3. 如果各个容器可用资源相同，将FinalTask调度到上次运行的容器(如果有的话)
+        log.info("prepare to select final task node, with containers {}, preFinalTaskNode {}, dumper MasterNode {}.",
+            containers.stream().map(Container::getContainerId).collect(Collectors.toList()),
+            preFinalTaskNode, dumperMasterNode);
+
+        if (containers.size() > 1) {
+            List<Container> filteredContainers = containers.stream()
+                .filter(c -> !c.getContainerId().equals(dumperMasterNode))
+                .collect(Collectors.toList());
+
+            sortByResourceDesc(filteredContainers);
+            Container maxResourceContainer = filteredContainers.get(0);
+            if (StringUtils.isNotBlank(preFinalTaskNode)) {
+                Optional<Container> optional = filteredContainers.stream()
+                    .filter(c -> c.getContainerId().equals(preFinalTaskNode)).findFirst();
+                if (optional.isPresent() && compareResource(maxResourceContainer, optional.get()) == 0) {
+                    log.info("continue to use previous final task node for this rebalance round, {}:{}:{}.",
+                        preFinalTaskNode, newVersion, newSubVersion);
+                    return optional.get();
+                }
+            }
+            return maxResourceContainer;
+        } else {
+            log.info("only one container, use it for final task, container id: {}.",
+                containers.get(0).getContainerId());
+            return containers.get(0);
+        }
     }
 
     private static boolean isForceRecover() {

@@ -16,6 +16,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Map;
@@ -69,17 +70,16 @@ public class RdsDownloadForRestoreRequest {
     /**
      * 是否解密/默认为解密
      */
-    private Boolean Encrypted ;
-
+    private Boolean Encrypted;
 
     public static String createHmacSha1(String data, String secret) {
         try {
             Mac mac = Mac.getInstance("HmacSHA1");
-            SecretKeySpec sec = new SecretKeySpec(secret.getBytes("UTF-8"), "HmacSHA1");
+            SecretKeySpec sec = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA1");
             mac.init(sec);
-            byte[] digest = mac.doFinal(data.getBytes("UTF-8"));
-            return new String(new Hex().encode(digest), "UTF-8");
-        } catch (NoSuchAlgorithmException | InvalidKeyException | UnsupportedEncodingException e) {
+            byte[] digest = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+            return new String(new Hex().encode(digest), StandardCharsets.UTF_8);
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             throw new PolardbxException("createHmacSha1 error", e);
         }
     }
@@ -101,14 +101,14 @@ public class RdsDownloadForRestoreRequest {
         paramMap.put("UserId", UserId);
         paramMap.put("InstanceName", urlEncode(InstanceName));
         paramMap.put("RegionCode", urlEncode(RegionCode));
-        paramMap.put("HostInsId", HostInsId+"");
+        paramMap.put("HostInsId", HostInsId + "");
 
         if (Decompression != null) {
-            paramMap.put("Decompression", Decompression+"");
+            paramMap.put("Decompression", Decompression + "");
         }
 
         if (Encrypted != null) {
-            paramMap.put("Encrypted", Encrypted+"");
+            paramMap.put("Encrypted", Encrypted + "");
         }
         paramMap.put("ArchiveLogId", urlEncode(ArchiveLogId));
         paramMap.put("ArchiveLogLocalFolder", urlEncode(ArchiveLogLocalFolder));

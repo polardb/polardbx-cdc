@@ -11,6 +11,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.JsonConversion;
 import com.aliyun.polardbx.binlog.canal.binlog.JsonConversion.Json_Value;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,6 +19,7 @@ import java.io.Serializable;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.BitSet;
+import java.util.zip.CRC32;
 
 /**
  * Extracting JDBC type & value information from packed rows-buffer.
@@ -31,7 +33,8 @@ public final class RowsLogBuffer {
     public static final long DATETIMEF_INT_OFS = 0x8000000000L;
     public static final long TIMEF_INT_OFS = 0x800000L;
     public static final long TIMEF_OFS = 0x800000000000L;
-    protected static final Logger logger = LoggerFactory.getLogger(RowsLogBuffer.class);
+    private static final Logger logger = LoggerFactory.getLogger(RowsLogBuffer.class);
+    @Getter
     private final LogBuffer buffer;
     private final int columnLen;
     private final String charsetName;
@@ -45,7 +48,7 @@ public final class RowsLogBuffer {
     private int length;
     private Serializable value;
 
-    private static char[] digits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+    private static final char[] digits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
 
     public RowsLogBuffer(LogBuffer buffer, final int columnLen, String charsetName) {
         this.buffer = buffer;
@@ -201,7 +204,7 @@ public final class RowsLogBuffer {
      *
      * @see mysql-5.1.60/sql/log_event.cc - Rows_log_event::print_verbose_one_row
      */
-    public final boolean nextOneRow(BitSet columns) {
+    public boolean nextOneRow(BitSet columns) {
         final boolean hasOneRow = buffer.hasRemaining();
 
         if (hasOneRow) {
@@ -220,12 +223,43 @@ public final class RowsLogBuffer {
         return hasOneRow;
     }
 
+    public int getNextOneValueLength(int type, int meta) {
+        fNull = nullBits.get(nullBitIndex++);
+        if (fNull) {
+            return 0;
+        } else {
+            return fetchLength(type, meta, buffer);
+        }
+    }
+
+    public int getNextOneRowLength(TableMapLogEvent.ColumnInfo[] columnInfos) {
+        int sum = 0;
+        for (TableMapLogEvent.ColumnInfo info : columnInfos) {
+            sum += getNextOneValueLength(info.type, info.meta);
+        }
+        return sum;
+    }
+
+    public RowDataHashCode getNextOneRowHashCode(TableMapLogEvent.ColumnInfo[] columnInfos, RowDataHashCode hashCode) {
+        // nullBit之前的offset
+        int offset = hashCode.getRowOffset();
+        // 在调用该函数之前一定调用过nextOneRow，因此这里pos - offset就是nullBit的长度
+        int nullBitLength = buffer.position() - offset;
+        int valueLength = getNextOneRowLength(columnInfos);
+        int totalLength = nullBitLength + valueLength;
+        CRC32 crc32 = new CRC32();
+        crc32.update(buffer.getByteBuffer(), offset + buffer.getOrigin(), totalLength);
+        hashCode.setHashCode(crc32.getValue());
+        hashCode.setLength(totalLength);
+        return hashCode;
+    }
+
     /**
      * Extracting next field value from packed buffer.
      *
      * @see mysql-5.1.60/sql/log_event.cc - Rows_log_event::print_verbose_one_row
      */
-    public final Serializable nextValue(final int type, final int meta) {
+    public Serializable nextValue(final int type, final int meta) {
         return nextValue(type, meta, false);
     }
 
@@ -234,7 +268,7 @@ public final class RowsLogBuffer {
      *
      * @see mysql-5.1.60/sql/log_event.cc - Rows_log_event::print_verbose_one_row
      */
-    public final Serializable nextValue(final int type, final int meta, boolean isBinary) {
+    public Serializable nextValue(final int type, final int meta, boolean isBinary) {
         fNull = nullBits.get(nullBitIndex++);
 
         if (fNull) {
@@ -251,7 +285,7 @@ public final class RowsLogBuffer {
     /**
      * 只提供给columnar使用
      */
-    public final Serializable nextBinaryValueForColumnar(final int type, final int meta) {
+    public Serializable nextBinaryValueForColumnar(final int type, final int meta) {
         fNull = nullBits.get(nullBitIndex++);
 
         if (fNull) {
@@ -267,7 +301,7 @@ public final class RowsLogBuffer {
         }
     }
 
-    public final Serializable nextValue(final int type, final int meta, boolean isBinary, String newCharsetName) {
+    public Serializable nextValue(final int type, final int meta, boolean isBinary, String newCharsetName) {
         fNull = nullBits.get(nullBitIndex++);
         if (fNull) {
             value = null;
@@ -280,16 +314,16 @@ public final class RowsLogBuffer {
         }
     }
 
-    public final Serializable fetchValue(int type, final int meta, boolean isBinary, boolean unsigned) {
+    public Serializable fetchValue(int type, final int meta, boolean isBinary, boolean unsigned) {
         return fetchValue(type, meta, isBinary, buffer, charsetName, unsigned);
     }
 
-    public final Serializable fetchValue(int type, final int meta, boolean isBinary) {
+    public Serializable fetchValue(int type, final int meta, boolean isBinary) {
         return fetchValue(type, meta, isBinary, buffer, charsetName, false);
     }
 
-    public final Serializable fetchValue(int type, final int meta, boolean isBinary, byte[] orginalData,
-                                         String charsetName) {
+    public Serializable fetchValue(int type, final int meta, boolean isBinary, byte[] orginalData,
+                                   String charsetName) {
         return fetchValue(type, meta, isBinary, new LogBuffer(orginalData, 0, orginalData.length), charsetName, false);
     }
 
@@ -298,9 +332,9 @@ public final class RowsLogBuffer {
      *
      * @see mysql-5.1.60/sql/log_event.cc - log_event_print_value
      */
-    public final Serializable fetchValue(int type, final int meta, boolean isBinary, LogBuffer buffer,
-                                         String charsetName,
-                                         boolean unsigned) {
+    public Serializable fetchValue(int type, final int meta, boolean isBinary, LogBuffer buffer,
+                                   String charsetName,
+                                   boolean unsigned) {
         int len = 0;
 
         if (type == LogEvent.MYSQL_TYPE_STRING) {
@@ -1068,14 +1102,13 @@ public final class RowsLogBuffer {
             // buffer.forward(meta - 4);
             if (0 == len) {
                 // fixed issue #1 by lava, json column of zero length has no value, value parsing should be skipped
-                value = "";
+                value = "null";
             } else {
                 int position = buffer.position();
                 Json_Value jsonValue = JsonConversion.parse_value(buffer.getUint8(), buffer, len - 1, charsetName);
                 StringBuilder builder = new StringBuilder();
                 jsonValue.toJsonString(builder, charsetName);
                 value = builder.toString();
-                value = JSON.parseObject(String.valueOf(value), String.class);
                 buffer.position(position + len);
                 // byte[] binary = new byte[len];
                 // buffer.fillBytes(binary, 0, len);
@@ -1128,7 +1161,307 @@ public final class RowsLogBuffer {
         return value;
     }
 
-    public final byte[] fetchBinaryValue(int type, final int meta, boolean forColumnar) {
+    /**
+     * Extracting next field value from packed buffer.
+     *
+     * @see mysql-5.1.60/sql/log_event.cc - log_event_print_value
+     */
+    public int fetchLength(int type, final int meta, LogBuffer buffer) {
+        int len = 0;
+        int startOffset = buffer.position();
+        // 一般是标识“数据长度”的“长度”，在真正读到数据之前，buffer挪动过的offset
+        int tmpOffset = 0;
+        if (type == LogEvent.MYSQL_TYPE_STRING) {
+            if (meta >= 256) {
+                int byte0 = meta >> 8;
+                int byte1 = meta & 0xff;
+                if ((byte0 & 0x30) != 0x30) {
+                    /* a long CHAR() field: see #37426 */
+                    len = byte1 | (((byte0 & 0x30) ^ 0x30) << 4);
+                    type = byte0 | 0x30;
+                } else {
+                    switch (byte0) {
+                    case LogEvent.MYSQL_TYPE_SET:
+                    case LogEvent.MYSQL_TYPE_ENUM:
+                    case LogEvent.MYSQL_TYPE_STRING:
+                    case LogEvent.MYSQL_TYPE_VAR_STRING:
+                        type = byte0;
+                        len = byte1;
+                        break;
+                    default:
+                        throw new IllegalArgumentException(String
+                            .format("!! Don't know how to handle column type=%d meta=%d (%04X)", type, meta, meta));
+                    }
+                }
+            } else {
+                len = meta;
+            }
+        }
+
+        switch (type) {
+        case LogEvent.MYSQL_TYPE_LONG: {
+            length = 4;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_TINY: {
+            length = 1;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_SHORT: {
+            length = 2;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_INT24: {
+            length = 3;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_LONGLONG: {
+            length = 8;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_DECIMAL: {
+            length = 0;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_NEWDECIMAL: {
+            // 必须用与 LogBuffer.getDecimal 相同的公式计算实际占用字节数
+            // 不能直接用 precision，否则偏移计算错误，导致后续字段解析越界
+            final int precision = meta >> 8;
+            final int scale = meta & 0xff;
+            final int intg = precision - scale;
+            final int intg0 = intg / LogBuffer.DIG_PER_INT32;
+            final int frac0 = scale / LogBuffer.DIG_PER_INT32;
+            final int intg0x = intg - intg0 * LogBuffer.DIG_PER_INT32;
+            final int frac0x = scale - frac0 * LogBuffer.DIG_PER_INT32;
+            length = intg0 * LogBuffer.SIZE_OF_INT32 + LogBuffer.dig2bytes[intg0x]
+                + frac0 * LogBuffer.SIZE_OF_INT32 + LogBuffer.dig2bytes[frac0x];
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_FLOAT: {
+            length = 4;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_DOUBLE: {
+            length = 8;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_BIT: {
+            /* Meta-data: bit_len, bytes_in_rec, 2 bytes */
+            final int nbits = ((meta >> 8) * 8) + (meta & 0xff);
+            len = (nbits + 7) / 8;
+            length = len;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_TIMESTAMP: {
+            length = 4;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_TIMESTAMP2: {
+            length = 4 + (meta + 1) / 2;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_DATETIME: {
+            length = 8;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_DATETIME2: {
+            length = 5 + (meta + 1) / 2;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_TIME: {
+            length = 3;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_TIME2: {
+            length = 3 + (meta + 1) / 2;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_NEWDATE: {
+            /*
+             * log_event.h : This enumeration value is only used internally and cannot exist in a binlog.
+             */
+            logger.warn("MYSQL_TYPE_NEWDATE : This enumeration value is "
+                + "only used internally and cannot exist in a binlog!");
+            length = 0;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_DATE: {
+            length = 3;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_YEAR: {
+            length = 1;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_ENUM: {
+            length = len;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_SET: {
+            final int nbits = (meta & 0xFF) * 8;
+            len = (nbits + 7) / 8;
+            if (nbits > 1) {
+                length = len;
+            } else {
+                length = 1;
+            }
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_TINY_BLOB: {
+            /*
+             * log_event.h : This enumeration value is only used internally and cannot exist in a binlog.
+             */
+            logger.warn("MYSQL_TYPE_TINY_BLOB : This enumeration value is "
+                + "only used internally and cannot exist in a binlog!");
+            length = 0;
+        }
+        case LogEvent.MYSQL_TYPE_MEDIUM_BLOB: {
+            /*
+             * log_event.h : This enumeration value is only used internally and cannot exist in a binlog.
+             */
+            logger.warn("MYSQL_TYPE_MEDIUM_BLOB : This enumeration value is "
+                + "only used internally and cannot exist in a binlog!");
+            length = 0;
+        }
+        case LogEvent.MYSQL_TYPE_LONG_BLOB: {
+            /*
+             * log_event.h : This enumeration value is only used internally and cannot exist in a binlog.
+             */
+            logger.warn("MYSQL_TYPE_LONG_BLOB : This enumeration value is "
+                + "only used internally and cannot exist in a binlog!");
+            length = 0;
+        }
+        case LogEvent.MYSQL_TYPE_BLOB: {
+            /*
+             * BLOB or TEXT datatype
+             */
+            switch (meta) {
+            case 1: {
+                /* TINYBLOB/TINYTEXT */
+                length = buffer.getUint8();
+                tmpOffset += 1;
+                break;
+            }
+            case 2: {
+                /* BLOB/TEXT */
+                length = buffer.getUint16();
+                tmpOffset += 2;
+                break;
+            }
+            case 3: {
+                /* MEDIUMBLOB/MEDIUMTEXT */
+                length = buffer.getUint24();
+                tmpOffset += 3;
+                break;
+            }
+            case 4: {
+                /* LONGBLOB/LONGTEXT */
+                length = (int) buffer.getUint32();
+                tmpOffset += 4;
+                break;
+            }
+            default:
+                throw new IllegalArgumentException("!! Unknown BLOB packlen = " + meta);
+            }
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_VARCHAR: {
+            /*
+             * Except for the data length calculation, MYSQL_TYPE_VARCHAR, MYSQL_TYPE_VAR_STRING and
+             * MYSQL_TYPE_STRING are handled the same way.
+             */
+            len = meta;
+            if (len < 256) {
+                len = buffer.getUint8();
+                tmpOffset += 1;
+            } else {
+                len = buffer.getUint16();
+                tmpOffset += 2;
+            }
+            length = len;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_STRING:
+        case LogEvent.MYSQL_TYPE_VAR_STRING: {
+            if (len < 256) {
+                len = buffer.getUint8();
+                tmpOffset += 1;
+            } else {
+                len = buffer.getUint16();
+                tmpOffset += 2;
+            }
+            length = len;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_JSON: {
+            switch (meta) {
+            case 1: {
+                len = buffer.getUint8();
+                tmpOffset += 1;
+                break;
+            }
+            case 2: {
+                len = buffer.getUint16();
+                tmpOffset += 2;
+                break;
+            }
+            case 3: {
+                len = buffer.getUint24();
+                tmpOffset += 3;
+                break;
+            }
+            case 4: {
+                len = (int) buffer.getUint32();
+                tmpOffset += 4;
+                break;
+            }
+            default:
+                throw new IllegalArgumentException("!! Unknown JSON packlen = " + meta);
+            }
+            length = len;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_GEOMETRY: {
+            /*
+             * MYSQL_TYPE_GEOMETRY: copy from BLOB or TEXT
+             */
+            switch (meta) {
+            case 1:
+                len = buffer.getUint8();
+                tmpOffset += 1;
+                break;
+            case 2:
+                len = buffer.getUint16();
+                tmpOffset += 2;
+                break;
+            case 3:
+                len = buffer.getUint24();
+                tmpOffset += 3;
+                break;
+            case 4:
+                len = (int) buffer.getUint32();
+                tmpOffset += 4;
+                break;
+            default:
+                throw new IllegalArgumentException("!! Unknown MYSQL_TYPE_GEOMETRY packlen = " + meta);
+            }
+            length = len;
+            break;
+        }
+        case LogEvent.MYSQL_TYPE_BOOL:
+        case LogEvent.MYSQL_TYPE_INVALID:
+        default:
+            logger.error(String.format("!! Don't know how to handle column type=%d meta=%d (%04X)",
+                type,
+                meta,
+                meta));
+            length = 0;
+        }
+        buffer.position(startOffset + tmpOffset + length);
+        return length + tmpOffset;
+    }
+
+    public byte[] fetchBinaryValue(int type, final int meta, boolean forColumnar) {
         int len = 0;
 
         if (type == LogEvent.MYSQL_TYPE_STRING) {
@@ -1613,19 +1946,19 @@ public final class RowsLogBuffer {
         return new byte[0];
     }
 
-    public final boolean isNull() {
+    public boolean isNull() {
         return fNull;
     }
 
-    public final int getJavaType() {
+    public int getJavaType() {
         return javaType;
     }
 
-    public final Serializable getValue() {
+    public Serializable getValue() {
         return value;
     }
 
-    public final int getLength() {
+    public int getLength() {
         return length;
     }
 
@@ -1680,5 +2013,4 @@ public final class RowsLogBuffer {
             builder.append('0').append(digits[d]);
         }
     }
-
 }

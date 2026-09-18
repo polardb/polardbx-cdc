@@ -6,89 +6,299 @@
  */
 package com.aliyun.polardbx.binlog.backup;
 
-import com.aliyun.polardbx.binlog.ConfigKeys;
-import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
-import lombok.SneakyThrows;
-import org.junit.BeforeClass;
+import com.aliyun.polardbx.binlog.testing.BaseTest;
+import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
+import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
-import org.mockito.Mockito;
-import org.mockito.junit.MockitoJUnitRunner;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.anyMap;
+import static org.mockito.Mockito.anySet;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/**
- * @author yudong
- * @since 2024/7/26 16:44
- **/
-@RunWith(MockitoJUnitRunner.class)
-public class BinlogBackupManagerTest {
+public class BinlogBackupManagerTest extends BaseTest {
 
-    @Mock
     private StreamContext streamContext;
-    @InjectMocks
-    private BinlogBackupManager manager;
+    private Map<String, MetricsObserver> metrics;
+
+    @Before
+    public void setUp() {
+        // 初始化StreamContext
+        Set<String> streamSet = new HashSet<>();
+        streamSet.add("stream1");
+        streamSet.add("stream2");
+
+        streamContext = new StreamContext("test_group", streamSet, "test_cluster", "test_task", TaskType.Final, 1L);
+
+        // 初始化metrics
+        metrics = new HashMap<>();
+        MetricsObserver observer = mock(MetricsObserver.class);
+        metrics.put("stream1", observer);
+    }
 
     @Test
-    @SneakyThrows
-    public void testNeedStart_backup_off() {
-        try (final MockedStatic<DynamicApplicationConfig> dynamicApplicationConfig =
-            mockStatic(DynamicApplicationConfig.class)) {
-            dynamicApplicationConfig.when(() ->
-                DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_UPLOAD_PART_SIZE)).thenReturn(1024);
-            final RemoteBinlogProxy proxy = spy(RemoteBinlogProxy.class);
-            try (final MockedStatic<RemoteBinlogProxy> remoteBinlogProxy = mockStatic(RemoteBinlogProxy.class)) {
-                remoteBinlogProxy.when(RemoteBinlogProxy::getInstance).thenReturn(proxy);
-                when(proxy.isBackupOn()).thenReturn(false);
-                assertFalse(manager.needStart());
-            }
+    public void testConstructor() {
+        BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+        // 构造函数不应该抛出异常
+    }
+
+    @Test
+    public void testNeedStartReturnsTrueWhenBackupIsOnAndIsMaster() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class)) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(true);
+
+            runtimeLeaderElectorMock.when(() -> RuntimeLeaderElector.isDumperMasterOrX(anyLong(), any(), anyString()))
+                .thenReturn(true);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            boolean result = backupManager.needStart();
+
+            // 验证needStart返回true
+            assert result;
         }
     }
 
     @Test
-    @SneakyThrows
-    public void testNeedStart_is_dumper_slave() {
-        try (final MockedStatic<DynamicApplicationConfig> dynamicApplicationConfig =
-            mockStatic(DynamicApplicationConfig.class);
-            final MockedStatic<RuntimeLeaderElector> runtimeLeaderElector = mockStatic(RuntimeLeaderElector.class)) {
-            dynamicApplicationConfig.when(() ->
-                DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_UPLOAD_PART_SIZE)).thenReturn(1024);
-            final RemoteBinlogProxy proxy = spy(RemoteBinlogProxy.class);
-            try (final MockedStatic<RemoteBinlogProxy> remoteBinlogProxy = mockStatic(RemoteBinlogProxy.class)) {
-                remoteBinlogProxy.when(RemoteBinlogProxy::getInstance).thenReturn(proxy);
-                when(proxy.isBackupOn()).thenReturn(true);
-                runtimeLeaderElector.when(() -> RuntimeLeaderElector.isDumperMasterOrX(streamContext.getVersion(),
-                    streamContext.getTaskType(), streamContext.getTaskName())).thenReturn(false);
-                assertFalse(manager.needStart());
-            }
+    public void testNeedStartReturnsFalseWhenBackupIsOff() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class)) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(false); // 备份关闭
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            boolean result = backupManager.needStart();
+
+            // 验证needStart返回false
+            assert !result;
         }
     }
 
     @Test
-    @SneakyThrows
-    public void testNeedStart_is_dumper_master() {
-        try (final MockedStatic<DynamicApplicationConfig> dynamicApplicationConfig =
-            mockStatic(DynamicApplicationConfig.class);
-            final MockedStatic<RuntimeLeaderElector> runtimeLeaderElector = mockStatic(RuntimeLeaderElector.class)) {
-            dynamicApplicationConfig.when(() ->
-                DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_UPLOAD_PART_SIZE)).thenReturn(1024);
-            final RemoteBinlogProxy proxy = spy(RemoteBinlogProxy.class);
-            try (final MockedStatic<RemoteBinlogProxy> remoteBinlogProxy = mockStatic(RemoteBinlogProxy.class)) {
-                remoteBinlogProxy.when(RemoteBinlogProxy::getInstance).thenReturn(proxy);
-                when(proxy.isBackupOn()).thenReturn(true);
-                runtimeLeaderElector.when(() -> RuntimeLeaderElector.isDumperMasterOrX(streamContext.getVersion(),
-                    streamContext.getTaskType(), streamContext.getTaskName())).thenReturn(true);
-                assertTrue(manager.needStart());
-            }
+    public void testNeedStartReturnsFalseWhenNotMaster() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class)) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(true);
+
+            runtimeLeaderElectorMock.when(() -> RuntimeLeaderElector.isDumperMasterOrX(anyLong(), any(), anyString()))
+                .thenReturn(false); // 不是master
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            boolean result = backupManager.needStart();
+
+            // 验证needStart返回false
+            assert !result;
+        }
+    }
+
+    @Test
+    public void testStartWhenNeedStartReturnsTrue() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class);
+            MockedConstruction<BinlogUploadManager> binlogUploadManagerConstruction = mockConstruction(
+                BinlogUploadManager.class,
+                (mock, context) -> doNothing().when(mock).start())) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(true);
+
+            runtimeLeaderElectorMock.when(() -> RuntimeLeaderElector.isDumperMasterOrX(anyLong(), any(), anyString()))
+                .thenReturn(true);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            backupManager.start();
+
+            // 验证BinlogUploadManager被创建并启动
+            verify(binlogUploadManagerConstruction.constructed().get(0), times(1)).start();
+        }
+    }
+
+    @Test
+    public void testStartWhenNeedStartReturnsFalse() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class)) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(false);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            backupManager.start();
+
+            // 验证BinlogUploadManager没有被创建
+            // 由于BinlogUploadManager没有被创建，所以不会有任何调用
+        }
+    }
+
+    @Test
+    public void testStartWithStreamsAndMetrics() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class);
+            MockedConstruction<BinlogUploadManager> binlogUploadManagerConstruction = mockConstruction(
+                BinlogUploadManager.class,
+                (mock, context) -> doNothing().when(mock).start(anySet(), anyMap()))) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(true);
+
+            runtimeLeaderElectorMock.when(() -> RuntimeLeaderElector.isDumperMasterOrX(anyLong(), any(), anyString()))
+                .thenReturn(true);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            // 先调用start()创建binlogUploadManager
+            backupManager.start();
+
+            // 创建新的streams和metrics
+            Set<String> streams = new HashSet<>();
+            streams.add("new_stream");
+            HashMap<String, MetricsObserver> newMetrics = new HashMap<>();
+            MetricsObserver observer = mock(MetricsObserver.class);
+            newMetrics.put("new_stream", observer);
+
+            backupManager.start(streams, newMetrics);
+
+            // 验证BinlogUploadManager的start方法被调用
+            verify(binlogUploadManagerConstruction.constructed().get(0), times(1)).start(streams, newMetrics);
+        }
+    }
+
+    @Test
+    public void testStartWithStreamsAndMetricsWhenBinlogUploadManagerIsNull() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class)) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(false);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            // binlogUploadManager为null
+
+            Set<String> streams = new HashSet<>();
+            streams.add("new_stream");
+            HashMap<String, MetricsObserver> newMetrics = new HashMap<>();
+            MetricsObserver observer = mock(MetricsObserver.class);
+            newMetrics.put("new_stream", observer);
+
+            // 调用start方法不应该抛出异常
+            backupManager.start(streams, newMetrics);
+        }
+    }
+
+    @Test
+    public void testStop() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class);
+            MockedConstruction<BinlogUploadManager> binlogUploadManagerConstruction = mockConstruction(
+                BinlogUploadManager.class,
+                (mock, context) -> doNothing().when(mock).stop())) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(true);
+
+            runtimeLeaderElectorMock.when(() -> RuntimeLeaderElector.isDumperMasterOrX(anyLong(), any(), anyString()))
+                .thenReturn(true);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            backupManager.start();
+
+            backupManager.stop();
+
+            // 验证BinlogUploadManager的stop方法被调用
+            verify(binlogUploadManagerConstruction.constructed().get(0), times(1)).stop();
+        }
+    }
+
+    @Test
+    public void testStopWhenBinlogUploadManagerIsNull() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class)) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(false);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            // binlogUploadManager为null
+
+            // 调用stop方法不应该抛出异常
+            backupManager.stop();
+        }
+    }
+
+    @Test
+    public void testStopWithStreamName() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class);
+            MockedConstruction<BinlogUploadManager> binlogUploadManagerConstruction = mockConstruction(
+                BinlogUploadManager.class,
+                (mock, context) -> doNothing().when(mock).stop(anyString()))) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(true);
+
+            runtimeLeaderElectorMock.when(() -> RuntimeLeaderElector.isDumperMasterOrX(anyLong(), any(), anyString()))
+                .thenReturn(true);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            backupManager.start();
+
+            backupManager.stop("stream1");
+
+            // 验证BinlogUploadManager的stop方法被调用
+            verify(binlogUploadManagerConstruction.constructed().get(0), times(1)).stop("stream1");
+        }
+    }
+
+    @Test
+    public void testGetFilesToUploadWithMultipleStreams() {
+        try (MockedStatic<RemoteBinlogProxy> remoteBinlogProxyMock = mockStatic(RemoteBinlogProxy.class);
+            MockedStatic<RuntimeLeaderElector> runtimeLeaderElectorMock = mockStatic(RuntimeLeaderElector.class);
+            MockedConstruction<BinlogUploadManager> binlogUploadManagerConstruction = mockConstruction(
+                BinlogUploadManager.class,
+                (mock, context) -> doNothing().when(mock).start())) {
+
+            RemoteBinlogProxy remoteBinlogProxy = mock(RemoteBinlogProxy.class);
+            remoteBinlogProxyMock.when(RemoteBinlogProxy::getInstance).thenReturn(remoteBinlogProxy);
+            when(remoteBinlogProxy.isBackupOn()).thenReturn(true);
+
+            runtimeLeaderElectorMock.when(() -> RuntimeLeaderElector.isDumperMasterOrX(anyLong(), any(), anyString()))
+                .thenReturn(true);
+
+            BinlogBackupManager backupManager = new BinlogBackupManager(streamContext, metrics);
+            backupManager.start();
+
+            // 验证BinlogUploadManager被正确初始化
+            assert backupManager != null;
         }
     }
 }

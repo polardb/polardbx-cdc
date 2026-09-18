@@ -12,6 +12,7 @@ import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 通用的Erosa的链接接口, 用于一般化处理mysql/oracle的解析过程
@@ -34,6 +35,11 @@ public interface ErosaConnection {
     void dump(long timestamp, SinkFunction func) throws Exception;
 
     void dump(GTIDSet gtidSet, SinkFunction func) throws Exception;
+
+    default void dump(String binlogfilename, Long binlogPosition, Long startTimestampMills, SinkFunction func,
+                      Map<String, String> extraParams) throws Exception {
+        dump(binlogfilename, binlogPosition, startTimestampMills, func);
+    }
 
     ErosaConnection fork();
 

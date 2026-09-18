@@ -15,7 +15,7 @@ import java.sql.SQLException;
 
 public class JoinSqlTraceIdOrderTest extends RplBaseTestCase {
 
-    // see : https://aone.alibaba-inc.com/v2/project/860366/bug/58961149
+    // see : historical compatibility behavior
     @Test
     public void testJoinSqlTraceIdOrder() throws SQLException {
         try (Connection connection = getPolardbxConnection()) {

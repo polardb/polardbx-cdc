@@ -6,10 +6,10 @@
  */
 package com.aliyun.polardbx.rpl.extractor;
 
+import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionBegin;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSTransactionEnd;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSXATransaction;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultOption;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
@@ -17,9 +17,11 @@ import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultRowChange;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.XATransactionType;
 import com.aliyun.polardbx.binlog.canal.core.AbstractEventParser;
 import com.aliyun.polardbx.binlog.canal.core.BinlogEventSink;
+import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
+import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.filter.BaseFilter;
 import com.aliyun.polardbx.rpl.pipeline.MessageEvent;
@@ -28,11 +30,13 @@ import com.aliyun.polardbx.rpl.storage.RplStorage;
 import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
+import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import java.net.InetSocketAddress;
+import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -75,6 +79,14 @@ public class MysqlBinlogExtractor extends BaseExtractor {
         try {
             parser = new MysqlEventParser(extractorConfig.getEventBufferSize(),
                 new RplEventRepository(pipeline.getPipeLineConfig().getPersistConfig()));
+            ReplicaMeta replicaMeta = JSON.parseObject(
+                extractorConfig.getPrivateMeta(), ReplicaMeta.class);
+            String ignoreServerIds = replicaMeta.getIgnoreServerIds();
+            log.info("ignore server id:{}", ignoreServerIds);
+            parser.setIgnoreServerIds(ignoreServerIds);
+            parser.setWriteServerId(replicaMeta.getServerId());
+            parser.setDetectingEnable(extractorConfig.isEnableDetectHeartbeat());
+            parser.setCreateHeartbeatTable(extractorConfig.isCreateHeartbeatTable());
             LogEventConvert logEventConvert = new LogEventConvert(metaHostInfo, filter, position, srcHostInfo.getType(),
                 enableSrcLogicalMetaSnapshot);
             logEventConvert.init();

@@ -6,7 +6,6 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
-import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -14,6 +13,7 @@ import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.protocol.DumpRequest;
 import com.aliyun.polardbx.binlog.protocol.MessageType;
 import com.aliyun.polardbx.binlog.protocol.TxnBegin;
+import com.aliyun.polardbx.binlog.protocol.TxnItem;
 import com.aliyun.polardbx.binlog.protocol.TxnMergedToken;
 import com.aliyun.polardbx.binlog.protocol.TxnMessage;
 import com.aliyun.polardbx.binlog.protocol.TxnTag;
@@ -21,6 +21,7 @@ import com.aliyun.polardbx.binlog.protocol.TxnType;
 import com.aliyun.polardbx.binlog.rpc.TxnMessageReceiver;
 import com.aliyun.polardbx.binlog.rpc.TxnStreamRpcClient;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
+import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.google.common.collect.Lists;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
@@ -42,11 +43,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.aliyun.polardbx.binlog.util.CommonUtils.getActualTso;
-import static com.aliyun.polardbx.binlog.util.CommonUtils.parsePureTso;
-import static com.aliyun.polardbx.binlog.util.CommonUtils.parseStreamSeq;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_KWAY_PARTITION_ID_CHECK_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_KWAY_SOURCE_QUEUE_SIZE;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.MERGER_STAGE_LOOP_ERROR;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.getActualTso;
+import static com.aliyun.polardbx.binlog.util.CommonUtils.parseStreamSeq;
 
 /**
  * created by ziyang.lb
@@ -68,7 +69,6 @@ public class BinlogKWayMerger {
     private volatile TxnMergedToken latestFormatDescToken;
     private volatile boolean running;
     private BinlogXMergeItem lastMergeItem;
-    private String lastTso;
     private volatile Throwable error;
 
     public BinlogKWayMerger(String taskName, String streamName, List<Pair<String, String>> targetTaskAddress,
@@ -110,9 +110,13 @@ public class BinlogKWayMerger {
             executorService.submit(() -> {
                 try {
                     int streamSeq = parseStreamSeq(streamName);
-                    entry.getValue().dump(
-                        DumpRequest.newBuilder().setDumperName(taskName).setTso(startTso).setStreamSeq(streamSeq)
-                            .setVersion(executionConfig.getRuntimeVersion()).build());
+                    DumpRequest dumpRequest = DumpRequest.newBuilder()
+                        .setDumperName(taskName)
+                        .setTso(startTso)
+                        .setStreamSeq(streamSeq)
+                        .setVersion(executionConfig.getRuntimeVersion())
+                        .setSubVersion(executionConfig.getSubRuntimeVersion()).build();
+                    entry.getValue().dump(dumpRequest);
                 } catch (Throwable e) {
                     error = new PolardbxException("dump from task error, target address :" + entry.getKey(), e);
                 }
@@ -168,12 +172,13 @@ public class BinlogKWayMerger {
                 }
 
                 // 对TxnType为FORMAT_DESC类型的事务不做顺序验证，直接透传给下游
-                String minTso = minItem.getTso();
-                if (lastTso != null && minTso.compareTo(lastTso) < 0
+                if (lastMergeItem != null && minItem.compareTo(lastMergeItem) < 0
                     && minItem.getTxnToken().getType() != TxnType.FORMAT_DESC) {
-                    log.error("detected disorderly tso，current tso is {}, last tso is {}", minTso, lastTso);
+                    log.error("detected disorderly tso，current tso is {}, last tso is {}",
+                        minItem.getTso(), lastMergeItem.getTso());
                     throw new PolardbxException(
-                        "detected disorderly tso，current tso is " + minTso + ",last tso is " + lastTso);
+                        "detected disorderly tso，current tso is " + minItem.getTso()
+                            + ",last tso is " + lastMergeItem.getTso());
                 }
 
                 send(minItem);
@@ -187,7 +192,7 @@ public class BinlogKWayMerger {
         log.info("Binlog KWay Merger started ...");
     }
 
-    private void initRpcClient(int flowControlWindowSize) {
+    protected void initRpcClient(int flowControlWindowSize) {
         targetTaskAddress.forEach(address -> {
             // merge source
             BinlogXMergeSource mergeSource = new BinlogXMergeSource(address.getKey(), address.getValue());
@@ -203,7 +208,7 @@ public class BinlogKWayMerger {
         });
     }
 
-    private void send(BinlogXMergeItem mergeItem) throws InterruptedException {
+    protected void send(BinlogXMergeItem mergeItem) throws InterruptedException {
         TxnMergedToken currentToken = mergeItem.txnToken;
         TxnMergedToken lastToken = lastMergeItem != null ? lastMergeItem.txnToken : null;
 
@@ -216,8 +221,8 @@ public class BinlogKWayMerger {
             sendTag(latestFormatDescToken.getTso(), latestFormatDescToken);
         }
 
-        String currentPureTso = parsePureTso(mergeItem.getTso());
-        String lastPureTso = lastMergeItem != null ? parsePureTso(lastMergeItem.getTso()) : "";
+        String currentPureTso = mergeItem.getPureTso();
+        String lastPureTso = lastMergeItem != null ? lastMergeItem.getPureTso() : "";
         if (!StringUtils.equals(currentPureTso, lastPureTso)) {
             if (lastToken != null && lastToken.getType() == TxnType.DML) {
                 sendEnd();
@@ -238,10 +243,9 @@ public class BinlogKWayMerger {
         }
 
         lastMergeItem = mergeItem;
-        lastTso = currentToken.getTso();
     }
 
-    private void trySendTag(String currentPureTso, String lastPureTso, TxnMergedToken token)
+    protected void trySendTag(String currentPureTso, String lastPureTso, TxnMergedToken token)
         throws InterruptedException {
         String currentActualTso = getActualTso(currentPureTso);
         String lastActualTso = StringUtils.isNotBlank(lastPureTso) ? getActualTso(lastPureTso) : "";
@@ -250,31 +254,31 @@ public class BinlogKWayMerger {
         }
     }
 
-    private void sendBegin(String pureTso, TxnMergedToken token)
+    protected void sendBegin(String pureTso, TxnMergedToken token)
         throws InterruptedException {
         TxnBegin txnBegin = TxnBegin.newBuilder().setTxnMergedToken(token.toBuilder().setTso(pureTso).build()).build();
         TxnMessage message = TxnMessage.newBuilder().setType(MessageType.BEGIN).setTxnBegin(txnBegin).build();
         receiver.onReceived(Lists.newArrayList(message));
     }
 
-    private void sendData(TxnMessage messageInput) throws InterruptedException {
+    protected void sendData(TxnMessage messageInput) throws InterruptedException {
         TxnMessage message =
             TxnMessage.newBuilder().setType(MessageType.DATA).setTxnData(messageInput.getTxnData()).build();
         receiver.onReceived(Lists.newArrayList(message));
     }
 
-    private void sendEnd() throws InterruptedException {
+    protected void sendEnd() throws InterruptedException {
         TxnMessage message = TxnMessage.newBuilder().setType(MessageType.END).build();
         receiver.onReceived(Lists.newArrayList(message));
     }
 
-    private void sendTag(String pureTso, TxnMergedToken token) throws InterruptedException {
+    protected void sendTag(String pureTso, TxnMergedToken token) throws InterruptedException {
         TxnTag txnTag = TxnTag.newBuilder().setTxnMergedToken(token.toBuilder().setTso(pureTso)).build();
         TxnMessage message = TxnMessage.newBuilder().setType(MessageType.TAG).setTxnTag(txnTag).build();
         receiver.onReceived(Lists.newArrayList(message));
     }
 
-    private static class BinlogXMergeSource {
+    protected static class BinlogXMergeSource {
         private final String dispatcherName;
         private final String target;
         private final ArrayBlockingQueue<TxnMessage> queue;
@@ -303,7 +307,7 @@ public class BinlogKWayMerger {
         }
     }
 
-    private static class BinlogXMergeSourceReceiver implements TxnMessageReceiver {
+    protected static class BinlogXMergeSourceReceiver implements TxnMessageReceiver {
         private final BinlogXMergeSource mergeSource;
 
         public BinlogXMergeSourceReceiver(BinlogXMergeSource mergeSource) {
@@ -318,12 +322,18 @@ public class BinlogKWayMerger {
         }
     }
 
-    private static class BinlogXMergeItem implements Comparable<BinlogXMergeItem> {
+    protected static class BinlogXMergeItem implements Comparable<BinlogXMergeItem> {
+        /**
+         * 也就是DispatcherName，目前与container ID绑定
+         */
         private final String sourceId;
         private final BinlogXMergeSource mergeSource;
         private final TxnMessage message;
         private final TxnMergedToken txnToken;
         private final String tso;
+        private final String pureTso;
+        private final String traceId;
+        private final String firstPartitionId;
 
         public BinlogXMergeItem(String sourceId, TxnMessage message, BinlogXMergeSource mergeSource) {
             this.sourceId = sourceId;
@@ -338,6 +348,37 @@ public class BinlogKWayMerger {
                 throw new PolardbxException("unsupported message type " + message.getType());
             }
             this.tso = txnToken.getTso();
+
+            // Decompose TSO into (pureTso, traceId) for deterministic comparison.
+            // DML TSO format: pureTso_traceId_subSeq; non-DML TSO: just pureTso.
+            String[] parts = tso.split("_");
+            this.pureTso = parts[0];
+            this.traceId = parts.length > 1 ? parts[1] : "";
+
+            // Extract first TxnItem's partitionId for DML messages.
+            // WriteBuffer flushes on each TABLE_MAP, so all TxnItems in one message share the same partitionId.
+            if (message.getType() == MessageType.WHOLE
+                && message.getTxnData().getTxnItemsCount() > 0) {
+                this.firstPartitionId = message.getTxnData().getTxnItems(0).getPartitionId();
+                if (DynamicApplicationConfig.getBoolean(BINLOGX_KWAY_PARTITION_ID_CHECK_ENABLED, false)) {
+                    checkPartitionIdConsistency();
+                }
+            } else {
+                this.firstPartitionId = null;
+            }
+        }
+
+        private void checkPartitionIdConsistency() {
+            List<TxnItem> items = message.getTxnData().getTxnItemsList();
+            for (int i = 1; i < items.size(); i++) {
+                String pid = items.get(i).getPartitionId();
+                if (!StringUtils.equals(firstPartitionId, pid)) {
+                    throw new PolardbxException(
+                        "inconsistent partitionId in TxnItems, tso=" + tso
+                            + ", firstPartitionId=" + firstPartitionId
+                            + ", items[" + i + "].partitionId=" + pid);
+                }
+            }
         }
 
         public String getSourceId() {
@@ -360,14 +401,32 @@ public class BinlogKWayMerger {
             return tso;
         }
 
+        public String getPureTso() {
+            return pureTso;
+        }
+
+        /**
+         * Compare by (pureTso, traceId, partitionId) to match upstream TxnBuffer.mergeTwoSortList ordering.
+         * subSeq is Dispatcher-local and must NOT participate in cross-Dispatcher ordering.
+         */
         @Override
         public int compareTo(BinlogXMergeItem o) {
-            return tso.compareTo(o.getTso());
+            int ret = pureTso.compareTo(o.pureTso);
+            if (ret == 0) {
+                ret = traceId.compareTo(o.traceId);
+            }
+            if (ret == 0 && firstPartitionId != null && o.firstPartitionId != null) {
+                ret = firstPartitionId.compareTo(o.firstPartitionId);
+            }
+            if (ret == 0) {
+                ret = sourceId.compareTo(o.sourceId);
+            }
+            return ret;
         }
     }
 
     @Slf4j
-    private static class BinlogXMergeController {
+    protected static class BinlogXMergeController {
         private final PriorityQueue<BinlogXMergeItem> priorityQueue = new PriorityQueue<>();
         private final Set<String> sourceIds = new HashSet<>();
 
@@ -408,4 +467,3 @@ public class BinlogKWayMerger {
         }
     }
 }
-

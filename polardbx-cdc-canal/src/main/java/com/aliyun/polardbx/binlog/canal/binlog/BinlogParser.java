@@ -22,6 +22,7 @@ import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta.FieldMeta;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.binlog.util.CharsetCache;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
 
@@ -31,7 +32,9 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.sql.Types;
 import java.util.BitSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author chengjin.lyf on 2020/7/27 8:15 下午
@@ -72,6 +75,23 @@ public class BinlogParser {
         return binaryLog;
     }
 
+    /**
+     * Determines whether the given field should be treated as binary data
+     * (no charset decoding) when parsing binlog row values.
+     *
+     * @param fieldMeta the field meta from table meta, may be null
+     * @return true if the column type indicates binary data (VARBINARY/BINARY/VECTOR)
+     */
+    static boolean isBinaryColumn(FieldMeta fieldMeta) {
+        if (fieldMeta == null) {
+            return false;
+        }
+        String columnType = fieldMeta.getColumnType();
+        return StringUtils.containsIgnoreCase(columnType, "VARBINARY")
+            || StringUtils.containsIgnoreCase(columnType, "BINARY")
+            || StringUtils.containsIgnoreCase(columnType, "VECTOR");
+    }
+
     public DefaultRowChange parse(TableMeta tableMeta, RowsLogEvent rowsLogEvent,
                                   String charset) throws UnsupportedEncodingException {
         if (!binaryLog && tableMeta == null) {
@@ -102,6 +122,7 @@ public class BinlogParser {
 
         // 构造列信息
         List<DBMSColumn> dbmsColumns = Lists.newArrayList();
+        Set<String> externalizedColumnNames = null;
         if (tableMeta == null) {
             ColumnInfo[] columnInfo = table.getColumnInfo();
             for (int i = 0; i < columnSize; i++) {
@@ -128,16 +149,24 @@ public class BinlogParser {
                     fieldMeta.isKey(),
                     fieldMeta.isUnique());
                 dbmsColumns.add(column);
+                if (fieldMeta.isExternalized()) {
+                    if (externalizedColumnNames == null) {
+                        externalizedColumnNames = new LinkedHashSet<>();
+                    }
+                    externalizedColumnNames.add(fieldMeta.getColumnName());
+                }
             }
         }
 
         rowChange = new DefaultRowChange(action,
             table.getDbName(),
             table.getTableName(),
-            new DefaultColumnSet(dbmsColumns));
+            externalizedColumnNames == null ? new DefaultColumnSet(dbmsColumns) :
+                new DefaultColumnSet(dbmsColumns, externalizedColumnNames));
         BitSet actualChangeColumns = new BitSet(columnSize); // 需要处理到update类型时，基于数据内容进行判定
         rowChange.setChangeColumnsBitSet(actualChangeColumns);
         rowChange.setHasHiddenPk((rowsLogEvent.getFlags() & RowsLogEvent.HIDDEN_PK_FLAG) != 0);
+        rowChange.setEventSize(rowsLogEvent.getEventLen());
         boolean tableError = false;
         while (rowsLogBuffer.nextOneRow(columns)) {
             // 处理row记录
@@ -219,14 +248,7 @@ public class BinlogParser {
                 } else {
                     // fixed issue
                     // https://github.com/alibaba/canal/issues/66，特殊处理binary/varbinary，不能做编码处理
-                    boolean isBinary = false;
-                    if (fieldMeta != null) {
-                        if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "VARBINARY")) {
-                            isBinary = true;
-                        } else if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "BINARY")) {
-                            isBinary = true;
-                        }
-                    }
+                    boolean isBinary = isBinaryColumn(fieldMeta);
                     buffer.nextValue(info.type, info.meta, isBinary);
                 }
             } catch (Exception e) {
@@ -320,7 +342,7 @@ public class BinlogParser {
                         // mysql binlog中blob/text都处理为blob类型，需要反查table
                         // meta，按编码解析text
                         if (fieldMeta != null && isText(fieldMeta.getColumnType())) {
-                            dataValue = new String((byte[]) value, charset);
+                            dataValue = new String((byte[]) value, CharsetCache.lookup(charset));
                             javaType = Types.CLOB;
                         } else {
                             // byte数组，直接使用iso-8859-1保留对应编码，浪费内存

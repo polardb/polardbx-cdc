@@ -18,6 +18,7 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
 import com.aliyun.polardbx.binlog.util.GmsTimeUtil;
+import com.google.common.collect.Sets;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.MockedStatic;
@@ -36,9 +37,9 @@ public class BinlogCleanerTest extends BaseTest {
         mockConfig(ConfigKeys.DISK_SIZE, "102400");
         mockConfig(ConfigKeys.BINLOG_PURGE_DISK_USE_RATIO, "0.7");
         mockConfig(ConfigKeys.BINLOG_DIR_PATH, this.getClass().getResource("/").getPath());
-        StreamContext context =
-            new StreamContext(CommonConstants.GROUP_NAME_GLOBAL, Arrays.asList(CommonConstants.STREAM_NAME_GLOBAL),
-                DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID), "", TaskType.Dumper, 1);
+        StreamContext context = new StreamContext(CommonConstants.GROUP_NAME_GLOBAL,
+            Sets.newTreeSet(Arrays.asList(CommonConstants.STREAM_NAME_GLOBAL)),
+            DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID), "", TaskType.Dumper, 1);
         BinlogCleaner cleaner = new BinlogCleaner(CommonConstants.STREAM_NAME_GLOBAL, context, null);
         try (MockedStatic<GmsTimeUtil> gmsTimeUtilMockedStatic = Mockito.mockStatic(GmsTimeUtil.class)) {
             gmsTimeUtilMockedStatic.when(GmsTimeUtil::getCurrentTimeMillis).thenReturn(System.currentTimeMillis());

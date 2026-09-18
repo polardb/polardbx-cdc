@@ -61,6 +61,7 @@ import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
+import io.grpc.netty.shaded.io.netty.channel.ChannelOption;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
@@ -75,12 +76,17 @@ import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.CommonConstants.STREAM_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_HEARTBEAT_INTERVAL_WITH_DUMP;
+import static com.aliyun.polardbx.binlog.ConfigKeys.CDC_SERVER_RESTART_CHECK_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.IS_LAB_ENV;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_KEY;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP;
 import static com.aliyun.polardbx.binlog.Constants.MDC_THREAD_LOGGER_VALUE_BINLOG_SYNC;
@@ -100,6 +106,7 @@ public class CdcServer {
     private final int port;
     private final ExecutorService executor;
     private final BinlogTaskConfig taskConfig;
+    private final Map<String, Map<String, Future<?>>> dumpingTasks;
     private Server server;
 
     private final MetricsManager metricsManager;
@@ -115,6 +122,7 @@ public class CdcServer {
         this.logFileManagerCollection = logFileManagerCollection;
         this.port = port;
         this.taskConfig = taskConfig;
+        this.dumpingTasks = new ConcurrentHashMap<>();
         this.metricsManager = metricsManager;
         this.executor = Executors.newCachedThreadPool(getThreadFactory("Cdc-server-thread" + "-%d", false));
     }
@@ -325,7 +333,9 @@ public class CdcServer {
                         StringUtils.isEmpty(request.getStreamName()) ? STREAM_NAME_GLOBAL : request.getStreamName();
                     StreamMetrics streamMetrics = StreamMetrics.getStreamMetrics(streamName);
                     DumpClientMetric dumpClientMetric = KEY_CLIENT_METRICS.get();
-                    executor.submit(() -> {
+
+                    final String uuid = UUID.randomUUID().toString();
+                    Future<?> future = executor.submit(() -> {
                         try {
                             MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
                             log.info("consumer count before dump: {}", streamMetrics.getConsumerCount().get());
@@ -340,10 +350,12 @@ public class CdcServer {
                         } finally {
                             log.info("consumer count after dump: {}", streamMetrics.getConsumerCount().get());
                             MDC.remove(MDC_THREAD_LOGGER_KEY);
+                            dumpingTasks.computeIfAbsent(streamName, k -> new HashMap<>()).remove(uuid);
                             streamMetrics.getConsumerCount().decrementAndGet();
                             DumpClientMetric.stopDump(dumpClientMetric);
                         }
                     });
+                    dumpingTasks.computeIfAbsent(streamName, k -> new HashMap<>()).put(uuid, future);
                 } finally {
                     MDC.remove(MDC_THREAD_LOGGER_KEY);
                 }
@@ -366,6 +378,12 @@ public class CdcServer {
                         ext = JSON.parseObject(request.getExt(), new TypeReference<Map<String, String>>() {
                         });
                     }
+
+                    if (ext.get("client_type").equalsIgnoreCase("COLUMNAR")) {
+                        // 有列存消费时，调小心跳间隔，快速推进位点
+                        tryAdjustCdcHeartbeatWriteInterval();
+                    }
+
                     Map<String, String> finalExt = ext;
 
                     executor.submit(() -> {
@@ -430,11 +448,17 @@ public class CdcServer {
                                              StreamObserver<BinlogDumpStatus> responseObserver) {
                 try {
                     MDC.put(MDC_THREAD_LOGGER_KEY, MDC_THREAD_LOGGER_VALUE_BINLOG_DUMP);
-                    log.info("CDC Server receive a show binlog dump status request, with stream name: {}",
-                        request.getStreamName());
+                    log.info("CDC Server receive a show binlog dump status request, with stream name: {}, inst Id:{}",
+                        request.getStreamName(), request.getInstId());
                     Map<String, DumpClientMetric> clientMap = metricsManager.getDumpClientMetricsMap();
                     long now = System.currentTimeMillis();
                     for (DumpClientMetric clientMetric : clientMap.values()) {
+                        if (StringUtils.isNotBlank(clientMetric.getInstId()) && !clientMetric.getInstId()
+                            .equalsIgnoreCase(request.getInstId())) {
+                            // metric中记录的instId与传入的不一致，说明该链路与执行show binlog dump status的Cn实例不一样
+                            // 如果metric中没有记录instId，说明当前cn还不支持传instId过来，就无视instId要求输出所有链路
+                            continue;
+                        }
                         long clientTimestamp = clientMetric.getTimestamp();
                         long delay = TimeUnit.MILLISECONDS.toSeconds(now) - clientTimestamp;
                         if (clientTimestamp == -1) {
@@ -502,6 +526,7 @@ public class CdcServer {
                 .forPort(port)
                 .flowControlWindow(1048576 * 500)
                 .addService(svc)
+                .withOption(ChannelOption.SO_REUSEADDR, true)
                 .intercept(new ServerInterceptor() {
                     @Override
                     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> call,
@@ -523,6 +548,11 @@ public class CdcServer {
                 .build()
                 .start();
             log.info("Listening on " + server.getPort());
+            if (DynamicApplicationConfig.getBoolean(IS_LAB_ENV) && DynamicApplicationConfig.getBoolean(
+                CDC_SERVER_RESTART_CHECK_ENABLED)) {
+                DynamicApplicationConfig.setValue(CDC_SERVER_RESTART_CHECK_ENABLED, "false");
+                throw new RuntimeException("cdc server restart test!");
+            }
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 // Use stderr here since the logger may have been reset by its JVM shutdown hook.
                 System.err.println("Shutting down");
@@ -533,11 +563,12 @@ public class CdcServer {
                 }
             }));
         } catch (IOException e) {
-            log.error("start cdc server fail", e);
+            throw new RuntimeException("start cdc server fail!", e);
         }
     }
 
     public void stop() {
+        log.info("## dumper controller stop begin ...");
         if (server != null) {
             try {
                 server.shutdownNow();
@@ -545,6 +576,21 @@ public class CdcServer {
                 log.warn("cdc server stop fail", e);
             }
         }
+        log.info("## dumper controller stop end ...");
+    }
+
+    public void stop(String streamName) {
+        log.info("## stopping binlog dump sessions for stream {} ... ", streamName);
+        if (logFileManagerCollection.contains(streamName)) {
+            logFileManagerCollection.stop(streamName);
+        }
+
+        Map<String, Future<?>> tasks = dumpingTasks.get(streamName);
+        if (tasks != null) {
+            tasks.values().forEach(future -> future.cancel(true));
+            dumpingTasks.remove(streamName);
+        }
+        log.info("## the binlog dump sessions for stream {} is successfully stopped ...", streamName);
     }
 
     private LogFileManager getLogFileManager(String streamName) {
@@ -589,6 +635,7 @@ public class CdcServer {
 
             JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
             TransactionTemplate transactionTemplate = SpringContextHolder.getObject("polarxTransactionTemplate");
+
             transactionTemplate.execute((o) -> transactionTemplate.execute(transactionStatus -> {
                 template.execute(TRANSACTION_POLICY);
                 JSONObject newObject = new JSONObject();

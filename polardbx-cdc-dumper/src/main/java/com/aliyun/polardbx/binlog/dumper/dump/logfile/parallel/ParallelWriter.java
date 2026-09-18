@@ -6,10 +6,14 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile.parallel;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.TimelineEnvConfig;
 import com.aliyun.polardbx.binlog.collect.message.MessageEventExceptionHandler;
 import com.aliyun.polardbx.binlog.dumper.dump.logfile.LogFileGenerator;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
+import com.aliyun.polardbx.binlog.enums.CompressionType;
+import com.github.luben.zstd.Zstd;
 import com.lmax.disruptor.BatchEventProcessor;
 import com.lmax.disruptor.BlockingWaitStrategy;
 import com.lmax.disruptor.ExceptionHandler;
@@ -31,6 +35,10 @@ import java.util.concurrent.locks.LockSupport;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_PARALLEL_BUILD_MAX_SLOT_PAYLOAD_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_PARALLEL_BUILD_MAX_SLOT_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_PARALLEL_BUILD_WITH_BATCH;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_TRANSACTION_COMPRESSION;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_TRANSACTION_COMPRESSION_LEVEL_ZSTD;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_TRANSACTION_COMPRESSION_TYPE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_TRANSACTION_COMPRESSION_USE_HISTORY_PARAMS;
 import static io.grpc.internal.GrpcUtil.getThreadFactory;
 
 /**
@@ -48,8 +56,10 @@ public class ParallelWriter {
     private final boolean dryRun;
     private final int dryRunMode;
     private final boolean useBatch;
+    private SingleEventToken curBeginEvent;
     private final int maxSlotSize;
     private final int maxSlotPayloadSize;
+    private final int maxCompressionSize;
     private final StreamMetrics metrics;
     private final String threadName;
 
@@ -59,6 +69,8 @@ public class ParallelWriter {
     private WorkerPool<EventData> eventBuildWorkerPool;
     private BatchEventProcessor<EventData> eventSinkStage;
     private BatchEventToken currentBatchEventToken;
+
+    private boolean compressionEnabled;
 
     public ParallelWriter(LogFileGenerator logFileGenerator, int ringBufferSize, int eventBuilderParallelism,
                           StreamMetrics metrics, boolean dryRun, int dryRunMode, String threadName) {
@@ -74,6 +86,8 @@ public class ParallelWriter {
         this.useBatch = DynamicApplicationConfig.getBoolean(BINLOG_PARALLEL_BUILD_WITH_BATCH);
         this.maxSlotSize = DynamicApplicationConfig.getInt(BINLOG_PARALLEL_BUILD_MAX_SLOT_SIZE);
         this.maxSlotPayloadSize = DynamicApplicationConfig.getInt(BINLOG_PARALLEL_BUILD_MAX_SLOT_PAYLOAD_SIZE);
+        this.maxCompressionSize =
+            DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_TRANSACTION_COMPRESSION_MAX_UNCOMPRESSED_SIZE);
         this.metrics = metrics;
         this.threadName = threadName;
     }
@@ -83,10 +97,37 @@ public class ParallelWriter {
             return;
         }
 
+        SingleEventToken.Type type = eventToken.getType();
+
+        if (type == SingleEventToken.Type.BEGIN) {
+            if (eventToken.isUseCompression()) {
+                compressionEnabled = true;
+                curBeginEvent = eventToken;
+            }
+        }
+
         EventToken tokenToPush;
-        if (useBatch) {
+        if (useBatch || compressionEnabled) {
             if (currentBatchEventToken == null) {
                 currentBatchEventToken = new BatchEventToken();
+            }
+
+            // 压缩需要保证一个事务的event在同一个batch中，此时都是该事务的event，不能push
+            if (curBeginEvent != null) {
+                if (type == SingleEventToken.Type.COMMIT) {
+                    curBeginEvent = null;
+                    compressionEnabled = false;
+                }
+                if (currentBatchEventToken.hasCompressionCapacity(eventToken, maxCompressionSize)) {
+                    currentBatchEventToken.addToken(eventToken);
+                    return;
+                } else {
+                    // 超出最大支持的压缩事务大小上限，放弃压缩
+                    compressionEnabled = false;
+                    curBeginEvent.setCompressionType(null);
+                    curBeginEvent.setUseCompression(false);
+                    curBeginEvent = null;
+                }
             }
 
             if (currentBatchEventToken.hasCapacity(eventToken, maxSlotSize, maxSlotPayloadSize) &&
@@ -228,5 +269,4 @@ public class ParallelWriter {
             LockSupport.parkNanos(100 * 1000L * newFullTimes);
         }
     }
-
 }

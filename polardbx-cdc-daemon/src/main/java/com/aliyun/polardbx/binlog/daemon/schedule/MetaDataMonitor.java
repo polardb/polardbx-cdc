@@ -126,7 +126,7 @@ public class MetaDataMonitor implements IScheduleJob {
             String cdcPhyTableName = getCdcPhyTableName();
             long threshold = DynamicApplicationConfig.getLong(META_PURGE_MARK_DDL_THRESHOLD);
             long totalCount = polarxJdbcTemplate.queryForObject(
-                "/!+TDDL:node(0)*/select count(id) from __cdc___000000." + cdcPhyTableName, Long.class);
+                "/*+TDDL:node(0)*/select count(id) from __cdc___000000." + cdcPhyTableName, Long.class);
             doCleanCdcDdlRecord(totalCount, threshold, polarxJdbcTemplate);
         } catch (Throwable t) {
             log.error("check cdc ddl record count for clean failed.", t);
@@ -238,7 +238,7 @@ public class MetaDataMonitor implements IScheduleJob {
         }
     }
 
-    private void cleanExpiredSemiSnapshot(String storageInstId, int cleanThreshold) {
+    void cleanExpiredSemiSnapshot(String storageInstId, int cleanThreshold) {
         int preserveHours = DynamicApplicationConfig.getInt(META_BUILD_SEMI_SNAPSHOT_PRESERVE_HOURS);
         SemiSnapshotInfoMapper semiMapper = getObject(SemiSnapshotInfoMapper.class);
         BinlogSemiSnapshotMapper binlogSemiSnapshotMapper = getObject(BinlogSemiSnapshotMapper.class);
@@ -255,31 +255,34 @@ public class MetaDataMonitor implements IScheduleJob {
                 + "{}. ", list.get(0).getTso(), count);
 
             RollbackMode rollbackMode = RollbackModeUtil.getRollbackMode();
-            long phyCount = phyHistMapper
-                .count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.storageInstId, isEqualTo(storageInstId)));
-            if (rollbackMode == RollbackMode.SNAPSHOT_SEMI && phyCount > cleanThreshold) {
-                transTemplate.execute(t -> {
-                    int cleanCount = phyHistMapper.delete(
-                        s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.storageInstId, isEqualTo(storageInstId))
-                            .and(BinlogPhyDdlHistoryDynamicSqlSupport.tso, isLessThan(list.get(0).getTso())));
+            if (rollbackMode == RollbackMode.SNAPSHOT_SEMI) {
+                long phyCount = phyHistMapper
+                    .count(s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.storageInstId, isEqualTo(storageInstId)));
+                if (phyCount > cleanThreshold) {
+                    transTemplate.execute(t -> {
+                        int cleanCount = phyHistMapper.delete(
+                            s -> s.where(BinlogPhyDdlHistoryDynamicSqlSupport.storageInstId, isEqualTo(storageInstId))
+                                .and(BinlogPhyDdlHistoryDynamicSqlSupport.tso, isLessThan(list.get(0).getTso())));
 
-                    Optional<BinlogPhyDdlHistCleanPoint> optional = cleanPointMapper.selectOne(s -> s
-                        .where(BinlogPhyDdlHistCleanPointDynamicSqlSupport.storageInstId, isEqualTo(storageInstId)));
-                    if (optional.isPresent()) {
-                        BinlogPhyDdlHistCleanPoint cleanPoint = new BinlogPhyDdlHistCleanPoint();
-                        cleanPoint.setTso(list.get(0).getTso());
-                        cleanPoint.setId(optional.get().getId());
-                        cleanPointMapper.updateByPrimaryKeySelective(cleanPoint);
-                    } else {
-                        BinlogPhyDdlHistCleanPoint cleanPoint = new BinlogPhyDdlHistCleanPoint();
-                        cleanPoint.setStorageInstId(storageInstId);
-                        cleanPoint.setTso(list.get(0).getTso());
-                        cleanPointMapper.insert(cleanPoint);
-                    }
-                    log.info("phy ddl history is cleaned, clean point is {}, clean count is {}",
-                        list.get(0).getTso(), cleanCount);
-                    return null;
-                });
+                        Optional<BinlogPhyDdlHistCleanPoint> optional = cleanPointMapper.selectOne(s -> s
+                            .where(BinlogPhyDdlHistCleanPointDynamicSqlSupport.storageInstId,
+                                isEqualTo(storageInstId)));
+                        if (optional.isPresent()) {
+                            BinlogPhyDdlHistCleanPoint cleanPoint = new BinlogPhyDdlHistCleanPoint();
+                            cleanPoint.setTso(list.get(0).getTso());
+                            cleanPoint.setId(optional.get().getId());
+                            cleanPointMapper.updateByPrimaryKeySelective(cleanPoint);
+                        } else {
+                            BinlogPhyDdlHistCleanPoint cleanPoint = new BinlogPhyDdlHistCleanPoint();
+                            cleanPoint.setStorageInstId(storageInstId);
+                            cleanPoint.setTso(list.get(0).getTso());
+                            cleanPointMapper.insert(cleanPoint);
+                        }
+                        log.info("phy ddl history is cleaned, clean point is {}, clean count is {}",
+                            list.get(0).getTso(), cleanCount);
+                        return null;
+                    });
+                }
             }
         }
     }

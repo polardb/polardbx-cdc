@@ -60,4 +60,10 @@ public interface DumpRequestOrBuilder extends
    */
   com.google.protobuf.ByteString
       getStorageInstIdBytes();
+
+  /**
+   * <code>int64 subVersion = 6;</code>
+   * @return The subVersion.
+   */
+  long getSubVersion();
 }

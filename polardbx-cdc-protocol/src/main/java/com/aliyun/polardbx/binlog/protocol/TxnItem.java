@@ -28,6 +28,7 @@ private static final long serialVersionUID = 0L;
     schema_ = "";
     table_ = "";
     primaryKey_ = java.util.Collections.emptyList();
+    partitionId_ = "";
   }
 
   @java.lang.Override
@@ -106,6 +107,12 @@ private static final long serialVersionUID = 0L;
               mutable_bitField0_ |= 0x00000001;
             }
             primaryKey_.add(input.readBytes());
+            break;
+          }
+          case 74: {
+            java.lang.String s = input.readStringRequireUtf8();
+
+            partitionId_ = s;
             break;
           }
           default: {
@@ -429,6 +436,54 @@ private static final long serialVersionUID = 0L;
     return primaryKey_.get(index);
   }
 
+  public static final int PARTITIONID_FIELD_NUMBER = 9;
+  private volatile java.lang.Object partitionId_;
+  /**
+   * <pre>
+   * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+   * 保证不同Dispatcher拓扑下输出顺序一致
+   * </pre>
+   *
+   * <code>string partitionId = 9;</code>
+   * @return The partitionId.
+   */
+  @java.lang.Override
+  public java.lang.String getPartitionId() {
+    java.lang.Object ref = partitionId_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      partitionId_ = s;
+      return s;
+    }
+  }
+  /**
+   * <pre>
+   * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+   * 保证不同Dispatcher拓扑下输出顺序一致
+   * </pre>
+   *
+   * <code>string partitionId = 9;</code>
+   * @return The bytes for partitionId.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getPartitionIdBytes() {
+    java.lang.Object ref = partitionId_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      partitionId_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -466,6 +521,9 @@ private static final long serialVersionUID = 0L;
     }
     for (int i = 0; i < primaryKey_.size(); i++) {
       output.writeBytes(8, primaryKey_.get(i));
+    }
+    if (!getPartitionIdBytes().isEmpty()) {
+      com.google.protobuf.GeneratedMessageV3.writeString(output, 9, partitionId_);
     }
     unknownFields.writeTo(output);
   }
@@ -509,6 +567,9 @@ private static final long serialVersionUID = 0L;
       size += dataSize;
       size += 1 * getPrimaryKeyList().size();
     }
+    if (!getPartitionIdBytes().isEmpty()) {
+      size += com.google.protobuf.GeneratedMessageV3.computeStringSize(9, partitionId_);
+    }
     size += unknownFields.getSerializedSize();
     memoizedSize = size;
     return size;
@@ -540,6 +601,8 @@ private static final long serialVersionUID = 0L;
         != other.getHashKey()) return false;
     if (!getPrimaryKeyList()
         .equals(other.getPrimaryKeyList())) return false;
+    if (!getPartitionId()
+        .equals(other.getPartitionId())) return false;
     if (!unknownFields.equals(other.unknownFields)) return false;
     return true;
   }
@@ -569,6 +632,8 @@ private static final long serialVersionUID = 0L;
       hash = (37 * hash) + PRIMARYKEY_FIELD_NUMBER;
       hash = (53 * hash) + getPrimaryKeyList().hashCode();
     }
+    hash = (37 * hash) + PARTITIONID_FIELD_NUMBER;
+    hash = (53 * hash) + getPartitionId().hashCode();
     hash = (29 * hash) + unknownFields.hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -718,6 +783,8 @@ private static final long serialVersionUID = 0L;
 
       primaryKey_ = java.util.Collections.emptyList();
       bitField0_ = (bitField0_ & ~0x00000001);
+      partitionId_ = "";
+
       return this;
     }
 
@@ -757,6 +824,7 @@ private static final long serialVersionUID = 0L;
         bitField0_ = (bitField0_ & ~0x00000001);
       }
       result.primaryKey_ = primaryKey_;
+      result.partitionId_ = partitionId_;
       onBuilt();
       return result;
     }
@@ -838,6 +906,10 @@ private static final long serialVersionUID = 0L;
           ensurePrimaryKeyIsMutable();
           primaryKey_.addAll(other.primaryKey_);
         }
+        onChanged();
+      }
+      if (!other.getPartitionId().isEmpty()) {
+        partitionId_ = other.partitionId_;
         onChanged();
       }
       this.mergeUnknownFields(other.unknownFields);
@@ -1541,6 +1613,107 @@ private static final long serialVersionUID = 0L;
     public Builder clearPrimaryKey() {
       primaryKey_ = java.util.Collections.emptyList();
       bitField0_ = (bitField0_ & ~0x00000001);
+      onChanged();
+      return this;
+    }
+
+    private java.lang.Object partitionId_ = "";
+    /**
+     * <pre>
+     * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+     * 保证不同Dispatcher拓扑下输出顺序一致
+     * </pre>
+     *
+     * <code>string partitionId = 9;</code>
+     * @return The partitionId.
+     */
+    public java.lang.String getPartitionId() {
+      java.lang.Object ref = partitionId_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        partitionId_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <pre>
+     * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+     * 保证不同Dispatcher拓扑下输出顺序一致
+     * </pre>
+     *
+     * <code>string partitionId = 9;</code>
+     * @return The bytes for partitionId.
+     */
+    public com.google.protobuf.ByteString
+        getPartitionIdBytes() {
+      java.lang.Object ref = partitionId_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        partitionId_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <pre>
+     * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+     * 保证不同Dispatcher拓扑下输出顺序一致
+     * </pre>
+     *
+     * <code>string partitionId = 9;</code>
+     * @param value The partitionId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setPartitionId(
+        java.lang.String value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  
+      partitionId_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+     * 保证不同Dispatcher拓扑下输出顺序一致
+     * </pre>
+     *
+     * <code>string partitionId = 9;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearPartitionId() {
+      
+      partitionId_ = getDefaultInstance().getPartitionId();
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+     * 保证不同Dispatcher拓扑下输出顺序一致
+     * </pre>
+     *
+     * <code>string partitionId = 9;</code>
+     * @param value The bytes for partitionId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setPartitionIdBytes(
+        com.google.protobuf.ByteString value) {
+      if (value == null) {
+    throw new NullPointerException();
+  }
+  checkByteStringIsUtf8(value);
+      
+      partitionId_ = value;
       onChanged();
       return this;
     }

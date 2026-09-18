@@ -34,4 +34,6 @@ public interface BinlogLabEventMapper {
     @Select("select count(*) from binlog_lab_event where event_type = #{eventType} and params = #{params}")
     int countEventWithParams(@Param("eventType") int eventType, @Param("params") String params);
 
+    @Select("select count(*) from binlog_lab_event where event_type = #{eventType}")
+    int countEvent(@Param("eventType") int eventType);
 }

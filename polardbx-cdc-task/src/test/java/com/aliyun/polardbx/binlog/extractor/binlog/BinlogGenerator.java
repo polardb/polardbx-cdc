@@ -7,6 +7,7 @@
 package com.aliyun.polardbx.binlog.extractor.binlog;
 
 import com.aliyun.polardbx.binlog.canal.LogEventUtil;
+import com.aliyun.polardbx.binlog.canal.binlog.DecodeMode;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
@@ -261,7 +262,7 @@ public class BinlogGenerator extends LogBuffer {
         rowData.setBiNullBitMap(nullBitMap);
         rowEventBuilder.setColumnsBitMap(bitMap);
         rowEventBuilder.addRowData(rowData);
-        WriteRowsLogEvent rowsLogEvent = new WriteRowsLogEvent(rebuild(rowEventBuilder), this, fde);
+        WriteRowsLogEvent rowsLogEvent = new WriteRowsLogEvent(rebuild(rowEventBuilder), this, fde, DecodeMode.NORMAL);
         rowsLogEvent.setTable(lastTableMap);
         return rowsLogEvent;
     }

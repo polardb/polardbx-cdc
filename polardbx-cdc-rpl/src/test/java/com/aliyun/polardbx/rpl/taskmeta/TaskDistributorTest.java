@@ -8,6 +8,7 @@ package com.aliyun.polardbx.rpl.taskmeta;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.domain.po.RplDdl;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
@@ -15,6 +16,7 @@ import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
 import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.Resource;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -22,6 +24,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 
@@ -39,6 +42,48 @@ public class TaskDistributorTest extends BaseTest {
         setConfig("rpl_task_keep_alive_interval_seconds", "300");
         setConfig(ConfigKeys.INST_IP, "1.1.1.1");
         setConfig(ConfigKeys.TASK_NAME, "123");
+        setConfig(ConfigKeys.PHONE_ALARM_WHEN_DDL, "false");
+    }
+
+    @Test
+    public void replicaDelayAlarm_DowngradesWhenDdlIsRunningByDefault() {
+        long stateMachineId = 11L;
+        try (MockedStatic<DbTaskMetaManager> dbTaskMetaManager = mockStatic(DbTaskMetaManager.class)) {
+            dbTaskMetaManager.when(
+                    () -> DbTaskMetaManager.getDdlTasksByState(stateMachineId, DdlState.RUNNING))
+                .thenReturn(Collections.singletonList(mock(RplDdl.class)));
+
+            Assert.assertEquals(MonitorType.RPL_PROCESS_ERROR,
+                TaskDistributor.getReplicaDelayAlarmType(stateMachineId));
+            dbTaskMetaManager.verify(
+                () -> DbTaskMetaManager.getDdlTasksByState(stateMachineId, DdlState.RUNNING), times(1));
+        }
+    }
+
+    @Test
+    public void replicaDelayAlarm_DoesNotDowngradeWhenPhoneAlarmEnabled() {
+        long stateMachineId = 12L;
+        setConfig(ConfigKeys.PHONE_ALARM_WHEN_DDL, "true");
+        try (MockedStatic<DbTaskMetaManager> dbTaskMetaManager = mockStatic(DbTaskMetaManager.class)) {
+            Assert.assertEquals(MonitorType.IMPORT_INC_ERROR,
+                TaskDistributor.getReplicaDelayAlarmType(stateMachineId));
+            dbTaskMetaManager.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    public void replicaDelayAlarm_RemainsPhoneAlarmWhenNoDdlIsRunning() {
+        long stateMachineId = 13L;
+        try (MockedStatic<DbTaskMetaManager> dbTaskMetaManager = mockStatic(DbTaskMetaManager.class)) {
+            dbTaskMetaManager.when(
+                    () -> DbTaskMetaManager.getDdlTasksByState(stateMachineId, DdlState.RUNNING))
+                .thenReturn(Collections.emptyList());
+
+            Assert.assertEquals(MonitorType.IMPORT_INC_ERROR,
+                TaskDistributor.getReplicaDelayAlarmType(stateMachineId));
+            dbTaskMetaManager.verify(
+                () -> DbTaskMetaManager.getDdlTasksByState(stateMachineId, DdlState.RUNNING), times(1));
+        }
     }
 
     @Test

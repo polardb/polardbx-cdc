@@ -13,60 +13,51 @@ public interface GetDumperInfoResponseOrBuilder extends
     // @@protoc_insertion_point(interface_extends:dumper.GetDumperInfoResponse)
     com.google.protobuf.MessageOrBuilder {
 
-    /**
-     * <code>string file = 1;</code>
-     *
-     * @return The file.
-     */
-    java.lang.String getFile();
+  /**
+   * <code>string file = 1;</code>
+   * @return The file.
+   */
+  java.lang.String getFile();
+  /**
+   * <code>string file = 1;</code>
+   * @return The bytes for file.
+   */
+  com.google.protobuf.ByteString
+      getFileBytes();
 
-    /**
-     * <code>string file = 1;</code>
-     *
-     * @return The bytes for file.
-     */
-    com.google.protobuf.ByteString
-    getFileBytes();
+  /**
+   * <code>int64 position = 2;</code>
+   * @return The position.
+   */
+  long getPosition();
 
-    /**
-     * <code>int64 position = 2;</code>
-     *
-     * @return The position.
-     */
-    long getPosition();
+  /**
+   * <code>int64 lastEventTimestamp = 3;</code>
+   * @return The lastEventTimestamp.
+   */
+  long getLastEventTimestamp();
 
-    /**
-     * <code>int64 lastEventTimestamp = 3;</code>
-     *
-     * @return The lastEventTimestamp.
-     */
-    long getLastEventTimestamp();
+  /**
+   * <code>int64 delay = 4;</code>
+   * @return The delay.
+   */
+  long getDelay();
 
-    /**
-     * <code>int64 delay = 4;</code>
-     *
-     * @return The delay.
-     */
-    long getDelay();
+  /**
+   * <code>int32 sessionCount = 5;</code>
+   * @return The sessionCount.
+   */
+  int getSessionCount();
 
-    /**
-     * <code>int32 sessionCount = 5;</code>
-     *
-     * @return The sessionCount.
-     */
-    int getSessionCount();
+  /**
+   * <code>int64 avgDumpBpsSum = 6;</code>
+   * @return The avgDumpBpsSum.
+   */
+  long getAvgDumpBpsSum();
 
-    /**
-     * <code>int64 avgDumpBpsSum = 6;</code>
-     *
-     * @return The avgDumpBpsSum.
-     */
-    long getAvgDumpBpsSum();
-
-    /**
-     * <code>double cpuUsage = 7;</code>
-     *
-     * @return The cpuUsage.
-     */
-    double getCpuUsage();
+  /**
+   * <code>double cpuUsage = 7;</code>
+   * @return The cpuUsage.
+   */
+  double getCpuUsage();
 }

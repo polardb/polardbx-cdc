@@ -9,9 +9,9 @@ package com.aliyun.polardbx.binlog.canal.binlog.event;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import com.aliyun.polardbx.binlog.util.CharsetCache;
 
 import java.io.IOException;
-import java.nio.charset.Charset;
 
 /**
  * A Query_log_event is created for each query that modifies the database, unless the query is logged row-based. The
@@ -382,6 +382,21 @@ public class QueryLogEvent extends LogEvent {
     public static final int Q_OPT_INDEX_FORMAT_GPP_ENABLED = 22;
 
     /**
+     * Replicate OPT_INDEX_FORMAT_SPC_ENABLED
+     */
+    public static final int Q_OPT_INDEX_FORMAT_SPC_ENABLED = 252;
+
+    /**
+     * Replicate OPT_INDEX_FORMAT_HIPPO_ENABLED
+     */
+    public static final int Q_OPT_INDEX_FORMAT_HIPPO_ENABLED = 253;
+
+    /**
+     * 回收站，仅在gh出现，暂时没有parse
+     */
+    public static final int Q_OPT_RECYCLE_BIN_TABLE_NAME = 254;
+
+    /**
      * Replicate opt_index_format_panda_enabled.
      */
     public static final int Q_OPT_INDEX_FORMAT_PANDA_ENABLED = 255;
@@ -538,7 +553,7 @@ public class QueryLogEvent extends LogEvent {
         if (clientCharset >= 0) {
             charsetName = CharsetConversion.getJavaCharset(clientCharset);
 
-            if ((charsetName != null) && (Charset.isSupported(charsetName))) {
+            if ((charsetName != null) && (CharsetCache.isSupported(charsetName))) {
                 query = buffer.getFixString(queryLen, charsetName);
             } else {
                 logger.warn("unsupported character set in query log: " + "\n    ID = " + clientCharset + ", Charset = "
@@ -596,6 +611,10 @@ public class QueryLogEvent extends LogEvent {
             return "Q_OPT_INDEX_FORMAT_GPP_ENABLED";
         case Q_OPT_INDEX_FORMAT_PANDA_ENABLED:
             return "Q_OPT_INDEX_FORMAT_PANDA_ENABLED";
+        case Q_OPT_INDEX_FORMAT_HIPPO_ENABLED:
+            return "Q_OPT_INDEX_FORMAT_HIPPO_ENABLED";
+        case Q_OPT_INDEX_FORMAT_SPC_ENABLED:
+            return "Q_OPT_INDEX_FORMAT_SPC_ENABLED";
         }
         return "CODE#" + code;
     }
@@ -673,7 +692,7 @@ public class QueryLogEvent extends LogEvent {
                         mtsAccessedDbs = OVER_MAX_DBS_IN_EVENT_MTS;
                         break;
                     }
-                    String mtsAccessedDbNames[] = new String[mtsAccessedDbs];
+                    String[] mtsAccessedDbNames = new String[mtsAccessedDbs];
                     for (int i = 0; i < mtsAccessedDbs && buffer.position() < end; i++) {
                         int length = end - buffer.position();
                         mtsAccessedDbNames[i] = buffer.getFixString(length < NAME_LEN ? length : NAME_LEN);
@@ -707,6 +726,12 @@ public class QueryLogEvent extends LogEvent {
                     buffer.forward(1);
                     break;
                 case Q_OPT_INDEX_FORMAT_PANDA_ENABLED:
+                    buffer.forward(1);
+                    break;
+                case Q_OPT_INDEX_FORMAT_HIPPO_ENABLED:
+                    buffer.forward(1);
+                    break;
+                case Q_OPT_INDEX_FORMAT_SPC_ENABLED:
                     buffer.forward(1);
                     break;
                 case Q_HRNOW:
@@ -750,7 +775,7 @@ public class QueryLogEvent extends LogEvent {
                      */
                     logger.error("Query_log_event has unknown status vars (first has code: " + code
                         + "), skipping the rest of them");
-                    break; // Break loop
+                    return; // Break loop
                 }
             }
         } catch (RuntimeException e) {

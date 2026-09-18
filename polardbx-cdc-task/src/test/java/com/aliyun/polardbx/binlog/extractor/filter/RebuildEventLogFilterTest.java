@@ -17,6 +17,8 @@ import com.aliyun.polardbx.binlog.canal.core.ddl.ThreadRecorder;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
+import com.aliyun.polardbx.binlog.canal.binlog.LogDecoder;
+import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
 import com.aliyun.polardbx.binlog.cdc.meta.ConsistencyChecker;
 import com.aliyun.polardbx.binlog.cdc.meta.ConsistencyCheckerFactory;
 import com.aliyun.polardbx.binlog.cdc.meta.MetaFilter;
@@ -32,10 +34,16 @@ import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.extractor.log.DDLEvent;
+import com.aliyun.polardbx.binlog.extractor.log.ExternalColumnTxnContext;
 import com.aliyun.polardbx.binlog.extractor.log.Transaction;
 import com.aliyun.polardbx.binlog.extractor.log.TransactionGroup;
 import com.aliyun.polardbx.binlog.extractor.log.VirtualTSO;
+import com.aliyun.polardbx.binlog.extractor.filter.rebuild.EventReformater;
+import com.aliyun.polardbx.binlog.extractor.filter.rebuild.ReformatContext;
 import com.aliyun.polardbx.binlog.format.QueryEventBuilder;
+import com.aliyun.polardbx.binlog.protocol.EventData;
+import com.aliyun.polardbx.binlog.storage.IteratorBuffer;
+import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.After;
 import org.junit.Assert;
@@ -48,6 +56,8 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -94,7 +104,6 @@ public class RebuildEventLogFilterTest extends BaseTest {
         when(tx.getDdlEvent()).thenReturn(event);
 
         tg.getTransactionList().add(tx);
-
 
         JdbcTemplate polarxJdbcTemplate = Mockito.mock(JdbcTemplate.class);
         Map<String, Object> returnMap = new HashMap();
@@ -568,5 +577,127 @@ public class RebuildEventLogFilterTest extends BaseTest {
         ll.add(transaction);
         filter.handle(new TransactionGroup(ll), handlerContext);
         Mockito.verify(transaction, Mockito.times(1)).isArchive();
+    }
+
+    @Test
+    public void testExternalColumnContextReleasedWhenTransactionHasNoRows() throws Exception {
+        RebuildEventLogFilter filter = Mockito.mock(RebuildEventLogFilter.class);
+        ReformatContext reformatContext = Mockito.mock(ReformatContext.class);
+        Transaction transaction = Mockito.mock(Transaction.class);
+        ExternalColumnTxnContext externalColumnTxnContext = Mockito.mock(ExternalColumnTxnContext.class);
+        when(transaction.getVirtualTsoStr()).thenReturn("external-column-tso");
+        when(transaction.getExternalColumnTxnContext()).thenReturn(externalColumnTxnContext);
+
+        invokeReformatEvent(filter, transaction, reformatContext);
+
+        Mockito.verify(reformatContext).setExternalColumnTxnContext(externalColumnTxnContext);
+        Mockito.verify(reformatContext).setExternalColumnTxnContext(null);
+        Mockito.verify(transaction).releaseExternalColumnTxnContext();
+    }
+
+    @Test
+    public void testExternalColumnContextReleasedWhenReformatFails() throws Exception {
+        RebuildEventLogFilter filter = Mockito.mock(RebuildEventLogFilter.class);
+        ReformatContext reformatContext = Mockito.mock(ReformatContext.class);
+        Transaction transaction = Mockito.mock(Transaction.class);
+        ExternalColumnTxnContext externalColumnTxnContext = Mockito.mock(ExternalColumnTxnContext.class);
+        IteratorBuffer iterator = Mockito.mock(IteratorBuffer.class);
+        when(transaction.iterator()).thenReturn(iterator);
+        when(transaction.getExternalColumnTxnContext()).thenReturn(externalColumnTxnContext);
+        when(iterator.hasNext()).thenThrow(new IllegalStateException("expected iterator failure"));
+
+        try {
+            invokeReformatEvent(filter, transaction, reformatContext);
+            Assert.fail("reformat failure should propagate");
+        } catch (InvocationTargetException e) {
+            Assert.assertTrue(e.getCause() instanceof IllegalStateException);
+        }
+
+        Mockito.verify(reformatContext).setExternalColumnTxnContext(externalColumnTxnContext);
+        Mockito.verify(reformatContext).setExternalColumnTxnContext(null);
+        Mockito.verify(transaction).releaseExternalColumnTxnContext();
+    }
+
+    @Test
+    public void testReformatReleasesTransactionWhenIteratorIsEmpty() throws Exception {
+        RebuildEventLogFilter filter = Mockito.mock(RebuildEventLogFilter.class);
+        ReformatContext reformatContext = Mockito.mock(ReformatContext.class);
+        Transaction transaction = Mockito.mock(Transaction.class);
+        IteratorBuffer iterator = Mockito.mock(IteratorBuffer.class);
+        when(transaction.iterator()).thenReturn(iterator);
+        when(iterator.hasNext()).thenReturn(false);
+
+        invokeReformatEvent(filter, transaction, reformatContext);
+
+        Mockito.verify(transaction).release();
+        Mockito.verify(transaction).releaseExternalColumnTxnContext();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testReformatCoversRejectRemoveAndRetainBranches() throws Exception {
+        EventAcceptFilter acceptFilter = Mockito.mock(EventAcceptFilter.class);
+        RebuildEventLogFilter filter = new RebuildEventLogFilter(111L, acceptFilter, false,
+            Mockito.mock(PolarDbXTableMetaManager.class));
+        LogDecoder decoder = Mockito.mock(LogDecoder.class);
+        setPrivateField(filter, "logDecoder", decoder);
+
+        ReformatContext reformatContext = Mockito.mock(ReformatContext.class);
+        Transaction transaction = Mockito.mock(Transaction.class);
+        IteratorBuffer iterator = Mockito.mock(IteratorBuffer.class);
+        TxnItemRef rejectedRef = Mockito.mock(TxnItemRef.class);
+        TxnItemRef removedRef = Mockito.mock(TxnItemRef.class);
+        TxnItemRef retainedRef = Mockito.mock(TxnItemRef.class);
+        EventData eventData = EventData.newBuilder().setPayload(com.google.protobuf.ByteString.copyFrom(
+            new byte[] {1})).build();
+        when(rejectedRef.getEventData()).thenReturn(eventData);
+        when(removedRef.getEventData()).thenReturn(eventData);
+        when(retainedRef.getEventData()).thenReturn(eventData);
+        when(transaction.iterator()).thenReturn(iterator);
+        when(transaction.getServerId()).thenReturn(null, 999L);
+        when(iterator.hasNext()).thenReturn(true, true, true, false);
+        when(iterator.next()).thenReturn(rejectedRef, removedRef, retainedRef);
+
+        LogEvent rejectedEvent = Mockito.mock(LogEvent.class, Mockito.RETURNS_DEEP_STUBS);
+        LogEvent removedEvent = Mockito.mock(LogEvent.class, Mockito.RETURNS_DEEP_STUBS);
+        LogEvent retainedEvent = Mockito.mock(LogEvent.class, Mockito.RETURNS_DEEP_STUBS);
+        when(removedEvent.getHeader().getType()).thenReturn(991);
+        when(retainedEvent.getHeader().getType()).thenReturn(992);
+        when(decoder.decode(Mockito.any(), Mockito.any())).thenReturn(rejectedEvent, removedEvent, retainedEvent);
+        when(acceptFilter.accept(rejectedEvent)).thenReturn(false);
+        when(acceptFilter.accept(removedEvent)).thenReturn(true);
+        when(acceptFilter.accept(retainedEvent)).thenReturn(true);
+
+        Field reformaterMapField = RebuildEventLogFilter.class.getDeclaredField("reformaterMap");
+        reformaterMapField.setAccessible(true);
+        Map<Integer, EventReformater> reformaterMap =
+            (Map<Integer, EventReformater>) reformaterMapField.get(filter);
+        EventReformater retainedReformater = Mockito.mock(EventReformater.class);
+        when(retainedReformater.accept(retainedEvent)).thenReturn(true);
+        when(retainedReformater.reformat(retainedEvent, retainedRef, reformatContext, eventData)).thenReturn(true);
+        reformaterMap.put(992, retainedReformater);
+
+        invokeReformatEvent(filter, transaction, reformatContext);
+
+        Mockito.verify(rejectedRef).delete();
+        Mockito.verify(iterator, Mockito.times(2)).remove();
+        Mockito.verify(reformatContext).setServerId(111L);
+        Mockito.verify(reformatContext).setServerId(999L);
+        Mockito.verify(transaction, Mockito.never()).release();
+        Mockito.verify(transaction).releaseExternalColumnTxnContext();
+    }
+
+    private static void invokeReformatEvent(RebuildEventLogFilter filter, Transaction transaction,
+                                            ReformatContext reformatContext) throws Exception {
+        Method method = RebuildEventLogFilter.class.getDeclaredMethod(
+            "reformatEvent", Transaction.class, ReformatContext.class);
+        method.setAccessible(true);
+        method.invoke(filter, transaction, reformatContext);
+    }
+
+    private static void setPrivateField(Object target, String name, Object value) throws Exception {
+        Field field = RebuildEventLogFilter.class.getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 }

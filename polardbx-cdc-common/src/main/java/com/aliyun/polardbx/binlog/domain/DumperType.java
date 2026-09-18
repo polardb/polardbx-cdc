@@ -13,7 +13,7 @@ public enum DumperType {
     MASTER("M"),
     SLAVE("S"),
     XSTREAM("X");
-    String name;
+    final String name;
 
     DumperType(String name) {
         this.name = name;

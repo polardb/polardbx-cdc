@@ -40,13 +40,15 @@ public class TopologyShareUtil {
         new ConcurrentHashMap<>();
 
     public static LogicMetaTopology buildSnapshotTopology(String tso, Supplier<LogicMetaTopology> supplier) {
+        LogicMetaTopology topology;
         if (needShareTopology()) {
-            return SNAPSHOT_TOPOLOGY_CACHE.computeIfAbsent(tso, k -> toShare(supplier.get())).copy();
+            topology =  SNAPSHOT_TOPOLOGY_CACHE.computeIfAbsent(tso, k -> toShare(supplier.get())).copy();
         } else {
-            LogicMetaTopology topology = supplier.get();
+            topology = supplier.get();
             toLowerCaseLogicMetaTopology(topology);
-            return topology;
         }
+        topology.setMaxTableId(supplier.get().getMaxTableId());
+        return topology;
     }
 
     public static void trySharedRecord(TopologyRecord record) {

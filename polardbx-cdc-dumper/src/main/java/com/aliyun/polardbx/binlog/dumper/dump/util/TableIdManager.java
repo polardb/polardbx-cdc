@@ -7,17 +7,20 @@
 package com.aliyun.polardbx.binlog.dumper.dump.util;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.format.FormatDescriptionEvent;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_WRITE_TABLE_ID_BASE_VALUE;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.DELETE_ROWS_EVENT;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.DELETE_ROWS_EVENT_V1;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.TABLE_MAP_EVENT;
+import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.TRANSACTION_PAYLOAD_EVENT;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.UPDATE_ROWS_EVENT;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.UPDATE_ROWS_EVENT_V1;
 import static com.aliyun.polardbx.binlog.canal.binlog.LogEvent.WRITE_ROWS_EVENT;
@@ -42,7 +45,9 @@ public class TableIdManager {
      */
     private static final long TABLE_ID_BASE_VALUE = DynamicApplicationConfig.getLong(BINLOG_WRITE_TABLE_ID_BASE_VALUE);
 
-    private final HashMap<String, Long> cache = new HashMap<>();
+    @Setter
+    private Map<String, Long> cache = new HashMap<>();
+    @Getter
     private AtomicLong counter;
 
     //只有当创建了一个新的Binlog文件时，tryReset才可以设置为true
@@ -61,9 +66,21 @@ public class TableIdManager {
         cache.remove(buildKey(schema, table));
     }
 
+    /**
+     * 在rotate时，清空table id的映射关系，但让table id仍然接着上一个文件的最大值增长
+     * 这样设计是为了避免恢复文件时，table id恢复前后由于映射关系不一致导致的不一致的问题
+     */
+    public void clearCache() {
+        cache.clear();
+    }
+
     //非线程安全
     public long getTableId(String schema, String table) {
         String key = buildKey(schema, table);
+        return getTableId(key);
+    }
+
+    public long getTableId(String key) {
         Long value = cache.get(key);
         if (value == null) {
             return cache.computeIfAbsent(key, k -> {
@@ -98,7 +115,7 @@ public class TableIdManager {
         return logEventType == UPDATE_ROWS_EVENT || logEventType == UPDATE_ROWS_EVENT_V1
             || logEventType == DELETE_ROWS_EVENT || logEventType == DELETE_ROWS_EVENT_V1
             || logEventType == WRITE_ROWS_EVENT || logEventType == WRITE_ROWS_EVENT_V1
-            || logEventType == TABLE_MAP_EVENT;
+            || logEventType == TABLE_MAP_EVENT || logEventType == TRANSACTION_PAYLOAD_EVENT;
     }
 
     public static void main(String[] args) {

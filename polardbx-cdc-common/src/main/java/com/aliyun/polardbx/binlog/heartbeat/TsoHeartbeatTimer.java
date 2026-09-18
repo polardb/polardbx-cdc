@@ -41,6 +41,8 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVA
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_ENABLE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_EPS_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_TARGET_INTERVAL;
+import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_SUSPEND_ENABLED;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 
 ;
@@ -58,7 +60,7 @@ public class TsoHeartbeatTimer implements Runnable, IScheduleJob {
     private static final Logger logger = LoggerFactory.getLogger(TsoHeartbeatTimer.class);
 
     private static final String TSO_HEARTBEAT_LEADER_LOCK = "TSO_HEARTBEAT_LEADER_LOCK";
-    private static final String TRANSACTION_POLICY = "set drds_transaction_policy='TSO'";
+    protected static final String TRANSACTION_POLICY = "set drds_transaction_policy='TSO'";
     private static final String CREATE_HEARTBEAT_TABLE_SQL =
         "CREATE TABLE IF NOT EXISTS `__cdc__`.`__cdc_heartbeat__` "
             + "( `id` bigint(20) NOT NULL AUTO_INCREMENT BY GROUP, "
@@ -155,7 +157,10 @@ public class TsoHeartbeatTimer implements Runnable, IScheduleJob {
         if (RuntimeLeaderElector.isLeader(TSO_HEARTBEAT_LEADER_LOCK + splitFlag + clusterRole)) {
             try {
                 if (heartbeatTableInitFlag.compareAndSet(false, true)) {
-                    template.execute(CREATE_HEARTBEAT_TABLE_SQL);
+                    if (!checkIfTableExists("__cdc__", "__cdc_heartbeat__")) {
+                        // see historical compatibility behavior
+                        template.execute(CREATE_HEARTBEAT_TABLE_SQL);
+                    }
                 }
             } catch (Throwable t) {
                 heartbeatTableInitFlag.compareAndSet(true, false);
@@ -170,16 +175,34 @@ public class TsoHeartbeatTimer implements Runnable, IScheduleJob {
                 }
             }
 
-            transactionTemplate.execute((o) -> transactionTemplate.execute(transactionStatus -> {
+            sendTsoHeartBeat();
+            updateNodeHeartbeatTimestamp();
+
+        }
+    }
+
+    boolean checkIfTableExists(String dbName, String tableName) {
+        try {
+            String sql = "select * from information_schema.tables where "
+                + "table_schema = '__cdc__' and table_name = '__cdc_heartbeat__'";
+            List<Map<String, Object>> list = template.queryForList(sql);
+            return !list.isEmpty();
+        } catch (Throwable t) {
+            logger.error("checkIfTableExists error,{}:{}.", dbName, tableName);
+            return false;
+        }
+    }
+
+    void sendTsoHeartBeat() {
+        if (!getBoolean(DAEMON_TSO_HEARTBEAT_SUSPEND_ENABLED)) {
+            transactionTemplate.execute(transactionStatus -> {
                 long now = System.currentTimeMillis();
                 String nowFormat = DateFormatUtils.format(now, "yyyy-MM-dd HH:mm:ss.SSS");
                 String sql = String.format(UPDATE_SQL, nowFormat);
                 template.execute(TRANSACTION_POLICY);
                 template.execute(sql);
                 return null;
-            }));
-            updateNodeHeartbeatTimestamp();
-
+            });
         }
     }
 

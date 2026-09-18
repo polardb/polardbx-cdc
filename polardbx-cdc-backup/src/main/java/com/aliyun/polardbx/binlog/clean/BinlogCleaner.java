@@ -52,7 +52,6 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getLong;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
-
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.id;
 import static com.aliyun.polardbx.binlog.dao.BinlogOssRecordDynamicSqlSupport.purgeStatus;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.BINLOG_BACKUP_DELETE_ERROR;
@@ -74,7 +73,7 @@ public class BinlogCleaner {
     public BinlogCleaner(String stream, StreamContext context, LogFileLockManager logFileLockManager) {
         this.group = context.getGroup();
         this.stream = stream;
-        this.maxTotalBytes = calculateMaxTotalBytes(context.getStreamList().size());
+        this.maxTotalBytes = calculateMaxTotalBytes(context.getStreamSet().size());
         this.fileSystem =
             new CdcFileSystem(BinlogFileUtil.getRootPath(context.getTaskType(), context.getVersion()), group, stream);
         this.lockManager = logFileLockManager;

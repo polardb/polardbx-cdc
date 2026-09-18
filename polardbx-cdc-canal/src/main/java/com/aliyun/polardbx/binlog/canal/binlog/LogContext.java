@@ -9,6 +9,8 @@ package com.aliyun.polardbx.binlog.canal.binlog;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -26,6 +28,10 @@ public final class LogContext {
     private LogPosition logPosition;
 
     private ServerCharactorSet serverCharactorSet;
+
+    @Getter
+    @Setter
+    private boolean iterateDecode;
 
     public LogContext() {
         this.formatDescription = FormatDescriptionLogEvent.FORMAT_DESCRIPTION_EVENT_5_x;

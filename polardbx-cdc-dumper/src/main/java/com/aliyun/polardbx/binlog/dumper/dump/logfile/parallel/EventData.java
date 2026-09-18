@@ -6,6 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile.parallel;
 
+import com.aliyun.polardbx.binlog.format.utils.AutoExpandByteArray;
 import lombok.Data;
 
 /**
@@ -14,11 +15,19 @@ import lombok.Data;
 @Data
 public class EventData {
     private EventToken eventToken;
-    private byte[] data;
+    /**
+     * 写入byte[]数组时.每次都要通过autoExpandByteArray写入
+     */
+    private AutoExpandByteArray autoExpandByteArray;
 
     public EventData(int eventDataBufferSize) {
-        //会被反复使用
-        data = new byte[eventDataBufferSize];
+        // 会被反复使用
+        byte[] data = new byte[eventDataBufferSize];
+        autoExpandByteArray = new AutoExpandByteArray(data);
+    }
+
+    public byte[] getData() {
+        return autoExpandByteArray.getData();
     }
 
     public void clear() {

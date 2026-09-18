@@ -16,6 +16,7 @@ import com.aliyun.polardbx.binlog.protocol.TxnMessage;
 import com.aliyun.polardbx.binlog.protocol.TxnTag;
 import com.aliyun.polardbx.binlog.protocol.TxnToken;
 import com.aliyun.polardbx.binlog.protocol.TxnType;
+import com.google.protobuf.ByteString;
 import lombok.Data;
 
 import java.util.List;

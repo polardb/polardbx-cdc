@@ -10,8 +10,8 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.daemon.cluster.topology.GlobalBinlogTopologyBuilder;
+import com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyEntity;
 import com.aliyun.polardbx.binlog.dao.StorageInfoMapper;
-import com.aliyun.polardbx.binlog.domain.po.BinlogTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.NodeInfo;
 import com.aliyun.polardbx.binlog.domain.po.StorageInfo;
 import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
@@ -19,7 +19,6 @@ import com.aliyun.polardbx.binlog.scheduler.model.Container;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.service.NodeInfoService;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
-import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.MockedStatic;
@@ -58,9 +57,9 @@ public class StorageCountStrategyTest extends BaseTest {
             );
             GlobalBinlogTopologyBuilder storageCountStrategy =
                 new GlobalBinlogTopologyBuilder(DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID));
-            Pair<Long, List<BinlogTaskConfig>> apply =
-                storageCountStrategy.buildTopology(capacity, storageInfo, ExecutionConfig.ORIGIN_TSO, 100, "1001", 1);
-            Assert.assertEquals(3, apply.getValue().size());
+            TopologyEntity topologyEntity = storageCountStrategy.buildTopology(
+                capacity, storageInfo, ExecutionConfig.ORIGIN_TSO, 100, 0, "1001", 1, null);
+            Assert.assertEquals(3, topologyEntity.getTaskConfigs().size());
         }
     }
 }

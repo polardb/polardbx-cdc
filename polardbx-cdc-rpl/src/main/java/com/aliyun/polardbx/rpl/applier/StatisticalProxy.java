@@ -10,10 +10,9 @@ import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.CommonMetrics;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
-import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.canal.DecompressionStatistics;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
-import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.dao.RplStatMetricsDynamicSqlSupport;
@@ -37,6 +36,7 @@ import com.aliyun.polardbx.rpl.common.NamedThreadFactory;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.pipeline.BasePipeline;
+import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.PipelineConfig;
@@ -56,7 +56,6 @@ import org.mybatis.dynamic.sql.SqlBuilder;
 import org.slf4j.Logger;
 import org.springframework.util.CollectionUtils;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -77,10 +76,18 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_APPLY_DRY_RUN_ENABLED;
 public class StatisticalProxy implements FlowLimiter {
 
     private static final int MAX_RETRY = 4;
+    /**
+     * 延迟未知时的落库哨兵值：true_delay_mills 列为 bigint unsigned NOT NULL 不能存 null，
+     * 选择 Long.MAX_VALUE 因其不可能是真实延迟，查表方可明确识别为"未知"而非误读为 0 延迟。
+     * 注意：该值也会随 DbTaskMetaManager.updateTask 的 JSON 序列化写入任务元数据，
+     * Java/fastjson 侧无精度问题，但若该 JSON 被前端 JS 消费，超出 2^53 会失真。
+     */
+    private static final long TRUE_DELAY_MILLS_UNKNOWN = Long.MAX_VALUE;
     private static final StatisticalProxy INSTANCE = new StatisticalProxy();
     private ScheduledExecutorService executorService;
     private final Logger positionLogger = LogUtil.getPositionLogger();
     private final Logger statisticLogger = LogUtil.getStatisticLogger();
+    private final Logger decompreesionLogger = LogUtil.getDecompreesionLogger();
     @Getter
     private String position;
     private long lastEventTimestamp;
@@ -147,7 +154,6 @@ public class StatisticalProxy implements FlowLimiter {
         if (dryRun) {
             return;
         }
-
         limiter.runTask(events);
     }
 
@@ -156,7 +162,6 @@ public class StatisticalProxy implements FlowLimiter {
         if (dryRun) {
             return;
         }
-
         limiter.runTranTask(transactions);
     }
 
@@ -208,7 +213,13 @@ public class StatisticalProxy implements FlowLimiter {
      */
     public void innerApply(List<DBMSEvent> events) throws Exception {
         try {
-            applier.apply(events);
+            if (events == null || events.isEmpty()) {
+                return;
+            }
+            StatMetrics.getInstance().addApplyAttemptCount(1);
+            if (!DynamicApplicationConfig.getBoolean(RPL_APPLY_DRY_RUN_ENABLED)) {
+                applier.apply(events);
+            }
         } catch (Exception e) {
             if (events.size() == 1 && DdlApplyHelper.isDdl(events.get(0))) {
                 throw new DdlApplyException(e);
@@ -256,7 +267,7 @@ public class StatisticalProxy implements FlowLimiter {
             try {
                 applier.tranApply(Collections.singletonList(transaction));
             } catch (Exception e2) {
-                log.error("stop because of the msg, " + transaction, e2);
+                log.error("stop because of the msg ", e2);
                 Transaction.RangeIterator it = transaction.rangeIterator();
                 while (it.hasNext()) {
                     Transaction.Range range = it.next();
@@ -281,7 +292,7 @@ public class StatisticalProxy implements FlowLimiter {
         if (StringUtils.isBlank(position)) {
             return;
         }
-        if (lastErrorRemoved.compareAndSet(false, true) && !StringUtils.equalsIgnoreCase(this.position, position)) {
+        if (!StringUtils.equalsIgnoreCase(this.position, position) && lastErrorRemoved.compareAndSet(false, true)) {
             StatisticalProxy.getInstance().removeLastError();
         }
         if (positionLogger.isDebugEnabled()) {
@@ -439,6 +450,9 @@ public class StatisticalProxy implements FlowLimiter {
         long lastTotalInCache = statMetrics.getTotalInCache().getAndSet(0);
         long lastProcessDelay = statMetrics.getProcessDelay().getAndSet(0);
         long lastReceiveDelay = statMetrics.getReceiveDelay().getAndSet(0);
+        long lastTotalApplyDelay = statMetrics.getTotalApplyDelay().getAndSet(0);
+        long lastApplyAttemptCount = statMetrics.getApplyAttemptCount().getAndSet(0);
+        long lastHeartbeatCount = statMetrics.getHeartbeatCount().getAndSet(0);
         long periodSkipCounter = statMetrics.getSkipCounter().getAndSet(0);
         long periodSkipExceptionCounter = statMetrics.getSkipExceptionCounter().getAndSet(0);
         long persistMsgCounter = statMetrics.getPersistentMessageCounter().get();
@@ -468,17 +482,62 @@ public class StatisticalProxy implements FlowLimiter {
         rplStatMetrics.setTotalCommitCount(
             periodCommitCount + (rplStatMetrics.getTotalCommitCount() == null ? 0 :
                 rplStatMetrics.getTotalCommitCount()));
-        // receive delay 为 0 说明过去一段时间内未收到event，此时以 pos 与 当前时间的差值作为延迟
-        // 否则以 receive delay + process delay 作为延迟
-        if (rplStatMetrics.getReceiveDelay() != null && rplStatMetrics.getReceiveDelay() == 0L) {
-            BinlogPosition pos = getLatestPosition();
-            long timeStamp = pos == null ? 0 : pos.getTimestamp();
-            rplStatMetrics.setTrueDelayMills(System.currentTimeMillis() - timeStamp * 1000);
+        // 计算真实延迟
+        // 1. 有event被成功apply：使用基于同一event的端到端延迟(extractDelay + processDelay)
+        // 2. 尝试过apply但未成功计算出totalApplyDelay（首批失败/仅非数据event）：用position时间差
+        // 3. 有event进来但没有尝试apply（系统空闲，仅数据event）：用receiveDelay
+        // 4. 仅收到心跳event，无数据event：master空闲，slave已追上，延迟为0
+        // 5. 完全没收到event：用position时间差兜底；无有效位点时返回 null，
+        //    trueDelayMills 保持 null 表示延迟未知，上报链路不吐出该指标
+        if (lastTotalApplyDelay > 0) {
+            rplStatMetrics.setTrueDelayMills(lastTotalApplyDelay);
+        } else if (lastApplyAttemptCount > 0) {
+            Long positionDelay = calculatePositionDelayMillis(
+                getLatestPosition(), System.currentTimeMillis());
+            if (positionDelay != null) {
+                rplStatMetrics.setTrueDelayMills(positionDelay);
+            }
+        } else if (lastReceiveDelay > 0) {
+            rplStatMetrics.setTrueDelayMills(lastReceiveDelay);
+        } else if (lastHeartbeatCount > 0) {
+            rplStatMetrics.setTrueDelayMills(0L);
         } else {
-            rplStatMetrics.setTrueDelayMills(rplStatMetrics.getReceiveDelay() + rplStatMetrics.getProcessDelay());
+            Long positionDelay = calculatePositionDelayMillis(
+                getLatestPosition(), System.currentTimeMillis());
+            if (positionDelay != null) {
+                rplStatMetrics.setTrueDelayMills(positionDelay);
+            }
         }
         statisticLogger.info(LogUtil.generateStatisticLogV2(rplStatMetrics));
+        decompreesionLogger.info(DecompressionStatistics.getDecompressionInfo());
+    }
 
+    /**
+     * 基于位点时间戳计算延迟毫秒数。
+     * <p>
+     * 返回值语义：
+     * <ul>
+     * <li>null：延迟未知（无有效位点，position 为 null 或 timestamp <= 0），该指标不上报，
+     * 监控通过指标缺失（no data）识别"未知"状态。</li>
+     * <li>0：位点时间戳超前于当前时间（时钟偏斜），视为近似追平，不是未知。</li>
+     * <li>正值：正常的位点延迟毫秒数。</li>
+     * </ul>
+     * 注意：null 仅存在于内存指标链路，写库前会在 flushInternal 中兜底为 TRUE_DELAY_MILLS_UNKNOWN 哨兵值
+     * （true_delay_mills 列为 unsigned NOT NULL，极大值可避免查表方误读为 0 延迟）。
+     */
+    static Long calculatePositionDelayMillis(BinlogPosition position, long currentTimeMillis) {
+        if (position == null || position.getTimestamp() <= 0) {
+            // 无有效位点，延迟未知，返回 null（上报链路不吐出该指标）
+            return null;
+        }
+
+        long currentTimeSeconds = TimeUnit.MILLISECONDS.toSeconds(currentTimeMillis);
+        if (position.getTimestamp() > currentTimeSeconds) {
+            // 未来位点视为时钟偏斜，近似追平，返回 0 而非未知
+            return 0L;
+        }
+
+        return currentTimeMillis - TimeUnit.SECONDS.toMillis(position.getTimestamp());
     }
 
     Retryer<Void> buildRetryer(long retryInterval, int retryAttemptCount) {
@@ -506,6 +565,12 @@ public class StatisticalProxy implements FlowLimiter {
         ProcSnapshot procSnapshot = ProcUtils.buildProcSnapshot();
         fill(rplStatMetrics, statMetrics, jvmSnapshot, procSnapshot);
         sendMetrics(rplStatMetrics, jvmSnapshot, procSnapshot);
+        // true_delay_mills 列为 bigint unsigned NOT NULL，无位点时 trueDelayMills 为 null（延迟未知），
+        // 真实"未知"语义由上面的 sendMetrics 上报链路缺失该指标表达，
+        // 落库用极大哨兵值而非 0，避免直接查表的运维方误读为"零延迟/已追平"
+        if (rplStatMetrics.getTrueDelayMills() == null) {
+            rplStatMetrics.setTrueDelayMills(TRUE_DELAY_MILLS_UNKNOWN);
+        }
         if (rplStatMetricsOptional.isPresent()) {
             rplStatMetrics.setId(rplStatMetricsOptional.get().getId());
             mapper.updateByPrimaryKey(rplStatMetrics);
@@ -537,17 +602,18 @@ public class StatisticalProxy implements FlowLimiter {
 
     @SneakyThrows
     private void sendMetrics(RplStatMetrics rplSnapshot, JvmSnapshot jvmSnapshot, ProcSnapshot procSnapshot) {
-        String prefix = "replica_" + TaskContext.getInstance().getTask().getType() + "_";
+        String prefixNew = "replica_" + TaskContext.getInstance().getTask().getType() + "_"
+            + TaskContext.getInstance().getTask().getId() + "_";
         List<CommonMetrics> commonMetrics = Lists.newArrayList();
-        CommonMetricsHelper.addReplicaMetrics(commonMetrics, rplSnapshot, prefix);
+        CommonMetricsHelper.addReplicaMetrics(commonMetrics, rplSnapshot, prefixNew);
         if (jvmSnapshot != null) {
-            CommonMetricsHelper.addJvmMetrics(commonMetrics, jvmSnapshot, prefix);
+            CommonMetricsHelper.addJvmMetrics(commonMetrics, jvmSnapshot, prefixNew);
         }
         if (procSnapshot != null) {
-            CommonMetricsHelper.addProcMetrics(commonMetrics, procSnapshot, prefix);
+            CommonMetricsHelper.addProcMetrics(commonMetrics, procSnapshot, prefixNew);
         }
         if (!CollectionUtils.isEmpty(commonMetrics)) {
-            MetricsReporter.report(commonMetrics);
+            MetricsReporter.leaderReport(commonMetrics);
         }
     }
 }

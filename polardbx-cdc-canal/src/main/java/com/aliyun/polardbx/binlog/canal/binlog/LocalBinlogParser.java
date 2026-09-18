@@ -17,9 +17,12 @@ import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.util.List;
 
+@Slf4j
 public class LocalBinlogParser extends AbstractEventParser {
 
     private int bufferSize = 8192;
@@ -49,6 +52,7 @@ public class LocalBinlogParser extends AbstractEventParser {
         decoder.handle(LogEvent.DELETE_ROWS_EVENT_V1);
         decoder.handle(LogEvent.ROWS_QUERY_LOG_EVENT);
         decoder.handle(LogEvent.XA_PREPARE_LOG_EVENT);
+        decoder.handle(LogEvent.TRANSACTION_PAYLOAD_EVENT);
         LogContext context = new LogContext();
         context.setServerCharactorSet(
             ServerCharactorSet.builder().characterSetServer("utf8mb4").characterSetClient("utf8mb4")
@@ -63,6 +67,17 @@ public class LocalBinlogParser extends AbstractEventParser {
             }
 
             if (logEvent == null) {
+                continue;
+            }
+
+            if (logEvent.getHeader().getType() == LogEvent.TRANSACTION_PAYLOAD_EVENT) {
+                log.info("parse compression log at {}", logEvent.getHeader().getLogPos());
+                List<LogEvent> eventList = decoder.processIterateDecode(logEvent, context);
+                for (LogEvent e : eventList) {
+                    if (!sinkFunction.sink(e, context.getLogPosition())) {
+                        break;
+                    }
+                }
                 continue;
             }
 

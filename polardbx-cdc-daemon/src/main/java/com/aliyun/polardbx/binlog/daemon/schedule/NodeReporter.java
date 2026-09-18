@@ -7,8 +7,8 @@
 package com.aliyun.polardbx.binlog.daemon.schedule;
 
 import com.alibaba.fastjson.JSONObject;
-import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.CommonConstants;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
@@ -52,25 +52,32 @@ public class NodeReporter extends AbstractBinlogTimerTask {
         String clusterRole = DynamicApplicationConfig.getClusterRole();
 
         NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
-        NodeInfoMapperExt binlogNodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapperExt.class);
-        NodeInfo nodeInfo = new NodeInfo();
         Optional<NodeInfo> node = nodeInfoMapper.selectOne(
             s -> s.where(NodeInfoDynamicSqlSupport.containerId,
                 SqlBuilder.isEqualTo(instId)));
 
         if (node.isPresent()) {
-            int result = binlogNodeInfoMapper.updateNodeHeartbeat(node.get().getId(),
-                role,
-                clusterType,
-                clusterRole
-            );
-            if (result == 0) {
-                log.warn("node info has removed from meta db.");
-            }
-
-            return;
+            updateNode(node.get(), role, clusterRole);
+        } else {
+            insetNode(role, clusterRole);
         }
+    }
 
+    private void updateNode(NodeInfo node, String role, String clusterRole) {
+        NodeInfoMapperExt binlogNodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapperExt.class);
+        int result = binlogNodeInfoMapper.updateNodeHeartbeat(node.getId(),
+            role,
+            clusterType,
+            clusterRole,
+            true
+        );
+        if (result == 0) {
+            log.warn("node info has removed from meta db, id is {}", node.getId());
+        }
+    }
+
+    private void insetNode(String role, String clusterRole) {
+        NodeInfo nodeInfo = new NodeInfo();
         ClusterType clusterType = ClusterType.valueOf(this.clusterType);
         nodeInfo.setRole(role);
         nodeInfo.setClusterId(clusterId);
@@ -84,6 +91,7 @@ public class NodeReporter extends AbstractBinlogTimerTask {
         nodeInfo.setStatus(0);
         nodeInfo.setPolarxInstId(DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID));
         nodeInfo.setClusterRole(clusterRole);
+        nodeInfo.setEnableLightRebalance(true);
 
         switch (clusterType) {
         case BINLOG:
@@ -97,6 +105,7 @@ public class NodeReporter extends AbstractBinlogTimerTask {
         }
 
         log.info("insert into binlog_node_info: {}", nodeInfo);
+        NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
         nodeInfoMapper.insertSelective(nodeInfo);
     }
 

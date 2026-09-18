@@ -44,6 +44,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.PRINT_METRICS;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_COLLECT_DDL_HISTORY_COUNT_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_COLLECT_DDL_HISTORY_COUNT_INTERVAL_ROUND;
 
 /**
  * Created by ziyang.lb
@@ -57,6 +59,9 @@ public class MetricsManager {
     private MetricsSnapshot lastSnapshot;
     private long startTime;
     private volatile boolean running;
+    private long ddlHistoryCollectRound = 0;
+    private long cachedLogicDdlHistoryCount = 0;
+    private long cachedPhyDdlHistoryCount = 0;
 
     public MetricsManager() {
         scheduledExecutorService = Executors.newSingleThreadScheduledExecutor((r) -> {
@@ -255,14 +260,17 @@ public class MetricsManager {
         sb.append(threadInfoFormat2);
     }
 
-    private void contactJvmMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
+    public void contactJvmMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
         TableFormat jvmFormatInfo = new TableFormat("Jvm Metrics");
-        jvmFormatInfo.addColumn("youngUsed", "youngMax", "youngCollectionCnt", "youngCollectionTime(ms)", "oldUsed",
-            "oldMax", "oldCollectionCnt", "oldCollectionTime(ms)");
-        jvmFormatInfo.addRow(snapshot.jvmSnapshot.getYoungUsed(), snapshot.jvmSnapshot.getYoungMax(),
+        jvmFormatInfo.addColumn("youngUsed", "youngCommitted", "youngMax", "youngCollectionCnt",
+            "youngCollectionTime(ms)", "oldUsed",
+            "oldMax", "oldCollectionCnt", "oldCollectionTime(ms)", "totalRatio");
+        jvmFormatInfo.addRow(snapshot.jvmSnapshot.getYoungUsed(), snapshot.jvmSnapshot.getYoungCommitted(),
+            snapshot.jvmSnapshot.getYoungMax(),
             snapshot.jvmSnapshot.getYoungCollectionCount(), snapshot.jvmSnapshot.getYoungCollectionTime(),
             snapshot.jvmSnapshot.getOldUsed(), snapshot.jvmSnapshot.getOldMax(),
-            snapshot.jvmSnapshot.getOldCollectionCount(), snapshot.jvmSnapshot.getOldCollectionTime());
+            snapshot.jvmSnapshot.getOldCollectionCount(), snapshot.jvmSnapshot.getOldCollectionTime(),
+            snapshot.jvmSnapshot.getTotalRatio());
         sb.append(jvmFormatInfo);
     }
 
@@ -377,7 +385,7 @@ public class MetricsManager {
         META_METRICS_LOGGER.info(sb.toString());
     }
 
-    private MetricsSnapshot buildSnapshot() {
+    public MetricsSnapshot buildSnapshot() {
         MetricsSnapshot snapshot = new MetricsSnapshot();
         snapshot.timestamp = System.currentTimeMillis();
         if (lastSnapshot != null) {
@@ -434,10 +442,23 @@ public class MetricsManager {
         aggregateCoreMetrics.logicTableCount = snapshot.metaMetrics.getLogicTableCount();
         aggregateCoreMetrics.phyDbCount = snapshot.metaMetrics.getPhyDbCount();
         aggregateCoreMetrics.phyTableCount = snapshot.metaMetrics.getPhyTableCount();
-        aggregateCoreMetrics.logicDdlHistoryCount =
-            SpringContextHolder.getObject(BinlogLogicMetaHistoryMapper.class).count(s -> s);
-        aggregateCoreMetrics.phyDdlHistoryCount =
-            SpringContextHolder.getObject(BinlogPhyDdlHistoryMapper.class).count(s -> s);
+
+        // ddl history count 指标：通过开关控制是否采集，通过轮次间隔控制频率
+        // 首轮（round=0）一定采集一次，之后每 intervalRound 轮采集一次
+        boolean collectDdlHistory = DynamicApplicationConfig.getBoolean(TASK_COLLECT_DDL_HISTORY_COUNT_ENABLED);
+        if (collectDdlHistory) {
+            int intervalRound =
+                Math.max(1, DynamicApplicationConfig.getInt(TASK_COLLECT_DDL_HISTORY_COUNT_INTERVAL_ROUND));
+            if (ddlHistoryCollectRound % intervalRound == 0) {
+                cachedLogicDdlHistoryCount =
+                    SpringContextHolder.getObject(BinlogLogicMetaHistoryMapper.class).count(s -> s);
+                cachedPhyDdlHistoryCount =
+                    SpringContextHolder.getObject(BinlogPhyDdlHistoryMapper.class).count(s -> s);
+            }
+            ddlHistoryCollectRound++;
+        }
+        aggregateCoreMetrics.logicDdlHistoryCount = cachedLogicDdlHistoryCount;
+        aggregateCoreMetrics.phyDdlHistoryCount = cachedPhyDdlHistoryCount;
         aggregateCoreMetrics.storeTxnCount = TxnBuffer.CURRENT_TXN_BUFFER_COUNT.get();
         aggregateCoreMetrics.storePersistedTxnCount = TxnBuffer.CURRENT_TXN_BUFFER_PERSISTED_COUNT.get();
         aggregateCoreMetrics.storeTxnItemCount = TxnItemRef.CURRENT_TXN_ITEM_COUNT.get();

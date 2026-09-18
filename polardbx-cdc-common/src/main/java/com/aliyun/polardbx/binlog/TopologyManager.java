@@ -61,9 +61,10 @@ public class TopologyManager {
     private void innerParse() {
         Connection connection = null;
         try {
-            logger.warn("connect to " + String.format("jdbc:mysql://%s:%s/%s", ip, port + "", dbName));
-            connection = DriverManager
-                .getConnection(String.format("jdbc:mysql://%s:%s/%s", ip, port + "", dbName), username, password);
+            String jdbcUrl = String.format(
+                "jdbc:mysql://%s:%s/%s?connectTimeout=5000&socketTimeout=30000", ip, port + "", dbName);
+            logger.warn("connect to " + jdbcUrl);
+            connection = DriverManager.getConnection(jdbcUrl, username, password);
 
             Map<String, String> dbGroup2dbNameMap = prepareDbGroup2DbName(connection);
             List<String> logicTableList = showTableList(connection);

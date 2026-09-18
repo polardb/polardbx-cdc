@@ -6,10 +6,14 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog.event;
 
+import com.aliyun.polardbx.binlog.canal.binlog.DecodeMode;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogContext;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import lombok.Setter;
+import lombok.Getter;
 
+import java.io.Serializable;
 import java.util.BitSet;
 
 /**
@@ -88,7 +92,8 @@ public abstract class RowsLogEvent extends LogEvent {
      * </ul>
      * Source : http://forge.mysql.com/wiki/MySQL_Internals_Binary_Log
      */
-    private final long tableId; /* Table ID */
+    @Setter
+    private long tableId; /* Table ID */
     /**
      * XXX: Don't handle buffer in another thread.
      */
@@ -105,10 +110,13 @@ public abstract class RowsLogEvent extends LogEvent {
     private TableMapLogEvent table;                             /*
      * The table the rows belong to
      */
+    @Getter
+    private final int payloadOffset;
+    private final DecodeMode decodeMode;
 
-    public RowsLogEvent(LogHeader header, LogBuffer buffer, FormatDescriptionLogEvent descriptionEvent) {
+    public RowsLogEvent(LogHeader header, LogBuffer buffer, FormatDescriptionLogEvent descriptionEvent,
+                        DecodeMode decodeMode) {
         super(header);
-
         final int commonHeaderLen = descriptionEvent.commonHeaderLen;
         final int postHeaderLen = descriptionEvent.postHeaderLen[header.type - 1];
         int headerLen = 0;
@@ -160,7 +168,14 @@ public abstract class RowsLogEvent extends LogEvent {
 
         // XXX: Don't handle buffer in another thread.
         int dataSize = buffer.limit() - buffer.position();
-        rowsBuf = buffer.duplicate(dataSize);
+        payloadOffset = buffer.position();
+        this.decodeMode = decodeMode;
+        if (decodeMode == DecodeMode.PART_RETURNING) {
+            // 避免拷贝byte[]
+            rowsBuf = new LogBuffer(buffer.getByteBuffer(), payloadOffset, dataSize);
+        } else {
+            rowsBuf = buffer.duplicate(dataSize);
+        }
     }
 
     public final void fillTable(LogContext context) {
@@ -170,7 +185,12 @@ public abstract class RowsLogEvent extends LogEvent {
         if ((flags & RowsLogEvent.STMT_END_F) != 0) {
             // Now is safe to clear ignored map (clear_tables will also
             // delete original table map events stored in the map).
-            context.clearAllTables();
+
+            // zm: 在returning模式中可能会连续解析两个ROWS_LOG_EVENT, 因此不能删这玩意
+            // 最多也就在解析一个returning的逻辑sql长久持有，内存开销应该还好
+            if (decodeMode != DecodeMode.PART_RETURNING) {
+                context.clearAllTables();
+            }
         }
     }
 
@@ -202,6 +222,10 @@ public abstract class RowsLogEvent extends LogEvent {
         return new RowsLogBuffer(rowsBuf.duplicate(), columnLen, charsetName);
     }
 
+    public final RowsLogBuffer getOriginalRowsBuf(String charsetName) {
+        return new RowsLogBuffer(rowsBuf, columnLen, charsetName);
+    }
+
     public final int getFlags(final int flags) {
         return this.flags & flags;
     }
@@ -217,5 +241,26 @@ public abstract class RowsLogEvent extends LogEvent {
     @Override
     public String getCommitLogInfo() {
         return commitKey;
+    }
+
+    /**
+     * @return {@link String }
+     */
+    public String printRowValues() {
+        RowsLogBuffer rowsLogBuffer = this.getRowsBuf("utf-8");
+        StringBuffer sb = new StringBuffer();
+        while (rowsLogBuffer.nextOneRow(columns)) {
+            BitSet nullBits = rowsLogBuffer.getNullBits(); // 获取 NULL BITMAP
+            for (int i = 0; i < getTable().getColumnCnt(); i++) {
+                TableMapLogEvent.ColumnInfo info = getTable().getColumnInfo()[i];
+                if (nullBits.get(i)) {
+                    sb.append(String.format("Column %s: NULL\t", i));
+                } else {
+                    Serializable value = rowsLogBuffer.nextValue(info.type, info.meta);
+                    sb.append(String.format("Column %s: %s\t", i, value));
+                }
+            }
+        }
+        return sb.toString();
     }
 }

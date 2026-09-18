@@ -38,4 +38,39 @@ public class DumpUserVariableName {
      */
     public static final String TRACE_ID = "trace_id";
     public static final String PROCESS_ID = "id";
+    /**
+     * 下游数据库的server_id,用于双向回环复制场景中对符合server_id的事件进行过滤
+     */
+    public static final String IGNORE_SERVER_IDS = "ignore_server_ids";
+    /**
+     * 控制 server_id 过滤时是否同时过滤 DDL 事件
+     */
+    public static final String SERVER_ID_FILTER_DDL = "server_id_filter_ddl";
+    /**
+     * 需要过滤的表名
+     */
+    public static final String TABLE_IGNORE = "table_ignore";
+    /**
+     * 允许的表名
+     */
+    public static final String TABLE_ALLOW = "table_allow";
+    /**
+     * 是否需要过滤由归档表产生的删除事件
+     */
+    public static final String ARCHIVE_IGNORE = "archive_ignore";
+    /**
+     * 是否需要过滤ROWS_QUERY_EVENT
+     */
+    public static final String ROWS_QUERY_IGNORE = "rows_query_ignore";
+    /**
+     * 是否使用flag的方式过滤事件
+     */
+    public static final String IGNORE_BY_FLAG = "ignore_by_flag";
+
+    /**
+     * 发起binlog dump请求的用户
+     */
+    public static final String USER = "user";
+
+    public static final String INST_ID = "inst_id";
 }
