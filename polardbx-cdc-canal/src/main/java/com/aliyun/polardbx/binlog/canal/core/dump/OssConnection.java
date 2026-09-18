@@ -37,6 +37,7 @@ import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.Shell;
 import com.google.common.collect.Maps;
 import lombok.Getter;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -124,8 +125,12 @@ public class OssConnection implements ErosaConnection {
         int maxRecordsPerPage =
             DynamicApplicationConfig.getInt(ConfigKeys.DESCRIBE_BINLOG_LIST_API_MAX_RECORDS_PER_PAGE);
         boolean useDbsAPi = DynamicApplicationConfig.getBoolean(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS);
-        logger.info("call rds api begin : {} end : {}, maxRecPerSize: {} , use dbsapi : {}", begin, end,
-            maxRecordsPerPage, useDbsAPi);
+        long backMinute = DynamicApplicationConfig.getLong(ConfigKeys.DESCRIBE_BINLOG_LIST_API_GO_BACK_MINUTE);
+        logger.info("call rds api begin : {} end : {}, maxRecPerSize: {} , backMinute: {}", begin, end,
+            maxRecordsPerPage, backMinute);
+        if (begin > 0 && backMinute > 0) {
+            begin = begin - TimeUnit.MINUTES.toMillis(backMinute);
+        }
         return DescribeRdsBinlogListApi.describeBinlogFiles(storageInstanceId, uid, bid, begin, end, maxRecordsPerPage,
             useDbsAPi);
     }
@@ -145,55 +150,59 @@ public class OssConnection implements ErosaConnection {
 
     public void prepareServerIdForDbs(List<BinlogFile> totalRecords) throws IOException {
         Map<Long, Long> serverIdMap = Maps.newHashMap();
-        String path = localBinlogDir+File.separator+"server_id";
-        for (BinlogFile bf : totalRecords){
-            String absFile = path+File.separator+bf.getLogname();
-            if (!serverIdMap.containsKey(bf.getInstanceID())){
+        String path = localBinlogDir + File.separator + "server_id";
+        for (BinlogFile bf : totalRecords) {
+            String absFile = path + File.separator + bf.getLogname();
+            if (!serverIdMap.containsKey(bf.getInstanceID())) {
                 String taskId = null;
-                if (DynamicApplicationConfig.getBoolean(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH)){
-                    String garethConfig = DynamicApplicationConfig.getString(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_CONFIG);
-                    String type = DynamicApplicationConfig.getString(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_POOL_TYPE);
-                    if (StringUtils.isBlank(garethConfig)){
+                if (DynamicApplicationConfig.getBoolean(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH)) {
+                    String garethConfig =
+                        DynamicApplicationConfig.getString(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_CONFIG);
+                    String type =
+                        DynamicApplicationConfig.getString(ConfigKeys.DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH_POOL_TYPE);
+                    if (StringUtils.isBlank(garethConfig)) {
                         DescribeStorageInfoResult
-                            result = DbsApi.describeStorageInfo(bf.getStorageEntityId(), DynamicApplicationConfig.getString(ConfigKeys.RDS_UID), DynamicApplicationConfig.getString(ConfigKeys.RDS_BID));
+                            result = DbsApi.describeStorageInfo(bf.getStorageEntityId(),
+                            DynamicApplicationConfig.getString(ConfigKeys.RDS_UID),
+                            DynamicApplicationConfig.getString(ConfigKeys.RDS_BID));
                         type = result.getData().getType();
                         garethConfig = result.getDataJson();
                     }
                     GarethActionFactory.create(type, garethConfig).download(absFile, bf.getDownloadLink(), path);
-                }else {
+                } else {
                     RdsDownloadForRestoreResult
                         result = DbsApi.submitDownloadTask(storageInstanceId, uid, bid, bf.getArchiveLogId(), path);
                     taskId = result.getData().getTaskId();
-                    while (BinlogFileUtil.readFileSize(absFile) < 20 && !Thread.currentThread().isInterrupted()){
+                    while (BinlogFileUtil.readFileSize(absFile) < 20 && !Thread.currentThread().isInterrupted()) {
                         LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
                         DescribeTaskStatusResult
                             downloadResult = DbsApi.describeTaskStatus(storageInstanceId, uid, bid, taskId);
                         logger.warn("download result : {}", JSON.toJSONString(downloadResult));
-                        if (StringUtils.equalsIgnoreCase("Failed", downloadResult.getData().getStatus())){
-                            throw new PolardbxException("download file "+bf.getLogname()+" failed by dbs gareth!");
+                        if (StringUtils.equalsIgnoreCase("Failed", downloadResult.getData().getStatus())) {
+                            throw new PolardbxException("download file " + bf.getLogname() + " failed by dbs gareth!");
                         }
                     }
                 }
 
                 long serverId = BinlogFileUtil.readServerId(absFile);
                 serverIdMap.put(bf.getInstanceID(), serverId);
-                if (taskId != null){
+                if (taskId != null) {
                     DbsApi.cancelTask(storageInstanceId, uid, bid, taskId);
                 }
                 String rootPath = DynamicApplicationConfig.getString(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_DOWNLOAD_DIR);
                 String res = Shell.execCommand("sudo", "chown", "-R", "admin:admin", rootPath);
-                logger.info("chown for gareth path : {}, res {}",rootPath,  res);
+                logger.info("chown for gareth path : {}, res {}", rootPath, res);
                 FileUtils.deleteQuietly(new File(absFile));
             }
         }
-        totalRecords.forEach(r->{
+        totalRecords.forEach(r -> {
             long serverId = serverIdMap.get(r.getInstanceID());
             r.setServerId(serverId);
         });
     }
 
     public void filterBinlogList(List<BinlogFile> totalRecords) throws Exception {
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS)){
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.DOWNLOAD_BINLOG_USE_DBS)) {
             prepareServerIdForDbs(totalRecords);
         }
 
@@ -251,7 +260,7 @@ public class OssConnection implements ErosaConnection {
         }
         // 不是下载模式，且也没有启用dbs 模式，才初始化memory cache
         if (!DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_IN_DOWNLOAD_MODE) &&
-            !DynamicApplicationConfig.getBoolean(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS)) {
+            !DynamicApplicationConfig.getBoolean(ConfigKeys.DOWNLOAD_BINLOG_USE_DBS)) {
             initExecutors();
             CacheManager cacheManager = SpringContextHolder.getObject(CacheManager.class);
             cacheManager.registerStorage(storageInstanceId);
@@ -348,7 +357,7 @@ public class OssConnection implements ErosaConnection {
         lastConnectFile = binlogfilename;
 
         if (DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_DUMP_OFFLINE_BINLOG_IN_DOWNLOAD_MODE) ||
-        DynamicApplicationConfig.getBoolean(ConfigKeys.DESCRIBE_BINLOG_LIST_API_USE_DBS)) {
+            DynamicApplicationConfig.getBoolean(ConfigKeys.DOWNLOAD_BINLOG_USE_DBS)) {
             return providerLocalFetcher(ossBinlogFile, binlogPosition, search);
         } else {
             return providerContinuesRemoteUrlFetcher(ossBinlogFile, binlogPosition);

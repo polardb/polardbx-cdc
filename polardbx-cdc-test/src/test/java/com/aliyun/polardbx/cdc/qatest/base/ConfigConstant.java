@@ -61,4 +61,6 @@ public class ConfigConstant {
 
     public static final String CDC_WAIT_TOKEN_TIMEOUT_MINUTES = "cdcWaitTokenTimeOutMinute";
 
+    public static final String CDC_LINK_BREAKER_ENABLED = "cdcLinkBreakerEnabled";
+
 }

@@ -32,7 +32,7 @@ public class CacheManagerTest extends BaseTest {
     @Test
     public void testGetFileName() {
         String url =
-            "http://rdslog-hz-v3-3az.oss-cn-hangzhou-internal.aliyuncs.com/custins85838872/hostins34345966/mysql-bin.000070?OSSAccessKeyId=STS.NTrWsvuoXVHB3qRBPjaYHQUF5&Expires=1736079622&security-token=CAIS%2BwJ1q6Ft5B2yfSjIr5fHHMnCmLB54YqpMVfjplA%2FbdZkvpDt1zz2IHpNfXZuAuEctvo%2BnGtR5%2F8clq5ZSpFfQlfYNXfvJE%2F8q1HPWZHInuDox1dt6vT8a37xZjf%2F2MjNGaqbKPrWZvaqbX3diyZ32sGUXD6%2BXlujQ%2Frr7Jl8dYY4UxWfZzhLD8ssAmkEksIBMmbLPvuAKwPjhnGqbHBloQ1hk2hym%2FzdhMSX8UjZl0aoiL1X9Z79OZyjYIxsLtJhCJLu1f4xfbfazC9W8EgXpPwm3PMevnXlxojNXwQKs0TfaLuNroA%2FfVBDC%2FJkS%2FIenp%2FVjuZlv%2BHfrYPzxitWMPtdOyalH9r5mZSaQ7LzbohoLe2iai2TyLeUKoKwqRxhZmkAcRlNf9cx6%2F7pwYaPgVowQ47QGzCiCm%2FLI8DtW3GMRxPchh6he1bekrwjlylbNbIie%2F5aIQphfGUtxjf6CYxNGFd3WFgET5F8ZGSejzm%2BAEqZ1YhKOSU%2Bphk%2FGoABXurMqZ7tYUX4Wbr0S%2FNM7eQrDEAfGv30urkQ4AR33S8%2BBktxyc7Is8EyZ%2BpU6%2F8PJejFQg5CN55HnxefOryIglpeY0IYb%2B84%2Brs5u7ml%2BmxQKGsEyMSHvFZ9E4d8g%2FD%2F36hmYuEaERy%2FUT93iUDOsTaYQCbhguuklmB3dykjtRkgAA%3D%3D&Signature=6CkmIJC0Zy0FB3rxpqiXW%2B%2By3%2Fc%3D";
+            "https://example.invalid/path/mysql-bin.000070?download=true";
         CacheManager cacheManager = new CacheManager();
         String fileName = cacheManager.getFileName(url);
         Assert.assertEquals("mysql-bin.000070", fileName);

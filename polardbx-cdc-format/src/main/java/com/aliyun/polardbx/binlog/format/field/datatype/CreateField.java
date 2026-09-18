@@ -9,6 +9,7 @@ package com.aliyun.polardbx.binlog.format.field.datatype;
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
+import com.aliyun.polardbx.binlog.util.CharsetCache;
 import lombok.Data;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
@@ -84,7 +85,7 @@ public class CreateField {
             throw new PolardbxException("can not find java charset for charset : " + mysqlCharset);
         }
         type.mysqlCharset = mysqlCharset;
-        type.charset = Charset.forName(javaCharset);
+        type.charset = CharsetCache.lookup(javaCharset);
         type.nullable = nullable;
         type.unsigned = unsigned;
 

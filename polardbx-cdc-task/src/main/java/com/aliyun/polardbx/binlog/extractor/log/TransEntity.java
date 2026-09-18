@@ -56,6 +56,8 @@ public class TransEntity implements Serializable {
     public String nextTraceId;
     public String originalTraceId;
     public String lastTraceId;
+    public int logicSqlId;
+    public boolean returningDelete;
     public String lastRowsQuery;
 
     //format desc event

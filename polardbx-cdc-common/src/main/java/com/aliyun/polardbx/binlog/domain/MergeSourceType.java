@@ -17,9 +17,5 @@ public enum MergeSourceType {
     /**
      * rpc服务
      */
-    RPC,
-    /**
-     * 模拟器
-     */
-    MOCK
+    RPC
 }

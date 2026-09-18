@@ -23,7 +23,7 @@ public class ReplicaTransitions {
 
         @Override
         public boolean isMatch(long FSMId) {
-            return !FSMMetaManager.isReplicaImageMode(FSMId);
+            return !FSMMetaManager.isReplicaModeContainsFull(FSMId);
         }
     }
 
@@ -35,7 +35,7 @@ public class ReplicaTransitions {
 
         @Override
         public boolean isMatch(long FSMId) {
-            return FSMMetaManager.isReplicaImageMode(FSMId);
+            return FSMMetaManager.isReplicaModeContainsFull(FSMId);
         }
     }
 

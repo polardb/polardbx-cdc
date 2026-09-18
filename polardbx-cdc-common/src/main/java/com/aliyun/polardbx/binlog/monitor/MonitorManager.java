@@ -93,6 +93,7 @@ public class MonitorManager {
             }
 
             String message = MonitorMsgBuilder.buildMessage(monitorType, args);
+
             if (monitorType.isExpirable()) {
                 MonitorContent content = expirableMonitorCache.getUnchecked(new MonitorKey(monitorType, message));
                 content.errorCount.incrementAndGet();

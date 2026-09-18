@@ -24,12 +24,15 @@ import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.PositionNotFoundException;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
+import lombok.Getter;
+import lombok.Setter;
 import org.apache.commons.lang3.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -69,14 +72,32 @@ public abstract class AbstractEventParser implements BinlogEventParser {
     };
     protected AtomicBoolean needTransactionPosition = new AtomicBoolean(true);
     protected long lastEntryTime = 0L;
-    protected volatile boolean detectingEnable = true; // 是否开启心跳检查
-    protected Integer detectingIntervalInSeconds = 3; // 检测频率
+    protected volatile boolean detectingEnable = false; // 是否开启心跳检查
+    protected volatile boolean createHeartbeatTable = false; // 是否创建心跳表
+    protected Integer detectingIntervalInSeconds = 5; // 检测频率
+    /**
+     * src 的serverId
+     */
     protected long currentServerId = -1;
+    /**
+     * target 的serverId
+     */
+    @Setter
+    @Getter
+    protected String ignoreServerIds = "";
+
+    @Setter
+    @Getter
+    protected String writeServerId = "";
     protected LogEventHandler eventHandler;
     protected SinkFunction searchFunction;
     protected ServerCharactorSet serverCharactorSet;
     protected int lowerCaseTableNames;
     protected IErrorHandler errorHandler;
+
+    protected volatile Timer timer;
+    protected TimerTask heartBeatTimerTask;
+
     protected HandlerContext tail = new HandlerContext(new DefaultTailEventFilter());
 
     protected abstract ErosaConnection buildErosaConnection();
@@ -159,6 +180,9 @@ public abstract class AbstractEventParser implements BinlogEventParser {
                     // 开始执行replication
                     // 1. 构造Erosa连接
                     erosaConnection = buildErosaConnection();
+
+                    // 2. 启动一个心跳线程
+                    startHeartBeat(erosaConnection);
 
                     // 3. 执行dump前的准备工作
                     preDump(erosaConnection);
@@ -301,6 +325,8 @@ public abstract class AbstractEventParser implements BinlogEventParser {
 
         running = false;
 
+        stopHeartBeat(); // 先停止心跳
+
         if (head != null) {
             head.fireStop();
         }
@@ -345,8 +371,43 @@ public abstract class AbstractEventParser implements BinlogEventParser {
         return;
     }
 
+    protected void startHeartBeat(ErosaConnection connection) {
+        lastEntryTime = 0L; // 初始化
+        if (timer == null) {// lazy初始化一下
+            String name = String.format("address = %s , HeartBeatTimeTask",
+                runningInfo == null ? null : runningInfo.getAddress().toString());
+            synchronized (AbstractEventParser.class) {
+                // synchronized (MysqlEventParser.class) {
+                // why use MysqlEventParser.class, u know, MysqlEventParser is
+                // the child class 4 AbstractEventParser,
+                // do this is ...
+                if (timer == null) {
+                    timer = new Timer(name, true);
+                }
+            }
+        }
+
+        if (heartBeatTimerTask == null) {// fixed issue #56，避免重复创建heartbeat线程
+            heartBeatTimerTask = buildHeartBeatTimeTask(connection);
+            Integer interval = detectingIntervalInSeconds;
+            if (heartBeatTimerTask != null) {
+                timer.schedule(heartBeatTimerTask, interval * 1000L, interval * 1000L);
+            }
+            logger.info("start heart beat.... ");
+        }
+    }
+
     protected TimerTask buildHeartBeatTimeTask(ErosaConnection connection) {
         return null;
+    }
+
+    protected void stopHeartBeat() {
+        lastEntryTime = 0L; // 初始化
+        if (timer != null) {
+            timer.cancel();
+            timer = null;
+        }
+        heartBeatTimerTask = null;
     }
 
     public Long getParsedEventCount() {
@@ -367,6 +428,10 @@ public abstract class AbstractEventParser implements BinlogEventParser {
 
     public void setDetectingEnable(boolean detectingEnable) {
         this.detectingEnable = detectingEnable;
+    }
+
+    public void setCreateHeartbeatTable(boolean createHeartbeatTable) {
+        this.createHeartbeatTable = createHeartbeatTable;
     }
 
     public void setDetectingIntervalInSeconds(Integer detectingIntervalInSeconds) {

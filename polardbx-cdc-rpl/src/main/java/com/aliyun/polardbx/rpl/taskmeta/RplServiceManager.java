@@ -22,12 +22,14 @@ import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.common.CommonUtil;
+import com.aliyun.polardbx.rpl.common.ReplicaMode;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
 import com.aliyun.polardbx.rpl.common.fsmutil.ReplicaFSM;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.MutableTriple;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -71,8 +73,9 @@ public class RplServiceManager {
         RplConstants.STREAM_GROUP, RplConstants.ENABLE_DYNAMIC_MASTER_HOST, RplConstants.WRITE_SERVER_ID,
         RplConstants.CHANNEL, RplConstants.SUB_CHANNEL, RplConstants.TRIGGER_DYNAMIC_MASTER_HOST,
         RplConstants.TRIGGER_AUTO_POSITION, RplConstants.FORCE_CHANGE, RplConstants.WRITE_TYPE,
-        RplConstants.COMPARE_ALL, RplConstants.CONFLICT_STRATEGY, RplConstants.MASTER_INST_ID,
-        RplConstants.MASTER_LOG_TIME_SECOND, RplConstants.ENABLE_SRC_LOGICAL_META_SNAPSHOT);
+        RplConstants.CONFLICT_STRATEGY, RplConstants.MASTER_INST_ID,
+        RplConstants.MASTER_LOG_TIME_SECOND, RplConstants.ENABLE_SRC_LOGICAL_META_SNAPSHOT,
+        RplConstants.EXTRACT_FULL_FROM_DN);
 
     private static final List<String> LEGAL_PARAMS_FOR_CHANGE_FILTER = Arrays.asList(
         RplConstants.REPLICATE_DO_DB, RplConstants.REPLICATE_IGNORE_DB, RplConstants.REPLICATE_DO_TABLE,
@@ -307,7 +310,11 @@ public class RplServiceManager {
                 }
             }
         } catch (Throwable e) {
-            return ResultCode.builder().code(CommonConstants.FAILURE_CODE).msg(e.getMessage()).build();
+            // 必须把异常抛出事务边界：若内层嵌套事务已被标记为rollback-only，这里返回失败码不会阻止外层提交，
+            // 提交时抛出的UnexpectedRollbackException会覆盖掉真实的失败原因
+            // 注意：params中包含master密码，不能整体打印
+            rplLogger.error("change master failed, channel: {}", params.get(RplConstants.CHANNEL), e);
+            throw new PolardbxException("change master failed: " + e.getMessage(), e);
         }
         return ResultCode.builder().code(CommonConstants.SUCCESS_CODE).msg("success").data(true).build();
     }
@@ -474,6 +481,9 @@ public class RplServiceManager {
                 binlogPosition = BinlogPosition.parseFromString(CommonUtil.getRplInitialPosition());
             }
             String running = TaskStatus.valueOf(task.getStatus()) == TaskStatus.RUNNING ? "Yes" : "No";
+            if (replicaMeta.getMode() == null) {
+                replicaMeta.setMode(ReplicaMode.INCREMENTAL);
+            }
             LinkedHashMap<String, String> response = new LinkedHashMap<>();
             response.put("Master_Host", replicaMeta.getMasterHost());
             response.put("Master_User", replicaMeta.getMasterUser());
@@ -495,7 +505,6 @@ public class RplServiceManager {
             response.put("Exec_Master_Log_Pos", String.valueOf(binlogPosition.getPosition()));
             response.put("Exec_Master_Log_Tso", StringUtils.isNotEmpty(binlogPosition.getRtso()) ?
                 binlogPosition.getRtso().substring(0, Math.min(19, binlogPosition.getRtso().length())) : "NULL");
-
             response.put("Until_Condition", "None");
             response.put("Master_SSL_Allowed", "No");
             response.put("Seconds_Behind_Master", String.valueOf(FSMMetaManager.computeTaskDelay(task)));
@@ -505,8 +514,7 @@ public class RplServiceManager {
             response.put("Slave_SQL_Running_State", running);
             response.put("Auto_Position", "0");
             response.put("Replicate_Rewrite_DB", replicaMeta.getRewriteDb());
-            response.put("Replicate_Mode", replicaMeta.isImageMode() ?
-                RplConstants.IMAGE_MODE : RplConstants.INCREMENTAL_MODE);
+            response.put("Replicate_Mode", (replicaMeta.getMode().name()));
             response.put("Running_Stage", FSMState.valueOf(stateMachine.getState()).name());
             response.put("Replicate_Enable_Ddl", String.valueOf(replicaMeta.isEnableDdl()));
             response.put("Skip_Tso", replicaMeta.getSkipTso());
@@ -514,6 +522,7 @@ public class RplServiceManager {
             response.put("Write_Type", replicaMeta.getApplierType().name());
             response.put("Conflict_Strategy", replicaMeta.getConflictStrategy().name());
             response.put("Source_Stream_Group_Name", replicaMeta.getStreamGroup());
+            response.put("Source_Stream_Name", replicaMeta.getStreamName());
             response.put("Channel_Name", stateMachine.getChannel());
             response.put("Sub_Channel_Name", task.getId().toString());
             for (Map.Entry<String, String> entry : response.entrySet()) {
@@ -590,11 +599,9 @@ public class RplServiceManager {
         if (params.containsKey(RplConstants.CHANNEL)) {
             replicaMeta.setChannel(params.get(RplConstants.CHANNEL));
         }
-        replicaMeta.setImageMode(false);
+        replicaMeta.setMode(ReplicaMode.INCREMENTAL);
         if (params.containsKey(RplConstants.MODE)) {
-            if (StringUtils.equalsIgnoreCase(params.get(RplConstants.MODE), RplConstants.IMAGE_MODE)) {
-                replicaMeta.setImageMode(true);
-            }
+            replicaMeta.setMode(ReplicaMode.valueOf(params.get(RplConstants.MODE)));
         }
         if (params.containsKey(RplConstants.MASTER_HOST)) {
             CommonUtil.hostSafeCheck(params.get(RplConstants.MASTER_HOST));
@@ -633,14 +640,20 @@ public class RplServiceManager {
             }
         }
 
+        replicaMeta.setExtractFullFromDn(false);
+        if (replicaMeta.getMode() == ReplicaMode.FULL_DATA || replicaMeta.getMode() == ReplicaMode.IMAGE) {
+            if (replicaMeta.getMasterType() == HostType.POLARX2 &&
+                params.containsKey(RplConstants.EXTRACT_FULL_FROM_DN) &&
+                "true".equalsIgnoreCase(params.get(RplConstants.EXTRACT_FULL_FROM_DN))) {
+                replicaMeta.setExtractFullFromDn(true);
+            }
+        }
+
         replicaMeta.setApplierType(ApplierType.valueOf(DynamicApplicationConfig
             .getString(ConfigKeys.RPL_DEFAULT_WRITE_TYPE)));
         if (params.containsKey(RplConstants.WRITE_TYPE)) {
             ApplierType type = ApplierType.valueOf(StringUtils.upperCase(params.get(RplConstants.WRITE_TYPE)));
             replicaMeta.setApplierType(type);
-        }
-        if (params.containsKey(RplConstants.COMPARE_ALL)) {
-            replicaMeta.setCompareAll(Boolean.parseBoolean(params.get(RplConstants.COMPARE_ALL)));
         }
         if (params.containsKey(RplConstants.ENABLE_SRC_LOGICAL_META_SNAPSHOT)) {
             replicaMeta.setEnableSrcLogicalMetaSnapshot(Boolean.parseBoolean(
@@ -735,21 +748,25 @@ public class RplServiceManager {
                     + "&allowLocalInfile=false&allowUrlInLocalInfile=false&useSSL=false",
                 meta.getMasterHost(), meta.getMasterPort()),
             meta.getMasterUser(), meta.getMasterPassword())) {
-            List<String> streamPositions;
-            if (StringUtils.isNotEmpty(meta.getStreamGroup())) {
-                streamPositions = CommonUtil.getStreamLatestPositions(connection, meta.getStreamGroup());
-            } else {
-                streamPositions = Collections.singletonList(CommonUtil.getBinaryLatestPosition(connection));
-            }
             RplService service = DbTaskMetaManager.getService(stateMachine.getId(), ServiceType.REPLICA_INC);
             List<RplTask> tasks = DbTaskMetaManager.listTaskByService(service.getId());
-            for (int i = 0; i < tasks.size(); i++) {
-                RplTask task = tasks.get(i);
-                ReplicaMeta replicaMeta = RplServiceManager.extractMetaFromTaskConfig(task);
-                replicaMeta.setPosition(streamPositions.get(i));
-                FSMMetaManager.updateReplicaTaskConfig(tasks.get(i), replicaMeta, true);
+            if (StringUtils.isNotEmpty(meta.getStreamGroup())) {
+                List<Pair<String, String>> streamPositions =
+                    CommonUtil.getStreamLatestPositions(connection, meta.getStreamGroup());
+                for (RplTask task : tasks) {
+                    ReplicaMeta replicaMeta = RplServiceManager.extractMetaFromTaskConfig(task);
+                    for (Pair<String, String> streamPosition : streamPositions) {
+                        if (StringUtils.equals(streamPosition.getLeft(), replicaMeta.getStreamName())) {
+                            replicaMeta.setPosition(streamPosition.getRight());
+                        }
+                    }
+                    FSMMetaManager.updateReplicaTaskConfig(task, replicaMeta, true);
+                }
+            } else {
+                ReplicaMeta replicaMeta = RplServiceManager.extractMetaFromTaskConfig(tasks.get(0));
+                replicaMeta.setPosition(CommonUtil.getBinaryLatestPosition(connection));
+                FSMMetaManager.updateReplicaTaskConfig(tasks.get(0), replicaMeta, true);
             }
-
         } catch (SQLException e) {
             throw new PolardbxException("connect to master failed ", e);
         }

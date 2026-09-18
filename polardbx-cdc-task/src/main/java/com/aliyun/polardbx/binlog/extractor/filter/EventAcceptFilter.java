@@ -154,7 +154,6 @@ public class EventAcceptFilter implements LogEventFilter<LogEvent>, IFilterBuild
     }
 
     private boolean accept(String schema, String table) {
-
         if (schema.startsWith("__cdc__")) {
             return cdcSchemaSet.contains(schema);
         }

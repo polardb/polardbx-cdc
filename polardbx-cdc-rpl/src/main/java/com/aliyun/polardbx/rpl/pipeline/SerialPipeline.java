@@ -21,6 +21,7 @@ import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.rpl.applier.BaseApplier;
 import com.aliyun.polardbx.rpl.applier.DdlApplyHelper;
 import com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier;
+import com.aliyun.polardbx.rpl.applier.ParallelSchemaTransactionApplier;
 import com.aliyun.polardbx.rpl.applier.RecoveryApplier;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
 import com.aliyun.polardbx.rpl.applier.Transaction;
@@ -411,15 +412,23 @@ public class SerialPipeline extends BasePipeline {
 
     /**
      * TranRingBufferEventHandler, this will construct Transactions to call APPLIER
+     * 支持库级别并行执行
      */
     private class TranRingBufferEventHandler implements EventHandler<MessageEvent>, LifecycleAware {
 
         private final List<Transaction> transactionBatch;
+        private final boolean parallelSchemaApplyEnabled;
+        private final ParallelSchemaTransactionApplier parallelSchemaTransactionApplier;
         private final String maxDdlCheckpointTso;
         private int eventCount = 0;
+        private int thisTranEventCount = 0;
+        private int transactionSplitSize = DynamicApplicationConfig.getInt(ConfigKeys.RPL_TRANSACTION_SPLIT_SIZE);
 
         public TranRingBufferEventHandler(int batchSize) {
             transactionBatch = new ArrayList<>(batchSize / 2);
+            parallelSchemaApplyEnabled = DynamicApplicationConfig.getBoolean(RPL_PARALLEL_SCHEMA_APPLY_ENABLED);
+            parallelSchemaTransactionApplier =
+                parallelSchemaApplyEnabled ? new ParallelSchemaTransactionApplier() : null;
             maxDdlCheckpointTso = DbTaskMetaManager.getLatestSubmittedTsoByTask(
                 TaskContext.getInstance().getStateMachineId(), TaskContext.getInstance().getTaskId());
         }
@@ -431,29 +440,50 @@ public class SerialPipeline extends BasePipeline {
                 boolean isDdl = false;
                 DBMSEvent dbmsEvent = messageEvent.getDbmsEventEffective();
                 if (dbmsEvent instanceof DefaultRowChange) {
-                    if (shouldSkip(dbmsEvent, maxDdlCheckpointTso)) {
-                        log.warn("dbms event is skipped , with position {}.", dbmsEvent.getPosition());
-                        return;
+                    if (!parallelSchemaApplyEnabled) {
+                        if (shouldSkip(dbmsEvent, maxDdlCheckpointTso)) {
+                            log.warn("dbms event is skipped , with position {}.", dbmsEvent.getPosition());
+                            return;
+                        }
                     }
                     transaction.appendRowChange(dbmsEvent);
                     eventCount++;
-                } else if (DdlApplyHelper.isDdl(dbmsEvent)) {
-                    if (shouldSkip(dbmsEvent, maxDdlCheckpointTso)) {
-                        log.warn("dbms event is skipped , with position {}.", dbmsEvent.getPosition());
-                        return;
+                    thisTranEventCount++;
+                    if (thisTranEventCount >= transactionSplitSize) {
+                        transaction.setFinished(true);
+                        thisTranEventCount = 0;
                     }
-                    // first apply all exist events
-                    StatisticalProxy.getInstance().tranApply(transactionBatch);
-                    transactionBatch.clear();
-                    transaction = getTransactionToApply();
-                    transaction.appendQueryLog(dbmsEvent);
-                    position = dbmsEvent.getPosition();
-                    transaction.setFinished(true);
-                    isDdl = true;
-                    endOfBatch = true;
+                } else if (DdlApplyHelper.isDdl(dbmsEvent)) {
+                    if (parallelSchemaApplyEnabled) {
+                        // schema并行模式：DDL不创建全局屏障，由ParallelSchemaTransactionApplier内部按库隔离处理
+                        if (transaction.getEventCount() > 0) {
+                            transaction.setFinished(true);
+                            transaction = getTransactionToApply();
+                        }
+                        transaction.appendQueryLog(dbmsEvent);
+                        position = dbmsEvent.getPosition();
+                        transaction.setFinished(true);
+                        thisTranEventCount = 0;
+                    } else {
+                        if (shouldSkip(dbmsEvent, maxDdlCheckpointTso)) {
+                            log.warn("dbms event is skipped , with position {}.", dbmsEvent.getPosition());
+                            return;
+                        }
+                        // 串行模式：全局flush屏障
+                        StatisticalProxy.getInstance().tranApply(transactionBatch);
+                        transactionBatch.clear();
+                        transaction = getTransactionToApply();
+                        transaction.appendQueryLog(dbmsEvent);
+                        position = dbmsEvent.getPosition();
+                        transaction.setFinished(true);
+                        thisTranEventCount = 0;
+                        isDdl = true;
+                        endOfBatch = true;
+                    }
                 } else if (dbmsEvent instanceof DBMSTransactionEnd) {
                     position = dbmsEvent.getPosition();
                     transaction.setFinished(true);
+                    thisTranEventCount = 0;
                 } else {
                     position = dbmsEvent.getPosition();
                 }
@@ -468,22 +498,36 @@ public class SerialPipeline extends BasePipeline {
                             transactionBatch.remove(transactionBatch.size() - 1);
                         }
                     }
-                    log.info("pipeline received events, count: {}, transaction count: {}",
-                        eventCount,
-                        transactionBatch.size());
-                    long start = System.currentTimeMillis();
-                    // apply
-                    StatisticalProxy.getInstance().tranApply(transactionBatch);
-                    takeStatisticsWithFlowControl(eventCount, sequence, start, 0, false);
-                    eventCount = 0;
-                    // force flush position info if Ddl happened
-                    // 位点不能跨ddl
-                    if (isDdl) {
-                        StatisticalProxy.getInstance().flushPosition();
+
+                    boolean shouldApply;
+                    if (parallelSchemaApplyEnabled) {
+                        // schema并行模式：批次积攒，达到阈值或ring buffer空时才apply
+                        int batchSize = DynamicApplicationConfig.getInt(RPL_PARALLEL_SCHEMA_APPLY_BATCH_SIZE) /
+                            transactionSplitSize / 4;
+                        shouldApply = transactionBatch.size() >= batchSize || isBufferEmpty(sequence);
+                    } else {
+                        shouldApply = true;
                     }
-                    // remove finished, keep the NOT finished transaction
-                    transactionBatch.forEach(Transaction::close);
-                    transactionBatch.clear();
+
+                    if (shouldApply) {
+                        log.info("now sequence:{}, now cursor:{} {}", sequence,
+                            msgRingBuffer.getCursor(), System.currentTimeMillis());
+                        log.info("pipeline received events, count: {}, transaction count: {}",
+                            eventCount, transactionBatch.size());
+                        long start = System.currentTimeMillis();
+                        if (parallelSchemaApplyEnabled) {
+                            parallelSchemaTransactionApplier.parallelApply(transactionBatch);
+                        } else {
+                            StatisticalProxy.getInstance().tranApply(transactionBatch);
+                        }
+                        takeStatisticsWithFlowControl(eventCount, sequence, start, 0, parallelSchemaApplyEnabled);
+                        eventCount = 0;
+                        if (isDdl) {
+                            StatisticalProxy.getInstance().flushPosition();
+                        }
+                        transactionBatch.forEach(Transaction::close);
+                        transactionBatch.clear();
+                    }
                     if (lastTransaction != null && !lastTransaction.isFinished()) {
                         transactionBatch.add(lastTransaction);
                     }
@@ -506,6 +550,20 @@ public class SerialPipeline extends BasePipeline {
 
         @Override
         public void onShutdown() {
+            if (parallelSchemaTransactionApplier != null) {
+                parallelSchemaTransactionApplier.stop();
+            }
+        }
+
+        @SneakyThrows
+        private boolean isBufferEmpty(long sequence) {
+            long maxLoopCount = 10;
+            long count = 0;
+            while (sequence == msgRingBuffer.getCursor() && count < maxLoopCount) {
+                Thread.sleep(10);
+                count++;
+            }
+            return sequence == msgRingBuffer.getCursor();
         }
 
         private Transaction getTransactionToApply() {

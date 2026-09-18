@@ -24,6 +24,8 @@ import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.ServerInfo;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
 import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
+import com.aliyun.polardbx.rpl.common.CommonUtil;
+import com.aliyun.polardbx.rpl.common.ResTypeEnum;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.fsmutil.DataImportFSM;
 import com.aliyun.polardbx.rpl.common.fsmutil.FSMState;
@@ -32,6 +34,7 @@ import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FullExtractorConfig;
+import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.MetaManagerTranProxy;
 import com.aliyun.polardbx.rpl.taskmeta.RdsExtractorConfig;
@@ -41,6 +44,9 @@ import com.aliyun.polardbx.rpl.taskmeta.StateMachineStatus;
 import com.aliyun.polardbx.rpl.taskmeta.ValidationExtractorConfig;
 import com.sun.jersey.spi.resource.Singleton;
 import lombok.Data;
+import lombok.NonNull;
+import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +58,9 @@ import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -73,12 +82,16 @@ public class ImportApiResource {
     private static final Logger logger = LoggerFactory.getLogger(ImportApiResource.class);
 
     public ImportApiResource() {
+        this.serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
         System.out.println("constructor importApiResource");
     }
 
     private final int REFRESH_ONLY_FULL_COPY = 1;
     private final int REFRESH_ONLY_NOT_FULL_COPY = 2;
     private final int REFRESH_ALL = 3;
+
+    @Setter
+    private ServerInfoMapper serverInfoMapper;
 
     @POST
     @Path("/service/create")
@@ -97,12 +110,19 @@ public class ImportApiResource {
             }
             importMeta.setSupportXa(true);
             importMeta.setCdcClusterId(config.getClusterId());
+
+            if (StringUtils.equalsIgnoreCase(config.getImportTaskConfigs().get(0).getSrcConn().getDbType(),
+                ResTypeEnum.POLARDB_M.value)) {
+                importMeta.setNeedHeartbeat(true);
+            }
+
             int drdsServerId = Math.abs(Objects.hash(config.getImportTaskConfigs().get(0).getRules()));
             int polarxServerId = Math.abs(new Long(ServerConfigUtil.getGlobalNumberVar("SERVER_ID")).intValue());
             if (drdsServerId == polarxServerId) {
                 drdsServerId = (drdsServerId - 1) > 0 ? (drdsServerId - 1) : (drdsServerId + 1);
             }
 
+            generateLogicalMeta(config, importMeta, drdsServerId, polarxServerId);
             generatePhysicalMeta(config, importMeta, drdsServerId, polarxServerId);
             generateValidationMeta(config, importMeta, drdsServerId, polarxServerId);
             generateBackFlowMeta(config, importMeta, drdsServerId, polarxServerId);
@@ -122,9 +142,8 @@ public class ImportApiResource {
         }
     }
 
-    private void generatePhysicalMeta(ImportTaskConfigList config, DataImportMeta importMeta, int drdsServerId,
-                                      int polarxServerId) {
-        ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
+    public void generatePhysicalMeta(ImportTaskConfigList config, DataImportMeta importMeta, int drdsServerId,
+                                     int polarxServerId) {
         List<ServerInfo> serverInfoList = serverInfoMapper.select(
             c -> c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
                 .and(status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
@@ -133,78 +152,53 @@ public class ImportApiResource {
         Integer dstPort = serverInfoList.get(0).getPort();
         String dstUser = DynamicApplicationConfig.getString(ConfigKeys.POLARX_USERNAME);
         String dstPwd = DynamicApplicationConfig.getString(ConfigKeys.POLARX_PASSWORD);
+        boolean rplFullFromDn = DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_FULL_FROM_DN);
         List<DataImportMeta.PhysicalMeta> metaList = new ArrayList<>();
-        if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_MERGE_SAME_RDS_TASK)) {
-            Map<String, DataImportMeta.PhysicalMeta> metaMap = new HashMap<>();
-            for (ImportTaskConfig oneDbConfig : config.getImportTaskConfigs()) {
-                ConnectionInfo srcConn = oneDbConfig.getSrcConn();
-                TopologyManager topologyManager = new TopologyManager(srcConn.getIp(), srcConn.getPort(),
+        Map<String, DataImportMeta.PhysicalMeta> metaMap = new HashMap<>();
+        for (ImportTaskConfig oneDbConfig : config.getImportTaskConfigs()) {
+            ConnectionInfo srcConn = oneDbConfig.getSrcConn();
+            TopologyManager topologyManager = null;
+            if (StringUtils.equalsIgnoreCase(srcConn.getDbType(), ResTypeEnum.POLARX1.value) ||
+                StringUtils.equalsIgnoreCase(srcConn.getDbType(), ResTypeEnum.DRDS.value) ||
+                (StringUtils.equalsIgnoreCase(srcConn.getDbType(), ResTypeEnum.POLARX2.value) && rplFullFromDn)) {
+                topologyManager = new TopologyManager(srcConn.getIp(), srcConn.getPort(),
                     oneDbConfig.getSrcDbName(),
                     srcConn.getUser(), srcConn.getPwd());
-                List<String> logicTableList = importMeta.getSrcLogicalTableList().get(oneDbConfig.getSrcDbName());
-                for (ConnectionInfo connectionInfo : oneDbConfig.getSrcPhyConnList()) {
-                    DataImportMeta.PhysicalMeta meta;
-                    if (metaMap.containsKey(connectionInfo.getDbInstanceId())) {
-                        meta = metaMap.get(connectionInfo.getDbInstanceId());
-                    } else {
-                        meta = new DataImportMeta.PhysicalMeta();
-                        meta.setDstHost(dstIp);
-                        meta.setDstPort(dstPort);
-                        meta.setDstUser(dstUser);
-                        meta.setDstPassword(dstPwd);
-                        meta.setDstType(HostType.POLARX2);
-                        meta.setSrcHost(connectionInfo.getIp());
-                        meta.setSrcPort(connectionInfo.getPort());
-                        meta.setSrcUser(connectionInfo.getUser());
-                        meta.setSrcPassword(connectionInfo.getPwd());
-                        meta.setSrcType(HostType.RDS);
-                        meta.setIgnoreServerIds(polarxServerId + "");
-                        meta.setDstServerId(drdsServerId);
-                        meta.setRdsBid(config.getImportTaskConfigs().get(0).getRdsBid());
-                        meta.setRdsUid(config.getImportTaskConfigs().get(0).getRdsUid());
-                        meta.setRdsInstanceId(connectionInfo.getDbInstanceId());
-                        meta.setDstDbMapping(new HashMap<>());
-                        meta.setSrcDbList(new HashSet<>());
-                        meta.setPhysicalDoTableList(new HashMap<>());
-                        meta.setRewriteTableMapping(new HashMap<>());
-                        metaList.add(meta);
-                        metaMap.put(connectionInfo.getDbInstanceId(), meta);
+            }
+            List<String> logicTableList = importMeta.getSrcLogicalTableList().get(oneDbConfig.getSrcDbName());
+
+            if (StringUtils.equalsIgnoreCase(srcConn.getDbType(), ResTypeEnum.POLARX2.value) && rplFullFromDn) {
+                try (Connection connection = DriverManager.getConnection(String.format(
+                        "jdbc:mysql://%s:%s?allowLoadLocalInfile=false&autoDeserialize=false"
+                            + "&allowLocalInfile=false&allowUrlInLocalInfile=false&useSSL=false",
+                        oneDbConfig.getSrcConn().getIp(),
+                        oneDbConfig.getSrcConn().getPort()),
+                    oneDbConfig.getSrcConn().getUser(),
+                    oneDbConfig.getSrcConn().getPwd())) {
+                    logger.warn("connect to " + String.format("jdbc:mysql://%s:%s", oneDbConfig.getSrcConn().getIp(),
+                        oneDbConfig.getSrcConn().getPort()));
+                    // rewrite srcPhyConnList
+                    oneDbConfig.setSrcPhyConnList(new ArrayList<>());
+                    Map<String, HostInfo> dnInfoMap = CommonUtil.getDnInfoMap(connection);
+                    for (String dnId : dnInfoMap.keySet()) {
+                        List<String> physicalDbNames = CommonUtil.getPhysicalDbInfoList(connection, dnId,
+                            oneDbConfig.getSrcDbName());
+                        HostInfo hostInfo = dnInfoMap.get(dnId);
+                        ConnectionInfo connectionInfo = new ConnectionInfo(hostInfo.getHost(), hostInfo.getPort(),
+                            hostInfo.getUserName(), hostInfo.getPassword(), dnId, HostType.RDS.name(), physicalDbNames);
+                        oneDbConfig.getSrcPhyConnList().add(connectionInfo);
                     }
-                    for (String srcDbName : connectionInfo.getDbNameList()) {
-                        meta.getDstDbMapping().put(srcDbName.toLowerCase(), oneDbConfig.getDstDbName().toLowerCase());
-                    }
-                    meta.getSrcDbList().addAll(connectionInfo.getDbNameList());
-                    for (String dbName : connectionInfo.getDbNameList()) {
-                        List<String> physicalTableList =
-                            topologyManager.getAllPhyTableList(dbName, new HashSet<>(logicTableList));
-                        physicalTableList =
-                            physicalTableList.stream().map(String::toLowerCase).collect(Collectors.toList());
-                        dbName = dbName.toLowerCase();
-                        meta.getPhysicalDoTableList().put(dbName, new HashSet<>(physicalTableList));
-                        // 按RDS合并任务之后，需要考虑不同逻辑库同名物理表的情况
-                        // 由map改为map<dbname,map>
-                        Map<String, String> dbRewriteTableMapping = new HashMap<>();
-                        meta.getRewriteTableMapping().put(dbName, dbRewriteTableMapping);
-                        for (String physicalTable : physicalTableList) {
-                            physicalTable = physicalTable.toLowerCase();
-                            dbRewriteTableMapping.put(physicalTable, topologyManager.getLogicTable(physicalTable));
-                        }
-                    }
+                } catch (SQLException e) {
+                    throw new RuntimeException(e);
                 }
             }
-        } else {
-            for (ImportTaskConfig oneDbConfig : config.getImportTaskConfigs()) {
-                ConnectionInfo srcConn = oneDbConfig.getSrcConn();
-                importMeta.getLogicalDbMappings()
-                    .put(oneDbConfig.getSrcDbName().toLowerCase(), oneDbConfig.getDstDbName().toLowerCase());
-                TopologyManager topologyManager =
-                    new TopologyManager(srcConn.getIp(), srcConn.getPort(), oneDbConfig.getSrcDbName(),
-                        srcConn.getUser(),
-                        srcConn.getPwd());
-                List<String> logicTableList = importMeta.getSrcLogicalTableList().get(oneDbConfig.getSrcDbName());
-                for (ConnectionInfo connectionInfo : oneDbConfig.getSrcPhyConnList()) {
-                    DataImportMeta.PhysicalMeta meta = new DataImportMeta.PhysicalMeta();
-                    metaList.add(meta);
+
+            for (ConnectionInfo connectionInfo : oneDbConfig.getSrcPhyConnList()) {
+                DataImportMeta.PhysicalMeta meta;
+                if (metaMap.containsKey(connectionInfo.getDbInstanceId())) {
+                    meta = metaMap.get(connectionInfo.getDbInstanceId());
+                } else {
+                    meta = new DataImportMeta.PhysicalMeta();
                     meta.setDstHost(dstIp);
                     meta.setDstPort(dstPort);
                     meta.setDstUser(dstUser);
@@ -224,23 +218,34 @@ public class ImportApiResource {
                     meta.setSrcDbList(new HashSet<>());
                     meta.setPhysicalDoTableList(new HashMap<>());
                     meta.setRewriteTableMapping(new HashMap<>());
-                    for (String srcPhysicalDbName : connectionInfo.getDbNameList()) {
-                        meta.getDstDbMapping()
-                            .put(srcPhysicalDbName.toLowerCase(), oneDbConfig.getDstDbName().toLowerCase());
-                    }
-                    meta.getSrcDbList().addAll(connectionInfo.getDbNameList());
-                    for (String dbName : connectionInfo.getDbNameList()) {
-                        List<String> physicalTableList =
-                            topologyManager.getAllPhyTableList(dbName, new HashSet<>(logicTableList));
+                    metaList.add(meta);
+                    metaMap.put(connectionInfo.getDbInstanceId(), meta);
+                }
+                for (String srcDbName : connectionInfo.getDbNameList()) {
+                    meta.getDstDbMapping().put(srcDbName.toLowerCase(), oneDbConfig.getDstDbName().toLowerCase());
+                }
+                meta.getSrcDbList().addAll(connectionInfo.getDbNameList());
+                for (String dbName : connectionInfo.getDbNameList()) {
+                    List<String> physicalTableList;
+                    if (topologyManager != null) {
                         physicalTableList =
-                            physicalTableList.stream().map(String::toLowerCase).collect(Collectors.toList());
-                        dbName = dbName.toLowerCase();
-                        meta.getPhysicalDoTableList().put(dbName, new HashSet<>(physicalTableList));
-                        Map<String, String> dbRewriteTableMapping = new HashMap<>();
-                        meta.getRewriteTableMapping().put(dbName, dbRewriteTableMapping);
-                        for (String physicalTable : physicalTableList) {
-                            physicalTable = physicalTable.toLowerCase();
+                            topologyManager.getAllPhyTableList(dbName, new HashSet<>(logicTableList));
+                    } else {
+                        physicalTableList =
+                            logicTableList.stream().map(String::toLowerCase).collect(Collectors.toList());
+                    }
+                    dbName = dbName.toLowerCase();
+                    meta.getPhysicalDoTableList().put(dbName, new HashSet<>(physicalTableList));
+                    // 按RDS合并任务之后，需要考虑不同逻辑库同名物理表的情况
+                    // 由map改为map<dbname,map>
+                    Map<String, String> dbRewriteTableMapping = new HashMap<>();
+                    meta.getRewriteTableMapping().put(dbName, dbRewriteTableMapping);
+                    for (String physicalTable : physicalTableList) {
+                        physicalTable = physicalTable.toLowerCase();
+                        if (topologyManager != null) {
                             dbRewriteTableMapping.put(physicalTable, topologyManager.getLogicTable(physicalTable));
+                        } else {
+                            dbRewriteTableMapping.put(physicalTable, physicalTable);
                         }
                     }
                 }
@@ -249,19 +254,85 @@ public class ImportApiResource {
         importMeta.setMetaList(metaList);
     }
 
-    private void generateValidationMeta(ImportTaskConfigList config,
-                                        DataImportMeta importMeta, int drdsServerId, int polarxServerId) {
+    private void generateLogicalMeta(ImportTaskConfigList config, DataImportMeta importMeta, int drdsServerId,
+                                     int polarxServerId) {
+        ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
+        List<ServerInfo> serverInfoList = serverInfoMapper.select(
+            c -> c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
+                .and(status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
+        );
+        String dstIp = serverInfoList.get(0).getIp();
+        Integer dstPort = serverInfoList.get(0).getPort();
+        String dstUser = DynamicApplicationConfig.getString(ConfigKeys.POLARX_USERNAME);
+        String dstPwd = DynamicApplicationConfig.getString(ConfigKeys.POLARX_PASSWORD);
+        ConnectionInfo drdsConn = config.getImportTaskConfigs().get(0).getSrcConn();
+        HostType srcType;
+        if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.RDS_MYSQL.getValue())) {
+            srcType = HostType.RDS;
+        } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARDB_M.getValue())) {
+            srcType = HostType.RDS;
+        } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARX2.getValue())) {
+            srcType = HostType.POLARX2;
+        } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARX1.getValue())) {
+            srcType = HostType.POLARX1;
+        } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.DRDS.getValue())) {
+            srcType = HostType.POLARX1;
+        } else {
+            srcType = HostType.POLARX1;
+        }
+        DataImportMeta.PhysicalMeta logicalMeta = new DataImportMeta.PhysicalMeta();
+        logicalMeta.setDstHost(dstIp);
+        logicalMeta.setDstPort(dstPort);
+        logicalMeta.setDstUser(dstUser);
+        logicalMeta.setDstPassword(dstPwd);
+        logicalMeta.setSrcHost(drdsConn.getIp());
+        logicalMeta.setSrcPort(drdsConn.getPort());
+        logicalMeta.setSrcUser(drdsConn.getUser());
+        logicalMeta.setSrcPassword(drdsConn.getPwd());
+        logicalMeta.setSrcType(srcType);
+        logicalMeta.setDstType(HostType.POLARX2);
+        logicalMeta.setDstServerId(drdsServerId);
+        logicalMeta.setIgnoreServerIds(polarxServerId + "");
+        logicalMeta.setSrcDbList(new HashSet<>());
+        logicalMeta.setDstDbMapping(new HashMap<>());
+        logicalMeta.setPhysicalDoTableList(new HashMap<>());
+        for (ImportTaskConfig oneDbConfig : config.getImportTaskConfigs()) {
+            logicalMeta.getSrcDbList().add(oneDbConfig.getSrcDbName().toLowerCase());
+            logicalMeta.getDstDbMapping()
+                .put(oneDbConfig.getSrcDbName().toLowerCase(), oneDbConfig.getDstDbName().toLowerCase());
+            List<String> logicTableList = importMeta.getSrcLogicalTableList().get(oneDbConfig.getSrcDbName());
+            logicalMeta.getPhysicalDoTableList().put(oneDbConfig.getSrcDbName(), new HashSet<>(logicTableList));
+        }
+        logicalMeta.setRewriteTableMapping(new HashMap<>());
+        importMeta.setLogicalMeta(logicalMeta);
+    }
+
+    public void generateValidationMeta(ImportTaskConfigList config,
+                                       DataImportMeta importMeta, int drdsServerId, int polarxServerId) {
         DataImportMeta.ValidationMeta validationMeta = new DataImportMeta.ValidationMeta();
 
         // set src logical conn info
         ConnectionInfo drdsConn = config.getImportTaskConfigs().get(0).getSrcConn();
+        HostType srcType;
+        if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.RDS_MYSQL.getValue())) {
+            srcType = HostType.RDS;
+        } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARDB_M.getValue())) {
+            srcType = HostType.RDS;
+        } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARX2.getValue())) {
+            srcType = HostType.POLARX2;
+        } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARX1.getValue())) {
+            srcType = HostType.POLARX1;
+        } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.DRDS.getValue())) {
+            srcType = HostType.POLARX1;
+        } else {
+            srcType = HostType.POLARX1;
+        }
         DataImportMeta.ConnInfo srcConnInfo =
             new DataImportMeta.ConnInfo(drdsConn.getIp(), drdsConn.getPort(), drdsConn.getUser(), drdsConn.getPwd(),
-                HostType.POLARX1);
+                srcType);
         validationMeta.setSrcLogicalConnInfo(srcConnInfo);
 
         // set dst logical conn info
-        ServerInfoMapper serverInfoMapper = SpringContextHolder.getObject(ServerInfoMapper.class);
         List<ServerInfo> serverInfoList = serverInfoMapper.select(c ->
             c.where(instType, isEqualTo(0))//0:master, 1:read without htap, 2:read with htap
                 .and(status, isEqualTo(0))//0: ready, 1: not_ready, 2: deleting
@@ -307,12 +378,26 @@ public class ImportApiResource {
         }
         for (int i = 0; i < backFlowTaskSize; ++i) {
             ConnectionInfo drdsConn = config.getImportTaskConfigs().get(0).getSrcConn();
+            HostType srcType;
+            if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.RDS_MYSQL.getValue())) {
+                srcType = HostType.RDS;
+            } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARDB_M.getValue())) {
+                srcType = HostType.RDS;
+            } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARX2.getValue())) {
+                srcType = HostType.POLARX2;
+            } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.POLARX1.getValue())) {
+                srcType = HostType.POLARX1;
+            } else if (StringUtils.equalsIgnoreCase(drdsConn.getDbType(), ResTypeEnum.DRDS.getValue())) {
+                srcType = HostType.POLARX1;
+            } else {
+                srcType = HostType.POLARX1;
+            }
             DataImportMeta.PhysicalMeta backFlowMeta = new DataImportMeta.PhysicalMeta();
             backFlowMeta.setDstHost(drdsConn.getIp());
             backFlowMeta.setDstPort(drdsConn.getPort());
             backFlowMeta.setDstUser(drdsConn.getUser());
             backFlowMeta.setDstPassword(drdsConn.getPwd());
-            backFlowMeta.setDstType(HostType.POLARX1);
+            backFlowMeta.setDstType(srcType);
             backFlowMeta.setSrcType(HostType.POLARX2);
             backFlowMeta.setDstServerId(polarxServerId);
             backFlowMeta.setIgnoreServerIds(drdsServerId + "");
@@ -353,6 +438,8 @@ public class ImportApiResource {
             }
 
             // 更新physical meta
+            generateLogicalMeta(config, dataImportMeta, (int) (dataImportMeta.getMetaList().get(0).getDstServerId()),
+                Integer.parseInt(dataImportMeta.getMetaList().get(0).getIgnoreServerIds()));
             generatePhysicalMeta(config, dataImportMeta, (int) (dataImportMeta.getMetaList().get(0).getDstServerId()),
                 Integer.parseInt(dataImportMeta.getMetaList().get(0).getIgnoreServerIds()));
             generateValidationMeta(config, dataImportMeta, (int) (dataImportMeta.getMetaList().get(0).getDstServerId()),
@@ -717,6 +804,14 @@ public class ImportApiResource {
     public ResultCode<?> unlockDbs(@PathParam("fsmId") Long fsmId) {
         logger.warn("receive unlock dbs request " + fsmId);
         return FSMMetaManager.unlockDbs(fsmId);
+    }
+
+    @POST
+    @Path("service/enableHeartbeat/{fsmId}")
+    public ResultCode<?> enableHeartbeat(@PathParam("fsmId") Long fsmId,
+                                         @QueryParam("enableHeartbeat") @NonNull Boolean enableHeartbeat) {
+        logger.warn("receive enable heartbeat request {}, enableHeartbeat {}", fsmId, enableHeartbeat);
+        return FSMMetaManager.enableHeartbeat(fsmId, enableHeartbeat);
     }
 
     @Data

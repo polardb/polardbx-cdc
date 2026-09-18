@@ -7,6 +7,7 @@
 package com.aliyun.polardbx.binlog.format.utils;
 
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 
 import com.aliyun.polardbx.binlog.canal.binlog.CharsetConversion;
 
@@ -14,7 +15,7 @@ public class CollationCharset {
 
     public static CollationCharset defaultCharset;
     public static CollationCharset utf8mb4Charset;
-    public static Charset defaultJavaCharset = Charset.forName("utf8");
+    public static Charset defaultJavaCharset = StandardCharsets.UTF_8;
 
     static {
         // default set is utf8

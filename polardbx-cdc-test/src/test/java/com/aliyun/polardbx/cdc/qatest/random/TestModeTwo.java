@@ -26,8 +26,10 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -81,6 +83,8 @@ public class TestModeTwo extends RplBaseTestCase {
     private final ArrayList<DdlType> alterTableCharsetTypes =
         Lists.newArrayList(DdlType.AlterTableCharset, DdlType.AlterTableCharset, DdlType.AlterTableCharset,
             DdlType.AlterTableCharset);
+    private final ArrayList<DdlType> addGeneratedColumnTypes =
+        Lists.newArrayList(DdlType.AddGeneratedColumn, DdlType.AddGeneratedColumn);
     private final ArrayList<DdlType> ddlTypes = Lists.newArrayList();
 
     // ----------------------------------------- parameters -----------------------------------------
@@ -147,6 +151,7 @@ public class TestModeTwo extends RplBaseTestCase {
                 .directCompareDetail(true)
                 .compareDetailOneByOne(true)
                 .loopWaitTimeoutMs(loopWaitTimeoutMs)
+                .ignoreColumns(columnSeeds.GENERATED_COLUMN_NAMES)
                 .build());
         } else {
             sendTokenAndWait(CheckParameter.builder().loopWaitTimeoutMs(loopWaitTimeoutMs).build());
@@ -243,7 +248,8 @@ public class TestModeTwo extends RplBaseTestCase {
     }
 
     private void buildDdlTypes() {
-        String ddlTypeConfig = System.getProperty("ddlTypes", "AddColumn,DropColumn,ModifyColumn,AlterTableCharset");
+        String ddlTypeConfig = System.getProperty("ddlTypes",
+            "AddColumn,DropColumn,ModifyColumn,AlterTableCharset,AddGeneratedColumn");
         String[] tokens = StringUtils.split(ddlTypeConfig, ",");
         for (String token : tokens) {
             if (DdlType.AddColumn.name().equals(token)) {
@@ -254,6 +260,8 @@ public class TestModeTwo extends RplBaseTestCase {
                 ddlTypes.addAll(modifyColumnTypes);
             } else if (DdlType.AlterTableCharset.name().equals(token)) {
                 ddlTypes.addAll(alterTableCharsetTypes);
+            } else if (DdlType.AddGeneratedColumn.name().equals(token)) {
+                ddlTypes.addAll(addGeneratedColumnTypes);
             }
         }
     }
@@ -305,16 +313,60 @@ public class TestModeTwo extends RplBaseTestCase {
         });
     }
 
+    private List<DdlType> getAvailableDdlTypes(List<DdlType> candidates) {
+        int columnCount = columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.size();
+        if (columnCount < ColumnSeeds.MAX_COLUMN_COUNT && columnCount > ColumnSeeds.MIN_COLUMN_COUNT) {
+            return candidates;
+        }
+        List<DdlType> available = new ArrayList<>(candidates);
+        if (columnCount >= ColumnSeeds.MAX_COLUMN_COUNT) {
+            available.removeIf(t -> t == DdlType.AddColumn || t == DdlType.AddGeneratedColumn);
+        }
+        if (columnCount <= ColumnSeeds.MIN_COLUMN_COUNT) {
+            available.removeIf(t -> t == DdlType.DropColumn);
+        }
+        return available.isEmpty() ? candidates : available;
+    }
+
     private Thread buildDdlThread(AtomicBoolean running) {
         return new Thread(() -> {
+            // 保底逻辑：确保每种DDL类型在一轮中至少被执行一次，避免某类型始终随机不到
+            Set<DdlType> distinctDdlTypes = new LinkedHashSet<>(ddlTypes);
+            Set<DdlType> pendingTypes = new LinkedHashSet<>(distinctDdlTypes);
+            int consecutiveRandomCount = 0;
+            final int guaranteeThreshold = distinctDdlTypes.size() * 3;
+
             while (running.get()) {
                 if (Thread.currentThread().isInterrupted()) {
                     return;
                 }
 
                 isDdlExecuting.set(true);
-                int index = new Random().nextInt(ddlTypes.size());
-                DdlType ddlType = ddlTypes.get(index);
+
+                // DDL type selection with guarantee logic, respecting column count limits
+                List<DdlType> availableTypes = getAvailableDdlTypes(ddlTypes);
+                DdlType ddlType;
+                if (consecutiveRandomCount >= guaranteeThreshold && !pendingTypes.isEmpty()) {
+                    // 保底：强制执行一个尚未被执行的DDL类型（排除被列数限制的类型）
+                    List<DdlType> availablePending = getAvailableDdlTypes(new ArrayList<>(pendingTypes));
+                    if (!availablePending.isEmpty()) {
+                        ddlType = availablePending.get(new Random().nextInt(availablePending.size()));
+                        consecutiveRandomCount = 0;
+                    } else {
+                        // 所有 pending 类型均被列数限制，从可用类型中随机选择
+                        ddlType = availableTypes.get(new Random().nextInt(availableTypes.size()));
+                        consecutiveRandomCount++;
+                    }
+                } else {
+                    ddlType = availableTypes.get(new Random().nextInt(availableTypes.size()));
+                    consecutiveRandomCount++;
+                }
+                pendingTypes.remove(ddlType);
+                if (pendingTypes.isEmpty()) {
+                    pendingTypes.addAll(distinctDdlTypes);
+                    consecutiveRandomCount = 0;
+                }
+
                 switch (ddlType) {
                 case AddColumn:
                     addColumn();
@@ -327,6 +379,9 @@ public class TestModeTwo extends RplBaseTestCase {
                     break;
                 case AlterTableCharset:
                     alterTableCharset();
+                    break;
+                case AddGeneratedColumn:
+                    addGeneratedColumn();
                     break;
                 default:
                     throw new PolardbxException("invalid ddl type " + ddlType);
@@ -378,6 +433,7 @@ public class TestModeTwo extends RplBaseTestCase {
         String columnName = ddlSqlBuilder.findSeedColumn4Drop();
         String sql = ddlSqlBuilder.buildDropColumnSql(columnName);
         columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.remove(columnName);
+        columnSeeds.GENERATED_COLUMN_NAMES.remove(columnName);
 
         try (Connection connection = getPolardbxConnection(DB_NAME)) {
             setSqlMode("", connection);
@@ -419,6 +475,23 @@ public class TestModeTwo extends RplBaseTestCase {
         } catch (Throwable t) {
             Metrics.getInstance().getModifyColumnFail().incrementAndGet();
             log.error("alter table charset error!! \r\nsql : " + alterTableCharsetSql, t);
+        }
+    }
+
+    private void addGeneratedColumn() {
+        String columnName = "gen_" + RandomUtil.randomIdentifier();
+        Pair<String, String> pair = ddlSqlBuilder.buildAddGeneratedColumnSql(columnName);
+
+        try (Connection connection = getPolardbxConnection(DB_NAME)) {
+            setSqlMode("", connection);
+            Statement stmt = connection.createStatement();
+            stmt.execute(pair.getValue());
+            columnSeeds.GENERATED_COLUMN_NAMES.add(columnName);
+            columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.put(columnName, pair.getKey());
+            Metrics.getInstance().getAddGeneratedColumnSuccess().incrementAndGet();
+        } catch (Throwable t) {
+            Metrics.getInstance().getAddGeneratedColumnFail().incrementAndGet();
+            log.error("add generated column error!! \r\nsql : " + pair.getValue(), t);
         }
     }
 

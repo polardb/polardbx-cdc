@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `rpl_task` (
     `worker` varchar(20) DEFAULT NULL,
     PRIMARY KEY (`id`),
     KEY (`service_id`)
-    ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+    ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `rpl_service` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS `rpl_service` (
     `status` int(10) NOT NULL DEFAULT '0',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_channel` (`channel`)
-    ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+    ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `rpl_ddl` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS `rpl_ddl` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_ddl_tso` (`ddl_tso`),
     KEY `service_id` (`service_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `rpl_table_position` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS `rpl_table_position` (
     UNIQUE KEY `uk_table_position` (`task_id`, `full_table_name`),
     KEY `task_id` (`task_id`),
     KEY `service_id` (`service_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS`rpl_db_full_position` (
                                         `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS`rpl_db_full_position` (
                                         `end_position` varchar(256) DEFAULT NULL,
                                         PRIMARY KEY (`id`),
                                         UNIQUE KEY `uk_full_position` (`task_id`,`full_table_name`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS`rpl_state_machine` (
                                      `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS`rpl_state_machine` (
                                      `config` longtext NOT NULL,
                                      PRIMARY KEY (`id`),
                                      UNIQUE KEY `uk_channel` (`channel`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 
 -- auto-generated definition
 create table if not exists validation_task
@@ -127,7 +127,7 @@ create table if not exists validation_task
     update_time         datetime   default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
     constraint validation_task_external_id_uindex unique (external_id),
     index validation_task_src_index (state_machine_id, src_phy_db)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 
 -- auto-generated definition
 CREATE TABLE IF NOT EXISTS validation_diff
@@ -156,4 +156,4 @@ CREATE TABLE IF NOT EXISTS validation_diff
     create_time         datetime   default CURRENT_TIMESTAMP not null,
     update_time         datetime   default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
     index validation_diff_srcdb_index (state_machine_id, src_phy_db, src_phy_table)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;

@@ -13,11 +13,11 @@ import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.testing.h2.H2Util;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.core.io.DefaultResourceLoader;
@@ -25,11 +25,13 @@ import org.springframework.core.io.Resource;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.URLStreamHandler;
 import java.net.URLStreamHandlerFactory;
 import java.sql.Connection;
+import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,9 +40,7 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getValue;
 import static com.aliyun.polardbx.binlog.testing.h2.H2Util.executeUpdate;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 import static org.mockito.Answers.CALLS_REAL_METHODS;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.when;
 
 /**
  * created by ziyang.lb
@@ -52,7 +52,8 @@ public class BaseTest {
     protected boolean autoMock = true;
     private static volatile SpringContextBootStrap springContextBootStrap;
     private static final Map<String, URLConnection> urlConnectionMap = new ConcurrentHashMap<>();
-    private static volatile URLStreamHandlerFactory urlStreamHandlerFactory;
+
+    private static CustomURLStreamHandler customURLStreamHandler;
     private static final ConcurrentHashMap<String, Object> springOriginObjHolder = new ConcurrentHashMap<>();
     private static final Object NULL_OBJECT = new Object();
 
@@ -77,6 +78,22 @@ public class BaseTest {
             unregisterSpringObject(entry.getKey(), entry.getValue());
         }
         springOriginObjHolder.clear();
+        urlConnectionMap.clear();
+        customURLStreamHandler = null;
+        try {
+            Field handlersField = URL.class.getDeclaredField("handlers");
+            handlersField.setAccessible(true);
+            Hashtable<String, URLStreamHandler> handlers =
+                (Hashtable<String, URLStreamHandler>) handlersField.get(null);
+            handlers.clear();
+        } catch (Exception ignored) {
+
+        }
+    }
+
+    public <T> void registerSpringObject(Class<?> clazz, T name) {
+        String beanName = StringUtils.uncapitalize(clazz.getSimpleName());
+        registerSpringObject(beanName, name);
     }
 
     public <T> void registerSpringObject(String name, T object) {
@@ -117,22 +134,38 @@ public class BaseTest {
         }
     }
 
+    public static class CustomStreamHandlerFactoryWrapper implements URLStreamHandlerFactory {
+
+        @Override
+        public URLStreamHandler createURLStreamHandler(String protocol) {
+            if (customURLStreamHandler != null) {
+                return customURLStreamHandler;
+            }
+            return null;
+        }
+    }
+
+    public static class CustomURLStreamHandler extends URLStreamHandler {
+
+        @Override
+        protected URLConnection openConnection(URL u) throws IOException {
+            return urlConnectionMap.get(u.toString());
+        }
+    }
+
     public void mockUrlConnection(String url, URLConnection urlConnection) {
-        if (urlStreamHandlerFactory == null) {
+        if (customURLStreamHandler == null) {
             synchronized (BaseTest.class) {
-                if (urlStreamHandlerFactory == null) {
-                    urlStreamHandlerFactory = Mockito.mock(URLStreamHandlerFactory.class);
-                    when(urlStreamHandlerFactory.createURLStreamHandler(anyString()))
-                        .thenReturn(new URLStreamHandler() {
-                            @Override
-                            protected URLConnection openConnection(URL u) throws IOException {
-                                return urlConnectionMap.get(u.toString());
-                            }
-                        });
-                    URL.setURLStreamHandlerFactory(urlStreamHandlerFactory);
+                if (customURLStreamHandler == null) {
+                    customURLStreamHandler = new CustomURLStreamHandler();
+                }
+                try {
+                    URL.setURLStreamHandlerFactory(new CustomStreamHandlerFactoryWrapper());
+                } catch (Error ignored) {
                 }
             }
         }
+
         urlConnectionMap.put(url, urlConnection);
     }
 
@@ -201,4 +234,7 @@ public class BaseTest {
         }
     }
 
+    public static void cleanUrlMocker() {
+        customURLStreamHandler = null;
+    }
 }

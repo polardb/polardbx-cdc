@@ -6,25 +6,17 @@
  */
 package com.aliyun.polardbx.rpl.extractor.full;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-
-import javax.sql.DataSource;
-
+import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.TopologyManager;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSAction;
 import com.aliyun.polardbx.binlog.domain.po.RplDbFullPosition;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
+import com.aliyun.polardbx.rpl.common.CommonUtil;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
+import com.aliyun.polardbx.rpl.common.ReplicaMode;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.aliyun.polardbx.rpl.common.ThreadPoolUtil;
@@ -37,9 +29,21 @@ import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FullExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
-
+import com.aliyun.polardbx.rpl.taskmeta.HostType;
+import com.aliyun.polardbx.rpl.taskmeta.ReplicaMeta;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+
+import javax.sql.DataSource;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 /**
  * @author shicai.xsc 2020/12/6 19:10
@@ -55,7 +59,10 @@ public class MysqlFullExtractor extends BaseExtractor {
     protected List<MysqlFullProcessor> runningProcessors;
     protected List<Future<?>> runningFetchTasks;
     protected List<Future<?>> runningCountTasks;
+
     protected HostInfo hostInfo;
+
+    protected HostInfo physicalHostInfo;
     protected String extractorName;
     protected DataImportFilter dataImportFilter;
     protected ReplicaFilter replicaFilter;
@@ -76,6 +83,7 @@ public class MysqlFullExtractor extends BaseExtractor {
         this.hostInfo = hostInfo;
         this.dataImportFilter = filter;
         isReplicaFull = false;
+        physicalHostInfo = hostInfo;
     }
 
     public MysqlFullExtractor(FullExtractorConfig extractorConfig, HostInfo hostInfo, ReplicaFilter replicaFilter) {
@@ -85,6 +93,7 @@ public class MysqlFullExtractor extends BaseExtractor {
         this.hostInfo = hostInfo;
         this.replicaFilter = replicaFilter;
         isReplicaFull = true;
+        physicalHostInfo = hostInfo;
     }
 
     @Override
@@ -104,9 +113,17 @@ public class MysqlFullExtractor extends BaseExtractor {
     @Override
     public void start() throws Exception {
         log.info("starting {}", extractorName);
+
         if (isReplicaFull) {
-            initIgnoreDbList();
-            getDoDbAndTableFromReplicaFilter();
+            ReplicaMeta replicaMeta = JSON.parseObject(
+                extractorConfig.getPrivateMeta(), ReplicaMeta.class);
+            generateDataImportMetaIfReplica(false, null);
+            if (replicaMeta.getMode() == ReplicaMode.IMAGE) {
+                structureImportIfReplica();
+            }
+            if (replicaMeta.isExtractFullFromDn()) {
+                generateDataImportMetaIfReplica(true, replicaMeta.getDnId());
+            }
         }
 
         List<String> newConnectionSqls = new ArrayList<>(1);
@@ -118,11 +135,13 @@ public class MysqlFullExtractor extends BaseExtractor {
         dataSourceMap = new HashMap<>(4);
         for (String db : dataImportFilter.getDoDbs()) {
             DataSource dataSource =
-                DataSourceUtil.createDruidMySqlDataSource(hostInfo.isUsePolarxPoolCN(), hostInfo.getHost(),
-                    hostInfo.getPort(),
+                DataSourceUtil.createDruidMySqlDataSource(
+                    physicalHostInfo.isUsePolarxPoolCN(),
+                    physicalHostInfo.getHost(),
+                    physicalHostInfo.getPort(),
                     db,
-                    hostInfo.getUserName(),
-                    hostInfo.getPassword(),
+                    physicalHostInfo.getUserName(),
+                    physicalHostInfo.getPassword(),
                     "",
                     1,
                     extractorConfig.getParallelCount(),
@@ -134,20 +153,11 @@ public class MysqlFullExtractor extends BaseExtractor {
 
         Set<String> dbNames = dataImportFilter.getDoDbs();
         for (String dbName : dbNames) {
-            if (isReplicaFull) {
-                String dstDbName = dataImportFilter.getRewriteDb(dbName, DBMSAction.INSERT);
-                StatisticalProxy.getInstance().applyDdlSql("", String.format(CREATE_DB, dstDbName));
-            }
-            for (String tbName : dataImportFilter.getDoTables().get(dbName)) {
+            Set<String> tableNames = dataImportFilter.getDoTables().get(dbName);
+            for (String tbName : tableNames) {
+
                 String dstDbName = dataImportFilter.getRewriteDb(dbName, DBMSAction.INSERT);
                 String dstTbName = dataImportFilter.getRewriteTable(dbName, tbName);
-                if (isReplicaFull) {
-                    Optional<String> ddl = Optional.ofNullable(structureImportDdl.get(dstDbName))
-                        .map(data -> data.get(dstTbName));
-                    if (ddl.isPresent()) {
-                        StatisticalProxy.getInstance().applyDdlSql(dstDbName, ddl.get());
-                    }
-                }
                 MysqlFullProcessor processor = new MysqlFullProcessor();
                 processor.setExtractorConfig(extractorConfig);
                 processor.setDataSource(dataSourceMap.get(dbName));
@@ -155,7 +165,7 @@ public class MysqlFullExtractor extends BaseExtractor {
                 processor.setTbName(tbName);
                 processor.setLogicalSchema(dstDbName);
                 processor.setLogicalTbName(dstTbName);
-                processor.setHostInfo(hostInfo);
+                processor.setHostInfo(physicalHostInfo);
                 processor.setPipeline(pipeline);
                 // 获得所有的待全量的表的行数，用来计算进度
                 Future<?> future = countExecutorService.submit(processor::preStart);
@@ -171,6 +181,32 @@ public class MysqlFullExtractor extends BaseExtractor {
         for (MysqlFullProcessor processor : runningProcessors) {
             Future<?> future = executorService.submit(processor::start);
             runningFetchTasks.add(future);
+        }
+    }
+
+    public void structureImportIfReplica() throws Exception {
+        Set<String> dbNames = dataImportFilter.getDoDbs();
+        for (String dbName : dbNames) {
+            String dstDbName = dataImportFilter.getRewriteDb(dbName, DBMSAction.INSERT);
+            StatisticalProxy.getInstance().applyDdlSql("", String.format(CREATE_DB, dstDbName));
+            for (String tbName : dataImportFilter.getDoTables().get(dbName)) {
+                String dstTbName = dataImportFilter.getRewriteTable(dbName, tbName);
+                Optional<String> ddl = Optional.ofNullable(structureImportDdl.get(dstDbName))
+                    .map(data -> data.get(dstTbName));
+                if (ddl.isPresent()) {
+                    StatisticalProxy.getInstance().applyDdlSql(dstDbName, ddl.get());
+                }
+
+            }
+        }
+
+    }
+
+    public void generateDataImportMetaIfReplica(boolean extractFullFromDn, String dnName) throws Exception {
+        initIgnoreDbList();
+        getDoDbAndTableFromReplicaFilter();
+        if (extractFullFromDn && dnName != null) {
+            getPhysicalDoDbAndTableFromReplicaFilter(dnName);
         }
     }
 
@@ -221,6 +257,7 @@ public class MysqlFullExtractor extends BaseExtractor {
         Map<String, String> dbMappings = new HashMap<>();
         DbMetaCache dbMetaCache = new DbMetaCache(hostInfo, 2, 2, true);
         List<String> dbs = dbMetaCache.getDatabases();
+
         Set<String> doDbs = new HashSet<>();
         log.info("source db list: {}", dbs);
         for (String dbName : dbs) {
@@ -255,6 +292,64 @@ public class MysqlFullExtractor extends BaseExtractor {
         importMeta.setSrcDbList(doDbs);
         importMeta.setPhysicalDoTableList(doTables);
         dataImportFilter = new DataImportFilter(importMeta);
+        dataImportFilter.init();
+        log.info("generated data import filter: {}", dataImportFilter);
+    }
+
+    public void getPhysicalDoDbAndTableFromReplicaFilter(String dnId) throws Exception {
+        DbMetaCache dbMetaCache = new DbMetaCache(hostInfo, 2, 2, true);
+
+        HostInfo dnHostInfo = CommonUtil.getDnInfoByDnId(dbMetaCache.getDefaultDataSource().getConnection(), dnId);
+
+        List<String> logicalDoDbs = dbMetaCache.getDatabases();
+        log.info("source db list: {}", logicalDoDbs);
+        DataImportMeta.PhysicalMeta meta = new DataImportMeta.PhysicalMeta();
+        meta.setSrcHost(dnHostInfo.getHost());
+        meta.setSrcPort(dnHostInfo.getPort());
+        meta.setSrcUser(dnHostInfo.getUserName());
+        meta.setSrcPassword(dnHostInfo.getPassword());
+        meta.setSrcType(HostType.RDS);
+        meta.setDstDbMapping(new HashMap<>());
+        meta.setSrcDbList(new HashSet<>());
+        meta.setPhysicalDoTableList(new HashMap<>());
+        meta.setRewriteTableMapping(new HashMap<>());
+        meta.setIgnoreServerIds("");
+        for (String logicalDbName : logicalDoDbs) {
+            if (defaultIgnoreDbList.contains(logicalDbName.toLowerCase())) {
+                continue;
+            }
+            if (replicaFilter.ignoreEvent(replicaFilter.getRewriteDb(logicalDbName, DBMSAction.CREATEDB), null
+                , DBMSAction.CREATEDB, Integer.MIN_VALUE)) {
+                continue;
+            }
+            TopologyManager topologyManager = new TopologyManager(hostInfo.getHost(), hostInfo.getPort(),
+                logicalDbName, hostInfo.getUserName(), hostInfo.getPassword());
+            // show ds where db = 'logical_db_name' and STORAGE_INST_ID='dn_id';
+            // 带全量的模式暂时都不支持设置 db mappings
+            List<String> physicalDbInfoList = CommonUtil.getPhysicalDbInfoList(
+                dbMetaCache.getDefaultDataSource().getConnection(), dnId, logicalDbName);
+            for (String physicalDbName : physicalDbInfoList) {
+                meta.getDstDbMapping().put(physicalDbName.toLowerCase(), logicalDbName);
+            }
+            meta.getSrcDbList().addAll(physicalDbInfoList);
+
+            List<String> logicTableList = dbMetaCache.getTables(logicalDbName);
+            for (String physicalDbName : physicalDbInfoList) {
+                List<String> physicalTableList;
+                physicalTableList = topologyManager.getAllPhyTableList(physicalDbName, new HashSet<>(logicTableList));
+                physicalDbName = physicalDbName.toLowerCase();
+                meta.getPhysicalDoTableList().put(physicalDbName, new HashSet<>(physicalTableList));
+                Map<String, String> dbRewriteTableMapping = new HashMap<>();
+                meta.getRewriteTableMapping().put(physicalDbName, dbRewriteTableMapping);
+                for (String physicalTable : physicalTableList) {
+                    physicalTable = physicalTable.toLowerCase();
+                    dbRewriteTableMapping.put(physicalTable, topologyManager.getLogicTable(physicalTable));
+                }
+            }
+            // 使用 dn 的 hostInfo 去初始化 processor
+            physicalHostInfo = dnHostInfo;
+        }
+        dataImportFilter = new DataImportFilter(meta);
         dataImportFilter.init();
         log.info("generated data import filter: {}", dataImportFilter);
     }

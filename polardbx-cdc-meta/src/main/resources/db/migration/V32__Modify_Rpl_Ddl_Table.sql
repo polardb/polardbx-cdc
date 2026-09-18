@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS `rpl_ddl_main` (
     UNIQUE KEY `uk_fsm_ddl_tso` (`fsm_id`,`ddl_tso`),
     UNIQUE KEY `uk_token`(token),
     KEY `service_id` (`service_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `rpl_ddl_sub` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS `rpl_ddl_sub` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_fsm_tso_task` (`fsm_id`,`ddl_tso`,`task_id`),
     KEY `service_id` (`service_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `rpl_stat_metrics` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -58,5 +58,5 @@ CREATE TABLE IF NOT EXISTS `rpl_stat_metrics` (
     `fsm_id` bigint(20) unsigned NOT NULL DEFAULT '0',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_task` (`task_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

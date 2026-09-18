@@ -13,6 +13,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.download.StorageDownloader;
 import com.aliyun.polardbx.binlog.canal.exception.ConsumeOSSBinlogEndException;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.file.Counters;
 import org.apache.commons.io.file.PathUtils;
 import org.junit.Assert;
@@ -25,6 +26,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.LinkedList;
 
+@Slf4j
 public class ContinuesFileLogFetcherTest extends BaseTest {
 
     @Test(expected = PolardbxException.class)
@@ -104,7 +106,7 @@ public class ContinuesFileLogFetcherTest extends BaseTest {
             binlogFile2.setInstanceID(1L);
             binlogFile2.setFileSize(1024L);
             binlogFile2.setServerId(1L);
-            binlogFile2.setIntranetDownloadLink("1.1.1.1");
+            binlogFile2.setIntranetDownloadLink("1.1.1.1/my-bin.02.zst?aaaa");
             binlogFile2.setLogname("my-bin.02");
             binlogFileQueue.add(binlogFile2);
             Logger logger = Mockito.mock(Logger.class);
@@ -131,4 +133,5 @@ public class ContinuesFileLogFetcherTest extends BaseTest {
         }
 
     }
+
 }

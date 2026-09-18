@@ -20,12 +20,27 @@ public class KeyColumnInfo {
     private String columnName;
     private int nonUnique;
     private int seqInIndex;
+    /**
+     * SHOW INDEXES.Sub_part. A non-null value means that only a column prefix participates in the index.
+     */
+    private Integer subPart;
+    /**
+     * MySQL 8.0 functional indexes expose a NULL Column_name.
+     */
+    private boolean expression;
 
     public KeyColumnInfo(String table, String keyName, String columnName, int nonUnique, int seqInIndex) {
+        this(table, keyName, columnName, nonUnique, seqInIndex, null, false);
+    }
+
+    public KeyColumnInfo(String table, String keyName, String columnName, int nonUnique, int seqInIndex,
+                         Integer subPart, boolean expression) {
         this.table = table;
         this.keyName = keyName;
         this.columnName = columnName;
         this.nonUnique = nonUnique;
         this.seqInIndex = seqInIndex;
+        this.subPart = subPart;
+        this.expression = expression;
     }
 }

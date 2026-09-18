@@ -25,6 +25,7 @@ import com.aliyun.polardbx.binlog.task.IDumperStatisticProvider;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -39,8 +40,11 @@ import java.util.Random;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_FILE_SEEK_BUFFER_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.enums.BinlogUploadStatus.SUCCESS;
+import static com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector.isDumperMasterOrX;
 
 /**
  * Created by ziyang.lb
@@ -49,6 +53,7 @@ import static com.aliyun.polardbx.binlog.enums.BinlogUploadStatus.SUCCESS;
 @Getter
 @Slf4j
 public class LogFileManager implements IDumperStatisticProvider {
+
     private String taskName;
     private TaskType taskType;
     private ExecutionConfig executionConfig;
@@ -68,86 +73,151 @@ public class LogFileManager implements IDumperStatisticProvider {
     private volatile boolean running;
     private LogFileLockManager logFileLockManager;
     private BinlogOssRecordService binlogOssRecordService;
+    @Getter
+    private boolean forceDownload = false;
 
     public void start() {
         if (running) {
             return;
         }
+        doStart();
         running = true;
-
-        try {
-            cdcFileSystem = new CdcFileSystem(binlogRootPath, groupName, streamName);
-            binlogListeners = new BinlogListenerWrapper();
-            binlogListeners.addListener(
-                new BinlogRecordManager(executionConfig.getRuntimeVersion(), groupName, streamName, taskName, taskType,
-                    binlogRootPath));
-            binlogOssRecordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
-
-            if (RuntimeLeaderElector.isDumperMasterOrX(executionConfig.getRuntimeVersion(), taskType, taskName)) {
-                if (isForceRecover(executionConfig)) {
-                    String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
-                    deleteLocalBinlogFilesIfUploaded(fullPath, groupName, streamName, getString(CLUSTER_ID));
-                } else {
-                    if (isForceDownload(executionConfig)) {
-                        String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
-                        deleteLocalBinlogFilesIfUploaded(fullPath, groupName, streamName, getString(CLUSTER_ID));
-                    }
-                    BinlogRestoreManager restoreManager =
-                        new BinlogRestoreManager(groupName, streamName, binlogRootPath);
-                    restoreManager.start();
-                }
-
-                logFileGenerator = new LogFileGenerator(this,
-                    binlogFileSize,
-                    dryRun,
-                    flushPolicy,
-                    flushInterval,
-                    writeBufferSize,
-                    taskName,
-                    taskType,
-                    groupName,
-                    streamName,
-                    executionConfig);
-                logFileGenerator.start();
-            } else {
-                // 主备Dumper的删除操作要一致
-                if (isForceRecover(executionConfig) || isForceDownload(executionConfig)) {
-                    String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
-                    deleteLocalBinlogFilesIfUploaded(fullPath, groupName, streamName, getString(CLUSTER_ID));
-                }
-
-                DumperSlaveStartMode startMode = DumperSlaveStartMode.typeOf(
-                    DynamicApplicationConfig.getString(ConfigKeys.BINLOG_RECOVER_MODE_WITH_DUMPER_SLAVE));
-                if (startMode == DumperSlaveStartMode.RANDOM) {
-                    startMode = new Random().nextBoolean() ? DumperSlaveStartMode.DOWNLOAD : DumperSlaveStartMode.SYNC;
-                }
-
-                log.info("dumper slave start mode:{}", startMode.name());
-                if (startMode == DumperSlaveStartMode.DOWNLOAD) {
-                    BinlogRestoreManager restoreManager =
-                        new BinlogRestoreManager(groupName, streamName, binlogRootPath);
-                    restoreManager.start();
-                }
-                logFileCopier = new LogFileCopier(this, writeBufferSize,
-                    DynamicApplicationConfig.getInt(BINLOG_FILE_SEEK_BUFFER_SIZE), executionConfig);
-                logFileCopier.start();
-            }
-        } catch (Throwable t) {
-            throw new PolardbxException("log file manager start failed.", t);
-        }
     }
 
+    private void doStart() {
+        log.info("## starting the log file manager, with stream {} ......", streamName);
+        try {
+            // init
+            this.cdcFileSystem = new CdcFileSystem(binlogRootPath, groupName, streamName);
+            this.initBinlogListeners();
+            this.binlogOssRecordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
+
+            // start
+            if (isDumperMasterOrX(executionConfig.getRuntimeVersion(), taskType, taskName)) {
+                startInMasterMode();
+            } else {
+                startInSlaveMode();
+            }
+        } catch (Throwable t) {
+            throw new PolardbxException("log file manager start failed, with stream " + streamName, t);
+        }
+        log.info("## the log file manager is running now, with stream {} ......", streamName);
+    }
+
+    private void initBinlogListeners() {
+        binlogListeners = new BinlogListenerWrapper();
+        if (getBoolean(ConfigKeys.IS_LAB_ENV)) {
+            binlogListeners.addListener(new BinlogFileLabCheckListener());
+        }
+        binlogListeners.addListener(new BinlogRecordManager(
+            executionConfig.getRuntimeVersion(), groupName, streamName, taskName, taskType, binlogRootPath));
+    }
+
+    private void startInMasterMode() throws IOException {
+        BinlogRestoreManager restoreManager = null;
+
+        if (isForceRecover(executionConfig)) {
+            String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+            deleteLocalBinlogFiles(fullPath, groupName, streamName, getString(CLUSTER_ID),
+                executionConfig.getRecoverTsoMap().get(streamName));
+        } else {
+            if (isForceDownload(executionConfig)) {
+                String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+                BinlogFileUtil.deleteBinlogFiles(fullPath);
+                forceDownload = true;
+            }
+            restoreManager = new BinlogRestoreManager(groupName, streamName, binlogRootPath);
+        }
+
+        logFileGenerator = new LogFileGenerator(this,
+            binlogFileSize,
+            dryRun,
+            flushPolicy,
+            flushInterval,
+            writeBufferSize,
+            taskName,
+            taskType,
+            groupName,
+            streamName,
+            executionConfig);
+        logFileGenerator.setBinlogRestoreManager(restoreManager);
+        logFileGenerator.start();
+    }
+
+    private void startInSlaveMode() throws IOException {
+        // 主备Dumper的删除操作要一致
+        if (isForceRecover(executionConfig)) {
+            String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+            deleteLocalBinlogFiles(fullPath, groupName, streamName, getString(CLUSTER_ID),
+                executionConfig.getRecoverTsoMap().get(streamName));
+        } else if (isForceDownload(executionConfig)) {
+            String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+            BinlogFileUtil.deleteBinlogFiles(fullPath);
+            forceDownload = true;
+        }
+
+        DumperSlaveStartMode startMode = DumperSlaveStartMode.typeOf(
+            DynamicApplicationConfig.getString(ConfigKeys.BINLOG_RECOVER_MODE_WITH_DUMPER_SLAVE));
+        if (startMode == DumperSlaveStartMode.RANDOM) {
+            startMode = new Random().nextBoolean() ? DumperSlaveStartMode.DOWNLOAD : DumperSlaveStartMode.SYNC;
+        }
+
+        log.info("dumper slave start mode:{}", startMode.name());
+        BinlogRestoreManager restoreManager = null;
+        if (startMode == DumperSlaveStartMode.DOWNLOAD) {
+            restoreManager = new BinlogRestoreManager(groupName, streamName, binlogRootPath);
+            restoreManager.restore();
+        }
+
+        logFileCopier = new LogFileCopier(this, writeBufferSize,
+            getInt(BINLOG_FILE_SEEK_BUFFER_SIZE), executionConfig);
+        logFileCopier.setBinlogRestoreManager(restoreManager);
+        logFileCopier.start();
+    }
+
+    @SneakyThrows
     public void stop() {
         if (!running) {
             return;
         }
+        doStop();
         running = false;
+    }
 
+    private void doStop() {
+        log.info("## stopping the log file manager, with stream {} ......", streamName);
         if (logFileCopier != null) {
             logFileCopier.stop();
         }
         if (logFileGenerator != null) {
             logFileGenerator.stop();
+        }
+        if (binlogListeners != null) {
+            binlogListeners.stop();
+        }
+        log.info("## the log file manager is stopped, with stream {} ......", streamName);
+    }
+
+    public void clean() throws IOException {
+        log.info("## cleaning the files for log file manager, with stream {} ......", streamName);
+        String fullPath = BinlogFileUtil.getFullPath(binlogRootPath, groupName, streamName);
+        if (new File(fullPath).exists()) {
+            FileUtils.forceDelete(new File(fullPath));
+        }
+        log.info("## the file for log file manager is cleaned, with stream {} ......", streamName);
+    }
+
+    public void refreshAndRestart(ExecutionConfig executionConfig) {
+        this.executionConfig = executionConfig;
+        if (logFileGenerator != null) {
+            this.logFileGenerator.refreshAndRestart(executionConfig);
+        }
+    }
+
+    public void refresh(ExecutionConfig executionConfig) {
+        this.executionConfig = executionConfig;
+        if (logFileGenerator != null) {
+            this.logFileGenerator.refresh(executionConfig);
         }
     }
 
@@ -254,22 +324,20 @@ public class LogFileManager implements IDumperStatisticProvider {
      * 该方法会读取forceRecover字段的值，如果为true，则将本地binlog文件清空，便于后续测试通过recover tso产生binlog
      */
     private boolean isForceRecover(ExecutionConfig taskConfig) {
-        int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
+        int heartbeatTimeout = getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
         if (taskConfig.isForceRecover()
-            && System.currentTimeMillis() - taskConfig.getTimestamp() < heartbeatTimeout * 6) {
-            log.info(
-                "will clean local binlog by force recover, with task config " + JSONObject.toJSONString(taskConfig));
+            && System.currentTimeMillis() - taskConfig.getTimestamp() < heartbeatTimeout * 6L) {
+            log.info("will clean local binlog by force recover, task config : " + JSONObject.toJSONString(taskConfig));
             return true;
         }
         return false;
     }
 
     private boolean isForceDownload(ExecutionConfig taskConfig) {
-        int heartbeatTimeout = DynamicApplicationConfig.getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
+        int heartbeatTimeout = getInt(DAEMON_WATCH_WORK_PROCESS_HEARTBEAT_TIMEOUT_MS);
         if (taskConfig.isForceDownload()
-            && System.currentTimeMillis() - taskConfig.getTimestamp() < heartbeatTimeout * 6) {
-            log.info(
-                "will clean local binlog by force download, with task config " + JSONObject.toJSONString(taskConfig));
+            && System.currentTimeMillis() - taskConfig.getTimestamp() < heartbeatTimeout * 6L) {
+            log.info("will clean local binlog by force download, task config : " + JSONObject.toJSONString(taskConfig));
             return true;
         }
         return false;
@@ -300,7 +368,13 @@ public class LogFileManager implements IDumperStatisticProvider {
         return 0;
     }
 
-    public void deleteLocalBinlogFilesIfUploaded(String fullPath, String gid, String sid, String cid) {
+    /**
+     * 只有0binlog满足下列条件之一，才可删除，否则会造成未被上传完毕的binlog永远上传不了的问题。
+     * 1. record tso 为空
+     * 2. record tso > recover tso
+     * 3. upload status == SUCCESS
+     */
+    public void deleteLocalBinlogFiles(String fullPath, String gid, String sid, String cid, String tso) {
         File dir = new File(fullPath);
         if (!dir.exists() || !dir.isDirectory()) {
             return;
@@ -309,9 +383,18 @@ public class LogFileManager implements IDumperStatisticProvider {
         for (File file : dir.listFiles()) {
             String fileName = file.getName();
             Optional<BinlogOssRecord> recordOpt = binlogOssRecordService.getRecordByName(gid, sid, cid, fileName);
-            if (recordOpt.isPresent() && recordOpt.get().getUploadStatus() == SUCCESS.getValue()) {
-                file.delete();
+            if (recordOpt.isPresent()) {
+                BinlogOssRecord record = recordOpt.get();
+                String recordTso = record.getLastTso();
+                boolean uploaded = record.getUploadStatus() == SUCCESS.getValue();
+                if (recordTso == null || recordTso.compareTo(tso) > 0 || uploaded) {
+                    file.delete();
+                }
             }
         }
+    }
+
+    public boolean isDumperMaster() {
+        return RuntimeLeaderElector.isDumperMaster(executionConfig.getRuntimeVersion(), taskName);
     }
 }

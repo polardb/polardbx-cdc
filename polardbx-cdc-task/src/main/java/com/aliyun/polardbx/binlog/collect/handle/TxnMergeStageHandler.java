@@ -189,6 +189,7 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
 
     private Pair<TxnToken, List<TxnBuffer>> txnMerge(TxnToken in) {
         TxnBuffer baseBuffer = fetchTxnBuffer(in, new TxnKey(in.getTxnId(), in.getPartitionId()));
+        baseBuffer.setPartitionId(in.getPartitionId());
 
         List<TxnBuffer> txnBuffers = new ArrayList<>();
         txnBuffers.add(baseBuffer);
@@ -212,6 +213,7 @@ public class TxnMergeStageHandler implements WorkHandler<MessageEvent>, Lifecycl
                     }
 
                     assert Objects.requireNonNull(buffer).isCompleted();
+                    buffer.setPartitionId(p);
                     baseBuffer.merge(buffer);
                     txnBuffers.add(buffer);
                 });

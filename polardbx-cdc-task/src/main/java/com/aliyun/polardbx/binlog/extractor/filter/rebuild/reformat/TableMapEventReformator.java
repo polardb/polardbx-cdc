@@ -71,6 +71,7 @@ public class TableMapEventReformator implements EventReformater<TableMapLogEvent
             log.debug("detected un compatible table meta for table map event, will reformat event "
                 + tableMeta.getPhySchema() + tableMeta.getPhyTable());
         }
+
         String characterServer = context.getCharsetServer();
         TableMapEventBuilder tme =
             TableMapEventRebuilder.convert(tle, serviceId, CharsetConversion.getJavaCharset(characterServer));
@@ -95,7 +96,8 @@ public class TableMapEventReformator implements EventReformater<TableMapLogEvent
                 throw e;
             }
         }
-
+        long tableId = tableMetaManager.getTableId(tableMeta.getLogicSchema(), tableMeta.getLogicTable());
+        tme.setTableId(tableId);
         tme.setSchema(tableMeta.getLogicSchema());
         tme.setTableName(tableMeta.getLogicTable());
         eventData = eventData.toBuilder()
@@ -130,10 +132,13 @@ public class TableMapEventReformator implements EventReformater<TableMapLogEvent
                 newNullBitMap.set(logicIndex, nullBitmap.get(phyIndex));
             } else {
                 String mysqlCharset = fieldMetaExt.getCharset();
+                // This null is only a placeholder used to derive the column type metadata; it is not a row value or a
+                // logical default. Always allow the placeholder to be null so CreateField does not report a false
+                // nullable violation. The TableMap null bitmap below still comes from the logical column metadata.
                 Field field = MakeFieldFactory.makeField(fieldMetaExt.getColumnType(),
                     null,
                     mysqlCharset,
-                    fieldMetaExt.isNullable(),
+                    true,
                     fieldMetaExt.isUnsigned());
                 if (field == null) {
                     String errorMsg = String.format("not support for add new Field: %s.%s %s",
@@ -145,7 +150,7 @@ public class TableMapEventReformator implements EventReformater<TableMapLogEvent
                 }
                 newTypeDef[logicIndex] = (byte) field.getMysqlType().getType();
                 newMetaDef[logicIndex] = field.doGetTableMeta();
-                newNullBitMap.set(logicIndex, field.isNullable());
+                newNullBitMap.set(logicIndex, fieldMetaExt.isNullable());
             }
         }
         tme.setColumnDefType(newTypeDef);

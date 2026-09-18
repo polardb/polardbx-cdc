@@ -6,11 +6,16 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog;
 
+import com.aliyun.polardbx.binlog.util.CharsetCache;
+
+import lombok.Getter;
+
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.charset.Charset;
+import java.nio.charset.UnsupportedCharsetException;
 import java.util.Arrays;
 import java.util.BitSet;
 
@@ -36,6 +41,7 @@ public class LogBuffer {
     public static final int DIG_PER_INT32 = 9;
     public static final int SIZE_OF_INT32 = 4;
     protected byte[] buffer;
+    @Getter
     protected int origin, limit;
     protected int position;
 
@@ -1210,8 +1216,8 @@ public class LogBuffer {
         }
 
         try {
-            return new String(buf, from, found - from, charsetName);
-        } catch (UnsupportedEncodingException e) {
+            return new String(buf, from, found - from, CharsetCache.lookup(charsetName));
+        } catch (UnsupportedCharsetException e) {
             throw new IllegalArgumentException("Unsupported encoding: " + charsetName, e);
         }
     }
@@ -1235,10 +1241,11 @@ public class LogBuffer {
         }
 
         try {
-            String string = new String(buf, from, found - from, charsetName);
+            Charset charset = CharsetCache.lookup(charsetName);
+            String string = new String(buf, from, found - from, charset);
             position += len;
             return string;
-        } catch (UnsupportedEncodingException e) {
+        } catch (UnsupportedCharsetException e) {
             throw new IllegalArgumentException("Unsupported encoding: " + charsetName, e);
         }
     }
@@ -1254,8 +1261,9 @@ public class LogBuffer {
         }
 
         try {
-            return new String(buffer, origin + pos, len, charsetName);
-        } catch (UnsupportedEncodingException e) {
+            Charset charset = CharsetCache.lookup(charsetName);
+            return new String(buffer, origin + pos, len, charset);
+        } catch (UnsupportedCharsetException e) {
             throw new IllegalArgumentException("Unsupported encoding: " + charsetName, e);
         }
     }
@@ -1271,10 +1279,11 @@ public class LogBuffer {
         }
 
         try {
-            String string = new String(buffer, position, len, charsetName);
+            Charset charset = CharsetCache.lookup(charsetName);
+            String string = new String(buffer, position, len, charset);
             position += len;
             return string;
-        } catch (UnsupportedEncodingException e) {
+        } catch (UnsupportedCharsetException e) {
             throw new IllegalArgumentException("Unsupported encoding: " + charsetName, e);
         }
     }
@@ -1308,8 +1317,8 @@ public class LogBuffer {
         }
 
         try {
-            return new String(buf, origin + pos + 1, len, charsetName);
-        } catch (UnsupportedEncodingException e) {
+            return new String(buf, origin + pos + 1, len, CharsetCache.lookup(charsetName));
+        } catch (UnsupportedCharsetException e) {
             throw new IllegalArgumentException("Unsupported encoding: " + charsetName, e);
         }
     }
@@ -1330,10 +1339,11 @@ public class LogBuffer {
         }
 
         try {
-            String string = new String(buf, position + 1, len, charsetName);
+            Charset charset = CharsetCache.lookup(charsetName);
+            String string = new String(buf, position + 1, len, charset);
             position += len + 1;
             return string;
-        } catch (UnsupportedEncodingException e) {
+        } catch (UnsupportedCharsetException e) {
             throw new IllegalArgumentException("Unsupported encoding: " + charsetName, e);
         }
     }
@@ -1780,5 +1790,13 @@ public class LogBuffer {
             return dump.toString();
         }
         return "";
+    }
+
+    public final byte[] getByteBuffer() {
+        return buffer;
+    }
+
+    public final int getOrigin() {
+        return origin;
     }
 }

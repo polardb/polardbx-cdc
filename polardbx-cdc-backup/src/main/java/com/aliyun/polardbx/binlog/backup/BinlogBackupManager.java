@@ -10,7 +10,9 @@ import com.aliyun.polardbx.binlog.leader.RuntimeLeaderElector;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * @author yudong
@@ -30,17 +32,27 @@ public class BinlogBackupManager {
     }
 
     public void start() {
-        log.info("binlog backup manager start");
         if (needStart()) {
             binlogUploadManager = new BinlogUploadManager(streamContext, metrics);
             binlogUploadManager.start();
         }
     }
 
+    public void start(Set<String> streams, HashMap<String, MetricsObserver> metrics) {
+        if (binlogUploadManager != null) {
+            binlogUploadManager.start(streams, metrics);
+        }
+    }
+
     public void stop() {
-        log.info("binlog backup manager stop");
         if (binlogUploadManager != null) {
             binlogUploadManager.stop();
+        }
+    }
+
+    public void stop(String stream) {
+        if (binlogUploadManager != null) {
+            binlogUploadManager.stop(stream);
         }
     }
 

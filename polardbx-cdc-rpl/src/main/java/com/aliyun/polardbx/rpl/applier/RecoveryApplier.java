@@ -34,6 +34,7 @@ import org.apache.commons.lang.StringUtils;
 import org.springframework.util.CollectionUtils;
 
 import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
 import java.sql.Types;
 import java.text.MessageFormat;
 import java.util.HashMap;
@@ -237,7 +238,7 @@ public class RecoveryApplier extends BaseApplier {
             final Appender appender = RemoteBinlogProxy.getInstance().providerAppender(currentOutputFile);
             try {
                 appender.begin();
-                byte[] bytes = stringBuilder.toString().getBytes("UTF-8");
+                byte[] bytes = stringBuilder.toString().getBytes(StandardCharsets.UTF_8);
                 nextPosition = appender.append(bytes, bytes.length);
                 appender.end();
             } catch (Throwable e) {
@@ -252,7 +253,7 @@ public class RecoveryApplier extends BaseApplier {
         }
     }
 
-    private String valueWrapper(Serializable data, int sqlType) {
+    String valueWrapper(Serializable data, int sqlType) {
         if (data == null) {
             return "NULL";
         }
@@ -285,7 +286,15 @@ public class RecoveryApplier extends BaseApplier {
             return stringBuilder.toString();
         }
 
-        return ("'" + data.toString().replaceAll("'", "\\\\'").replaceAll("\n", "\\\\n") + "'");
+        return ("'" + data.toString().replaceAll("\\\\", "\\\\\\\\")
+            .replaceAll("\b", "\\\\b")
+            .replaceAll("\n", "\\\\n")
+            .replaceAll("\r", "\\\\r")
+            .replaceAll("\t", "\\\\t")
+            .replaceAll("\\x1A", "\\\\Z")
+            .replaceAll("\\x00", "\\\\0")
+            .replaceAll("'", "\\\\'")
+            .replaceAll("\"", "\\\\\"") + "'");
     }
 
     private String whereClause(DefaultRowChange event, DBMSRowData data) {

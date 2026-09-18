@@ -64,7 +64,7 @@ public class ServerCharactorSet {
 
     public static ServerCharactorSet loadCharactorSetFromCN() {
         JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("polarxJdbcTemplate");
-        List<Pair<String, String>> list = jdbcTemplate.query("show variables like '%character%'",
+        List<Pair<String, String>> list = jdbcTemplate.query("show global variables like '%character%'",
             (rs, rowNum) -> Pair.of(rs.getString(1), rs.getString(2)));
         ServerCharactorSet set = new ServerCharactorSet();
         list.forEach(pair -> {

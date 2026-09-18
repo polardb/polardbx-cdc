@@ -10,12 +10,12 @@ import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.ResultCode;
-import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.domain.po.RplService;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
+import com.aliyun.polardbx.binlog.domain.po.RplTaskConfig;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.scheduler.ResourceManager;
@@ -32,6 +32,7 @@ import com.aliyun.polardbx.rpl.taskmeta.ApplierConfig;
 import com.aliyun.polardbx.rpl.taskmeta.ApplierType;
 import com.aliyun.polardbx.rpl.taskmeta.DataImportMeta;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
+import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.ExtractorType;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.FilterType;
@@ -50,23 +51,30 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mybatis.dynamic.sql.select.SelectDSLCompleter;
-import org.springframework.beans.factory.support.DefaultListableBeanFactory;
-import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 public class FSMMetaManagerTest extends BaseTest {
@@ -121,7 +129,7 @@ public class FSMMetaManagerTest extends BaseTest {
         int expectedMemory = ((((int) (8192 * 0.95) - 1024) / 4)) / 8 * 8;
         FSMMetaManager.RESOURCE_MANAGER = resourceManager;
         int result = FSMMetaManager.computeIncTaskMemory(taskNum);
-        Assert.assertEquals(expectedMemory, result);
+        assertEquals(expectedMemory, result);
 
     }
 
@@ -147,7 +155,7 @@ public class FSMMetaManagerTest extends BaseTest {
         int expectedMemory = ((((int) (8192 * 0.95) - 1024) / 10)) / 8 * 8;
         FSMMetaManager.RESOURCE_MANAGER = resourceManager;
         int result = FSMMetaManager.computeIncTaskMemory(taskNum);
-        Assert.assertEquals(expectedMemory, result);
+        assertEquals(expectedMemory, result);
     }
 
     @Test
@@ -157,7 +165,7 @@ public class FSMMetaManagerTest extends BaseTest {
         int taskNum = 10;
         int expectedMemory = DynamicApplicationConfig.getInt(ConfigKeys.RPL_DEFAULT_MEMORY); // 使用默认内存
         int result = FSMMetaManager.computeIncTaskMemory(taskNum);
-        Assert.assertEquals(expectedMemory, result);
+        assertEquals(expectedMemory, result);
         setConfig("cluster_type", "REPLICA");
     }
 
@@ -184,7 +192,7 @@ public class FSMMetaManagerTest extends BaseTest {
                 .showMasterStatus(ArgumentMatchers.any(Request.class), ArgumentMatchers.any(StreamObserver.class));
 
             BinlogPosition position = FSMMetaManager.findMainStartPosition();
-            Assert.assertEquals(expectedPosition, position);
+            assertEquals(expectedPosition, position);
             unregisterSpringObject("dumperInfoMapper", dumperInfoMapper);
         }
     }
@@ -206,7 +214,7 @@ public class FSMMetaManagerTest extends BaseTest {
             dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.getXStreamByStreamName("stream1"))
                 .thenReturn(xStream);
             BinlogPosition position = FSMMetaManager.findStreamStartPosition("stream1");
-            Assert.assertEquals(new BinlogPosition("file1", 0, -1, -1), position);
+            assertEquals(new BinlogPosition("file1", 0, -1, -1), position);
         }
     }
 
@@ -216,7 +224,7 @@ public class FSMMetaManagerTest extends BaseTest {
             dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.getXStreamByStreamName("stream1"))
                 .thenReturn(null);
             BinlogPosition position = FSMMetaManager.findStreamStartPosition("stream1");
-            Assert.assertNull(position);
+            assertNull(position);
         }
     }
 
@@ -297,6 +305,7 @@ public class FSMMetaManagerTest extends BaseTest {
         physicalMeta.setRdsUid("uid1");
         physicalMeta.setRdsBid("bid1");
         physicalMeta.setRdsInstanceId("instance1");
+        meta.setLogicalMeta(physicalMeta);
 
         int sequenceId = 1;
         int incMemory = DynamicApplicationConfig.getInt(ConfigKeys.RPL_DEFAULT_MEMORY);
@@ -359,12 +368,12 @@ public class FSMMetaManagerTest extends BaseTest {
 
         HostInfo hostInfo = FSMMetaManager.getBackflowApplierHostInfo(dataImportMeta);
 
-        Assert.assertEquals("localhost", hostInfo.getHost());
-        Assert.assertEquals(3306, hostInfo.getPort());
-        Assert.assertEquals("user", hostInfo.getUserName());
-        Assert.assertEquals("password", hostInfo.getPassword());
-        Assert.assertEquals(HostType.POLARX1, hostInfo.getType());
-        Assert.assertEquals(100L, hostInfo.getServerId());
+        assertEquals("localhost", hostInfo.getHost());
+        assertEquals(3306, hostInfo.getPort());
+        assertEquals("user", hostInfo.getUserName());
+        assertEquals("password", hostInfo.getPassword());
+        assertEquals(HostType.POLARX1, hostInfo.getType());
+        assertEquals(100L, hostInfo.getServerId());
     }
 
     @Test
@@ -391,6 +400,7 @@ public class FSMMetaManagerTest extends BaseTest {
         physicalMeta.setSrcType(HostType.MYSQL);
         metaList.add(physicalMeta);
         meta.setMetaList(metaList);
+        meta.setLogicalMeta(physicalMeta);
 
         meta.setValidationMeta(new DataImportMeta.ValidationMeta());
         meta.getValidationMeta().setSrcLogicalConnInfo(new DataImportMeta.ConnInfo());
@@ -452,5 +462,228 @@ public class FSMMetaManagerTest extends BaseTest {
                 DbTaskMetaManager.addTaskWithMemory(anyLong(), anyLong(), anyString(), anyString(), anyString(),
                     eq(ServiceType.CDC_INC), anyInt(), anyString(), anyInt()));
         }
+    }
+
+    @Test
+    public void testUpdateIncCopyApplierConfig_4_CustomizedPk_withConfig() {
+        // 准备测试数据
+        String ukAsPkTableConfig = "{\"table1\":\"pk1\",\"table2\":\"pk2\"}";
+        mockConfig(ConfigKeys.RPL_UK_AS_PK_TABLE_CONFIG, ukAsPkTableConfig);
+
+        ApplierConfig applierConfig = new ApplierConfig();
+
+        // 执行方法
+        FSMMetaManager.updateIncCopyApplierConfig_4_CustomizedPk(applierConfig);
+
+        // 验证结果
+        Map<String, String> expectedMap = new HashMap<>();
+        expectedMap.put("table1", "pk1");
+        expectedMap.put("table2", "pk2");
+        assertEquals(expectedMap, applierConfig.getCustomizedUsingUkAsPkTables());
+    }
+
+    @Test
+    public void testUpdateIncCopyApplierConfig_4_CustomizedPk_withoutConfig() {
+        // 准备测试数据 - 空配置
+        mockConfig(ConfigKeys.RPL_UK_AS_PK_TABLE_CONFIG, "");
+
+        ApplierConfig applierConfig = new ApplierConfig();
+
+        // 执行方法
+        FSMMetaManager.updateIncCopyApplierConfig_4_CustomizedPk(applierConfig);
+
+        // 验证结果 - 应该为null或empty
+        assertNull(applierConfig.getCustomizedUsingUkAsPkTables());
+    }
+
+    @Test
+    public void testUpdateCdcIncApplierConfig_4_FilterColumn_withConfig() {
+        // 准备测试数据
+        String filterColumnsConfig = "{\"table1\":[\"col1\",\"col2\"],\"table2\":[\"col3\"]}";
+        mockConfig(ConfigKeys.RPL_UK_AS_PK_FILTER_COLUMN_CONFIG, filterColumnsConfig);
+
+        ApplierConfig applierConfig = new ApplierConfig();
+
+        // 执行方法
+        FSMMetaManager.updateCdcIncApplierConfig_4_FilterColumn(applierConfig);
+
+        // 验证结果
+        Map<String, Set<String>> expectedMap = new HashMap<>();
+        expectedMap.put("table1", new HashSet<>(Arrays.asList("col1", "col2")));
+        expectedMap.put("table2", new HashSet<>(Collections.singletonList("col3")));
+        assertEquals(expectedMap, applierConfig.getFilterColumns());
+    }
+
+    @Test
+    public void testUpdateCdcIncApplierConfig_4_FilterColumn_withoutConfig() {
+        // 准备测试数据 - 空配置
+        mockConfig(ConfigKeys.RPL_UK_AS_PK_FILTER_COLUMN_CONFIG, "");
+
+        ApplierConfig applierConfig = new ApplierConfig();
+
+        // 执行方法
+        FSMMetaManager.updateCdcIncApplierConfig_4_FilterColumn(applierConfig);
+
+        // 验证结果 - 应该为null或empty
+        assertNull(applierConfig.getFilterColumns());
+    }
+
+    @Test
+    public void testEnableHeartbeat_Success() {
+        long fsmId = 1L;
+        boolean enableHeartbeat = true;
+
+        // Mock RplService
+        RplService mockService = Mockito.mock(RplService.class);
+        when(mockService.getId()).thenReturn(1L);
+
+        // Mock RplTask list
+        List<RplTask> mockTasks = new ArrayList<>();
+        RplTask mockTask1 = Mockito.mock(RplTask.class);
+        when(mockTask1.getId()).thenReturn(1L);
+        RplTask mockTask2 = Mockito.mock(RplTask.class);
+        when(mockTask2.getId()).thenReturn(2L);
+        mockTasks.add(mockTask1);
+        mockTasks.add(mockTask2);
+
+        // Mock RplTaskConfig list
+        List<RplTaskConfig> mockTaskConfigs = new ArrayList<>();
+        RplTaskConfig mockTaskConfig1 = Mockito.mock(RplTaskConfig.class);
+        when(mockTaskConfig1.getTaskId()).thenReturn(1L);
+        when(mockTaskConfig1.getExtractorConfig()).thenReturn(
+            "{\"enableDetectHeartbeat\":false,\"createHeartbeatTable\":false}");
+        RplTaskConfig mockTaskConfig2 = Mockito.mock(RplTaskConfig.class);
+        when(mockTaskConfig2.getTaskId()).thenReturn(2L);
+        when(mockTaskConfig2.getExtractorConfig()).thenReturn(
+            "{\"enableDetectHeartbeat\":false,\"createHeartbeatTable\":false}");
+        mockTaskConfigs.add(mockTaskConfig1);
+        mockTaskConfigs.add(mockTaskConfig2);
+
+        try (MockedStatic<DbTaskMetaManager> dbTaskMetaManagerMockedStatic = mockStatic(DbTaskMetaManager.class)) {
+            // 设置DbTaskMetaManager的mock行为
+            dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY))
+                .thenReturn(mockService);
+            dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.listTaskByService(1L))
+                .thenReturn(mockTasks);
+            dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.listTaskConfig(anySet()))
+                .thenReturn(mockTaskConfigs);
+
+            // 执行测试
+            ResultCode<?> result = FSMMetaManager.enableHeartbeat(fsmId, enableHeartbeat);
+
+            // 验证结果
+            Assert.assertNotNull(result);
+            Assert.assertEquals(RplConstants.SUCCESS_CODE, result.getCode());
+            Assert.assertEquals("success", result.getMsg());
+            Assert.assertTrue((Boolean) result.getData());
+
+            // 验证方法调用
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY),
+                times(1));
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.listTaskByService(1L), times(1));
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.listTaskConfig(anySet()), times(1));
+            dbTaskMetaManagerMockedStatic.verify(
+                () -> DbTaskMetaManager.updateTaskConfig(anyLong(), anyString(), any(), any(), any()), times(2));
+        }
+    }
+
+    @Test
+    public void testEnableHeartbeat_EmptyTaskList() {
+        long fsmId = 1L;
+        boolean enableHeartbeat = true;
+
+        // Mock RplService
+        RplService mockService = Mockito.mock(RplService.class);
+        when(mockService.getId()).thenReturn(1L);
+
+        // Mock empty RplTask list
+        List<RplTask> mockTasks = new ArrayList<>();
+
+        try (MockedStatic<DbTaskMetaManager> dbTaskMetaManagerMockedStatic = mockStatic(DbTaskMetaManager.class)) {
+            // 设置DbTaskMetaManager的mock行为
+            dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY))
+                .thenReturn(mockService);
+            dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.listTaskByService(1L))
+                .thenReturn(mockTasks);
+
+            // 执行测试
+            ResultCode<?> result = FSMMetaManager.enableHeartbeat(fsmId, enableHeartbeat);
+
+            // 验证结果
+            Assert.assertNotNull(result);
+            Assert.assertEquals(RplConstants.SUCCESS_CODE, result.getCode());
+            Assert.assertEquals("success", result.getMsg());
+            Assert.assertTrue((Boolean) result.getData());
+
+            // 验证方法调用
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY),
+                times(1));
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.listTaskByService(1L), times(1));
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.listTaskConfig(anySet()), times(0));
+            dbTaskMetaManagerMockedStatic.verify(
+                () -> DbTaskMetaManager.updateTaskConfig(anyLong(), anyString(), any(), any(), any()), times(0));
+        }
+    }
+
+    @Test
+    public void testEnableHeartbeat_DisableHeartbeat() {
+        long fsmId = 1L;
+        boolean enableHeartbeat = false;
+
+        // Mock RplService
+        RplService mockService = Mockito.mock(RplService.class);
+        when(mockService.getId()).thenReturn(1L);
+
+        // Mock RplTask list
+        List<RplTask> mockTasks = new ArrayList<>();
+        RplTask mockTask1 = Mockito.mock(RplTask.class);
+        when(mockTask1.getId()).thenReturn(1L);
+        mockTasks.add(mockTask1);
+
+        // Mock RplTaskConfig list
+        List<RplTaskConfig> mockTaskConfigs = new ArrayList<>();
+        RplTaskConfig mockTaskConfig1 = Mockito.mock(RplTaskConfig.class);
+        when(mockTaskConfig1.getTaskId()).thenReturn(1L);
+        when(mockTaskConfig1.getExtractorConfig()).thenReturn(
+            "{\"enableDetectHeartbeat\":true,\"createHeartbeatTable\":true}");
+        mockTaskConfigs.add(mockTaskConfig1);
+
+        try (MockedStatic<DbTaskMetaManager> dbTaskMetaManagerMockedStatic = mockStatic(DbTaskMetaManager.class)) {
+            // 设置DbTaskMetaManager的mock行为
+            dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY))
+                .thenReturn(mockService);
+            dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.listTaskByService(1L))
+                .thenReturn(mockTasks);
+            dbTaskMetaManagerMockedStatic.when(() -> DbTaskMetaManager.listTaskConfig(anySet()))
+                .thenReturn(mockTaskConfigs);
+
+            // 执行测试
+            ResultCode<?> result = FSMMetaManager.enableHeartbeat(fsmId, enableHeartbeat);
+
+            // 验证结果
+            Assert.assertNotNull(result);
+            Assert.assertEquals(RplConstants.SUCCESS_CODE, result.getCode());
+            Assert.assertEquals("success", result.getMsg());
+            Assert.assertTrue((Boolean) result.getData());
+
+            // 验证方法调用
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.getService(fsmId, ServiceType.INC_COPY),
+                times(1));
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.listTaskByService(1L), times(1));
+            dbTaskMetaManagerMockedStatic.verify(() -> DbTaskMetaManager.listTaskConfig(anySet()), times(1));
+            dbTaskMetaManagerMockedStatic.verify(
+                () -> DbTaskMetaManager.updateTaskConfig(anyLong(), anyString(), any(), any(), any()), times(1));
+        }
+    }
+
+    @Test
+    public void enableHeartbeatForLabTest() {
+        mockConfig(ConfigKeys.IS_LAB_ENV, "true");
+        ExtractorConfig extractorConfig = new ExtractorConfig();
+        Assert.assertFalse(extractorConfig.isEnableDetectHeartbeat());
+        Assert.assertFalse(extractorConfig.isCreateHeartbeatTable());
+        FSMMetaManager.enableHeartbeatForLab(extractorConfig);
+        Assert.assertTrue(extractorConfig.isEnableDetectHeartbeat());
+        Assert.assertTrue(extractorConfig.isCreateHeartbeatTable());
     }
 }

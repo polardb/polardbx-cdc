@@ -12,7 +12,9 @@ import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author yudong
@@ -94,5 +96,45 @@ public class NodeInfoMapperExtTest extends BaseTest {
 
         aliveNodes = nodeInfoMapperExt.getDeadNodes("heartbeat-mapper-test", 5000, "");
         Assert.assertEquals(2, aliveNodes.size());
+    }
+
+    /**
+     * 探活的时间比较必须在DB侧完成，因此按cluster_type查询存活节点时，
+     * 只有心跳未超时的节点才会被返回
+     */
+    @Test
+    public void testGetAliveNodesByClusterType() {
+        NodeInfoMapperExt nodeInfoMapperExt = SpringContextHolder.getObject(NodeInfoMapperExt.class);
+        NodeInfoMapper nodeInfoMapper = SpringContextHolder.getObject(NodeInfoMapper.class);
+        nodeInfoMapper.delete(s -> s.where());
+
+        Date staleTime = new Date(System.currentTimeMillis() - TimeUnit.HOURS.toMillis(1));
+        // 心跳正常的REPLICA节点
+        nodeInfoMapper.insertSelective(buildNode("replica-alive", "REPLICA", null));
+        // 心跳超时的REPLICA节点
+        nodeInfoMapper.insertSelective(buildNode("replica-stale", "REPLICA", staleTime));
+        // 心跳正常但集群类型不匹配的节点
+        nodeInfoMapper.insertSelective(buildNode("binlog-alive", "BINLOG", null));
+
+        List<NodeInfo> nodes = nodeInfoMapperExt.getAliveNodesByClusterType("REPLICA", 2 * 60 * 1000);
+
+        Assert.assertEquals(1, nodes.size());
+        Assert.assertEquals("replica-alive", nodes.get(0).getContainerId());
+        Assert.assertEquals("REPLICA", nodes.get(0).getClusterType());
+
+        Assert.assertTrue(nodeInfoMapperExt.getAliveNodesByClusterType("NOT_EXIST", 2 * 60 * 1000).isEmpty());
+    }
+
+    private NodeInfo buildNode(String containerId, String clusterType, Date gmtHeartbeat) {
+        NodeInfo node = new NodeInfo();
+        node.setClusterId("cluster-type-mapper-test");
+        node.setContainerId(containerId);
+        node.setStatus(0);
+        node.setIp("127.1");
+        node.setDaemonPort(1111);
+        node.setAvailablePorts("1111");
+        node.setClusterType(clusterType);
+        node.setGmtHeartbeat(gmtHeartbeat);
+        return node;
     }
 }

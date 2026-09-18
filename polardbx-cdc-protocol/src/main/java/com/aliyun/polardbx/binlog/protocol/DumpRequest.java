@@ -85,6 +85,11 @@ private static final long serialVersionUID = 0L;
             storageInstId_ = s;
             break;
           }
+          case 48: {
+
+            subVersion_ = input.readInt64();
+            break;
+          }
           default: {
             if (!parseUnknownField(
                 input, unknownFields, extensionRegistry, tag)) {
@@ -253,6 +258,17 @@ private static final long serialVersionUID = 0L;
     }
   }
 
+  public static final int SUBVERSION_FIELD_NUMBER = 6;
+  private long subVersion_;
+  /**
+   * <code>int64 subVersion = 6;</code>
+   * @return The subVersion.
+   */
+  @java.lang.Override
+  public long getSubVersion() {
+    return subVersion_;
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -282,6 +298,9 @@ private static final long serialVersionUID = 0L;
     if (!getStorageInstIdBytes().isEmpty()) {
       com.google.protobuf.GeneratedMessageV3.writeString(output, 5, storageInstId_);
     }
+    if (subVersion_ != 0L) {
+      output.writeInt64(6, subVersion_);
+    }
     unknownFields.writeTo(output);
   }
 
@@ -308,6 +327,10 @@ private static final long serialVersionUID = 0L;
     if (!getStorageInstIdBytes().isEmpty()) {
       size += com.google.protobuf.GeneratedMessageV3.computeStringSize(5, storageInstId_);
     }
+    if (subVersion_ != 0L) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeInt64Size(6, subVersion_);
+    }
     size += unknownFields.getSerializedSize();
     memoizedSize = size;
     return size;
@@ -333,6 +356,8 @@ private static final long serialVersionUID = 0L;
         != other.getVersion()) return false;
     if (!getStorageInstId()
         .equals(other.getStorageInstId())) return false;
+    if (getSubVersion()
+        != other.getSubVersion()) return false;
     if (!unknownFields.equals(other.unknownFields)) return false;
     return true;
   }
@@ -355,6 +380,9 @@ private static final long serialVersionUID = 0L;
         getVersion());
     hash = (37 * hash) + STORAGEINSTID_FIELD_NUMBER;
     hash = (53 * hash) + getStorageInstId().hashCode();
+    hash = (37 * hash) + SUBVERSION_FIELD_NUMBER;
+    hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
+        getSubVersion());
     hash = (29 * hash) + unknownFields.hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -498,6 +526,8 @@ private static final long serialVersionUID = 0L;
 
       storageInstId_ = "";
 
+      subVersion_ = 0L;
+
       return this;
     }
 
@@ -529,6 +559,7 @@ private static final long serialVersionUID = 0L;
       result.streamSeq_ = streamSeq_;
       result.version_ = version_;
       result.storageInstId_ = storageInstId_;
+      result.subVersion_ = subVersion_;
       onBuilt();
       return result;
     }
@@ -594,6 +625,9 @@ private static final long serialVersionUID = 0L;
       if (!other.getStorageInstId().isEmpty()) {
         storageInstId_ = other.storageInstId_;
         onChanged();
+      }
+      if (other.getSubVersion() != 0L) {
+        setSubVersion(other.getSubVersion());
       }
       this.mergeUnknownFields(other.unknownFields);
       onChanged();
@@ -910,6 +944,37 @@ private static final long serialVersionUID = 0L;
   checkByteStringIsUtf8(value);
       
       storageInstId_ = value;
+      onChanged();
+      return this;
+    }
+
+    private long subVersion_ ;
+    /**
+     * <code>int64 subVersion = 6;</code>
+     * @return The subVersion.
+     */
+    @java.lang.Override
+    public long getSubVersion() {
+      return subVersion_;
+    }
+    /**
+     * <code>int64 subVersion = 6;</code>
+     * @param value The subVersion to set.
+     * @return This builder for chaining.
+     */
+    public Builder setSubVersion(long value) {
+      
+      subVersion_ = value;
+      onChanged();
+      return this;
+    }
+    /**
+     * <code>int64 subVersion = 6;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearSubVersion() {
+      
+      subVersion_ = 0L;
       onChanged();
       return this;
     }

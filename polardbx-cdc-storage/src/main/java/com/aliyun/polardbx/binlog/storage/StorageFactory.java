@@ -36,8 +36,8 @@ public class StorageFactory {
     private static Storage buildStorage(String identifier, boolean oneStoragePerDn) {
         int repoUnitCount = oneStoragePerDn ? 1 : getInt(STORAGE_PERSIST_UNIT_COUNT);
         int cleanWorkerCount = oneStoragePerDn ? 1 : getInt(STORAGE_CLEAN_WORKER_COUNT);
-        String persistPath = getString(STORAGE_PERSIST_BASE_PATH) + File.pathSeparator +
-            getString(ConfigKeys.TASK_NAME) + File.pathSeparator + identifier;
+        String persistPath = getString(STORAGE_PERSIST_BASE_PATH) + File.separator +
+            getString(ConfigKeys.TASK_NAME) + File.separator + identifier;
 
         Repository repository = new Repository(getBoolean(STORAGE_PERSIST_ENABLE),
             persistPath,

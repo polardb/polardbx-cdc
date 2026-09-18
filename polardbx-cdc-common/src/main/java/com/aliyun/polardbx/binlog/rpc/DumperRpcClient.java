@@ -61,9 +61,9 @@ public class DumperRpcClient {
      *
      * @return dumper ip:port -> BinlogDumpStatus
      */
-    public Pair<String, List<BinlogDumpStatus>> showDumperStatus() {
+    public Pair<String, List<BinlogDumpStatus>> showDumperStatus(String instId) {
         blockingStub = CdcServiceGrpc.newBlockingStub(channel);
-        ShowBinlogDumpStatusRequest request = ShowBinlogDumpStatusRequest.newBuilder().build();
+        ShowBinlogDumpStatusRequest request = ShowBinlogDumpStatusRequest.newBuilder().setInstId(instId).build();
         List<BinlogDumpStatus> responses = new ArrayList<>();
         Iterator<BinlogDumpStatus> responseIterator = blockingStub.showBinlogDumpStatus(request);
         while (responseIterator.hasNext()) {

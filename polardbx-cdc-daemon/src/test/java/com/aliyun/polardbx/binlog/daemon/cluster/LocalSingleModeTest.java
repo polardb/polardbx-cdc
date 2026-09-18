@@ -122,7 +122,7 @@ public class LocalSingleModeTest extends BaseTest {
         BinlogTaskConfigMapper binlogTaskConfigMapper = SpringContextHolder.getObject(BinlogTaskConfigMapper.class);
         Assert.assertEquals(0, binlogTaskConfigMapper.select(s -> s).size());
         topologyWatcher.exec();
-        DaemonBootStrap.waitForTopologyReady();
+        DaemonBootStrap.waitForTopologyReady(1);
         Assert.assertEquals(2, binlogTaskConfigMapper.select(s -> s).size());
     }
 }

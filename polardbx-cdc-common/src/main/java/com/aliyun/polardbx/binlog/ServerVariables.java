@@ -196,6 +196,7 @@ public class ServerVariables {
         variables.add("task_reformat_ignore_mismatched_column_error");
         variables.add("task_reformat_event_force_enabled");
         variables.add("task_reformat_ddl_algorithm_blacklist");
+        variables.add("task_reformat_ddl_character_quote_keywords");
         variables.add("task_dump_offline_binlog_forced");
         variables.add("task_dump_offline_binlog_recall_days_limit");
         variables.add("task_dump_offline_binlog_prefer_host_instances");
@@ -214,6 +215,11 @@ public class ServerVariables {
         variables.add("task_recover_force_quick_search_when_loss_backup");
         variables.add("task_dump_dn_default_binlog_file_size");
         variables.add("task_reformat_no_foreign_key_check");
+        variables.add("task_reformat_external_column_memory_limit_bytes");
+        variables.add("task_reformat_external_column_max_txn_bytes");
+        variables.add("task_reformat_external_column_max_entries");
+        variables.add("task_reformat_external_column_partial_update_row_image_enabled");
+        variables.add("task_reformat_external_column_blob_ref_error_fallback_enabled");
         variables.add("alarm_nodata_threshold_second");
         variables.add("alarm_delay_threshold_second");
         variables.add("alarm_report_alarm_event_enabled");
@@ -250,16 +256,13 @@ public class ServerVariables {
         variables.add("meta_persist_enabled");
         variables.add("meta_cache_compare_result_enabled");
         variables.add("meta_cache_table_meta_max_size");
-        variables.add("meta_cache_table_meat_expire_time_minutes");
+        variables.add("meta_cache_table_meta_expire_time_minutes");
         variables.add("binlogx_rocksdb_base_path");
         variables.add("binlogx_auto_init");
         variables.add("binlogx_stream_group_name");
         variables.add("binlogx_stream_count");
         variables.add("binlogx_dir_path_prefix");
         variables.add("binlogx_wait_latest_tso_timeout_second");
-        variables.add("binlogx_schedule_dispatcher_count_per_node");
-        variables.add("binlogx_schedule_dispatcher_memory_unit");
-        variables.add("binlogx_schedule_dispatcher_memory_min");
         variables.add("binlogx_schedule_dispatcher_rocksdb_ratio");
         variables.add("binlogx_transmit_relay_engine_type");
         variables.add("binlogx_transmit_relay_file_max_size");
@@ -293,7 +296,6 @@ public class ServerVariables {
         variables.add("binlogx_kway_source_queue_size");
 
         variables.add("rpl_task_support_running_check");
-        variables.add("rpl_random_compare_all");
         variables.add("rpl_rocksdb_deserialize_parallelism");
         variables.add("rpl_validation_per_db_parallelism");
         variables.add("rpl_validation_chunk_size");
@@ -316,6 +318,7 @@ public class ServerVariables {
         variables.add("rpl_set_max_statement_time_option");
         variables.add("rpl_async_ddl_enabled");
         variables.add("rpl_async_ddl_threshold_in_second");
+        variables.add("rpl_async_externalize_ddl_enabled");
         variables.add("rpl_parallel_schema_apply_enabled");
         variables.add("rpl_parallel_schema_channel_enabled");
         variables.add("rpl_parallel_schema_channel_parallelism");

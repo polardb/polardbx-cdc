@@ -9,6 +9,8 @@ package com.aliyun.polardbx.binlog.canal.binlog;
 import com.aliyun.polardbx.binlog.canal.HandlerEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.FormatDescriptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.LogHeader;
+import lombok.Getter;
+import lombok.Setter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -167,6 +169,8 @@ public abstract class LogEvent implements HandlerEvent {
     /* New MySQL/Sun events are to be added right above this comment */
     public static final int MYSQL_EVENTS_END = 39;
 
+    public static final int TRANSACTION_PAYLOAD_EVENT = 40;
+
     /**
      * RDS TSO EVENT
      */
@@ -295,6 +299,12 @@ public abstract class LogEvent implements HandlerEvent {
     protected final LogHeader header;
 
     protected String trace;
+    @Setter
+    @Getter
+    protected boolean returningDelete;
+    @Setter
+    @Getter
+    protected int logicSqlId;
 
     protected Long traceServerId;
 
@@ -380,8 +390,11 @@ public abstract class LogEvent implements HandlerEvent {
             return "Gcn";
         case XA_PREPARE_LOG_EVENT:
             return "XA_Prepare";
+        case TRANSACTION_PAYLOAD_EVENT:
+            return "Transaction_payload";
         default:
-            return "Unknown"; /* impossible */
+            /* impossible */
+            return "Unknown";
         }
     }
 

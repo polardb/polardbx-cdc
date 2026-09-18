@@ -1,12 +1,13 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.client;
 
 import com.alibaba.fastjson.JSON;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.canal.MySqlInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
@@ -30,7 +31,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -41,13 +41,12 @@ public class DumperDataSource {
 
     private static final Logger logger = LoggerFactory.getLogger(DumperDataSource.class);
     private static final long DUMPER_TIMEOUT_MILL = TimeUnit.SECONDS.toMillis(60);
+    private final MetaDbHelper metaDbHelper;
+    private final boolean useSyncProtocol;
     private ManagedChannel channel;
     private String ip;
     private int port;
     private MySqlInfo mySqlInfo;
-    private MetaDbHelper metaDbHelper;
-    private final boolean useSyncProtocol;
-
     private IExceptionHandler exceptionHandler;
 
     public DumperDataSource(MetaDbHelper metaDbHelper, boolean useSyncProtocol) {
@@ -146,23 +145,22 @@ public class DumperDataSource {
         }
     }
 
-    public void dump(BinlogPosition position, StreamObserver<DumpStream> target) {
+    public void dump(BinlogPosition position, StreamObserver<DumpStream> target, Map<String, String> ext) {
         checkChannelState();
         CdcServiceGrpc.CdcServiceStub cdcServiceStub = CdcServiceGrpc.newStub(channel);
         final String fileName = position.getFileName();
         final long pos = position.getPosition();
-        if (useSyncProtocol){
+        if (useSyncProtocol) {
             logger.info("use sync protocol");
-            Map<String, String> ext = new HashMap<>(1);
             ext.put("client_type", "COLUMNAR");
+            ext.put(ConfigKeys.BINLOG_DUMP_ROWS_QUERY_IGNORE_ENABLED, "false");
             cdcServiceStub.sync(DumpRequest.newBuilder()
                 .setFileName(fileName)
                 .setPosition(pos)
                 .setExt(JSON.toJSONString(ext))
                 .setSplitMode(EventSplitMode.CLIENT).build(), target);
-        }else {
+        } else {
             logger.info("use dump protocol");
-            Map<String, String> ext = new HashMap<>(2);
             ext.put("master_binlog_checksum", "CRC32");
             ext.put("client_type", "COLUMNAR");
             cdcServiceStub.dump(DumpRequest.newBuilder()

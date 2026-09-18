@@ -18,12 +18,14 @@ import java.util.List;
 @Builder
 public class TxnBufferItem {
     private String traceId;
+    private int logicSqlId;
     private String rowsQuery;
     private int eventType;
     private byte[] payload;
     private String schema;
     private String table;
     private int hashKey;
+    private boolean returningEvent;
     private List<byte[]> primaryKey;
 
     //可选项

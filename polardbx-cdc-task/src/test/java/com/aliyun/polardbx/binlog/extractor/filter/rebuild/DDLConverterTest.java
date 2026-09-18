@@ -6,7 +6,13 @@
  */
 package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
+import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
+import com.alibaba.polardbx.druid.sql.ast.expr.SQLBinaryOpExpr;
+import com.alibaba.polardbx.druid.sql.ast.expr.SQLBinaryOperator;
+import com.alibaba.polardbx.druid.sql.ast.expr.SQLIdentifierExpr;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAssignItem;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.aliyun.polardbx.binlog.canal.core.ddl.TableMeta;
 import com.aliyun.polardbx.binlog.canal.core.ddl.tsdb.MemoryTableMeta;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
@@ -17,14 +23,20 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
+import static com.alibaba.polardbx.druid.sql.SQLUtils.normalize;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_DDL_HINT_BLACKLIST;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSql;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSqlForMysqlPart;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.buildDdlEventSqlForPolarPart;
-import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.tryRemoveAutoShardKey;
+import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.removeAsyncDdlFlags;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql;
 
 /**
@@ -37,7 +49,7 @@ public class DDLConverterTest extends BaseTest {
     public void testTryRemoveDropImplicitPk() {
         String sql = "alter table modify_sk_simple_checker_test_tblPF drop column _drds_implicit_id_";
 
-        SQLAlterTableStatement sqlStatement = (SQLAlterTableStatement) SQLUtils.parseSQLStatement(sql);
+        SQLAlterTableStatement sqlStatement = SQLUtils.parseSQLStatement(sql);
         assert sqlStatement != null;
         sqlStatement.getItems().forEach(DDLConverter::tryRemoveDropImplicitPk);
         Assert.assertEquals("ALTER TABLE modify_sk_simple_checker_test_tblPF ", sqlStatement.toUnformattedString());
@@ -225,6 +237,7 @@ public class DDLConverterTest extends BaseTest {
             "ALTER TABLE gen_col_with_insert_select_1o ADD COLUMN c int NOT NULL FIRST, ADD COLUMN d int NOT NULL FIRST",
             sb.toString());
 
+
         /*
          test if align to info can be removed
          */
@@ -316,7 +329,20 @@ public class DDLConverterTest extends BaseTest {
             + "TBPARTITION BY hash(JOB_ID) TBPARTITIONS 16";
         buildDdlEventSqlForMysqlPart(sb, "t_ddl_test_normal", "utf8mb4", "utf8_general_cs", ddl);
         Assert.assertEquals(
-            "CREATE TABLE IF NOT EXISTS `t_ddl_test_normal` ( `ID` BIGINT(20) NOT NULL AUTO_INCREMENT, `JOB_ID` BIGINT(20) NOT NULL DEFAULT 0, `EXT_ID` BIGINT(20) NOT NULL DEFAULT 0, `TV_ID` BIGINT(20) NOT NULL DEFAULT 0, `SCHEMA_NAME` VARCHAR(200) NOT NULL, `TABLE_NAME` VARCHAR(200) NOT NULL, `GMT_CREATED` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, `DDL_SQL` TEXT NOT NULL, PRIMARY KEY (`ID`), KEY `idx1` (`SCHEMA_NAME`), INDEX `auto_shard_key_job_id` USING BTREE(`JOB_ID`) ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4",
+            "/* CDC_TOKEN : 0644b5a0-1ce9-43f9-8b62-62d0a0f59d72 */\n"
+                + "CREATE TABLE IF NOT EXISTS `t_ddl_test_normal` (\n"
+                + "\t`ID` BIGINT(20) NOT NULL AUTO_INCREMENT,\n"
+                + "\t`JOB_ID` BIGINT(20) NOT NULL DEFAULT 0,\n"
+                + "\t`EXT_ID` BIGINT(20) NOT NULL DEFAULT 0,\n"
+                + "\t`TV_ID` BIGINT(20) NOT NULL DEFAULT 0,\n"
+                + "\t`SCHEMA_NAME` VARCHAR(200) NOT NULL,\n"
+                + "\t`TABLE_NAME` VARCHAR(200) NOT NULL,\n"
+                + "\t`GMT_CREATED` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+                + "\t`DDL_SQL` TEXT NOT NULL,\n"
+                + "\tPRIMARY KEY (`ID`),\n"
+                + "\tKEY `idx1` (`SCHEMA_NAME`),\n"
+                + "\tINDEX `auto_shard_key_job_id` USING BTREE(`JOB_ID`)\n"
+                + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4",
             sb.toString());
 
         /*
@@ -534,8 +560,37 @@ public class DDLConverterTest extends BaseTest {
             "# POLARX_ORIGIN_SQL=/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*/ /*tddl:enable_recyclebin=true*/ DROP TABLE test_recyclebin_tb\n"
                 + "# POLARX_TSO=111111\n"
                 + "# POLARX_DDL_ID=1234\n"
-                + "/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*/\n/*tddl:enable_recyclebin=true*/\nDROP TABLE test_recyclebin_tb",
+                + "/*+tddl:cmd_extra(allow_alter_gsi_indirectly=true)*/ /*tddl:enable_recyclebin=true*/ DROP TABLE test_recyclebin_tb",
             sql);
+    }
+
+    @Test
+    public void testBuildDdlEventSqlForPolarPartWithHashLineComment() {
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+        mockConfig(BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED, "true");
+
+        String tableName = "t_zzz";
+        String ddl = "/*DDL_ID=7481263829662302272*/\n"
+            + "# ===== hash line comment =====\n"
+            + "/*+TDDL:cmd_extra(SEQUENTIAL_CONCURRENT_POLICY=true)*/\n"
+            + String.format(
+            "CREATE TABLE `%s` (id bigint, data_source TINYINT NOT NULL DEFAULT 0 COMMENT 'test', PRIMARY KEY(id))",
+            tableName);
+
+        String expectedSql = "/* ===== hash line comment =====*/ "
+            + "/*+TDDL:cmd_extra(SEQUENTIAL_CONCURRENT_POLICY=true)*/ "
+            + "CREATE TABLE `t_zzz` ( id bigint, data_source TINYINT NOT NULL DEFAULT 0 COMMENT 'test', "
+            + "PRIMARY KEY (id) ) DEFAULT CHARACTER SET = utf8 DEFAULT COLLATE = utf8_general_cs";
+
+        StringBuilder polarBuilder = new StringBuilder();
+        buildDdlEventSqlForPolarPart(polarBuilder, ddl, "utf8mb4", "utf8_general_cs", "111111", false, null);
+        Assert.assertEquals("# POLARX_ORIGIN_SQL=" + expectedSql + "\n"
+            + "# POLARX_TSO=111111\n"
+            + "# POLARX_DDL_ID=7481263829662302272\n", polarBuilder.toString());
+
+        StringBuilder mysqlBuilder = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(mysqlBuilder, tableName, "utf8mb4", "utf8_general_cs", ddl);
+        Assert.assertEquals(expectedSql, mysqlBuilder.toString());
     }
 
     @Test
@@ -606,6 +661,519 @@ public class DDLConverterTest extends BaseTest {
         memoryTableMeta.apply(null, "test_db", sql, null);
         tableMeta = memoryTableMeta.find("test_db", "xxvvzz");
         Assert.assertEquals("utf8mb4", tableMeta.getCharset());
+    }
+
+    /**
+     * 回归：源 DDL 的 CHARSET/COLLATE 取值为反引号包裹的 `binary`。
+     * 修复前 tryAttacheCharacterInfo 会把 CHARSET/COLLATE 值归一化为裸词 binary，Druid 再次解析时
+     * 会把它当成 BINARY token：要么抛 ParserException，要么把后续 option 静默吞并导致 COLLATE 丢失、
+     * charset 元数据被污染；修复后两个值都保留反引号，reformat 产物可被再次正确解析。
+     */
+    @Test
+    public void testProcessDdlSqlCharactersWithBinaryCollation() {
+        // CHARSET/COLLATE 保留字白名单由配置维护，默认值见 config.properties
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        String sql = "CREATE TABLE `__orca_in_polardb_m_`.`orca_meta_0000_0000` (\n"
+            + "        `redis_key` varbinary(2560) NOT NULL,\n"
+            + "        `redis_blob_flag` tinyint(3) UNSIGNED NOT NULL,\n"
+            + "        `redis_blob_key` longblob NULL,\n"
+            + "        `redis_type` tinyint(3) UNSIGNED NOT NULL,\n"
+            + "        `redis_ttl` bigint(20) UNSIGNED NULL DEFAULT '0',\n"
+            + "        `redis_field_cnt` bigint(20) UNSIGNED NULL DEFAULT '0',\n"
+            + "        `redis_ttl_field_cnt` bigint(20) UNSIGNED NULL DEFAULT '0',\n"
+            + "        `redis_max_fields_expiry` bigint(20) UNSIGNED NULL DEFAULT '0',\n"
+            + "        `redis_unique_id` bigint(20) UNSIGNED NULL DEFAULT '0',\n"
+            + "        `redis_first_list_id` bigint(20) UNSIGNED NULL DEFAULT '0',\n"
+            + "        `redis_last_list_id` bigint(20) UNSIGNED NULL DEFAULT '0',\n"
+            + "        `redis_max_list_id` bigint(20) UNSIGNED NULL DEFAULT '0',\n"
+            + "        `redis_reserve` blob NULL,\n"
+            + "        PRIMARY KEY (`redis_key`, `redis_blob_flag`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = `binary` DEFAULT COLLATE = `binary` "
+            + "ROW_FORMAT = Dynamic COMMENT 'Redis Meta'";
+
+        // 源 DDL 自身可被正常解析（反引号包裹的 binary 是合法标识符）
+        Assert.assertNotNull(SQLUtils.parseSQLStatement(sql));
+
+        // 经过 reformat（tbCollation = binary），CHARSET 与 COLLATE 值都应保留反引号
+        String convertSql = DDLConverter.processDdlSqlCharacters("orca_meta_0000_0000", sql, "binary", "binary");
+        log.info("converted sql: {}", convertSql);
+        Assert.assertTrue("CHARSET 值应保留反引号", convertSql.contains("CHARSET = `binary`"));
+        Assert.assertTrue("COLLATE 值应保留反引号", convertSql.contains("COLLATE = `binary`"));
+
+        // 关键回归：reformat 后的 DDL 应能被再次解析（等同 checkBeforeApply 的行为），
+        // 且 CHARSET/COLLATE/ROW_FORMAT 选项不能被 BINARY token 吞并
+        assertCharacterOptions(convertSql, "binary", "binary");
+
+        // 下游元数据提取不能被反引号污染
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
+        memoryTableMeta.apply(null, "__orca_in_polardb_m_", convertSql, null);
+        TableMeta tableMeta = memoryTableMeta.find("__orca_in_polardb_m_", "orca_meta_0000_0000");
+        Assert.assertEquals("binary", tableMeta.getCharset());
+    }
+
+    /**
+     * 回归：源 DDL 只有 CHARSET = `binary`、没有显式 COLLATE，且后面还跟着其它 option。
+     * 这种形态下裸词化 CHARSET 会直接导致 ParserException（token =）。
+     */
+    @Test
+    public void testProcessDdlSqlCharactersWithBinaryCharsetOnly() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        String sql = "CREATE TABLE `t_binary_charset_only` (\n"
+            + "  `id` bigint(20) NOT NULL,\n"
+            + "  PRIMARY KEY (`id`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = `binary` ROW_FORMAT = Dynamic COMMENT 'x'";
+
+        String convertSql =
+            DDLConverter.processDdlSqlCharacters("t_binary_charset_only", sql, "binary", "binary");
+        log.info("converted sql: {}", convertSql);
+        assertCharacterOptions(convertSql, "binary", "binary");
+    }
+
+    /**
+     * 回归：源 DDL 完全没有 CHARSET/COLLATE，全靠 addOption 补全，且 tbCollation 为保留字 binary。
+     */
+    @Test
+    public void testProcessDdlSqlCharactersAttachBinaryCollation() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        String sql = "CREATE TABLE `t_binary_attach` (\n"
+            + "  `id` bigint(20) NOT NULL,\n"
+            + "  PRIMARY KEY (`id`)\n"
+            + ") ENGINE = InnoDB ROW_FORMAT = Dynamic";
+
+        String convertSql = DDLConverter.processDdlSqlCharacters("t_binary_attach", sql, "binary", "binary");
+        log.info("converted sql: {}", convertSql);
+        assertCharacterOptions(convertSql, "binary", "binary");
+    }
+
+    /**
+     * 断言 reformat 产物可被再次解析，且 CHARSET、COLLATE 两个选项均以独立 option 形式存在、取值正确。
+     * 单纯的 parseSQLStatement 不抛异常不足以证明正确：裸词 binary 会作为 BINARY 一元操作符
+     * 静默吞掉后续的 COLLATE 选项。
+     */
+    private void assertCharacterOptions(String ddl, String expectCharset, String expectCollate) {
+        SQLStatement statement = SQLUtils.parseSQLStatement(ddl);
+        Assert.assertTrue(statement instanceof MySqlCreateTableStatement);
+        MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) statement;
+
+        String actualCharset = null;
+        String actualCollate = null;
+        for (SQLAssignItem option : createTableStatement.getTableOptions()) {
+            String target = StringUtils.upperCase(normalize(option.getTarget().toString()));
+            if (StringUtils.equalsAny(target, "CHARACTER SET", "CHARSET")) {
+                actualCharset = normalize(option.getValue().toString());
+            } else if (StringUtils.equals(target, "COLLATE")) {
+                actualCollate = normalize(option.getValue().toString());
+            }
+        }
+        Assert.assertEquals("charset option 解析结果不符合预期", expectCharset, actualCharset);
+        Assert.assertEquals("collate option 解析结果不符合预期", expectCollate, actualCollate);
+    }
+
+    /**
+     * CHARSET/COLLATE 保留字白名单由配置 {@code task_reformat_ddl_character_quote_keywords} 驱动，
+     * 覆盖三条分支：配置为空、配置命中（大小写不敏感）、配置未命中。
+     */
+    @Test
+    public void testCollateQuoteKeywordsDrivenByConfig() {
+        String binaryDdl = "CREATE TABLE `t_collate_cfg` (\n"
+            + "  `id` bigint(20) NOT NULL,\n"
+            + "  PRIMARY KEY (`id`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = `binary` DEFAULT COLLATE = `binary`";
+
+        // 分支1：配置为空 -> 白名单为空集合，不加反引号（退化为修复前行为）
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "");
+        String sqlWithBlankConfig =
+            DDLConverter.processDdlSqlCharacters("t_collate_cfg", binaryDdl, "binary", "binary");
+        Assert.assertTrue(sqlWithBlankConfig.contains("COLLATE = binary"));
+        Assert.assertFalse(sqlWithBlankConfig.contains("COLLATE = `binary`"));
+
+        // 分支2：配置命中且大小写不敏感（配置写大写 BINARY 也应命中）-> 保留反引号
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "BINARY");
+        String sqlWithUpperConfig =
+            DDLConverter.processDdlSqlCharacters("t_collate_cfg", binaryDdl, "binary", "binary");
+        Assert.assertTrue(sqlWithUpperConfig.contains("CHARSET = `binary`"));
+        Assert.assertTrue(sqlWithUpperConfig.contains("COLLATE = `binary`"));
+        assertCharacterOptions(sqlWithUpperConfig, "binary", "binary");
+
+        // 分支3：配置未命中（普通 collation）-> 不加反引号，保持原有行为
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+        String normalDdl = "CREATE TABLE `t_collate_normal` (\n"
+            + "  `id` bigint(20) NOT NULL,\n"
+            + "  PRIMARY KEY (`id`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci";
+        String sqlNormalCollation =
+            DDLConverter.processDdlSqlCharacters("t_collate_normal", normalDdl, "utf8mb4", "utf8mb4_general_ci");
+        Assert.assertTrue(sqlNormalCollation.contains("COLLATE = utf8mb4_general_ci"));
+        Assert.assertFalse(sqlNormalCollation.contains("COLLATE = `utf8mb4_general_ci`"));
+        assertCharacterOptions(sqlNormalCollation, "utf8mb4", "utf8mb4_general_ci");
+    }
+
+    // ==================== tryAttacheCharacterInfo 直接驱动的用例 ====================
+
+    /**
+     * 已显式指定反引号包裹的保留字 charset/collate：原样保留，且不重复追加 option。
+     */
+    @Test
+    public void testAttacheCharacterInfoKeepBacktickedBinary() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) ENGINE = InnoDB "
+                + "DEFAULT CHARSET = `binary` DEFAULT COLLATE = `binary` ROW_FORMAT = Dynamic",
+            "binary");
+
+        Assert.assertEquals("`binary`", options.get("CHARSET"));
+        Assert.assertEquals("`binary`", options.get("COLLATE"));
+        // 不能因为补全逻辑而多出 CHARACTER SET
+        Assert.assertFalse(options.containsKey("CHARACTER SET"));
+        Assert.assertEquals(4, options.size());
+    }
+
+    /**
+     * 显式指定的 charset/collate 是字符串字面量（SQLCharExpr）时，归一化为裸词。
+     */
+    @Test
+    public void testAttacheCharacterInfoNormalizeStringLiteral() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) "
+                + "DEFAULT CHARSET = 'utf8mb4' DEFAULT COLLATE = 'utf8mb4_general_ci'",
+            "utf8mb4_general_ci");
+
+        Assert.assertEquals("utf8mb4", options.get("CHARSET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+
+        // 字符串字面量形式的保留字 collation 同样要加反引号
+        options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = 'binary'", "binary");
+        Assert.assertEquals("`binary`", options.get("CHARSET"));
+        Assert.assertEquals("`binary`", options.get("COLLATE"));
+    }
+
+    /**
+     * DDL 中完全没有 charset/collate：两者都按 tbCollation 补全，保留字场景带反引号。
+     */
+    @Test
+    public void testAttacheCharacterInfoAttachBoth() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+        String ddl = "CREATE TABLE `t` (`id` bigint(20) NOT NULL) ENGINE = InnoDB ROW_FORMAT = Dynamic";
+
+        Map<String, String> options = attachAndCollectOptions(ddl, "utf8mb4_general_ci");
+        Assert.assertEquals("utf8mb4", options.get("CHARACTER SET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+
+        options = attachAndCollectOptions(ddl, "binary");
+        Assert.assertEquals("`binary`", options.get("CHARACTER SET"));
+        Assert.assertEquals("`binary`", options.get("COLLATE"));
+    }
+
+    /**
+     * 仅显式指定 charset 时，collate 只在 charset 与 tbCollation 对应 charset 一致时才补全。
+     */
+    @Test
+    public void testAttacheCharacterInfoCollateAttachDependsOnCharset() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        // charset 不一致（utf8 vs utf8mb4）：不补 collate，避免与显式 charset 冲突
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = utf8", "utf8mb4_general_ci");
+        Assert.assertEquals("utf8", options.get("CHARSET"));
+        Assert.assertFalse("charset 不一致时不应补 collate", options.containsKey("COLLATE"));
+
+        // charset 一致：补 collate
+        options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = utf8mb4", "utf8mb4_general_ci");
+        Assert.assertEquals("utf8mb4", options.get("CHARSET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+    }
+
+    /**
+     * CHARACTER SET 写法与仅指定 COLLATE 的写法都应被正确识别，不产生重复 option。
+     */
+    @Test
+    public void testAttacheCharacterInfoRecognizeAllOptionForms() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        // CHARACTER SET 形式已存在 -> 不再追加 charset，只补 collate
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARACTER SET = utf8mb4", "utf8mb4_general_ci");
+        Assert.assertEquals("utf8mb4", options.get("CHARACTER SET"));
+        Assert.assertFalse(options.containsKey("CHARSET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+
+        // 只有 COLLATE -> 补 charset，且 collate 不重复
+        options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT COLLATE = utf8mb4_general_ci", "utf8mb4_general_ci");
+        Assert.assertEquals("utf8mb4", options.get("CHARACTER SET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+        Assert.assertEquals(2, options.size());
+    }
+
+    /**
+     * tbCollation 为空，以及 CREATE TABLE ... LIKE：都不做任何补全。
+     */
+    @Test
+    public void testAttacheCharacterInfoSkipAttach() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+        String ddl = "CREATE TABLE `t` (`id` bigint(20) NOT NULL) ENGINE = InnoDB";
+
+        Assert.assertEquals(1, attachAndCollectOptions(ddl, null).size());
+        Assert.assertEquals(1, attachAndCollectOptions(ddl, "  ").size());
+
+        MySqlCreateTableStatement likeStatement = SQLUtils.parseSQLStatement("CREATE TABLE `t2` LIKE `t1`");
+        Assert.assertNotNull(likeStatement);
+        DDLConverter.tryAttacheCharacterInfo(likeStatement, "utf8mb4_general_ci");
+        Assert.assertTrue("CREATE TABLE LIKE 不应补 charset/collate", likeStatement.getTableOptions().isEmpty());
+    }
+
+    /**
+     * 现状刻画：源 DDL 用裸词保留字 binary 作为 charset（仅在其后没有其它 option 时 Druid 才能解析成功），
+     * Druid 会把取值大写成 BINARY，当前实现原样保留该大小写，导致产物中 CHARSET 与 COLLATE 大小写不一致。
+     * 内部消费方（CharsetConversion / ConsistencyChecker / columnTypeMatch）均大小写不敏感，故不影响功能，
+     * 但产物文本不规范，如后续修正为统一小写，本用例期望值需同步调整。
+     */
+    @Test
+    public void testAttacheCharacterInfoBareReservedWordCharsetCaseLeak() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) ENGINE = InnoDB DEFAULT CHARSET = binary", "binary");
+
+        Assert.assertEquals("`BINARY`", options.get("CHARSET"));
+        Assert.assertEquals("`binary`", options.get("COLLATE"));
+    }
+
+    /**
+     * 现状刻画：tbCollation 无法在 CharsetConversion 中查到对应 charset 时，
+     * CHARACTER SET 不补（charset 为空），但 COLLATE 仍被补上，产出"只有未知 collate"的 DDL。
+     */
+    @Test
+    public void testAttacheCharacterInfoUnknownCollation() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) ENGINE = InnoDB", "not_exist_collation_ci");
+
+        Assert.assertFalse(options.containsKey("CHARACTER SET"));
+        Assert.assertEquals("not_exist_collation_ci", options.get("COLLATE"));
+    }
+
+    /**
+     * 现状刻画：charset option 取值不是 SQLIdentifierExpr / SQLCharExpr 时（如 SQLBinaryOpExpr），
+     * 归一化被跳过（表达式结构不被破坏，符合预期），但 optionCharset 也随之保持为空，
+     * 使后续补全逻辑误判为"DDL 未显式指定 charset"，从而补上一个 COLLATE。
+     */
+    @Test
+    public void testAttacheCharacterInfoUnsupportedValueExpr() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        MySqlCreateTableStatement statement = SQLUtils.parseSQLStatement(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = utf8");
+        Assert.assertNotNull(statement);
+        SQLAssignItem charsetOption = statement.getTableOptions().get(0);
+        Assert.assertEquals("CHARSET", StringUtils.upperCase(normalize(charsetOption.getTarget().toString())));
+        charsetOption.setValue(new SQLBinaryOpExpr(new SQLIdentifierExpr("utf8"), SQLBinaryOperator.Equality,
+            new SQLIdentifierExpr("x")));
+
+        DDLConverter.tryAttacheCharacterInfo(statement, "utf8mb4_general_ci");
+
+        // 表达式保持原样，没有被拍平成一个标识符
+        Assert.assertTrue(charsetOption.getValue() instanceof SQLBinaryOpExpr);
+        // 已显式声明 charset(utf8)，与 utf8mb4_general_ci 对应的 utf8mb4 并不一致，却仍补上了 collate
+        Assert.assertTrue(statement.getTableOptions().stream()
+            .anyMatch(i -> "COLLATE".equalsIgnoreCase(normalize(i.getTarget().toString()))));
+    }
+
+    /**
+     * charset 一致性比较必须大小写不敏感：DDL 写 UTF8MB4、tbCollation 对应 utf8mb4，仍应视为一致并补全 collate。
+     * 同理，tbCollation 本身大写时也应能查到 charset、并命中保留字白名单。
+     */
+    @Test
+    public void testAttacheCharacterInfoCompareCharsetIgnoreCase() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = UTF8MB4", "utf8mb4_general_ci");
+        Assert.assertEquals("UTF8MB4", options.get("CHARSET"));
+        Assert.assertEquals("大小写不同也应视为 charset 一致，从而补全 collate",
+            "utf8mb4_general_ci", options.get("COLLATE"));
+
+        // tbCollation 大写：collation -> charset 查询与保留字白名单匹配都应大小写不敏感。
+        // 同时刻画一个现象：CHARACTER SET 的值来自 CharsetConversion 查表返回的规范小写名，
+        // 而 COLLATE 的值是 tbCollation 原文透传，因此两者大小写可能不一致。
+        options = attachAndCollectOptions("CREATE TABLE `t` (`id` bigint(20) NOT NULL)", "BINARY");
+        Assert.assertEquals("`binary`", options.get("CHARACTER SET"));
+        Assert.assertEquals("`BINARY`", options.get("COLLATE"));
+    }
+
+    /**
+     * 核心语义：只补全缺失项，绝不用 tbCollation 覆盖 DDL 中已显式指定的值（以 DDL 为准），
+     * 也不介入 DDL 自身 charset 与 collate 的不匹配。
+     */
+    @Test
+    public void testAttacheCharacterInfoNeverOverrideExistingValue() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        // 已有 collate 与 tbCollation 不同 -> 保持 DDL 中的 utf8mb4_bin
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_bin",
+            "utf8mb4_general_ci");
+        Assert.assertEquals("utf8mb4", options.get("CHARSET"));
+        Assert.assertEquals("utf8mb4_bin", options.get("COLLATE"));
+
+        // DDL 自身 charset 与 collate 矛盾 -> 不做任何纠正
+        options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = utf8mb4 COLLATE = utf8_general_ci",
+            "utf8mb4_general_ci");
+        Assert.assertEquals("utf8mb4", options.get("CHARSET"));
+        Assert.assertEquals("utf8_general_ci", options.get("COLLATE"));
+    }
+
+    /**
+     * 归一化主线：取值带反引号但不在保留字白名单时，反引号应被剔除（不能把反引号带到产物里）。
+     */
+    @Test
+    public void testAttacheCharacterInfoStripBacktickForNonKeyword() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) "
+                + "DEFAULT CHARSET = `utf8mb4` DEFAULT COLLATE = `utf8mb4_general_ci`",
+            "utf8mb4_general_ci");
+
+        Assert.assertEquals("utf8mb4", options.get("CHARSET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+    }
+
+    /**
+     * 幂等性：reformat 产物再次进入本方法（CDC 内 DDL 可能被多个路径处理）结果必须稳定，
+     * 尤其不能出现反引号嵌套或 option 重复追加。
+     */
+    @Test
+    public void testAttacheCharacterInfoIdempotent() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        String[] ddls = new String[] {
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) ENGINE = InnoDB",
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = `binary` DEFAULT COLLATE = `binary`",
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = 'utf8mb4'"
+        };
+        for (String ddl : ddls) {
+            MySqlCreateTableStatement statement = SQLUtils.parseSQLStatement(ddl);
+            Assert.assertNotNull(statement);
+            DDLConverter.tryAttacheCharacterInfo(statement, "binary");
+            String firstRound = statement.toUnformattedString();
+
+            DDLConverter.tryAttacheCharacterInfo(statement, "binary");
+            Assert.assertEquals("重复处理应幂等: " + ddl, firstRound, statement.toUnformattedString());
+
+            // 对产物重新解析后再跑一轮，同样应稳定
+            MySqlCreateTableStatement reparsed = SQLUtils.parseSQLStatement(firstRound);
+            Assert.assertNotNull(reparsed);
+            DDLConverter.tryAttacheCharacterInfo(reparsed, "binary");
+            Assert.assertEquals("重新解析后再处理应幂等: " + ddl, firstRound, reparsed.toUnformattedString());
+        }
+    }
+
+    /**
+     * 边界：已显式指定 charset，但 tbCollation 查不到对应 charset（charset 为 null）。
+     * 此时 optionCharset.equalsIgnoreCase(null) 应安全返回 false（不能 NPE）且不补 collate。
+     */
+    @Test
+    public void testAttacheCharacterInfoExplicitCharsetWithUnknownCollation() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = utf8mb4", "not_exist_collation_ci");
+
+        Assert.assertEquals("utf8mb4", options.get("CHARSET"));
+        Assert.assertFalse("未知 collation 无法与显式 charset 比对，不应补 collate", options.containsKey("COLLATE"));
+    }
+
+    /**
+     * 现状刻画：CHARSET 与 CHARACTER SET 同时出现时，optionCharset 取最后一个，
+     * 故是否补 collate 由最后一个 charset option 决定。
+     */
+    @Test
+    public void testAttacheCharacterInfoDuplicatedCharsetOptions() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        // 最后一个是 utf8mb4，与 tbCollation 对应 charset 一致 -> 补 collate
+        Map<String, String> options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARSET = utf8 DEFAULT CHARACTER SET = utf8mb4",
+            "utf8mb4_general_ci");
+        Assert.assertEquals("utf8", options.get("CHARSET"));
+        Assert.assertEquals("utf8mb4", options.get("CHARACTER SET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+
+        // 最后一个是 utf8，与 tbCollation 对应 charset 不一致 -> 不补 collate
+        options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) DEFAULT CHARACTER SET = utf8mb4 DEFAULT CHARSET = utf8",
+            "utf8mb4_general_ci");
+        Assert.assertFalse(options.containsKey("COLLATE"));
+    }
+
+    /**
+     * 作用域约束：本方法只处理 table option，不得改动列级的 CHARACTER SET / COLLATE。
+     */
+    @Test
+    public void testAttacheCharacterInfoNotTouchColumnLevelCharacter() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        MySqlCreateTableStatement statement = SQLUtils.parseSQLStatement(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL, `c` varchar(10) CHARACTER SET `binary`) "
+                + "DEFAULT CHARSET = utf8mb4");
+        Assert.assertNotNull(statement);
+        String columnBefore = statement.getTableElementList().get(1).toString();
+
+        DDLConverter.tryAttacheCharacterInfo(statement, "utf8mb4_general_ci");
+
+        Assert.assertEquals("列级 charset 不应被本方法修改",
+            columnBefore, statement.getTableElementList().get(1).toString());
+    }
+
+    /**
+     * 边界：table option 列表为空（循环不执行），以及小写 option 名写法。
+     */
+    @Test
+    public void testAttacheCharacterInfoEmptyOptionsAndLowerCaseForm() {
+        mockConfig(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS, "binary");
+
+        Map<String, String> options =
+            attachAndCollectOptions("CREATE TABLE `t` (`id` bigint(20) NOT NULL)", "utf8mb4_general_ci");
+        Assert.assertEquals(2, options.size());
+        Assert.assertEquals("utf8mb4", options.get("CHARACTER SET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+
+        // 小写写法应被识别为已指定，不产生重复 option
+        options = attachAndCollectOptions(
+            "CREATE TABLE `t` (`id` bigint(20) NOT NULL) default charset=utf8mb4 collate=utf8mb4_general_ci",
+            "utf8mb4_general_ci");
+        Assert.assertEquals(2, options.size());
+        Assert.assertEquals("utf8mb4", options.get("CHARSET"));
+        Assert.assertEquals("utf8mb4_general_ci", options.get("COLLATE"));
+    }
+
+    /**
+     * 直接驱动 tryAttacheCharacterInfo，返回处理后的 table option 原始文本（不做 normalize），
+     * 便于精确断言反引号与大小写；同时校验产物可被再次解析（等同下游 checkBeforeApply 的行为）。
+     */
+    private Map<String, String> attachAndCollectOptions(String ddl, String tbCollation) {
+        MySqlCreateTableStatement statement = SQLUtils.parseSQLStatement(ddl);
+        Assert.assertNotNull(statement);
+        DDLConverter.tryAttacheCharacterInfo(statement, tbCollation);
+
+        Map<String, String> options = new LinkedHashMap<>();
+        for (SQLAssignItem item : statement.getTableOptions()) {
+            options.put(StringUtils.upperCase(normalize(item.getTarget().toString())), item.getValue().toString());
+        }
+        log.info("converted sql: {}", statement.toUnformattedString());
+        Assert.assertNotNull(SQLUtils.parseSQLStatement(statement.toUnformattedString()));
+        return options;
     }
 
     @Test
@@ -1102,23 +1670,48 @@ public class DDLConverterTest extends BaseTest {
     }
 
     @Test
-    public void testTryRemoveAutoShardKey() {
+    public void testTryRemoveDropIndex() {
         String dropIndexSql1 = "drop index auto_shard_key_xx on t1";
         String dropIndexSql2 = "alter table t1 drop index auto_shard_key_xx";
         String dropIndexSql3 = "drop index idx on t1";
         String dropIndexSql4 = "alter table t1 drop index idx";
-        String str1 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql1, i -> false);
-        String str2 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql2, i -> false);
-        String str3 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql3, i -> false);
-        String str4 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql4, i -> false);
-        String str5 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql1, i -> true);
-        String str6 = tryRemoveAutoShardKey("d1", "t1", dropIndexSql2, i -> true);
-        Assert.assertNull(str1);
-        Assert.assertEquals("ALTER TABLE t1", str2);
-        Assert.assertEquals(dropIndexSql3, str3);
-        Assert.assertEquals(dropIndexSql4, str4);
-        Assert.assertEquals(dropIndexSql1, str5);
-        Assert.assertEquals(dropIndexSql2, str6);
+
+        Set<String> suppressAutoShard = new HashSet<>();
+        suppressAutoShard.add("auto_shard_key_xx");
+        Set<String> suppressIdx = new HashSet<>();
+        suppressIdx.add("idx");
+        Set<String> empty = new HashSet<>();
+
+        // 场景1: 索引在 suppress 集合中 → 抑制
+        Assert.assertNull("DROP INDEX 在 suppress 集合中应返回 null",
+            DDLConverter.tryRemoveDropIndex(dropIndexSql1, suppressAutoShard));
+        Assert.assertEquals("ALTER TABLE 中 DROP 项被移除后保留为空 ALTER TABLE（MySQL 接受为 no-op）",
+            "ALTER TABLE t1", DDLConverter.tryRemoveDropIndex(dropIndexSql2, suppressAutoShard));
+
+        // 场景2: 索引不在 suppress 集合中 → 正常透传
+        Assert.assertEquals(dropIndexSql1, DDLConverter.tryRemoveDropIndex(dropIndexSql1, empty));
+        Assert.assertEquals(dropIndexSql2, DDLConverter.tryRemoveDropIndex(dropIndexSql2, empty));
+
+        // 场景3: 普通索引不在 suppress 集合中 → 正常透传
+        Assert.assertEquals(dropIndexSql3, DDLConverter.tryRemoveDropIndex(dropIndexSql3, suppressAutoShard));
+        Assert.assertEquals(dropIndexSql4, DDLConverter.tryRemoveDropIndex(dropIndexSql4, suppressAutoShard));
+
+        // 场景4: 普通索引在 suppress 集合中 → 抑制
+        Assert.assertNull(DDLConverter.tryRemoveDropIndex(dropIndexSql3, suppressIdx));
+        Assert.assertEquals("ALTER TABLE 中 DROP 项被移除后保留为空 ALTER TABLE",
+            "ALTER TABLE t1", DDLConverter.tryRemoveDropIndex(dropIndexSql4, suppressIdx));
+
+        // 场景5: null/empty 集合 → 原样返回
+        Assert.assertEquals(dropIndexSql1, DDLConverter.tryRemoveDropIndex(dropIndexSql1, null));
+        Assert.assertEquals(dropIndexSql1, DDLConverter.tryRemoveDropIndex(dropIndexSql1, new HashSet<>()));
+
+        // 场景6: extractDroppedIndexNames 正确提取索引名
+        Set<String> names1 = DDLConverter.extractDroppedIndexNames(dropIndexSql1);
+        Assert.assertTrue(names1.contains("auto_shard_key_xx"));
+        Set<String> names2 = DDLConverter.extractDroppedIndexNames(dropIndexSql2);
+        Assert.assertTrue(names2.contains("auto_shard_key_xx"));
+        Set<String> names3 = DDLConverter.extractDroppedIndexNames("select 1");
+        Assert.assertTrue(names3.isEmpty());
     }
 
     @Test
@@ -1227,5 +1820,475 @@ public class DDLConverterTest extends BaseTest {
                 + "# POLARX_DDL_TYPES=CCI\n"
                 + "# POLARX_EXTRA_DDL=DROP INDEX `cc22c777-cd7f-4783-8d6f-833bc6c00140` ON `accounts`\n",
             sb2.toString());
+    }
+
+    @Test
+    public void testCreateTableWithHashOrderIdx() {
+        String sql1 = "create table if not exists `hash_order` (\n"
+            + "  `id` int, \n"
+            + "  `a` int, \n"
+            + "  `b` int,\n"
+            + "  INDEX `index_a_b` USING HASH(`a`, `b` ASC), \n"
+            + "  INDEX `index_id_a` (`id`,`a`), \n"
+            + "  INDEX `index_id_b` (`id`,`b` ASC) \n"
+            + "\n"
+            + ")";
+        StringBuilder sb1 = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb1, "hash_order", "utf8", "utf8_general_ci", sql1);
+        log.info(sb1.toString());
+    }
+
+    @Test
+    public void testCreateTableWithHashOrderKey() {
+        String sql1 = "create table if not exists `hash_order` (\n"
+            + "  `id` int, \n"
+            + "  `a` int, \n"
+            + "  `b` int,\n"
+            + "  KEY `index_a_b` USING HASH(`a`, `b` ASC), \n"
+            + "  KEY `index_id_a` (`id`,`a`), \n"
+            + "  KEY `index_id_b` (`id`,`b` ASC) \n"
+            + ")";
+        StringBuilder sb1 = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb1, "hash_order", "utf8", "utf8_general_ci", sql1);
+        log.info(sb1.toString());
+    }
+
+    @Test
+    public void testCharsetCollationOrder() {
+        String ddl = "create table if not exists `collation_order`(\n"
+            + "    `id` int,\n"
+            + "    `a` int\n"
+            + ")COLLATE = utf8mb4_unicode_ci CHARACTER SET = utf8mb4";
+        StringBuilder sb1 = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb1, "collation_order", "utf8", "utf8_unicode_ci", ddl);
+        log.info(sb1.toString());
+        Assert.assertEquals(
+            "CREATE TABLE IF NOT EXISTS `collation_order` ( `id` int, `a` int ) DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_unicode_ci",
+            sb1.toString());
+    }
+
+    @Test
+    public void testSpecialTableName() {
+        String ddl1 = "create table `zimian_p00001`.```omc_column_name``_00001` ("
+            + " a int primary key,\n"
+            + " b int\n"
+            + ") default charset = utf8mb4 default collate = utf8mb4_general_ci";
+        String ddl2 =
+            "create  table `zimian_p00001`.```omc_column_name``_00001_omc` like `zimian_p00001`.```omc_column_name``_00001`";
+        String ddl3 =
+            "alter table `zimian_p00001`.```omc_column_name``_00001_omc`  change column b ```c``` bigint not null";
+        String ddl4 =
+            "create  table `zimian_p00001`.```omc_column_name``_00001_del` (id int auto_increment primary key) engine=innodb comment='omc sentry table of ```omc_column_name``_00001`'";
+        String ddl5 =
+            "alter  table `zimian_p00001`.```omc_column_name``_00001_omc` add column omc_tmp_qksz tinyint default null, algorithm=instant";
+        String ddl6 =
+            "alter  table `zimian_p00001`.```omc_column_name``_00001_omc` drop column omc_tmp_qksz, algorithm=instant";
+        String ddl7 = "drop table if exists ```omc_column_name``_00001_del`";
+        String ddl8 =
+            "rename  table `zimian_p00001`.```omc_column_name``_00001` to `zimian_p00001`.```omc_column_name``_00001_del`, `zimian_p00001`.```omc_column_name``_00001_omc` to `zimian_p00001`.```omc_column_name``_00001`";
+
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
+        memoryTableMeta.apply(null, "", ddl1, null);
+        memoryTableMeta.apply(null, "", ddl2, null);
+        memoryTableMeta.apply(null, "", ddl3, null);
+        TableMeta meta = memoryTableMeta.find("zimian_p00001", "`omc_column_name`_00001_omc");
+        TableMeta.FieldMeta fieldMeta = meta.getFieldMetaByName("`c`", true);
+        Assert.assertNotNull(fieldMeta);
+        memoryTableMeta.apply(null, "", ddl4, null);
+        memoryTableMeta.apply(null, "", ddl5, null);
+        memoryTableMeta.apply(null, "", ddl6, null);
+        memoryTableMeta.apply(null, "", ddl7, null);
+        memoryTableMeta.apply(null, "", ddl8, null);
+        meta = memoryTableMeta.find("zimian_p00001", "`omc_column_name`_00001");
+        fieldMeta = meta.getFieldMetaByName("`c`", true);
+        Assert.assertNotNull(fieldMeta);
+    }
+
+    /**
+     * DBLE 复制表语法，可以指定locality的表，对mysql过滤
+     * <a href="https://aliyuque.antfin.com/coronadb/design/wh5lbx3b722geqkg#0ff7ea86">...</a>
+     */
+    @Test
+    public void testCreateReplicasTable() {
+        String ddl = "CREATE TABLE `ofst_tr_floor_pbl` (\n"
+            + "    PBL_ID VARCHAR(50) PRIMARY KEY,\n"
+            + "    IMG_ID VARCHAR(100),\n"
+            + "    PBL_COLOR VARCHAR(20),\n"
+            + "    MAIN_TITLE VARCHAR(200),\n"
+            + "    SUB_TITLE VARCHAR(200),\n"
+            + "    BUTTON_NAME VARCHAR(50),\n"
+            + "    ZONE_ID VARCHAR(20),\n"
+            + "    BRCH_ID VARCHAR(20),\n"
+            + "    STRU_LEVEL VARCHAR(10),\n"
+            + "    CREATE_TIME DATETIME,\n"
+            + "    MODI_TIME DATETIME,\n"
+            + "    POS_NO INT,\n"
+            + "    STATUS VARCHAR(1),\n"
+            + "    APPROVE_STATUS VARCHAR(10),\n"
+            + "    ACT_ID VARCHAR(50),\n"
+            + "    PBL_ACT_ID VARCHAR(50),\n"
+            + "    BACKOF1 VARCHAR(100),\n"
+            + "    BACKOF2 VARCHAR(100),\n"
+            + "    BACKOF3 VARCHAR(100),\n"
+            + "    BACKOF4 VARCHAR(100),\n"
+            + "    HEAD_TOP VARCHAR(10),\n"
+            + "    BACKUP2 VARCHAR(10),\n"
+            + "    BACKUP3 VARCHAR(10),\n"
+            + "    BACKUP4 VARCHAR(10)\n"
+            + ") REPLICAS ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_0900_ai_ci;";
+        StringBuilder sb1 = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb1, "ofst_tr_floor_pbl", "utf8mb4", "utf8mb4_0900_ai_ci", ddl);
+        log.info(sb1.toString());
+        Assert.assertEquals(
+            "CREATE TABLE `ofst_tr_floor_pbl` ( PBL_ID VARCHAR(50) PRIMARY KEY, IMG_ID VARCHAR(100), PBL_COLOR VARCHAR(20), MAIN_TITLE VARCHAR(200), SUB_TITLE VARCHAR(200), BUTTON_NAME VARCHAR(50), ZONE_ID VARCHAR(20), BRCH_ID VARCHAR(20), STRU_LEVEL VARCHAR(10), CREATE_TIME DATETIME, MODI_TIME DATETIME, POS_NO INT, STATUS VARCHAR(1), APPROVE_STATUS VARCHAR(10), ACT_ID VARCHAR(50), PBL_ACT_ID VARCHAR(50), BACKOF1 VARCHAR(100), BACKOF2 VARCHAR(100), BACKOF3 VARCHAR(100), BACKOF4 VARCHAR(100), HEAD_TOP VARCHAR(10), BACKUP2 VARCHAR(10), BACKUP3 VARCHAR(10), BACKUP4 VARCHAR(10) ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 DEFAULT COLLATE = utf8mb4_0900_ai_ci;",
+            sb1.toString());
+    }
+
+    /**
+     * 测试PURE_ASYNC_DDL_MODE hint在PolarX部分被正确去掉
+     */
+    @Test
+    public void testRemoveAsyncDdlHintForPolarPart() {
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+
+        // 带 PURE_ASYNC_DDL_MODE 的 ALTER TABLE ADD INDEX
+        String ddl = "/*+TDDL:cmd_extra(PURE_ASYNC_DDL_MODE=true)*/ALTER TABLE t1 ADD INDEX idx_col1 (col1)";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForPolarPart(sb, ddl, "utf8mb4", "utf8_general_cs", "222222", false, null);
+        String result = sb.toString();
+        Assert.assertFalse("PolarX part should not contain PURE_ASYNC_DDL_MODE",
+            result.contains("PURE_ASYNC_DDL_MODE"));
+        Assert.assertTrue(result.contains("# POLARX_ORIGIN_SQL="));
+        Assert.assertTrue(result.contains("# POLARX_TSO=222222"));
+    }
+
+    /**
+     * 测试PURE_ASYNC_DDL_MODE hint在MySQL部分被正确去掉
+     */
+    @Test
+    public void testRemoveAsyncDdlHintForMysqlPart() {
+        // 带 PURE_ASYNC_DDL_MODE 的 ALTER TABLE ADD INDEX
+        String ddl = "/*+TDDL:cmd_extra(PURE_ASYNC_DDL_MODE=true)*/ALTER TABLE t1 ADD INDEX idx_col1 (col1)";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "t1", "utf8mb4", "utf8_general_cs", ddl);
+        String result = sb.toString();
+        Assert.assertFalse("MySQL part should not contain PURE_ASYNC_DDL_MODE",
+            result.contains("PURE_ASYNC_DDL_MODE"));
+        Assert.assertTrue("MySQL part should contain ALTER TABLE",
+            result.toUpperCase().contains("ALTER TABLE"));
+    }
+
+    /**
+     * 测试PURE_ASYNC_DDL_MODE hint混合其他hint时只移除PURE_ASYNC_DDL_MODE
+     */
+    @Test
+    public void testRemoveAsyncDdlHintMixedWithOtherHints() {
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+
+        String ddl = "/*+TDDL:cmd_extra(PURE_ASYNC_DDL_MODE=true, ALLOW_ADD_GSI=TRUE)*/"
+            + "ALTER TABLE t1 ADD INDEX idx_col1 (col1)";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForPolarPart(sb, ddl, "utf8mb4", "utf8_general_cs", "333333", false, null);
+        String result = sb.toString();
+        Assert.assertFalse("Should not contain PURE_ASYNC_DDL_MODE",
+            result.contains("PURE_ASYNC_DDL_MODE"));
+        Assert.assertTrue("Should still contain ALLOW_ADD_GSI",
+            result.contains("ALLOW_ADD_GSI"));
+    }
+
+    /**
+     * 测试async=true标志在MySQL部分被正确去掉
+     */
+    @Test
+    public void testRemoveAsyncFlagForMysqlPart() {
+        String ddl = "ALTER TABLE t1 ADD INDEX idx_col1 (col1) async=true";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "t1", "utf8mb4", "utf8_general_cs", ddl);
+        String result = sb.toString();
+        Assert.assertFalse("MySQL part should not contain async",
+            result.toLowerCase().contains("async"));
+    }
+
+    /**
+     * 测试async=true标志在PolarX部分被正确去掉
+     */
+    @Test
+    public void testRemoveAsyncFlagForPolarPart() {
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+
+        String ddl = "ALTER TABLE t1 ADD INDEX idx_col1 (col1) async=true";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForPolarPart(sb, ddl, "utf8mb4", "utf8_general_cs", "444444", false, null);
+        String result = sb.toString();
+        Assert.assertFalse("PolarX part should not contain async=true",
+            result.toLowerCase().contains("async"));
+    }
+
+    /**
+     * 测试removeAsyncDdlFlags直接方法
+     */
+    @Test
+    public void testRemoveAsyncDdlFlags() {
+        // ALTER TABLE with async=true
+        String sql = "ALTER TABLE t1 ADD INDEX idx_col1 (col1) async=true";
+        com.alibaba.polardbx.druid.sql.ast.SQLStatement stmt = SQLUtils.parseSQLStatement(sql);
+        removeAsyncDdlFlags(stmt);
+        String result = stmt.toString();
+        Assert.assertFalse("Should not contain async", result.toLowerCase().contains("async"));
+
+        // CREATE INDEX with async=true
+        sql = "CREATE INDEX idx_col1 ON t1 (col1) async=true";
+        stmt = SQLUtils.parseSQLStatement(sql);
+        removeAsyncDdlFlags(stmt);
+        result = stmt.toString();
+        Assert.assertFalse("Should not contain async", result.toLowerCase().contains("async"));
+    }
+
+    /**
+     * 测试完整的buildDdlEventSql同时去掉hint和async标志
+     */
+    @Test
+    public void testBuildDdlEventSqlRemovesAsyncDdl() {
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+
+        // 同时带有 PURE_ASYNC_DDL_MODE hint 和 async=true
+        String ddlForPolar =
+            "/*+TDDL:cmd_extra(PURE_ASYNC_DDL_MODE=true)*/ALTER TABLE t1 ADD INDEX idx_col1 (col1) async=true";
+        String ddlForMysql = "ALTER TABLE t1 ADD INDEX idx_col1 (col1) async=true";
+        String result = buildDdlEventSql("t1", ddlForPolar, "utf8mb4", "utf8_general_cs",
+            "555555", ddlForMysql);
+        Assert.assertFalse("Should not contain PURE_ASYNC_DDL_MODE",
+            result.contains("PURE_ASYNC_DDL_MODE"));
+        Assert.assertFalse("Should not contain async",
+            StringUtils.containsIgnoreCase(result, "async=true"));
+        Assert.assertTrue("Should contain POLARX_ORIGIN_SQL",
+            result.contains("# POLARX_ORIGIN_SQL="));
+        Assert.assertTrue("Should contain ALTER TABLE",
+            result.toUpperCase().contains("ALTER TABLE"));
+    }
+
+    /**
+     * 测试不带async属性的正常DDL不受影响
+     */
+    @Test
+    public void testNormalDdlNotAffected() {
+        mockConfig(TASK_REFORMAT_ATTACH_PRIVATE_DDL_ENABLED, "true");
+
+        String ddl = "ALTER TABLE t1 ADD INDEX idx_col1 (col1)";
+        String result = buildDdlEventSql("t1", ddl, "utf8mb4", "utf8_general_cs", "666666", ddl);
+        Assert.assertTrue("Should contain ALTER TABLE",
+            result.toUpperCase().contains("ALTER TABLE"));
+        Assert.assertTrue(result.contains("# POLARX_ORIGIN_SQL="));
+    }
+
+    /**
+     * 测试 VECTOR 列类型转换为 VARBINARY 以及 VECTOR INDEX 的移除
+     */
+    @Test
+    public void testVectorDdlConversion() {
+        // Case 1: CREATE TABLE - VECTOR(128) 转换为 VARBINARY(512)，VECTOR INDEX 被移除
+        StringBuilder sb = new StringBuilder();
+        String ddl = "CREATE TABLE test_vector (\n"
+            + "  id bigint NOT NULL,\n"
+            + "  embedding VECTOR(128),\n"
+            + "  PRIMARY KEY (id),\n"
+            + "  VECTOR INDEX vec_idx (embedding) DISTANCE=COSINE M=16\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4";
+        buildDdlEventSqlForMysqlPart(sb, "test_vector", "utf8mb4", "utf8mb4_general_ci", ddl);
+        String result = sb.toString();
+        Assert.assertTrue("VECTOR 列应被转换为 VARBINARY(512)", result.contains("VARBINARY(512)"));
+        Assert.assertFalse("输出中不应包含 VECTOR(128) 类型", result.toUpperCase().contains("VECTOR(128)"));
+        Assert.assertFalse("VECTOR INDEX 应被移除", result.toUpperCase().contains("VECTOR INDEX"));
+
+        // Case 2: ALTER TABLE ADD COLUMN VECTOR(64) → VARBINARY(256)
+        sb = new StringBuilder();
+        ddl = "ALTER TABLE test_vector ADD COLUMN vec VECTOR(64)";
+        buildDdlEventSqlForMysqlPart(sb, "test_vector", "utf8mb4", "utf8mb4_general_ci", ddl);
+        Assert.assertEquals(
+            "ALTER TABLE test_vector ADD COLUMN vec VARBINARY(256)",
+            sb.toString());
+
+        // Case 3: ALTER TABLE MODIFY COLUMN VECTOR(128) → VARBINARY(512)
+        sb = new StringBuilder();
+        ddl = "ALTER TABLE test_vector MODIFY COLUMN embedding VECTOR(128)";
+        buildDdlEventSqlForMysqlPart(sb, "test_vector", "utf8mb4", "utf8mb4_general_ci", ddl);
+        Assert.assertEquals(
+            "ALTER TABLE test_vector MODIFY COLUMN embedding VARBINARY(512)",
+            sb.toString());
+
+        // Case 4: ALTER TABLE ADD VECTOR INDEX → 索引项被移除，剩余空 ALTER TABLE（MySQL 接受为 no-op）
+        sb = new StringBuilder();
+        ddl = "ALTER TABLE test_vector ADD VECTOR INDEX vec_idx (embedding) DISTANCE=COSINE M=16";
+        buildDdlEventSqlForMysqlPart(sb, "test_vector", "utf8mb4", "utf8mb4_general_ci", ddl);
+        Assert.assertEquals("ALTER TABLE test_vector", sb.toString());
+
+        // Case 5: CREATE VECTOR INDEX → 整个语句被抑制，MySQL 输出为空
+        sb = new StringBuilder();
+        ddl = "CREATE VECTOR INDEX vec_idx ON test_vector (embedding) DISTANCE=COSINE M=16";
+        buildDdlEventSqlForMysqlPart(sb, "test_vector", "utf8mb4", "utf8mb4_general_ci", ddl);
+        Assert.assertEquals("CREATE VECTOR INDEX 在 MySQL 输出中应为空", "", sb.toString());
+    }
+
+    /**
+     * 端到端生命周期测试：使用真实 MemoryTableMeta 模拟 VECTOR INDEX 从建表到 DROP INDEX 的完整流程。
+     * <p>
+     * 此测试模拟 LogicDDLHandler 的真实行为：
+     * 1. 用 MemoryTableMeta 维护源端 schema（模拟 CDC 内部元数据）
+     * 2. 回调函数从 MemoryTableMeta 读取索引信息（而非硬编码）
+     * 3. 验证 indexExistenceChecker 对 VECTOR 类型索引返回 false（核心修复逻辑）
+     */
+    @Test
+    public void testVectorIndexLifecycle() {
+        // ========== 初始化：用真实 MemoryTableMeta 维护 schema ==========
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(log, true);
+        String schema = "vec_test_ddl";
+
+        // ========== Step 1: CREATE TABLE 带 VECTOR 列和 VECTOR INDEX ==========
+        String createTableDdl = "CREATE TABLE test_lifecycle (\n"
+            + "  id bigint NOT NULL,\n"
+            + "  embedding VECTOR(128),\n"
+            + "  description varchar(255),\n"
+            + "  PRIMARY KEY (id),\n"
+            + "  VECTOR INDEX vec_idx_lifecycle (embedding) DISTANCE=COSINE M=16\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4";
+
+        // 对 MySQL 下游输出（strip VECTOR）
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "test_lifecycle", "utf8mb4", "utf8mb4_general_ci", createTableDdl);
+        String createResult = sb.toString();
+        Assert.assertTrue("Step1: VECTOR(128) 应转换为 VARBINARY(512)", createResult.contains("VARBINARY(512)"));
+        Assert.assertFalse("Step1: VECTOR INDEX 应被移除", createResult.toUpperCase().contains("VECTOR INDEX"));
+
+        // 同时 apply 原始 DDL 到 CDC 内部元数据（模拟 doApplyAndRebuildFilter）
+        memoryTableMeta.apply(null, schema, createTableDdl, null);
+
+        // 验证元数据中确实存储了 VECTOR INDEX
+        TableMeta tableMeta = memoryTableMeta.find(schema, "test_lifecycle");
+        Assert.assertNotNull("元数据应能找到表", tableMeta);
+        TableMeta.IndexMeta indexMeta = tableMeta.getIndexes().get("vec_idx_lifecycle");
+        Assert.assertNotNull("元数据中应存在 vec_idx_lifecycle 索引", indexMeta);
+        Assert.assertEquals("索引类型应为 VECTOR", "VECTOR", indexMeta.getIndexType());
+
+        // ========== Step 2: CREATE VECTOR INDEX → MySQL 输出被抑制 ==========
+        sb = new StringBuilder();
+        String createVectorIndexDdl =
+            "CREATE VECTOR INDEX vec_idx_lifecycle ON test_lifecycle (embedding) DISTANCE=COSINE M=16";
+        buildDdlEventSqlForMysqlPart(sb, "test_lifecycle", "utf8mb4", "utf8mb4_general_ci", createVectorIndexDdl);
+        Assert.assertEquals("Step2: CREATE VECTOR INDEX 应被完全抑制", "", sb.toString());
+
+        // ========== Step 3: DROP INDEX — 与 LogicDDLHandler.resolveIndexesToSuppress 一致的逻辑 ==========
+        String dropIndexSql = "drop index vec_idx_lifecycle on test_lifecycle";
+        Set<String> indexesToSuppress =
+            resolveIndexesToSuppress(memoryTableMeta, schema, "test_lifecycle", dropIndexSql);
+        String dropResult = DDLConverter.tryRemoveDropIndex(dropIndexSql, indexesToSuppress);
+        Assert.assertNull("Step3: VECTOR INDEX DROP 应被抑制", dropResult);
+
+        // ALTER TABLE DROP INDEX 形式
+        String alterDropIndexSql = "alter table test_lifecycle drop index vec_idx_lifecycle";
+        indexesToSuppress = resolveIndexesToSuppress(memoryTableMeta, schema, "test_lifecycle", alterDropIndexSql);
+        String alterDropResult = DDLConverter.tryRemoveDropIndex(alterDropIndexSql, indexesToSuppress);
+        Assert.assertEquals("Step3: ALTER TABLE 中 VECTOR DROP 项被移除（MySQL 接受空 ALTER TABLE）",
+            "ALTER TABLE test_lifecycle", alterDropResult);
+
+        // ========== 对照组: 普通索引不应被抑制 ==========
+        memoryTableMeta.apply(null, schema,
+            "CREATE INDEX normal_idx ON test_lifecycle (description)", null);
+        TableMeta tableMetaAfter = memoryTableMeta.find(schema, "test_lifecycle");
+        Assert.assertNotNull("普通索引应存在于元数据", tableMetaAfter.getIndexes().get("normal_idx"));
+
+        String dropNormalIndexSql = "drop index normal_idx on test_lifecycle";
+        indexesToSuppress = resolveIndexesToSuppress(memoryTableMeta, schema, "test_lifecycle", dropNormalIndexSql);
+        String normalDropResult = DDLConverter.tryRemoveDropIndex(dropNormalIndexSql, indexesToSuppress);
+        Assert.assertEquals("对照组: 普通索引 DROP 不应被抑制", dropNormalIndexSql, normalDropResult);
+    }
+
+    /**
+     * 模拟 LogicDDLHandler.resolveIndexesToSuppress 的判断逻辑。
+     */
+    private Set<String> resolveIndexesToSuppress(MemoryTableMeta meta, String schema, String table, String sql) {
+        Set<String> toSuppress = new HashSet<>();
+        for (String indexName : DDLConverter.extractDroppedIndexNames(sql)) {
+            if (DDLConverter.isAutoShardKey(indexName)) {
+                boolean existsInMeta = meta.find(schema, table).getIndexes().keySet().stream()
+                    .anyMatch(i -> StringUtils.equalsIgnoreCase(indexName, i));
+                if (!existsInMeta) {
+                    toSuppress.add(indexName);
+                }
+                continue;
+            }
+            TableMeta tableMeta = meta.find(schema, table);
+            if (tableMeta != null) {
+                TableMeta.IndexMeta idx = tableMeta.getIndexes().get(indexName);
+                if (idx != null && "VECTOR".equalsIgnoreCase(idx.getIndexType())) {
+                    toSuppress.add(indexName);
+                }
+            }
+        }
+        return toSuppress;
+    }
+
+    @Test
+    public void testExternalizeKeywordStrippedInCreateTable() {
+        String ddl = "CREATE TABLE `ext_test` (\n"
+            + "  `id` bigint NOT NULL AUTO_INCREMENT,\n"
+            + "  `name` varchar(64),\n"
+            + "  `content` LONGTEXT EXTERNALIZE,\n"
+            + "  PRIMARY KEY (`id`)\n"
+            + ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "ext_test", "utf8mb4", "utf8mb4_general_ci", ddl);
+        String result = sb.toString();
+        Assert.assertFalse("EXTERNALIZE keyword should be stripped", result.contains("EXTERNALIZE"));
+        Assert.assertTrue("LONGTEXT column should remain", result.contains("LONGTEXT"));
+        Assert.assertTrue("column name should remain", result.contains("`content`"));
+    }
+
+    @Test
+    public void testExternalizeKeywordStrippedInAlterAddColumn() {
+        String ddl = "ALTER TABLE `ext_test` ADD COLUMN `body` LONGTEXT EXTERNALIZE";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "ext_test", "utf8mb4", "utf8mb4_general_ci", ddl);
+        String result = sb.toString();
+        Assert.assertFalse("EXTERNALIZE keyword should be stripped", result.contains("EXTERNALIZE"));
+        Assert.assertTrue("LONGTEXT column should remain", result.contains("LONGTEXT"));
+        Assert.assertTrue("column name should remain", result.contains("`body`"));
+    }
+
+    @Test
+    public void testExternalizeKeywordStrippedInAlterModifyColumn() {
+        String ddl = "ALTER TABLE `ext_test` MODIFY COLUMN `content` LONGBLOB EXTERNALIZE";
+        StringBuilder sb = new StringBuilder();
+        buildDdlEventSqlForMysqlPart(sb, "ext_test", "utf8mb4", "utf8mb4_general_ci", ddl);
+        String result = sb.toString();
+        Assert.assertFalse("EXTERNALIZE keyword should be stripped", result.contains("EXTERNALIZE"));
+        Assert.assertTrue("LONGBLOB column should remain", result.contains("LONGBLOB"));
+    }
+
+    @Test
+    public void testAddCharacterToGenerateColumn() {
+        /*
+         test generated column with character set
+         */
+        StringBuilder sb = new StringBuilder();
+        String ddl = "ALTER TABLE fi3 ADD COLUMN `func_index$0` CHAR(16) CHARACTER SET UTF8MB4 "
+            + "GENERATED ALWAYS AS (SUBSTRING(col3, 1, 2)), ADD UNIQUE INDEX func_index (`func_index$0`)";
+        buildDdlEventSqlForMysqlPart(sb, "fi3", "utf8mb4", "utf8mb4_general_ci", ddl);
+        Assert.assertEquals(
+            "ALTER TABLE fi3 ADD COLUMN `func_index$0` CHAR(16) CHARACTER SET UTF8MB4, ADD UNIQUE INDEX func_index (`func_index$0`)",
+            sb.toString());
+    }
+
+    @Test
+    public void testModifyCharacterToGenerateColumn() {
+        /*
+         test modify column with character set on generated column
+         */
+        StringBuilder sb = new StringBuilder();
+        String ddl = "ALTER TABLE fi3 MODIFY COLUMN `func_index$0` VARCHAR(32) CHARACTER SET UTF8MB4 "
+            + "GENERATED ALWAYS AS (SUBSTRING(col3, 1, 4))";
+        buildDdlEventSqlForMysqlPart(sb, "fi3", "utf8mb4", "utf8mb4_general_ci", ddl);
+        Assert.assertEquals(
+            "ALTER TABLE fi3 MODIFY COLUMN `func_index$0` VARCHAR(32) CHARACTER SET UTF8MB4",
+            sb.toString());
     }
 }

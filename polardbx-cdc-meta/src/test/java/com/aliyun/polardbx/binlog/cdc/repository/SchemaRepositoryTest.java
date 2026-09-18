@@ -355,7 +355,7 @@ public class SchemaRepositoryTest {
             + ") DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_general_ci", buffer.toString());
     }
 
-    //see: https://aone.alibaba-inc.com/v2/project/860366/bug/52881689
+    //see: historical compatibility behavior
     @Test
     public void testCreateTableLike() {
         String schema = "d`b1";

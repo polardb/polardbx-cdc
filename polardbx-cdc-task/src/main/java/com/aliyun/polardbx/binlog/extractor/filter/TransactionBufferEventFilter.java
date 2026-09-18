@@ -31,6 +31,7 @@ import com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUtil;
 import com.aliyun.polardbx.binlog.storage.Storage;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.binlog.util.LabEventType;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -47,6 +48,7 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
     private final Storage storage;
     private final List<EventFilter> eventFilterList = new ArrayList<>();
+    @Setter
     private TransactionStorage transactionStorage;
     private Transaction currentTran;
     private boolean receiveFormatDesc = false;
@@ -66,7 +68,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         if (StringUtils.isNotBlank(blacklist)) {
             this.eventFilterList.add(new FilterBlacklistTableFilter(blacklist));
         }
-        if (StringUtils.isNotEmpty(startTso)){
+        if (StringUtils.isNotEmpty(startTso)) {
             requestTso = CommonUtils.getTsoTimestamp(startTso);
         }
     }
@@ -148,7 +150,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
             Transaction transaction = transactionStorage.getByXid(xid, context.getRuntimeContext());
             if (transaction == null) {
                 // 只有正常点xa事物才输出log
-                if (LogEventUtil.isValidXid(xid)){
+                if (LogEventUtil.isValidXid(xid)) {
                     log.warn("rollback event not found transaction obj , xid : {} event log : {}:{}", xid,
                         context.getRuntimeContext().getBinlogFile(), logEvent.getHeader().getLogPos());
                 }
@@ -199,7 +201,7 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
         String xid = LogEventUtil.getXid(event);
         if (StringUtils.isNotBlank(xid)) {
             commitTran = transactionStorage.getByXid(xid, context.getRuntimeContext());
-            if (commitTran != null){
+            if (commitTran != null) {
                 if (lastCommitSequenceNum > 0) {
                     commitTran.setTsoTransaction(true);
                     commitTran.setRealTSO(lastCommitSequenceNum);
@@ -210,22 +212,23 @@ public class TransactionBufferEventFilter implements LogEventFilter<LogEvent> {
                 }
             } else {
                 boolean ignoreLog = false;
-                try{
+                try {
                     String group = StringUtils.lowerCase(LogEventUtil.getGroupFromXid(xid, "UTF8"));
-                    if ((group != null && group.startsWith("__cdc___single_group")) || !LogEventUtil.isValidXid(xid)){
+                    if ((group != null && group.startsWith("__cdc___single_group")) || !LogEventUtil.isValidXid(xid)) {
                         // 忽略cdc 和 不合法的xid事物
                         ignoreLog = true;
                     }
-                } catch (Throwable ignored){
+                } catch (Throwable ignored) {
                 }
-                if (!ignoreLog){
+                if (!ignoreLog) {
                     log.warn("commit event not found transaction obj , xid : {} {}:{}", xid,
                         context.getRuntimeContext().getBinlogFile(), event.getHeader().getLogPos());
                     // 异常检查，丢失commit的事物，如果tso > request tso ，抛出异常
-                    if (requestTso > 0 && lastCommitSequenceNum >= requestTso && DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_EXTRACT_LOSS_COMMIT_CHECK)){
-                        throw new PolardbxException("commit event not found transaction obj , xid "+ xid + " " +
-                            context.getRuntimeContext().getBinlogFile()+":"+ event.getHeader().getLogPos()+
-                            ", tso = "+lastCommitSequenceNum+", request tso "+requestTso);
+                    if (requestTso > 0 && lastCommitSequenceNum >= requestTso && DynamicApplicationConfig.getBoolean(
+                        ConfigKeys.TASK_EXTRACT_LOSS_COMMIT_CHECK)) {
+                        throw new PolardbxException("commit event not found transaction obj , xid " + xid + " " +
+                            context.getRuntimeContext().getBinlogFile() + ":" + event.getHeader().getLogPos() +
+                            ", tso = " + lastCommitSequenceNum + ", request tso " + requestTso);
                     }
                 }
             }

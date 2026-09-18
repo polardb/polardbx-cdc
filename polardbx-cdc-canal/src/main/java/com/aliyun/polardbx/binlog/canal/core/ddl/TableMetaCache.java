@@ -141,8 +141,12 @@ public class TableMetaCache {
                             meta.setKey("PRI".equalsIgnoreCase(rs.getString("Key")));
                             meta.setUnique("UNI".equalsIgnoreCase(rs.getString("Key")));
                             meta.setDefaultValue(rs.getString("Default"));
-                            meta.setGenerated(rs.getString("Extra").contains("GENERATED"));
-                            meta.setIsOnUpdate(rs.getString("Extra").toLowerCase().contains("on update"));
+                            String extra = rs.getString("Extra").toLowerCase();
+                            // 只有 VIRTUAL GENERATED / STORED GENERATED 才是真正的生成列，
+                            // DEFAULT_GENERATED（如 DEFAULT CURRENT_TIMESTAMP）不是
+                            meta.setGenerated(extra.contains("virtual generated")
+                                || extra.contains("stored generated"));
+                            meta.setIsOnUpdate(extra.contains("on update"));
                             metas.add(meta);
                         }
                         return new TableMeta(schema, table, metas);

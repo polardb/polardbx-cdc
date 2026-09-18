@@ -12,6 +12,7 @@ import com.alibaba.druid.pool.vendor.MySqlValidConnectionChecker;
 import com.alibaba.fastjson.JSON;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver;
 import com.google.common.collect.Maps;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -47,7 +48,7 @@ public class DataSourceUtil {
         // 关闭每次读取read-only状态,提升batch性能
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("readOnlyPropagatesToServer", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("connectTimeout", "1000");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("autoReconnect", "true");
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("autoReconnect", "false");
         // 将0000-00-00的时间类型返回null
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("zeroDateTimeBehavior", "convertToNull");
         // 直接返回字符串，不做year转换date处理
@@ -61,7 +62,9 @@ public class DataSourceUtil {
         // net_write_timeout
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("netTimeoutForStreamingResults", "72000");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useServerPrepStmts", "false");
-        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useInformationSchema", "false");
+        // The SHOW-based metadata implementation reinterprets literal backticks in table names.
+        // Use information_schema with raw JDBC names, including names that begin/end with backticks.
+        DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("useInformationSchema", "true");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("pedantic", "true");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowLoadLocalInfile", "false");
         DEFAULT_MYSQL_CONNECTION_PROPERTIES.put("allowLocalInfile", "false");
@@ -104,6 +107,7 @@ public class DataSourceUtil {
                                                               List<String> newConnectionSQLs) throws Exception {
         checkParams(ip, port, user, maxPoolSize, minPoolSize);
         DruidDataSource ds = new DruidDataSource();
+        ds.setDriverClassName(PolarDbxCompatDriver.class.getName());
         String url = "jdbc:mysql://" + ip + ":" + port;
         if (StringUtils.isNotBlank(dbName)) {
             url = url + "/" + dbName;

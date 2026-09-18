@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2013-Present, Alibaba Group Holding Limited.
  * All rights reserved.
- *
+ * <p>
  * Licensed under the Server Side Public License v1 (SSPLv1).
  */
 package com.aliyun.polardbx.binlog.client;
@@ -13,28 +13,39 @@ import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.client.listener.IEventHandler;
 import com.aliyun.polardbx.binlog.client.listener.IExceptionHandler;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import lombok.Setter;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class CdcClient {
 
-    private static final Logger logger = LoggerFactory.getLogger(CdcClient.class);
-    private AtomicBoolean started = new AtomicBoolean(false);
-    private CdcClientParser cdcClientParser;
-    private Thread parseThread;
-    private IExceptionHandler exceptionHandler;
-    private DumperDataSource dataSource;
-    private MetaDbHelper metaDbHelper;
-    private BinlogPosition startPosition;
-    private int rowParseThreadNum = 4;
-    private int ringBufferSize = 16384;
-    private int flowControlWindow = 500 * 1024 * 1024;
-    private boolean dryRun = false;
+    protected static final Logger logger = LoggerFactory.getLogger(CdcClient.class);
+    protected AtomicBoolean started = new AtomicBoolean(false);
+    @Setter
+    protected CdcClientParser cdcClientParser;
+    protected Thread parseThread;
+    protected IExceptionHandler exceptionHandler;
+    protected DumperDataSource dataSource;
+    protected MetaDbHelper metaDbHelper;
+    protected BinlogPosition startPosition;
+    protected int rowParseThreadNum = 4;
+    protected int ringBufferSize = 16384;
+    protected int flowControlWindow = 500 * 1024 * 1024;
+    protected boolean dryRun = false;
+    protected RBWaitStrategy waitStrategy = RBWaitStrategy.YIELD;
+    protected volatile Set<String> allowOrIgnoreTables;
+    protected volatile boolean whiteListMode = true;
+    protected volatile boolean filterOptimizeEnabled = true;
+    protected volatile boolean decode64Enabled = false;
+
+    public CdcClient() {
+    }
 
     public CdcClient(IMetaDBDataSourceProvider provider) {
         this(provider, true);
@@ -68,24 +79,47 @@ public class CdcClient {
         this.startPosition = new BinlogPosition(binlogFileName, filePosition, -1, -1);
     }
 
-    private void startDump(String binlogFileName, IEventHandler handle) throws Exception {
+    protected void startDump(String binlogFileName, IEventHandler handle) throws Exception {
         dataSource.initCharset();
         dataSource.reConnect(flowControlWindow);
         StreamObserverLogFetcher logFetcher = providerLogFetcher();
-        dataSource.dump(new BinlogPosition(binlogFileName, 4, -1, -1), logFetcher);
+        dataSource.dump(new BinlogPosition(binlogFileName, 4, -1, -1), logFetcher, new HashMap<>());
         logger.info("dump start success!");
         cdcClientParser =
             new CdcClientParser(logFetcher, startPosition, handle, dataSource.getServerCharset(),
                 exceptionHandler, ringBufferSize, rowParseThreadNum);
         cdcClientParser.setDryRun(dryRun);
+        cdcClientParser.setWaitStrategy(waitStrategy);
+        cdcClientParser.setDecode64Enabled(decode64Enabled);
+        if (this.allowOrIgnoreTables != null) {
+            if (whiteListMode) {
+                cdcClientParser.setAcceptTable(allowOrIgnoreTables);
+            } else {
+                cdcClientParser.setIgnoreTable(allowOrIgnoreTables);
+            }
+        }
+        cdcClientParser.logBufferFilter.setEnabled(filterOptimizeEnabled);
+        cdcClientParser.init();
         parseThread = new Thread(() -> {
             try {
-                cdcClientParser.parser();
+                cdcClientParser.parse();
             } finally {
                 dataSource.releaseChannel();
             }
         }, "parser-thread");
         parseThread.start();
+    }
+
+    public void setUseSleepWaitMode() {
+        this.waitStrategy = RBWaitStrategy.SLEEP;
+    }
+
+    public void setUseBlockWaitMode() {
+        this.waitStrategy = RBWaitStrategy.BLOCK;
+    }
+
+    public void setYieldWaitMode() {
+        this.waitStrategy = RBWaitStrategy.YIELD;
     }
 
     public void setRowParseThreadNum(int rowParseThreadNum) {
@@ -157,11 +191,31 @@ public class CdcClient {
      * 每个值都是db.table 的小写形式
      */
     public void setAcceptTable(Set<String> acceptTableSet) {
-        cdcClientParser.setAcceptTable(acceptTableSet);
+        this.allowOrIgnoreTables = acceptTableSet;
+        this.whiteListMode = true;
+        if (cdcClientParser != null) {
+            cdcClientParser.setAcceptTable(acceptTableSet);
+        }
     }
 
     public void setIgnoreTable(Set<String> ignoreTableSet) {
-        cdcClientParser.setIgnoreTable(ignoreTableSet);
+        this.allowOrIgnoreTables = ignoreTableSet;
+        this.whiteListMode = false;
+        if (cdcClientParser != null) {
+            cdcClientParser.setIgnoreTable(ignoreTableSet);
+        }
+    }
+
+    public void setFilterOptimizeEnabled(boolean enabled) {
+        this.filterOptimizeEnabled = enabled;
+        if (cdcClientParser != null) {
+            cdcClientParser.logBufferFilter.setEnabled(enabled);
+        }
+    }
+
+    public void setDecode64Enabled(boolean enabled) {
+        this.decode64Enabled = enabled;
+        this.cdcClientParser.setDecode64Enabled(enabled);
     }
 
 }

@@ -8,6 +8,7 @@ package com.aliyun.polardbx.binlog.canal.binlog.event;
 
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
+import lombok.Setter;
 
 /**
  * The Common-Header, documented in the table @ref Table_common_header "below", always has the same form and length
@@ -73,6 +74,7 @@ public final class LogHeader {
      * (this way, when one does SHOW SLAVE STATUS it sees the offset of the BEGIN, which is logical as rollback may
      * occur), except the COMMIT query which has its real offset.
      */
+    @Setter
     protected long logPos;
 
     /**
@@ -86,6 +88,7 @@ public final class LogHeader {
     /**
      * Number of bytes written by write() function
      */
+    @Setter
     protected int eventLen;
 
     /**

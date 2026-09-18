@@ -7,6 +7,7 @@
 package com.aliyun.polardbx.binlog.util;
 
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
+import com.alibaba.polardbx.druid.sql.ast.statement.DrdsAlterTableRebuildCleanup;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCallStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateDatabaseStatement;
@@ -15,10 +16,13 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLGrantStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableAlterFullTextIndex;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlLockTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlUnlockTablesStatement;
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.testing.BaseTest;
 import org.apache.commons.lang3.StringUtils;
@@ -26,6 +30,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import javax.sql.DataSource;
+import java.lang.reflect.Method;
 import java.sql.SQLException;
 
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
@@ -404,6 +409,180 @@ public class SQLUtilsTest extends BaseTest {
     }
 
     @Test
+    public void testSqlWithHashComment() {
+        String sql =
+            "/*DDL_ID=7481263829662302272*/\n"
+                + "# ===== hash line comment =====\n"
+                + "/*+TDDL:cmd_extra(SEQUENTIAL_CONCURRENT_POLICY=true)*/\n"
+                + "ALTER TABLE k_line_mark_1s\n"
+                + "        ADD COLUMN data_source TINYINT NOT NULL DEFAULT 0 COMMENT 'test'";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+
+        String result = SQLUtils.toSQLStringWithTrueUcase(statement);
+        Assert.assertFalse("result should be single-line after # line comment conversion: " + result,
+            result.contains("\n"));
+        Assert.assertFalse("result should not contain # line comment after conversion: " + result,
+            result.contains("# ===== hash line comment ====="));
+        Assert.assertTrue("# line comment should be converted to block comment: " + result,
+            result.contains("/* ===== hash line comment =====*/"));
+        Assert.assertTrue("ALTER TABLE should be preserved after converted block comment: " + result,
+            StringUtils.containsIgnoreCase(result, "ALTER TABLE k_line_mark_1s"));
+    }
+
+    @Test
+    public void testHyphenInSingleQuoteString() {
+        // -- 在单引号 COMMENT 字符串内，不是行注释，不应触发回退
+        String sql = "CREATE TABLE t_hyphen_in_str (id int COMMENT 'use -- for decrement', name varchar(20))";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+        String result = SQLUtils.toSQLStringWithTrueUcase(statement);
+        Assert.assertFalse("should be single-line when -- is inside single-quoted string: " + result,
+            result.contains("\n"));
+        Assert.assertTrue("COMMENT string with -- should be preserved: " + result,
+            result.contains("-- for decrement"));
+    }
+
+    @Test
+    public void testHashInSingleQuoteString() {
+        // # 在单引号 COMMENT 字符串内，不是行注释，不应触发回退
+        String sql = "CREATE TABLE t_hash_in_str (id int COMMENT 'price #1', name varchar(20))";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+        String result = SQLUtils.toSQLStringWithTrueUcase(statement);
+        Assert.assertFalse("should be single-line when # is inside single-quoted string: " + result,
+            result.contains("\n"));
+        Assert.assertTrue("COMMENT string with # should be preserved: " + result,
+            result.contains("#1"));
+    }
+
+    @Test
+    public void testHyphenInBacktickIdentifier() {
+        // -- 在反引号标识符内，不是行注释，不应触发回退
+        String sql = "CREATE TABLE `t--test` (id int, name varchar(20))";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+        String result = SQLUtils.toSQLStringWithTrueUcase(statement);
+        Assert.assertFalse("should be single-line when -- is inside backtick identifier: " + result,
+            result.contains("\n"));
+        Assert.assertTrue("backtick identifier with -- should be preserved: " + result,
+            result.contains("t--test"));
+    }
+
+    @Test
+    public void testHyphenInDoubleQuoteString() {
+        // -- 在双引号字符串内，不是行注释，不应触发回退
+        String sql = "CREATE TABLE t_hyphen_in_dq (id int COMMENT \"use -- for decrement\", name varchar(20))";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+        String result = SQLUtils.toSQLStringWithTrueUcase(statement);
+        Assert.assertFalse("should be single-line when -- is inside double-quoted string: " + result,
+            result.contains("\n"));
+    }
+
+    @Test
+    public void testEscapedQuoteWithHyphen() {
+        // 转义引号 '' 内的 -- ，不应触发回退
+        String sql = "CREATE TABLE t_escape_hyphen (id int COMMENT 'it''s -- not comment', name varchar(20))";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+        String result = SQLUtils.toSQLStringWithTrueUcase(statement);
+        Assert.assertFalse("should be single-line when -- is inside escaped quote: " + result,
+            result.contains("\n"));
+        Assert.assertTrue("escaped quote content should be preserved: " + result,
+            result.contains("-- not comment"));
+    }
+
+    @Test
+    public void testDoubleHyphenWithoutWhitespaceIsNotLineComment() {
+        // MySQL 规则要求 -- 后必须跟空白字符，--1 不是行注释
+        String sql = "SELECT 1--1";
+        SQLStatement statement = SQLUtils.parseSQLStatement(sql);
+        String result = SQLUtils.toSQLStringWithTrueUcase(statement);
+        Assert.assertFalse("-- without whitespace should not be converted to block comment: " + result,
+            result.contains("/*"));
+        Assert.assertFalse("result should be single-line: " + result, result.contains("\n"));
+    }
+
+    // --------------------------
+    // 私有方法边界测试：CDC 侧只负责识别真实行注释风险，转换由 parser 侧完成
+    // --------------------------
+
+    private static boolean invokeContainsLineComment(String sql) throws Exception {
+        Method m = SQLUtils.class.getDeclaredMethod("containsLineComment", String.class);
+        m.setAccessible(true);
+        return (Boolean) m.invoke(null, sql);
+    }
+
+    private static boolean invokeShouldFallbackForLineComment(String sql) throws Exception {
+        Method m = SQLUtils.class.getDeclaredMethod("shouldFallbackForLineComment", String.class);
+        m.setAccessible(true);
+        return (Boolean) m.invoke(null, sql);
+    }
+
+    @Test
+    public void testShouldFallbackForLineCommentSwitch() throws Exception {
+        String formattedResultWithLineComment = "-- hyphen comment\nALTER TABLE t ADD COLUMN c1 INT";
+        // 模拟 parser 漏网后的格式化结果：开关开启时，CDC 侧需要触发 prettyFormat 回退
+        mockedAppConfig.when(() -> DynamicApplicationConfig.getValue(
+            ConfigKeys.BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED)).thenReturn("true");
+        Assert.assertTrue("line comment defense should fallback when switch is enabled",
+            invokeShouldFallbackForLineComment(formattedResultWithLineComment));
+
+        // 模拟 parser 漏网后的格式化结果：开关关闭时，CDC 侧不再触发回退
+        mockedAppConfig.when(() -> DynamicApplicationConfig.getValue(
+            ConfigKeys.BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED)).thenReturn("false");
+        Assert.assertFalse("line comment defense should not fallback when switch is disabled",
+            invokeShouldFallbackForLineComment(formattedResultWithLineComment));
+    }
+
+    @Test
+    public void testShouldFallbackForLineCommentUsesDefaultTrueWhenConfigMissing() throws Exception {
+        // 配置缺失时默认安全开启；这里直接模拟 parser 漏网后的 formatted result，而不是正常 parser 转换路径
+        mockedAppConfig.when(() -> DynamicApplicationConfig.getValue(
+            ConfigKeys.BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED)).thenReturn("");
+        Assert.assertTrue("line comment defense should fallback by default when config is missing",
+            invokeShouldFallbackForLineComment("# hash comment\nALTER TABLE t ADD COLUMN c1 INT"));
+    }
+
+    @Test
+    public void testShouldFallbackForLineCommentDoesNotFallbackWithoutLineComment() throws Exception {
+        mockedAppConfig.when(() -> DynamicApplicationConfig.getValue(
+            ConfigKeys.BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED)).thenReturn("true");
+        Assert.assertFalse("line comment defense should not fallback when result has no line comment",
+            invokeShouldFallbackForLineComment("/* block comment */ ALTER TABLE t ADD COLUMN c1 INT"));
+    }
+
+    @Test
+    public void testContainsLineCommentSkipBlockComment() throws Exception {
+        String input = "/* block with -- and # inside */ ALTER TABLE t ADD COLUMN c1 INT";
+        Assert.assertFalse("containsLineComment should skip block comment content",
+            invokeContainsLineComment(input));
+    }
+
+    @Test
+    public void testContainsLineCommentDetectsHyphenAndHash() throws Exception {
+        Assert.assertTrue("should detect -- line comment",
+            invokeContainsLineComment("-- hyphen comment\nALTER TABLE t ADD COLUMN c1 INT"));
+        Assert.assertTrue("should detect # line comment",
+            invokeContainsLineComment("# hash comment\nALTER TABLE t ADD COLUMN c1 INT"));
+        Assert.assertTrue("should detect -- line comment with CRLF",
+            invokeContainsLineComment("-- hyphen comment\r\nALTER TABLE t ADD COLUMN c1 INT"));
+        Assert.assertTrue("should detect # line comment at EOF",
+            invokeContainsLineComment("ALTER TABLE t ADD COLUMN c1 INT\n# hash comment without newline"));
+    }
+
+    @Test
+    public void testContainsLineCommentSkipQuotedContent() throws Exception {
+        Assert.assertFalse("should skip -- inside single quoted string",
+            invokeContainsLineComment("CREATE TABLE t (c varchar(20) COMMENT 'use -- as text')"));
+        Assert.assertFalse("should skip # inside single quoted string",
+            invokeContainsLineComment("CREATE TABLE t (c varchar(20) COMMENT 'price #1')"));
+        Assert.assertFalse("should skip -- inside backtick identifier",
+            invokeContainsLineComment("CREATE TABLE `t--name` (id int)"));
+    }
+
+    @Test
+    public void testContainsLineCommentDoesNotTreatDoubleHyphenWithoutWhitespaceAsComment() throws Exception {
+        Assert.assertFalse("-- without following whitespace is not MySQL line comment",
+            invokeContainsLineComment("SELECT 1--1"));
+    }
+
+    @Test
     public void testSqlWithBeforeComment() {
         String sql = "#xxyyzz\n"
             + "/* //1/ */ /* //2/ */ /* //3/ */"
@@ -512,9 +691,49 @@ public class SQLUtilsTest extends BaseTest {
     }
 
     @Test
+    public void testGrantNl2Sql() {
+        String sql = "GRANT NL2SQL ON *.* TO 'your_user'@'%';";
+        SQLGrantStatement statement = parseSQLStatement(sql);
+        Assert.assertEquals(1, statement.getPrivileges().size());
+        Assert.assertEquals("NL2SQL", statement.getPrivileges().get(0).getAction().toString());
+        Assert.assertEquals("GRANT NL2SQL ON *.* TO 'your_user'@'%';", statement.toString());
+    }
+
+    @Test
+    public void testAlterTableRebuildCleanupWhere() {
+        String sql = "ALTER TABLE `t_order` REBUILD CLEANUP WHERE `gmt_modified` < '2026-08-01 00:00:00'";
+        SQLAlterTableStatement statement = parseSQLStatement(sql);
+
+        Assert.assertEquals(1, statement.getItems().size());
+        Assert.assertTrue(statement.getItems().get(0) instanceof DrdsAlterTableRebuildCleanup);
+        DrdsAlterTableRebuildCleanup rebuildCleanup =
+            (DrdsAlterTableRebuildCleanup) statement.getItems().get(0);
+        Assert.assertEquals("`gmt_modified` < '2026-08-01 00:00:00'",
+            rebuildCleanup.getCleanupPredicate().toString());
+        Assert.assertFalse(rebuildCleanup.isDryRun());
+        Assert.assertEquals("ALTER TABLE `t_order`\n"
+            + "\tREBUILD CLEANUP WHERE `gmt_modified` < '2026-08-01 00:00:00'", statement.toString());
+    }
+
+    @Test
     public void testCallColumnarSetConfig() {
         String sql = "CALL polardbx.columnar_set_config(256, 'TYPE', 'SNAPSHOT')";
         SQLCallStatement statement = parseSQLStatement(sql);
         Assert.assertEquals(statement.getProcedureName().getSimpleName(), "columnar_set_config");
+    }
+
+    @Test
+    public void test() {
+        String sql = "CREATE JAVA FUNCTION `java_udf_concat` "
+            + "RETURN_TYPE varchar(255) INPUT_TYPES int,varchar(255) CODE "
+            + "public class Java_udf_concat extends UserDefinedJavaFunction {\n"
+            + "public Object compute(Object[] args) {\n"
+            + "Integer a = (Integer) args[0];\n"
+            + "String b = (String) args[1];\n"
+            + "return \"polarx_\" + b + \"_\" + a;\n"
+            + "}\n"
+            + "}; END_CODE";
+        SQLStatement statement = parseSQLStatement(sql);
+        System.out.println(statement);
     }
 }

@@ -36,7 +36,7 @@ public class DdlTest extends RplBaseTestCase {
         }
     }
 
-    // see https://aone.alibaba-inc.com/issue/49900554
+    // see historical compatibility behavior
     @Test
     public void testBigEvent() {
         String sql = "CREATE TABLE `" + DB_NAME + "`.`" + TB_NAME + "` (\n"

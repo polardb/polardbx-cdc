@@ -44,6 +44,7 @@ import com.aliyun.polardbx.rpl.taskmeta.ExtractorConfig;
 import com.aliyun.polardbx.rpl.taskmeta.FSMMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
+import com.google.common.collect.Lists;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import lombok.Getter;
@@ -171,7 +172,7 @@ public class CdcExtractor extends BaseExtractor {
         mySqlInfo.init(connection);
     }
 
-    public LogContext providerLogContext(){
+    public LogContext providerLogContext() {
         LogContext context = new LogContext();
         context.setFormatDescription(new FormatDescriptionLogEvent(4, mySqlInfo.getBinlogChecksum()));
         context.setServerCharactorSet(mySqlInfo.getServerCharactorSet());
@@ -229,7 +230,17 @@ public class CdcExtractor extends BaseExtractor {
 
                     shouldIgnore = false;
 
-                    handle.handle(event, logPosition);
+                    // 对压缩事务进行解压，并处理它们
+                    if (event.getHeader().getType() == LogEvent.TRANSACTION_PAYLOAD_EVENT) {
+                        logger.info("Start to parse TRANSACTION_PAYLOAD_EVENT in {} at {}", position.getFileName(),
+                            position.getPosition());
+                        List<LogEvent> eventList = decoder.processIterateDecode(event, context);
+                        for (LogEvent e : eventList) {
+                            handle.handle(e, context.getLogPosition());
+                        }
+                    } else {
+                        handle.handle(event, context.getLogPosition());
+                    }
                     if (handle.interrupt()) {
                         logger.warn(" handler interrupt");
                         break;
@@ -239,6 +250,7 @@ public class CdcExtractor extends BaseExtractor {
                 logger.error("event process or end run : " + run);
             } catch (Throwable e) {
                 ex = e;
+                logger.error("cdc extractor exception: ", ex);
             } finally {
                 handle.onEnd();
                 StatisticalProxy.getInstance().triggerAlarmSync(MonitorType.IMPORT_INC_ERROR,
@@ -253,7 +265,7 @@ public class CdcExtractor extends BaseExtractor {
         logger.info("start cdc extractor start success");
     }
 
-    public boolean isCrc32(){
+    public boolean isCrc32() {
         return mySqlInfo.getBinlogChecksum() == LogEvent.BINLOG_CHECKSUM_ALG_CRC32;
     }
 
@@ -267,7 +279,7 @@ public class CdcExtractor extends BaseExtractor {
         }
 
         Map<String, String> ext = new HashMap<>();
-        if (isCrc32()){
+        if (isCrc32()) {
             ext.put("master_binlog_checksum", "CRC32");
         }
         StreamObserverLogFetcher logBuffer = providerLogFetcher();

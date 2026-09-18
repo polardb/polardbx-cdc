@@ -7,11 +7,14 @@
 package com.aliyun.polardbx.rpl.applier;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.polardbx.druid.sql.ast.SQLObject;
+import com.alibaba.polardbx.druid.sql.ast.SQLPartition;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsExtractHotKey;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsMergePartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsSplitHotKey;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsSplitPartition;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddColumn;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddIndex;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddPartition;
@@ -35,10 +38,12 @@ import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlPrimaryKey;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.MySqlUnique;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.DrdsAlterTablePartition;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableAlterFullTextIndex;
+import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAnalyzeStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateRoleStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateUserStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlTableIndex;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DBMSEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.dbms.DefaultQueryLog;
@@ -100,11 +105,13 @@ import java.util.stream.Collectors;
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalize;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_ASYNC_DDL_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_ASYNC_DDL_THRESHOLD_IN_SECOND;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_ASYNC_EXTERNALIZE_DDL_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_APPLY_COLUMNAR_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_RETRY_INTERVAL_MILLS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_RETRY_MAX_COUNT;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_WAIT_ALIGN_INTERVAL_MILLS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_INC_DDL_SKIP_MISS_LOCAL_PARTITION_ERROR;
+import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_INC_DDL_SKIP_TTL_AUTO_PARTITION_ERROR;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.canal.LogEventUtil.SYNC_POINT_PROCEDURE_NAME;
@@ -113,7 +120,7 @@ import static com.aliyun.polardbx.binlog.util.CommonUtils.PRIVATE_DDL_TSO_PREFIX
 import static com.aliyun.polardbx.binlog.util.CommonUtils.extractPolarxOriginSql;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.removeSomeHints;
-import static com.aliyun.polardbx.rpl.applier.SqlContextExecutor.execUpdate;
+import static com.aliyun.polardbx.rpl.applier.SqlContextExecutor.execDdl;
 import static com.aliyun.polardbx.rpl.common.RplConstants.ASYNC_DDL_HINTS;
 
 /**
@@ -122,6 +129,17 @@ import static com.aliyun.polardbx.rpl.common.RplConstants.ASYNC_DDL_HINTS;
  */
 @Slf4j
 public class DdlApplyHelper {
+
+    /**
+     * 分区DDL操作类型，用于区分 ADD PARTITION 和 DROP PARTITION 以便与错误信息严格关联。
+     */
+    @VisibleForTesting
+    enum PartitionDdlType {
+        NONE,           // 非 ADD/DROP PARTITION DDL
+        ADD_PARTITION,  // ALTER TABLE ADD PARTITION / ADD SUBPARTITION
+        DROP_PARTITION  // ALTER TABLE DROP PARTITION / DROP SUBPARTITION
+    }
+
     /**
      * Constants
      */
@@ -157,6 +175,17 @@ public class DdlApplyHelper {
         sqlContext.setDdlParallelSeq(queryLog.getParallelSeq());
         String originSql = DdlApplyHelper.getOriginSql(queryLog.getQuery());
         String sql = StringUtils.isNotBlank(originSql) ? originSql : queryLog.getQuery();
+
+        // Strip leading comments before TDDL hint when enabled
+        if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_DDL_STRIP_LEADING_COMMENTS)) {
+            int tddlIdx = StringUtils.indexOfIgnoreCase(sql, "/*+TDDL:");
+            if (tddlIdx > 0) {
+                log.warn("stripped leading comments before TDDL hint for downstream DDL apply, "
+                    + "original length: {}, stripped from index: {}", sql.length(), tddlIdx);
+                sql = sql.substring(tddlIdx);
+            }
+        }
+
         sql = removeSomeHints(sql);
 
         // process for async ddl
@@ -238,7 +267,7 @@ public class DdlApplyHelper {
         try {
             conn = dataSource.getConnection();
             stmt = conn.prepareStatement(SQL_SHOW_FULL_DDL);
-            rs = stmt.executeQuery(SQL_SHOW_FULL_DDL);
+            rs = stmt.executeQuery();
             while (rs.next()) {
                 Long ddlJobId = rs.getLong(COLUMN_DEF_JOB_ID);
                 String ddlJobState = rs.getString(COLUMN_DEF_STATE);
@@ -271,6 +300,7 @@ public class DdlApplyHelper {
                 throw new InterruptedException();
             }
 
+            // todo by jiyue fix 一下这里的 drop db
             if (checkCreateOrDropDatabaseRunning(dataSource, token, tso, schemaName)) {
                 StatisticalProxy.getInstance().heartbeat();
                 Thread.sleep(1000);
@@ -313,6 +343,13 @@ public class DdlApplyHelper {
     }
 
     public static String tryAttachAsyncDdlHints(String sql, long execTime) {
+        if (isExternalizeDdl(sql)) {
+            // MCE can pause for manual confirmation. Keep this DDL on RPL's async path so the
+            // applier releases subsequent DML after submission and never enters the sync path
+            // that automatically continues a PAUSED job.
+            return getBoolean(RPL_ASYNC_EXTERNALIZE_DDL_ENABLED) ? ASYNC_DDL_HINTS + sql : sql;
+        }
+
         boolean enableAsyncDdl = getBoolean(RPL_ASYNC_DDL_ENABLED);
         long asyncDdlTimeThreshold = DynamicApplicationConfig.getLong(RPL_ASYNC_DDL_THRESHOLD_IN_SECOND);
         if (!enableAsyncDdl || execTime < asyncDdlTimeThreshold) {
@@ -350,6 +387,34 @@ public class DdlApplyHelper {
         }
 
         return sql;
+    }
+
+    private static boolean isExternalizeDdl(SQLStatement stmt) {
+        if (!(stmt instanceof SQLAlterTableStatement)) {
+            return false;
+        }
+        for (SQLAlterTableItem item : ((SQLAlterTableStatement) stmt).getItems()) {
+            if (item instanceof MySqlAlterTableModifyColumn) {
+                SQLColumnDefinition column = ((MySqlAlterTableModifyColumn) item).getNewColumnDefinition();
+                if (column != null && column.isExternalize()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isExternalizeDdl(String sql) {
+        if (!StringUtils.containsIgnoreCase(sql, "EXTERNALIZE")) {
+            return false;
+        }
+        try {
+            SQLStatement stmt = SQLUtils.parseSQLStatement(sql);
+            return isExternalizeDdl(stmt);
+        } catch (Throwable t) {
+            log.error("failed to detect externalize ddl, {}.", sql, t);
+            return false;
+        }
     }
 
     private static boolean isAlterTableWithIndex(SQLAlterTableItem item) {
@@ -419,6 +484,7 @@ public class DdlApplyHelper {
                         sqlContext.setSyncPoint(true);
                     }
                 }
+                break;
             default:
                 break;
             }
@@ -523,9 +589,20 @@ public class DdlApplyHelper {
                 DbTaskMetaManager.addDdl(ddl);
             }
         } catch (DataIntegrityViolationException e) {
-            // do nothing
-            // 通过uk来实现回溯后跳过已执行的ddl
-            // 如果需要重新执行，需要reset slave清空ddl执行记录
+            // UK冲突说明之前已处理过同一ddlTso，读取旧记录获取原始token
+            // 确保后续 checkIfDdlRunning/checkIfDdlSucceed 用旧token匹配CN上的DDL Job
+            RplDdl existingDdl = DbTaskMetaManager.getDdl(
+                TaskContext.getInstance().getStateMachineId(), ddlTso);
+            if (existingDdl != null && StringUtils.isNotBlank(existingDdl.getToken())) {
+                log.info("检测到 DDL 重复处理，使用旧 token: {}, ddlTso: {}, newToken: {}",
+                    existingDdl.getToken(), ddlTso, token);
+                // 将sqlContext的SQL替换为旧记录中的DDL语句（包含旧token），
+                // 确保后续若需重新发送DDL到CN，SQL中嵌入的也是旧token
+                sqlContext.setSql(existingDdl.getDdlStmt());
+            } else {
+                log.warn("DDL重复处理但未找到旧记录或旧token为空, ddlTso: {}, fsmId: {}",
+                    ddlTso, TaskContext.getInstance().getStateMachineId());
+            }
         } catch (Throwable t) {
             log.error("insert rpl ddl to database error!", t);
             throw t;
@@ -619,7 +696,19 @@ public class DdlApplyHelper {
             );
         }
 
-        return DbTaskMetaManager.getDdl(TaskContext.getInstance().getStateMachineId(), ddlTso);
+        RplDdl rplDdl = DbTaskMetaManager.getDdl(TaskContext.getInstance().getStateMachineId(), ddlTso);
+        restorePersistedExternalizeAsyncMode(sqlContext, rplDdl);
+        return rplDdl;
+    }
+
+    @VisibleForTesting
+    static void restorePersistedExternalizeAsyncMode(SqlContext sqlContext, RplDdl rplDdl) {
+        if (rplDdl != null && isExternalizeDdl(rplDdl.getDdlStmt())) {
+            // The first submission mode is persisted with the DDL record. Reuse it during recovery:
+            // recomputing after a config change could route an already-submitted async MCE job into
+            // the sync path, which automatically continues a PAUSED job.
+            sqlContext.setAsyncDdl(Boolean.TRUE.equals(rplDdl.getAsyncFlag()));
+        }
     }
 
     @SneakyThrows
@@ -693,6 +782,32 @@ public class DdlApplyHelper {
                 }
             }
 
+            // 当主备实例均开启了TTL能力时，两侧会各自独立执行TTL触发的ADD/DROP PARTITION DDL。
+            // CDC将主库的此类DDL同步到备库时，若备库已自行执行，会产生幂等冲突报错（分区已存在 or 分区不存在）。
+            // 开启此开关后，对于TTL表的 ADD/DROP PARTITION 类型DDL，若报错符合幂等冲突模式，则直接跳过。
+            // 三重校验：1. DDL类型为ADD/DROP PARTITION  2. 错误与DDL类型严格匹配  3. 目标表确实是TTL表
+            if (DynamicApplicationConfig.getBoolean(RPL_INC_DDL_SKIP_TTL_AUTO_PARTITION_ERROR)) {
+                if (isTtlAutoPartitionConflictError(sqlContext.getSql(), sqlContext.getException())
+                    && isTtlTable(dataSource, sqlContext.getDstSchema(), sqlContext.getDstTable())) {
+                    log.warn("skip ttl auto partition conflict error for sql: {}, tso: {}, error: {}",
+                        sqlContext.getSql(), tso, sqlContext.getException().getMessage());
+                    markDdlSucceed(tso, asyncDdl);
+                    return;
+                }
+            }
+
+            // REVOKE 语句因角色未授予而失败时，尝试添加 IF EXISTS 后重试
+            // 不预先添加 IF EXISTS 是因为该语法在老版本数据库中不支持
+            if (isRoleNotGrantedError(sqlContext.getException())) {
+                String sql = sqlContext.getSql();
+                if (!sql.toLowerCase().contains("if exists")) {
+                    String newSql = sql.replaceAll("(?i)revoke", "revoke if exists");
+                    log.warn("revoke role not granted error detected, will retry with IF EXISTS, "
+                        + "original sql: {}, modified sql: {}, tso: {}", sql, newSql, tso);
+                    sqlContext.setSql(newSql);
+                }
+            }
+
             if (count < retryMaxCount) {
                 retry = true;
                 Thread.sleep(DynamicApplicationConfig.getInt(RPL_DDL_RETRY_INTERVAL_MILLS));
@@ -705,6 +820,168 @@ public class DdlApplyHelper {
 
     public static boolean isMissLocalPartitionError(Throwable e) {
         return e != null && e.getMessage().matches(".*server error by local partition \\w+ doesn't exist.*");
+    }
+
+    /**
+     * 判断当前异常是否为TTL自动增删分区幂等冲突错误。
+     * <p>
+     * 场景：主备库均开启了TTL能力，TTL调度任务在主库和备库各自独立执行ADD/DROP PARTITION DDL。
+     * CDC将主库的DDL同步到备库时，若备库已自行执行过，会出现幂等冲突错误：
+     * - ADD PARTITION 时：Partition name: pXXXX already exists. Please use another name.
+     * - DROP PARTITION 时：Partition group 'pXXXX' doesn't exist.
+     * <p>
+     * 为保证严谨性，同时需要满足以下两个条件，且DDL类型与错误类型必须严格对应：
+     * 1. DDL SQL 属于 ALTER TABLE ... ADD PARTITION（或子分区）类型，且报错为分区已存在；
+     * 2. 或 DDL SQL 属于 ALTER TABLE ... DROP PARTITION（或子分区）类型，且报错为分区不存在。
+     *
+     * @param ddlSql 当前DDL语句（可能包含 POLARX_ORIGIN_SQL 头部）
+     * @param e 当前异常
+     * @return 是否为TTL自动分区幂等冲突错误
+     */
+    public static boolean isTtlAutoPartitionConflictError(String ddlSql, Throwable e) {
+        if (e == null || e.getMessage() == null) {
+            return false;
+        }
+        // 识别SQL操作类型：必须是 ADD PARTITION 或 DROP PARTITION，并区分具体类型
+        PartitionDdlType type = detectPartitionDdlType(ddlSql);
+        // 严格关联：ADD PARTITION 只匹配"分区已存在"错误，DROP PARTITION 只匹配"分区不存在"错误
+        switch (type) {
+        case ADD_PARTITION:
+            return isPartitionAlreadyExistsError(e);
+        case DROP_PARTITION:
+            return isPartitionGroupNotExistsError(e);
+        default:
+            return false;
+        }
+    }
+
+    /**
+     * 识别 SQL 的分区DDL操作类型：ADD PARTITION、DROP PARTITION 或 NONE。
+     * 注意：DDL语句可能包含 POLARX_ORIGIN_SQL 屏蔽头，需要识别原始SQL。
+     * 同时覆盖子分区操作（ADD/DROP SUBPARTITION），因为 Druid 将其解析为
+     * SQLAlterTableAddPartition/SQLAlterTableDropPartition（isSubPartition=true）。
+     * <p>
+     * 仅识别操作单个分区或子分区的DDL。同时操作多个分区/子分区时返回 NONE，
+     * 因为部分分区可能冲突而其余不冲突，整条DDL不能安全跳过。
+     */
+    @VisibleForTesting
+    static PartitionDdlType detectPartitionDdlType(String ddlSql) {
+        if (StringUtils.isBlank(ddlSql)) {
+            return PartitionDdlType.NONE;
+        }
+        try {
+            // 识别原始SQL（去除 POLARX_ORIGIN_SQL 屏蔽信息）
+            String originSql = getOriginSql(ddlSql);
+            String sqlToParse = StringUtils.isNotBlank(originSql) ? originSql : ddlSql;
+            SQLStatement stmt = parseSQLStatement(sqlToParse);
+            if (!(stmt instanceof SQLAlterTableStatement)) {
+                return PartitionDdlType.NONE;
+            }
+            SQLAlterTableStatement alterTable = (SQLAlterTableStatement) stmt;
+            List<SQLAlterTableItem> items = alterTable.getItems();
+            // 必须恰好一个操作项，多项混合不处理
+            if (items == null || items.size() != 1) {
+                return PartitionDdlType.NONE;
+            }
+            SQLAlterTableItem item = items.get(0);
+            if (item instanceof SQLAlterTableAddPartition) {
+                SQLAlterTableAddPartition addPart = (SQLAlterTableAddPartition) item;
+                if (addPart.isSubPartition()) {
+                    // ADD SUBPARTITION: getPartitions() 返回父分区列表，每个父分区内有子分区定义
+                    // 要求恰好1个父分区且其中恰好包含1个子分区
+                    if (addPart.getPartitions().size() != 1) {
+                        return PartitionDdlType.NONE;
+                    }
+                    SQLObject parent = addPart.getPartitions().get(0);
+                    if (parent instanceof SQLPartition
+                        && ((SQLPartition) parent).getSubPartitions().size() != 1) {
+                        return PartitionDdlType.NONE;
+                    }
+                } else {
+                    // ADD PARTITION: 要求恰好1个分区定义
+                    if (addPart.getPartitions().size() != 1) {
+                        return PartitionDdlType.NONE;
+                    }
+                }
+                return PartitionDdlType.ADD_PARTITION;
+            } else if (item instanceof SQLAlterTableDropPartition) {
+                SQLAlterTableDropPartition dropPart = (SQLAlterTableDropPartition) item;
+                // DROP PARTITION/SUBPARTITION: 要求恰好1个分区名
+                if (dropPart.getPartitions().size() != 1) {
+                    return PartitionDdlType.NONE;
+                }
+                return PartitionDdlType.DROP_PARTITION;
+            }
+            return PartitionDdlType.NONE;
+        } catch (Throwable t) {
+            log.warn("failed to parse ddl sql to detect partition ddl type: {}", ddlSql, t);
+            return PartitionDdlType.NONE;
+        }
+    }
+
+    /**
+     * 判断错误是否为分区已存在错误。
+     * 对应 ADD PARTITION 时备库已存在该分区的冲突场景。
+     * 错误信息格式：[ERR_PARTITION_MANAGEMENT] Partition name: pXXXX already exists. Please use another name.
+     */
+    @VisibleForTesting
+    static boolean isPartitionAlreadyExistsError(Throwable e) {
+        return e != null && e.getMessage() != null
+            && e.getMessage().matches(".*\\[ERR_PARTITION_MANAGEMENT\\].*Partition name: \\S+ already exists.*");
+    }
+
+    /**
+     * 判断错误是否为分区不存在错误。
+     * 对应 DROP PARTITION 时备库该分区已删除的冲突场景。
+     * 错误信息格式：[ERR_PARTITION_MANAGEMENT] Partition group 'pXXXX' doesn't exist.
+     */
+    @VisibleForTesting
+    static boolean isPartitionGroupNotExistsError(Throwable e) {
+        return e != null && e.getMessage() != null
+            && (e.getMessage().matches(".*\\[ERR_PARTITION_MANAGEMENT\\].*Partition group '\\S+' doesn't exist.*")
+            || (e.getMessage().matches(".*\\[ERR_PARTITION_MANAGEMENT\\].*partition '\\S+' doesn't exist.*")));
+    }
+
+    /**
+     * 判断目标库上的指定表是否为 TTL 表。
+     * 通过在目标库执行 SHOW CREATE TABLE 获取建表语句，解析后检查是否包含 TTL 表选项。
+     * <p>
+     * 该方法仅在已确认为分区幂等冲突后调用（调用频率极低），失败时返回 false（保守策略：不跳过DDL）。
+     */
+    @VisibleForTesting
+    static boolean isTtlTable(DataSource dataSource, String schema, String tableName) {
+        if (StringUtils.isBlank(schema) || StringUtils.isBlank(tableName)) {
+            return false;
+        }
+        try (Connection conn = dataSource.getConnection();
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(
+                String.format("SHOW CREATE TABLE `%s`.`%s`",
+                    CommonUtils.escape(schema), CommonUtils.escape(tableName)))) {
+            if (rs.next()) {
+                String createTableSql = rs.getString(2);
+                if (StringUtils.isNotBlank(createTableSql)) {
+                    SQLStatement sqlStatement = parseSQLStatement(createTableSql);
+                    if (sqlStatement instanceof SQLCreateTableStatement) {
+                        SQLCreateTableStatement createTable = (SQLCreateTableStatement) sqlStatement;
+                        return createTable.getTableOptions().stream()
+                            .anyMatch(opt -> opt.getTarget() != null
+                                && StringUtils.equalsIgnoreCase(opt.getTarget().toString(), "TTL"));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("failed to check if table is TTL: `{}`.`{}`, will not skip DDL", schema, tableName, e);
+        }
+        return false;
+    }
+
+    /**
+     * 判断异常是否为角色未授予错误（ERR_ROLE_NOT_GRANTED / TDDL-5118）
+     * 该错误在 REVOKE 语句撤销一个未授予的角色时发生
+     */
+    public static boolean isRoleNotGrantedError(Throwable e) {
+        return e != null && e.getMessage() != null && e.getMessage().contains("ERR_ROLE_NOT_GRANTED");
     }
 
     private static boolean executeDdlInternalAsync(DataSource dataSource, SqlContext sqlContext,
@@ -723,7 +1000,7 @@ public class DdlApplyHelper {
         } else {
             if (!isRunning) {
                 try (Connection conn = dataSource.getConnection()) {
-                    execUpdate(conn, sqlContext);
+                    execDdl(conn, sqlContext);
                 } catch (Exception e) {
                     log.error("ddl execute runs into exception: ", e);
                     sqlContext.exception = e;
@@ -814,7 +1091,7 @@ public class DdlApplyHelper {
         } else {
             try (Connection conn = dataSource.getConnection()) {
                 long startTime = System.currentTimeMillis();
-                execUpdate(conn, sqlContext);
+                execDdl(conn, sqlContext);
                 long endTime = System.currentTimeMillis();
                 StatMetrics.getInstance().addApplyCount(1);
                 StatMetrics.getInstance().addRt(endTime - startTime);
@@ -842,7 +1119,7 @@ public class DdlApplyHelper {
             try {
                 conn = dataSource.getConnection();
                 stmt = conn.createStatement();
-                stmt.executeUpdate(String.format(SQL_CONTINUE_DDL, ddlJobInfo.getJobId()));
+                stmt.execute(String.format(SQL_CONTINUE_DDL, ddlJobInfo.getJobId()));
             } catch (Throwable e) {
                 log.error("try continue paused ddl failed , tso {}, ddl job info {}!", tso, ddlJobInfo, e);
             } finally {
@@ -932,6 +1209,25 @@ public class DdlApplyHelper {
             }
         }
         return false;
+    }
+
+    /**
+     * 判断 DDL 是否仅包含 ADD COLUMN 操作（迁移链路 DDL 白名单）
+     */
+    public static boolean isOnlyAddColumn(SQLStatement statement) {
+        if (!(statement instanceof SQLAlterTableStatement)) {
+            return false;
+        }
+        SQLAlterTableStatement alterTable = (SQLAlterTableStatement) statement;
+        if (alterTable.getItems().isEmpty()) {
+            return false;
+        }
+        for (SQLAlterTableItem item : alterTable.getItems()) {
+            if (!(item instanceof SQLAlterTableAddColumn)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Pair<Boolean, Boolean> tryRemoveColumnarIndexForAlterTable(
@@ -1062,7 +1358,7 @@ public class DdlApplyHelper {
         return (stmt instanceof SQLCreateDatabaseStatement) || (stmt instanceof SQLDropDatabaseStatement);
     }
 
-    private static boolean isDropDatabase(String ddlSql) {
+    static boolean isDropDatabase(String ddlSql) {
         SQLStatement stmt = parseSQLStatement(ddlSql);
         return stmt instanceof SQLDropDatabaseStatement;
     }

@@ -42,12 +42,12 @@ import com.aliyun.polardbx.binlog.domain.po.RplDdl;
 import com.aliyun.polardbx.binlog.domain.po.RplDdlSub;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.jvm.JvmUtils;
-import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.SQLUtils;
 import com.aliyun.polardbx.rpl.common.TaskContext;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import lombok.Data;
+import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -62,6 +62,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -74,6 +75,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -88,7 +90,6 @@ import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getInt;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.canal.LogEventUtil.SYNC_POINT_PROCEDURE_NAME;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
-import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.DependencyCheckResult.OBJ_TYPE_FUNCTION;
 import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.DependencyCheckResult.OBJ_TYPE_SEQ;
 import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.DependencyCheckResult.OBJ_TYPE_TABLE;
 import static com.aliyun.polardbx.rpl.common.LogUtil.getSkipDdlLogger;
@@ -110,7 +111,9 @@ public class ParallelSchemaApplier {
     private final ConcurrentHashMap<String, AtomicBoolean> schemaFirstDdlFlags;
     private final ConcurrentHashMap<String, AtomicBoolean> tableFirstDdlFlags;
     private final ConcurrentHashMap<String, SchemaChannel> schemaChannels;
+    @Getter
     private final Semaphore schemaChannelSemaphore;
+    @Getter
     private final AtomicReference<Throwable> schemaChannelError;
     private final Statistic statistic;
     private String lastFlushedPosition;
@@ -184,7 +187,8 @@ public class ParallelSchemaApplier {
                 String originalDdlSql = DdlApplyHelper.getOriginSql(queryLog.getQuery());
 
                 if (StringUtils.equalsAnyIgnoreCase(schemaName, "cdc_token_db")
-                    || isCrossDatabase(originalDdlSql, schemaName) || isSyncPoint(originalDdlSql, schemaName)) {
+                    || isCrossDatabase(originalDdlSql, schemaName) || isSyncPoint(originalDdlSql, schemaName)
+                    || isFunctionDdl(originalDdlSql)) {
                     log.warn("meet a serial executing ddl sql {}, with schema {} ", originalDdlSql, schemaName);
 
                     // flush previous events
@@ -414,7 +418,7 @@ public class ParallelSchemaApplier {
             if (oldUsedRatio < 0.7 || totalRemaining < 524288) {
                 Map.Entry<String, List<DBMSEvent>> entry = iterator.next();
                 SchemaChannel schemaChannel = schemaChannels.computeIfAbsent(entry.getKey(), SchemaChannel::new);
-                schemaChannel.events.add(entry.getValue());
+                schemaChannel.add(entry.getValue());
                 if (log.isDebugEnabled()) {
                     log.debug("group events is put to buffer, with batch id " + batchId);
                 }
@@ -434,7 +438,7 @@ public class ParallelSchemaApplier {
                 }
 
                 Optional<SchemaChannel> optional =
-                    schemaChannels.values().stream().filter(c -> !c.events.isEmpty()).findAny();
+                    schemaChannels.values().stream().filter(c -> !c.isEmpty()).findAny();
                 if (!optional.isPresent()) {
                     schemaChannels.values().forEach(c -> c.close(false));
                     schemaChannels.clear();
@@ -494,7 +498,7 @@ public class ParallelSchemaApplier {
 
     private void tryRemoveTimeOutSchemaChannel(String schemaName) {
         SchemaChannel channel = schemaChannels.get(schemaName);
-        if (System.currentTimeMillis() - channel.lastExecuteTime > 60000 && channel.events.isEmpty()) {
+        if (System.currentTimeMillis() - channel.lastExecuteTime > 60000 && channel.isEmpty()) {
             channel.close(false);
             schemaChannels.remove(channel.getSchemaName());
         }
@@ -812,7 +816,8 @@ public class ParallelSchemaApplier {
         if (sqlStatement instanceof MySqlCreateTableStatement && drdsModeDatabase) {
             checkDependencyForCreateTable((MySqlCreateTableStatement) sqlStatement, result);
         } else if (sqlStatement instanceof SQLDropTableStatement && drdsModeDatabase) {
-            checkDependencyForDropTable((SQLDropTableStatement) sqlStatement, result);
+            // see https://aliyuque.antfin.com/coronadb/knddog/lup6itm9wm31sy4l
+            // checkDependencyForDropTable((SQLDropTableStatement) sqlStatement, result);
         } else if (sqlStatement instanceof SQLAlterTableStatement && drdsModeDatabase) {
             checkDependencyForAlterTable((SQLAlterTableStatement) sqlStatement, result, ddlSql);
         } else if (sqlStatement instanceof SQLCreateIndexStatement && drdsModeDatabase) {
@@ -829,8 +834,6 @@ public class ParallelSchemaApplier {
             checkDependencyForTruncateTable((SQLTruncateStatement) sqlStatement, result);
         } else if (sqlStatement instanceof SQLAnalyzeTableStatement) {
             checkDependencyForAnalyzeTable((SQLAnalyzeTableStatement) sqlStatement, result);
-        } else {
-            checkDependencyForRandomUdfTest(ddlSql, result);
         }
 
         // omc带index的表，并发执行会有ddl死锁问题，将其放入一个队列
@@ -959,21 +962,14 @@ public class ParallelSchemaApplier {
         }
     }
 
-    private void checkDependencyForRandomUdfTest(String sql, DependencyCheckResult result) {
-        // 实验室特殊逻辑，尽量提升并发度，减少单库承载的ddl数量
-        // 参见CN测试代码：com.alibaba.polardbx.qatest.dml.sharding.basecrud.RandomUdfTest
+    static boolean isFunctionDdl(String sql) {
         SQLStatement statement = SQLUtils.parseSQLStatement(sql);
-        if ((statement instanceof SQLCreateFunctionStatement
+
+        return ((statement instanceof SQLCreateFunctionStatement
             || statement instanceof SQLDropFunctionStatement
             || statement instanceof SQLCreateJavaFunctionStatement
             || statement instanceof SQLDropJavaFunctionStatement
-            || statement instanceof SQLAlterFunctionStatement) &
-            StringUtils.containsIgnoreCase(sql, "random_udf_test_")) {
-            String functionName = getFunctionName(statement);
-            result.setParallelPossibility(true);
-            result.setObjName(functionName);
-            result.setObjType(OBJ_TYPE_FUNCTION);
-        }
+            || statement instanceof SQLAlterFunctionStatement));
     }
 
     @NotNull
@@ -1077,12 +1073,13 @@ public class ParallelSchemaApplier {
         }
     }
 
-    @Data
     public class SchemaChannel {
-
+        @Getter
         private final String schemaName;
         private final ConcurrentLinkedQueue<List<DBMSEvent>> events;
         private final ExecutorService executorService;
+        private final AtomicInteger count;
+        @Getter
         private volatile String position = "";
         private volatile long lastExecuteTime = System.currentTimeMillis();
 
@@ -1091,51 +1088,73 @@ public class ParallelSchemaApplier {
             this.events = new ConcurrentLinkedQueue<>();
             this.executorService = Executors.newSingleThreadExecutor(
                 new ThreadFactoryBuilder().setNameFormat("schema-channel-executor-" + schemaName).build());
+            this.count = new AtomicInteger(0);
 
             this.executorService.submit(() -> {
+                LinkedList<DBMSEvent> batch = new LinkedList<>();
+
                 while (true) {
                     if (events.peek() == null) {
                         try {
-                            Thread.sleep(1000);
+                            executeBatch(batch);
+                            Thread.sleep(10);
                             continue;
                         } catch (InterruptedException e) {
                             break;
                         }
                     }
 
-                    try {
-                        schemaChannelSemaphore.acquire();
-                        List<DBMSEvent> dbmsEvents = events.peek();
+                    List<DBMSEvent> dbmsEvents = events.poll();
+                    batch.addAll(dbmsEvents);
 
-                        SchemaExecutor schemaExecutor =
-                            new SchemaExecutor(schemaName, dbmsEvents, p -> this.position = p);
-                        schemaExecutor.call();
-
-                        lastExecuteTime = System.currentTimeMillis();
-                        position = dbmsEvents.get(dbmsEvents.size() - 1).getPosition();
-                        events.poll();
-                    } catch (Throwable t) {
-                        schemaChannelError.set(t);
-                        log.error("Fatal error in schema channel {}", schemaName, t);
-                        break;
-                    } finally {
-                        schemaChannelSemaphore.release();
+                    if (batch.size() >= 512) {
+                        executeBatch(batch);
                     }
                 }
             });
         }
 
-        public int remaining() {
-            Iterator<List<DBMSEvent>> iterator = events.iterator();
-            int count = 0;
-            while (iterator.hasNext()) {
-                count += iterator.next().size();
+        @SneakyThrows
+        public void executeBatch(LinkedList<DBMSEvent> batch) {
+            if (batch.isEmpty()) {
+                return;
             }
-            return count;
+
+            try {
+                schemaChannelSemaphore.acquire();
+
+                SchemaExecutor schemaExecutor = new SchemaExecutor(schemaName, batch, p -> this.position = p);
+                schemaExecutor.call();
+
+                lastExecuteTime = System.currentTimeMillis();
+                position = batch.getLast().getPosition();
+                count.addAndGet(-batch.size());
+
+            } catch (Throwable t) {
+                schemaChannelError.set(t);
+                log.error("Fatal error in schema channel {}", schemaName, t);
+                throw t;
+            } finally {
+                schemaChannelSemaphore.release();
+                batch.clear();
+            }
+        }
+
+        public void add(List<DBMSEvent> events) {
+            this.events.add(events);
+            this.count.addAndGet(events.size());
+        }
+
+        public int remaining() {
+            return this.count.get();
+        }
+
+        public boolean isEmpty() {
+            return this.count.get() == 0;
         }
 
         public void close(boolean force) {
-            if (!force && !events.isEmpty()) {
+            if (!force && !isEmpty()) {
                 throw new PolardbxException("can`t close schema channel, because events buffer is not empty");
             }
             this.executorService.shutdownNow();

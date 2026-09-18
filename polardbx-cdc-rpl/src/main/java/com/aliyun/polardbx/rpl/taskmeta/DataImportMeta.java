@@ -34,6 +34,8 @@ public class DataImportMeta {
      */
     private List<PhysicalMeta> backFlowMetaList;
 
+    private PhysicalMeta logicalMeta;
+
     /**
      * for full data extraction
      */
@@ -80,6 +82,8 @@ public class DataImportMeta {
      * group name of back flow tasks, empty means use main stream
      */
     private String groupName;
+
+    private boolean needHeartbeat;
 
     /**
      * physical info
@@ -160,6 +164,7 @@ public class DataImportMeta {
         private long dstServerId;
         private String ignoreServerIds;
         private ValidationTypeEnum type;
+        private boolean sampleFromSrc;
 
         private Set<String> srcLogicalDbList;
         private Map<String, String> dbMapping;

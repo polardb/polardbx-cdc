@@ -17,6 +17,14 @@ import org.junit.Test;
 public class DDLExtInfoTest extends BaseTest {
 
     @Test
+    public void testExternalColumnDdlFlag() {
+        DDLExtInfo extInfo = DDLExtInfo.parseExtInfo("{\"externalColumnDdl\":true}");
+        Assert.assertEquals(Boolean.TRUE, extInfo.getExternalColumnDdl());
+        extInfo.setExternalColumnDdl(false);
+        Assert.assertEquals(Boolean.FALSE, extInfo.getExternalColumnDdl());
+    }
+
+    @Test
     public void testOriginalDdl() {
         String extStr = "{\"createSql4PhyTable\":\"\",\"gsi\":true,"
             + "\"orginalDdl\":\"alter table `jiyuetest2` add global index g_i_1(a,b,c) partition by key(a) partitions 3\",\"taskId\":1625938869717319684}";

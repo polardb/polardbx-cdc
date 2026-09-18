@@ -47,7 +47,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_ID;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_IGNORE_APPLY_ERROR;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_META_EXPIRE_TIME_MINUTES;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_META_MAX_SIZE;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.buildCreateLikeSql;
@@ -59,6 +59,7 @@ import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTableMeta {
     private static final Logger logger = LoggerFactory.getLogger(PolarDbXStorageTableMeta.class);
     private static final int PAGE_SIZE = 200;
+    private static final String DEFINER_PREFIX = "create definer";
 
     private final BinlogPhyDdlHistoryService phyDdlHistoryService =
         SpringContextHolder.getObject(BinlogPhyDdlHistoryService.class);
@@ -72,12 +73,13 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
     private long applyHistoryCostTime = -1;
     private long queryDdlHistoryCostTime = -1;
     private long queryDdlHistoryCount = -1;
+    private final boolean labEnv;
 
     public PolarDbXStorageTableMeta(String storageInstId, PolarDbXLogicTableMeta polarDbXLogicTableMeta,
                                     TopologyManager topologyManager, String dnVersion) {
         super(logger, CdcSchemaStoreProvider.getInstance(),
             DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_MAX_SIZE),
-            DynamicApplicationConfig.getInt(META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES),
+            DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_EXPIRE_TIME_MINUTES),
             DynamicApplicationConfig.getBoolean(META_BUILD_IGNORE_APPLY_ERROR));
         this.storageInstId = storageInstId;
         this.polarDbXLogicTableMeta = polarDbXLogicTableMeta;
@@ -85,6 +87,7 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
         this.dnVersion = dnVersion;
         boolean isMySQL8 = StringUtils.startsWith(dnVersion, "8");
         setMySql8(isMySQL8);
+        this.labEnv = DynamicApplicationConfig.getBoolean(ConfigKeys.IS_LAB_ENV);
     }
 
     @Override
@@ -217,6 +220,9 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
         // 首先记录到内存结构
         lock.writeLock().lock();
         try {
+            if (labEnv && !canApply(ddl)) {
+                return true;
+            }
             if (super.apply(position, schema, ddl, extra)) {
                 // 同步每次变更给远程做历史记录，只记录ddl，不记录快照
                 applyHistoryToDb(position, schema, ddl, extra);
@@ -228,6 +234,10 @@ public class PolarDbXStorageTableMeta extends MemoryTableMeta implements ICdcTab
         } finally {
             lock.writeLock().unlock();
         }
+    }
+
+    private boolean canApply(String ddl) {
+        return !StringUtils.startsWithIgnoreCase(StringUtils.trim(ddl), DEFINER_PREFIX);
     }
 
     public boolean apply(String schema, String ddl) {

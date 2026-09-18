@@ -58,7 +58,7 @@ public class BinlogDumpTest extends BaseTestCase {
             new ThreadPoolExecutor(nWorkers, nWorkers, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(),
                 new ThreadFactoryBuilder().setNameFormat("binlog-dump-worker-%d").build(),
                 new ThreadPoolExecutor.CallerRunsPolicy());
-        Set<Pair<String, String>> jobs = generateJobs();
+        Set<Pair<String, String>> jobs = generateJobs(nJobs, MAX_FILES_NUM);
         List<Future<?>> futures = new ArrayList<>();
         jobs.forEach(pair -> {
             Future<?> future = workerPool.submit(() -> {
@@ -79,7 +79,7 @@ public class BinlogDumpTest extends BaseTestCase {
     /**
      * Pair: start file, end file
      */
-    private Set<Pair<String, String>> generateJobs() {
+    Set<Pair<String, String>> generateJobs(int nJobs, int maxFilesNum) {
         Set<Pair<String, String>> res = new HashSet<>();
         List<String> allFiles = getBinlogFiles();
         if (allFiles.size() <= 1) {
@@ -88,7 +88,7 @@ public class BinlogDumpTest extends BaseTestCase {
         Random random = new Random();
         for (int i = 0; i < nJobs; i++) {
             int start = random.nextInt(allFiles.size() - 1);
-            int end = start + Math.min(random.nextInt(allFiles.size() - start), MAX_FILES_NUM);
+            int end = start + Math.min(random.nextInt(allFiles.size() - start), maxFilesNum);
             res.add(Pair.of(allFiles.get(start), allFiles.get(end)));
         }
 
@@ -135,7 +135,7 @@ public class BinlogDumpTest extends BaseTestCase {
     }
 
     @SneakyThrows
-    private List<String> getBinlogFiles() {
+    List<String> getBinlogFiles() {
         List<String> res = new ArrayList<>();
         String querySql =
             usingBinlogX ? String.format(SHOW_BINARY_LOGS_WITH_STREAM, getStreamName()) : SHOW_BINARY_LOGS;

@@ -10,8 +10,10 @@ import com.aliyun.polardbx.binlog.format.field.Field;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.BinlogEventType;
 import com.aliyun.polardbx.binlog.format.utils.BitMap;
+import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 import lombok.Data;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -90,13 +92,13 @@ public class RowEventBuilder extends BinlogBuilder {
             writeBytes(outputData, rowData.getBiNullBitMap().getData());
             if (!isEmpty(rowData.getBiFieldList())) {
                 for (Field value : rowData.getBiFieldList()) {
-                    writeBytes(outputData, value.encode());
+                    writeBytes(outputData, value);
                 }
             }
             if (isUpdate()) {
                 writeBytes(outputData, rowData.getAiNullBitMap().getData());
                 for (Field value : rowData.getAiFieldList()) {
-                    writeBytes(outputData, value.encode());
+                    writeBytes(outputData, value);
                 }
             }
         }
@@ -151,5 +153,22 @@ public class RowEventBuilder extends BinlogBuilder {
 
     public void addRowData(RowData rowData) {
         this.rowDataList.add(rowData);
+    }
+
+    /**
+     * 在有一列类型是not null的json类型时，如果该列存在一行在变更前后为null，实际上binlog中存的值为‘’，在decoder中会丢失该行数据，需要补全
+     *
+     * @return boolean
+     */
+    public boolean checkJsonNull(Field field) {
+        return !field.isNull() && field.encode().length == 0 && field.getMysqlType() == MySQLType.MYSQL_TYPE_JSON;
+    }
+
+    public void writeBytes(AutoExpandBuffer outputData, Field value) {
+        if (checkJsonNull(value)) {
+            writeBytes(outputData, new byte[4]);
+        } else {
+            writeBytes(outputData, value.encode());
+        }
     }
 }

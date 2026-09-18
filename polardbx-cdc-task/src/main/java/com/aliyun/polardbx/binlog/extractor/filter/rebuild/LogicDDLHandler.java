@@ -51,6 +51,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -61,7 +62,6 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_APPLY_FROM_HISTOR
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_APPLY_FROM_RECORD_FIRST;
 import static com.aliyun.polardbx.binlog.cdc.meta.CreateDropTableWithExistFilter.shouldIgnore;
 import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.processDdlSqlCharacters;
-import static com.aliyun.polardbx.binlog.extractor.filter.rebuild.DDLConverter.tryRemoveAutoShardKey;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.reWriteWrongDdl;
 
@@ -150,6 +150,11 @@ public class LogicDDLHandler {
             ddlExtInfo.getActualOriginalSql() : ddlRecord.getDdlSql();
     }
 
+    private boolean isExternalColumnDdl(DDLRecord ddlRecord) {
+        return ddlRecord.getExtInfo() != null
+            && BooleanUtils.isTrue(ddlRecord.getExtInfo().getExternalColumnDdl());
+    }
+
     public Set<String> findIndexes(String schema, String table) {
         return tableMetaManager.findIndexes(schema, table);
     }
@@ -221,24 +226,51 @@ public class LogicDDLHandler {
         // prepare output binlog ddl sql
 
         String outputBinlogSql4Mysql = ddlRecord.getDdlSql();
+        DDLExtInfo ddlExtInfo = ddlRecord.getExtInfo();
 
-        // 建表SQL使用用户侧输入的DDL，作为单机MySQL形态的DDL sql，不能用物理执行计划中的sql
-        // 对于以/* //1/ */开头的建表SQL，属于创建影子表的范畴，内核会自动将源表名带上__test前缀，但MySQL并没有这个行为，所以不能用原始sql
-        if (ddlRecord.getExtInfo() != null && ("CREATE_TABLE".equals(ddlRecord.getSqlKind()) || BooleanUtils.isTrue(
-            ddlRecord.getExtInfo().getForeignKeysDdl()))) {
-            String actualSql = ddlRecord.getExtInfo().getActualOriginalSql();
+        if (ddlExtInfo != null
+            && (isExternalColumnDdl(ddlRecord) || "CREATE_TABLE".equals(ddlRecord.getSqlKind())
+            || BooleanUtils.isTrue(ddlExtInfo.getForeignKeysDdl()))) {
+            // 建表SQL使用用户侧输入的DDL，作为单机MySQL形态的DDL sql，不能用物理执行计划中的sql
+            // 对于以/* //1/ */开头的建表SQL，属于创建影子表的范畴，内核会自动将源表名带上__test前缀，但MySQL并没有这个行为，所以不能用原始sql
+            String actualSql = ddlExtInfo.getActualOriginalSql();
             if (StringUtils.isNotBlank(actualSql) && !StringUtils.contains(actualSql, "/* //1/ */")) {
                 outputBinlogSql4Mysql = actualSql;
                 compareAndFixShardKey(ddlRecord, outputBinlogSql4Mysql);
             }
         }
 
-        // removeAutoShardKey 逻辑从输出event前移到apply 前，解决shardKey必定会被remove掉的问题
-        outputBinlogSql4Mysql =
-            tryRemoveAutoShardKey(ddlRecord.getSchemaName(), ddlRecord.getTableName(), outputBinlogSql4Mysql,
-                triple -> tableMetaManager.findIndexes(triple.getLeft(), triple.getMiddle()).stream()
-                    .anyMatch(i -> StringUtils.equalsIgnoreCase(triple.getRight(), i)));
+        // 移除下游 MySQL 中不存在的索引的 DROP 操作
+        Set<String> indexesToSuppress = resolveIndexesToSuppress(
+            ddlRecord.getSchemaName(), ddlRecord.getTableName(), outputBinlogSql4Mysql);
+        if (!indexesToSuppress.isEmpty()) {
+            outputBinlogSql4Mysql = DDLConverter.tryRemoveDropIndex(outputBinlogSql4Mysql, indexesToSuppress);
+        }
         return outputBinlogSql4Mysql;
+    }
+
+    /**
+     * 确定 DROP INDEX SQL 中哪些索引的 DROP 需要被抑制
+     */
+    private Set<String> resolveIndexesToSuppress(String schema, String tableName, String sql) {
+        Set<String> toSuppress = new HashSet<>();
+        for (String indexName : DDLConverter.extractDroppedIndexNames(sql)) {
+            // auto_shard_key：物理级索引，逻辑元数据中不存在即代表下游不存在
+            if (DDLConverter.isAutoShardKey(indexName)) {
+                boolean existsInMeta = tableMetaManager.findIndexes(schema, tableName).stream()
+                    .anyMatch(i -> StringUtils.equalsIgnoreCase(indexName, i));
+                if (!existsInMeta) {
+                    toSuppress.add(indexName);
+                }
+                continue;
+            }
+            // VECTOR INDEX：CREATE 被抑制，下游 MySQL 从未创建
+            String indexType = tableMetaManager.getIndexType(schema, tableName, indexName);
+            if ("VECTOR".equalsIgnoreCase(indexType)) {
+                toSuppress.add(indexName);
+            }
+        }
+        return toSuppress;
     }
 
     public void rebuildDdlForApply(Transaction transaction, String dbCharset, String tbCollation) {
@@ -246,7 +278,8 @@ public class LogicDDLHandler {
         DDLRecord ddlRecord = ddlEvent.getDdlRecord();
         DDLExtInfo ddlExtInfo = ddlRecord.getExtInfo();
         // apply logic ddl sql
-        String ddlSql4Apply = ddlRecord.getDdlSql().trim();
+        String ddlSql4Apply = (isExternalColumnDdl(ddlRecord) ?
+            ddlExtInfo.getActualOriginalSql() : ddlRecord.getDdlSql()).trim();
         logger.info("begin to apply logic ddl : " + ddlSql4Apply + ", tso : " + transaction.getVirtualTsoStr()
             + " ddl_record_id : " + ddlRecord.getId());
         ddlSql4Apply = processDdlSqlCharacters(ddlRecord.getTableName(), ddlSql4Apply, dbCharset, tbCollation);
@@ -258,7 +291,7 @@ public class LogicDDLHandler {
         if (isGSI) {
             ddlEvent.setVisibleToMysql(false);
             if (ddlExtInfo.isOldVersionOriginalSql()) {
-                //@see https://aone.alibaba-inc.com/v2/project/860366/bug/51253282
+                //@see historical compatibility behavior
                 ddlRecord.setDdlSql("select 1");
                 ddlRecord.getExtInfo().setCreateSql4PhyTable(null);
                 ddlRecord.setMetaInfo(null);
@@ -505,7 +538,7 @@ public class LogicDDLHandler {
         try {
             SQLStatement stmt = parseSQLStatement(ddl);
 
-            //fix https://work.aone.alibaba-inc.com/issue/36762424
+            //fix historical compatibility behavior
             if (stmt instanceof SQLDropTableStatement) {
                 SQLDropTableStatement dropTableStatement = (SQLDropTableStatement) stmt;
                 if (dropTableStatement.getTableSources().size() > 1) {
@@ -535,7 +568,7 @@ public class LogicDDLHandler {
     public String tryRewriteTruncateSql(String tableName, String ddl) {
         SQLStatement sqlStatement = parseSQLStatement(ddl);
 
-        //fix https://aone.alibaba-inc.com/issue/46776374
+        //fix historical compatibility behavior
         if (sqlStatement instanceof SQLTruncateStatement) {
             SQLTruncateStatement sqlTruncateStatement = (SQLTruncateStatement) sqlStatement;
             if (sqlTruncateStatement.getTableSources().size() == 1) {

@@ -310,8 +310,10 @@ public class DmlSqlBuilder {
         if (useRandomColumn4Dml) {
             ArrayList<Map.Entry<String, String>> list =
                 new ArrayList<>(columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.entrySet());
+            // 过滤掉生成列，生成列的值由MySQL自动计算，不允许手动INSERT/UPDATE
+            list.removeIf(e -> columnSeeds.GENERATED_COLUMN_NAMES.contains(e.getKey()));
             Collections.shuffle(list);
-            int count = RandomUtils.nextInt(10, list.size());
+            int count = RandomUtils.nextInt(Math.min(10, list.size()), list.size());
 
             Map<String, String> map = new HashMap<>();
             for (int i = 0; i < count; i++) {
@@ -320,6 +322,8 @@ public class DmlSqlBuilder {
             result = map;
         } else {
             result = Maps.newHashMap(columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING);
+            // 过滤掉生成列
+            columnSeeds.GENERATED_COLUMN_NAMES.forEach(result::remove);
         }
         result.put("c_idx", "bigint");
         return result;
@@ -502,7 +506,7 @@ public class DmlSqlBuilder {
 
     private Integer doGetMinId() throws Exception {
         try (Connection connection = ConnectionManager.getInstance().getDruidPolardbxConnection()) {
-            JdbcUtil.executeQuery("use " + dbName, connection);
+            JdbcUtil.useDb(connection, dbName);
             Statement stmt = connection.createStatement();
             ResultSet rs = stmt.executeQuery("select min(id) from " + tableName);
             if (rs.next()) {
@@ -537,7 +541,7 @@ public class DmlSqlBuilder {
 
     private Integer doGetMaxId() throws Exception {
         try (Connection connection = ConnectionManager.getInstance().getDruidPolardbxConnection()) {
-            JdbcUtil.executeQuery("use " + dbName, connection);
+            JdbcUtil.useDb(connection, dbName);
             Statement stmt = connection.createStatement();
             ResultSet rs = stmt.executeQuery("select max(id) from " + tableName);
             if (rs.next()) {
@@ -556,7 +560,7 @@ public class DmlSqlBuilder {
     private Set<Integer> getIds(Integer min, Integer max, int limit) {
         Set<Integer> set = new HashSet<>();
         try (Connection connection = ConnectionManager.getInstance().getDruidPolardbxConnection()) {
-            JdbcUtil.executeQuery("use " + dbName, connection);
+            JdbcUtil.useDb(connection, dbName);
             Statement stmt = connection.createStatement();
             ResultSet rs = stmt.executeQuery(
                 "select id from " + tableName + " where id >= " + min + " and id <= " + max + " limit " + limit);

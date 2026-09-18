@@ -16,6 +16,7 @@ import java.util.Set;
 
 import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.DependencyCheckResult.OBJ_TYPE_SEQ;
 import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.DependencyCheckResult.OBJ_TYPE_TABLE;
+import static com.aliyun.polardbx.rpl.applier.ParallelSchemaApplier.isFunctionDdl;
 
 /**
  * description:
@@ -136,12 +137,12 @@ public class ParallelSchemaApplierTest extends BaseTest {
         // check drop table
         sql = "drop table tXyz";
         result = applier.checkDependency(sql);
-        checkAfterCheckDependency("txyz", OBJ_TYPE_TABLE, Sets.newHashSet(), true, result);
+        checkAfterCheckDependency("", "", Sets.newHashSet(), false, result);
 
         // check drop table with backtick
         sql = "DROP TABLE IF EXISTS ```gxw_test-minus```";
         result = applier.checkDependency(sql);
-        checkAfterCheckDependency("`gxw_test-minus`", OBJ_TYPE_TABLE, Sets.newHashSet(), true, result);
+        checkAfterCheckDependency("", "", Sets.newHashSet(), false, result);
 
         // check sql with create index
         sql = "CREATE GLOBAL INDEX `g_i_seller` ON t_orDer (`seller_id`) COVERING (order_snapshot) "
@@ -224,6 +225,55 @@ public class ParallelSchemaApplierTest extends BaseTest {
         sql = "analyze table xxx, yyy";
         result = applier.checkDependency(sql);
         checkAfterCheckDependency("", "", Sets.newHashSet(), false, result);
+    }
+
+    @Test
+    public void testIsFunctionDdl() {
+
+        // 测试 SQLCreateFunctionStatement
+        String createFunctionSql = "CREATE FUNCTION test_function() RETURNS INT RETURN 1;";
+        Assert.assertTrue("Should identify CREATE FUNCTION as function DDL",
+            isFunctionDdl(createFunctionSql));
+
+        // 测试 SQLDropFunctionStatement
+        String dropFunctionSql = "DROP FUNCTION test_function;";
+        Assert.assertTrue("Should identify DROP FUNCTION as function DDL",
+            isFunctionDdl(dropFunctionSql));
+
+        // 测试 SQLCreateJavaFunctionStatement
+        String createJavaFunctionSql = "CREATE JAVA FUNCTION `java_udf_concat` "
+            + "RETURN_TYPE varchar(255) INPUT_TYPES int,varchar(255) CODE public class Java_udf_concat extends UserDefinedJavaFunction {\n"
+            + "public Object compute(Object[] args) {\n"
+            + "Integer a = (Integer) args[0];\n"
+            + "String b = (String) args[1];\n"
+            + "return \"polarx_\" + b + \"_\" + a;\n"
+            + "}\n"
+            + "}; END_CODE";
+        Assert.assertTrue("Should identify CREATE JAVA FUNCTION as function DDL",
+            isFunctionDdl(createJavaFunctionSql));
+
+        // 测试 SQLDropJavaFunctionStatement
+        String dropJavaFunctionSql = "DROP JAVA FUNCTION test_java_function;";
+        Assert.assertTrue("Should identify DROP JAVA FUNCTION as function DDL",
+            isFunctionDdl(dropJavaFunctionSql));
+
+        // 测试 SQLAlterFunctionStatement
+        String alterFunctionSql = "ALTER FUNCTION test_function COMMENT 'test comment';";
+        Assert.assertTrue("Should identify ALTER FUNCTION as function DDL",
+            isFunctionDdl(alterFunctionSql));
+
+        // 测试非函数DDL语句
+        String createTableSql = "CREATE TABLE test_table (id INT);";
+        Assert.assertFalse("Should not identify CREATE TABLE as function DDL",
+            isFunctionDdl(createTableSql));
+
+        String selectSql = "SELECT * FROM test_table;";
+        Assert.assertFalse("Should not identify SELECT as function DDL",
+            isFunctionDdl(selectSql));
+
+        String insertSql = "INSERT INTO test_table VALUES (1);";
+        Assert.assertFalse("Should not identify INSERT as function DDL",
+            isFunctionDdl(insertSql));
     }
 
     private void checkAfterCheckDependency(String expectObjName, String expectObjType,

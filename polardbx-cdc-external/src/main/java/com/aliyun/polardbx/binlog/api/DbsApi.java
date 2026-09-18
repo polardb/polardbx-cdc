@@ -10,6 +10,8 @@ import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.api.dbs.CancelTaskRequest;
 import com.aliyun.polardbx.binlog.api.dbs.CancelTaskResult;
+import com.aliyun.polardbx.binlog.api.dbs.DescribeRestoreArchiveLogFilesRequest;
+import com.aliyun.polardbx.binlog.api.dbs.DescribeRestoreArchiveLogFilesResult;
 import com.aliyun.polardbx.binlog.api.dbs.DescribeStorageInfoRequest;
 import com.aliyun.polardbx.binlog.api.dbs.DescribeStorageInfoResult;
 import com.aliyun.polardbx.binlog.api.dbs.DescribeTaskStatusRequest;
@@ -44,20 +46,19 @@ public class DbsApi {
         request.setAccessSecretKey(apiSk);
         request.setEndPoint(apiUrl);
         request.setRegionCode(regionCode);
+        request.setUseHela(DynamicApplicationConfig.getBoolean(ConfigKeys.DBS_API_USE_HELA));
         return request.doRequest();
     }
 
     /**
      * 提交大binlog下载任务
      * 会提交给DBS进行下载，返回下载任务ID
-     * @param dbInstanceName
-     * @param uid
-     * @param user_id
+     *
      * @param archiveLogId 日志文件ID/批量传参，按逗号分割：12345,2345,3456
      * @param archiveLogPath 宿主机上的目录路径
-     * @return
      */
-    public static RdsDownloadForRestoreResult submitDownloadTask(String dbInstanceName, String uid, String user_id, String archiveLogId, String archiveLogPath){
+    public static RdsDownloadForRestoreResult submitDownloadTask(String dbInstanceName, String uid, String user_id,
+                                                                 String archiveLogId, String archiveLogPath) {
         String apiUrl = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_URL);
         String apiAk = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_ACCESS_ID);
         String apiSk = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_ACCESS_KEY);
@@ -74,16 +75,14 @@ public class DbsApi {
         request.setArchiveLogId(archiveLogId);
         request.setArchiveLogLocalFolder(archiveLogPath);
         request.setHostInsId(HostInsId);
-        return  request.doRequest();
+        return request.doRequest();
     }
 
     /**
      * 查询binlog下载任务状态
-     * @param dbInstanceName
-     * @param taskId
-     * @return
      */
-    public static DescribeTaskStatusResult describeTaskStatus(String dbInstanceName, String uid, String user_id, String taskId) {
+    public static DescribeTaskStatusResult describeTaskStatus(String dbInstanceName, String uid, String user_id,
+                                                              String taskId) {
         String apiUrl = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_URL);
         String apiAk = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_ACCESS_ID);
         String apiSk = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_ACCESS_KEY);
@@ -117,7 +116,6 @@ public class DbsApi {
         return request.doRequest();
     }
 
-
     public static DescribeStorageInfoResult describeStorageInfo(String storageEntityId, String uid, String user_id) {
         String apiUrl = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_URL);
         String apiAk = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_ACCESS_ID);
@@ -131,6 +129,33 @@ public class DbsApi {
         request.setAccessSecretKey(apiSk);
         request.setEndPoint(apiUrl);
         request.setRegion(regionCode);
+        return request.doRequest();
+    }
+
+    public static DescribeRestoreArchiveLogFilesResult describeRestoreArchiveLogFiles(
+        String dbInstanceName,
+        String uid,
+        String user_id,
+        long startTime,
+        long endTime,
+        Integer maxRecordsPerPage,
+        Integer pageNumbers) throws Exception {
+        String apiUrl = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_URL);
+        String apiAk = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_ACCESS_ID);
+        String apiSk = DynamicApplicationConfig.getString(ConfigKeys.DBS_API_ACCESS_KEY);
+        String regionCode = DynamicApplicationConfig.getString(ConfigKeys.DBS_REGION_CODE);
+        DescribeRestoreArchiveLogFilesRequest request = new DescribeRestoreArchiveLogFilesRequest();
+        request.setInstanceName(dbInstanceName);
+        request.setUserId(uid);
+        request.setConsistentTime(startTime);
+        request.setRestoreTimePoint(endTime);
+        request.setCallerBid(user_id);
+        request.setPageSize(maxRecordsPerPage);
+        request.setPageNumber(pageNumbers);
+        request.setAccessKey(apiAk);
+        request.setAccessSecretKey(apiSk);
+        request.setEndPoint(apiUrl);
+        request.setRegionCode(regionCode);
         return request.doRequest();
     }
 

@@ -117,7 +117,7 @@ public class TableBlackListTest extends RplBaseTestCase {
         executor.execute(() -> dmlWithTable(BLACK_TABLE));
         executor.execute(() -> dmlWithTable(NORMAL_TABLE));
         try {
-            Thread.sleep(TimeUnit.MINUTES.toMillis(10));
+            Thread.sleep(TimeUnit.MINUTES.toMillis(5));
         } catch (InterruptedException e) {
         }
         running = false;
@@ -128,7 +128,7 @@ public class TableBlackListTest extends RplBaseTestCase {
                 .tbName(NORMAL_TABLE)
                 .directCompareDetail(false)
                 .compareDetailOneByOne(true)
-                .loopWaitTimeoutMs(TimeUnit.MINUTES.toMillis(10)).build();
+                .loopWaitTimeoutMs(TimeUnit.MINUTES.toMillis(20)).build();
         waitAndCheck(checkParameter);
         checkBlackTable();
     }

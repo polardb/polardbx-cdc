@@ -174,6 +174,8 @@ CREATE TABLE `binlog_dumper_info`
     `version`        bigint(20) NOT NULL DEFAULT '0',
     `polarx_inst_id` varchar(128)         DEFAULT NULL,
     `delay`          bigint NOT NULL DEFAULT '9223372036854775807',
+    `sub_version`    bigint(20) NOT NULL DEFAULT 1,
+    `enable_light_rebalance` boolean NOT NULL DEFAULT false,
     PRIMARY KEY (`id`),
     UNIQUE KEY `udx_cluster_ip_port` (`cluster_id`, `ip`, `port`),
     UNIQUE KEY `udx_taskname` (`cluster_id`, `task_name`)
@@ -279,6 +281,7 @@ CREATE TABLE `binlog_node_info`
     `polarx_inst_id`     varchar(128)          DEFAULT NULL,
     `cluster_role`       varchar(24)  NOT NULL DEFAULT 'master' COMMENT '集群角色',
     `last_tso_heartbeat` timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最近一次上报TSO时间',
+    `enable_light_rebalance` boolean NOT NULL DEFAULT false,
     PRIMARY KEY (`id`),
     UNIQUE KEY `udx_container_id` (`container_id`)
 );
@@ -307,8 +310,12 @@ CREATE TABLE `binlog_oss_record`
     `group_id`      varchar(100)          DEFAULT 'group_global' COMMENT 'group name， 单流为group_global',
     `stream_id`     varchar(100)          DEFAULT 'stream_global' COMMENT 'stream name，单流为stream_global',
     `cluster_id`    varchar(64)           DEFAULT '0',
+    `last_xid`      bigint(20) DEFAULT NULL,
+    `last_tid`      bigint(20) DEFAULT NULL,
+    `binlog_file_seq` int unsigned        DEFAULT NULL COMMENT '生成列:binlog_file数字后缀(H2不支持SUBSTRING_INDEX,测试中手动赋值)',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_file_name_cluster_id` (`binlog_file`, `cluster_id`)
+    UNIQUE KEY `uk_file_name_cluster_id` (`binlog_file`, `cluster_id`),
+    KEY `idx_group_stream_cluster_seq` (`group_id`, `stream_id`, `cluster_id`, `binlog_file_seq`)
 );
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -354,7 +361,9 @@ CREATE TABLE `binlog_phy_ddl_history`
     `cluster_id`      varchar(64)  NOT NULL COMMENT '所属集群',
     PRIMARY KEY (`id`),
     UNIQUE KEY `udx_tso_db` (`cluster_id`, `storage_inst_id`, `tso`),
-    KEY               `idx_phy_db_name` (`db_name`)
+    KEY               `idx_phy_db_name` (`db_name`),
+    KEY               `idx_tso` (`tso`),
+    KEY               `idx_storage_inst_id` (`storage_inst_id`)
 );
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -396,6 +405,7 @@ CREATE TABLE `binlog_schedule_history`
     `version`      bigint(20) NOT NULL,
     `content`      mediumtext  NOT NULL,
     `cluster_id`   varchar(64) NOT NULL DEFAULT '0' COMMENT '所属集群，0代表全局binlog集群',
+    `sub_version`  bigint(20) NOT NULL DEFAULT 1,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uindex_key` (`version`, `cluster_id`)
 );
@@ -553,6 +563,7 @@ CREATE TABLE `binlog_task_config`
     `role`         varchar(64) NOT NULL COMMENT 'Dumper | Final | Relay',
     `status`       int(10) NOT NULL DEFAULT '0' COMMENT '1:自动调度开启，其他状态非0',
     `version`      bigint(20) NOT NULL DEFAULT '1',
+    `sub_version`  bigint(20) NOT NULL DEFAULT 1,
     PRIMARY KEY (`id`),
     UNIQUE KEY `udx_cluster_task_name` (`cluster_id`, `task_name`)
 );
@@ -581,6 +592,9 @@ CREATE TABLE `binlog_task_info`
     `version`        bigint(20) NOT NULL DEFAULT '0',
     `polarx_inst_id` varchar(128)         DEFAULT NULL,
     `sources_list`   longtext COMMENT 'task连接的DN列表',
+    `sub_version`    bigint(20) NOT NULL DEFAULT 1,
+    `enable_light_rebalance` boolean NOT NULL DEFAULT false,
+    `ext` longtext NOT NULL COMMENT '当前版本支持的特性',
     PRIMARY KEY (`id`),
     UNIQUE KEY `udx_cluster_ip_port` (`cluster_id`, `ip`, `port`),
     UNIQUE KEY `udx_taskname` (`cluster_id`, `task_name`)

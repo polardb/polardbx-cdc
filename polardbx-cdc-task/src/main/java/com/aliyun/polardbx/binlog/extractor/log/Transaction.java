@@ -61,6 +61,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.STORAGE_PERSIST_TXN_ENTITY_ENABLED;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.canal.LogEventUtil.getLogicSqlIdFromTraceId;
 import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_DDL_ID;
 import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_DDL_SQL;
 import static com.aliyun.polardbx.binlog.canal.system.ISystemDBProvider.DDL_RECORD_FIELD_EXT;
@@ -94,6 +95,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     private static final String ENTITY_KEY_PREFIX = "TRANS_ENTITY_";
     private static final AtomicLong ENTITY_KEY_SEQUENCE = new AtomicLong(0);
     private static final ThreadLocal<TransactionCommitListener> COMMIT_LISTENER = new ThreadLocal<>();
+    private static final String REPLACE_RETURNING_CODE = "1";
 
     private TxnBuffer txnBuffer;
     private DDLEvent ddlEvent;
@@ -108,6 +110,8 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     private long entityPersistKey;
     private Storage storage;
     private String syncPointExtra;
+    private ExternalColumnTxnContext externalColumnTxnContext;
+    private boolean externalColumnStagingDegraded;
 
     public Transaction(Storage storage, FormatDescriptionLogEvent fdLogEvent, FormatDescriptionEvent fde,
                        RuntimeContext rc) {
@@ -177,7 +181,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         this.getEntity().binlogFileName = rc.getBinlogFile();
         this.getEntity().when = logEvent.getWhen();
         this.getEntity().txnKey = buildTxnKey(rc.getStorageHashCode(), pair);
-        if (!isCdcSingle()) {
+        if (isCdcSingle()) {
+            this.getEntity().ignore = true;
+        } else {
             this.buildBuffer();
         }
         TransactionMemoryLeakDetectorManager.getInstance().watch(this);
@@ -298,6 +304,14 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
                     if (NumberUtils.isCreatable(results[1])) {
                         getEntity().serverId = NumberUtils.createLong(results[1]);
                     }
+                    if (StringUtils.isNotBlank(results[2])) {
+                        getEntity().returningDelete = results[2].equalsIgnoreCase(REPLACE_RETURNING_CODE);
+                    } else {
+                        getEntity().returningDelete = false;
+                    }
+                    if (StringUtils.isNotBlank(results[3])) {
+                        getEntity().logicSqlId = NumberUtils.createInteger(results[3]);
+                    }
                 }
             } catch (Exception e) {
                 logger.error("parser trace error " + queryLogEvent.getRowsQuery(), e);
@@ -308,6 +322,9 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             return;
         }
         if (filter(event)) {
+            return;
+        }
+        if (processExternalColumnStagingEvent(event)) {
             return;
         }
         if (processSpecialTableData(event, rc)) {
@@ -328,10 +345,98 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             //直接使用前面紧邻的TableMapEvent的TraceId
             event.setTrace(getEntity().lastTraceId);
         }
+        event.setLogicSqlId(getLogicSqlIdFromTraceId(event.getTrace()));
         if (getEntity().serverId != null) {
             event.setTraceServerId(getEntity().serverId);
         }
+        event.setReturningDelete(getEntity().returningDelete);
+        event.setLogicSqlId(getEntity().logicSqlId);
         addTxnBuffer(event);
+    }
+
+    private boolean processExternalColumnStagingEvent(LogEvent event) {
+        if (!ExternalColumnStagingEvent.isStagingEvent(event)) {
+            return false;
+        }
+
+        if (externalColumnStagingDegraded) {
+            if (event instanceof TableMapLogEvent) {
+                consumeSkippedTableMapTrace();
+            }
+            return true;
+        }
+
+        try {
+            if (event instanceof TableMapLogEvent) {
+                ExternalColumnStagingEvent.validateAndGetSeqId((TableMapLogEvent) event);
+                consumeSkippedTableMapTrace();
+                return true;
+            }
+
+            int eventType = event.getHeader().getType();
+            if (eventType == LogEvent.WRITE_ROWS_EVENT || eventType == LogEvent.WRITE_ROWS_EVENT_V1) {
+                ExternalColumnStagingEvent.consumeWriteRows((RowsLogEvent) event,
+                    (seqId, slotAddr, tableId, raw) -> {
+                        ExternalColumnTxnContext txnContext = getOrCreateExternalColumnTxnContext();
+                        txnContext.put(seqId, slotAddr, tableId, raw);
+                    });
+                return true;
+            }
+            if (eventType == LogEvent.DELETE_ROWS_EVENT || eventType == LogEvent.DELETE_ROWS_EVENT_V1) {
+                // A staging DELETE has no row-rebuild meaning today. Keep it out of the global transaction without
+                // changing the branch-local raw mapping; add explicit semantics here only if CN starts relying on it.
+                return true;
+            }
+            throw new PolardbxException("unsupported external-column staging row event type " + eventType);
+        } catch (RuntimeException e) {
+            /*
+             * A staging protocol/storage error means that later business rows may no longer be restored to their
+             * logical TEXT/BLOB values. Fail closed by default so an upgrade mismatch cannot silently publish
+             * BlobRef addresses as user data. The existing external-column emergency fallback switch deliberately
+             * restores the old availability-first behavior when an operator explicitly accepts that risk.
+             */
+            if (!DynamicApplicationConfig.getBoolean(
+                ConfigKeys.TASK_REFORMAT_EXTERNAL_COLUMN_BLOB_REF_ERROR_FALLBACK_ENABLED)) {
+                throw e;
+            }
+            externalColumnStagingDegraded = true;
+            if (event instanceof TableMapLogEvent) {
+                consumeSkippedTableMapTrace();
+            }
+            logger.error("degrade external-column staging for transaction {}, binlog {}:{}, "
+                    + "unresolved fields will keep their BlobRef addresses because emergency fallback {} is enabled",
+                getXid(), getBinlogFileName(), event.getHeader().getLogPos(),
+                ConfigKeys.TASK_REFORMAT_EXTERNAL_COLUMN_BLOB_REF_ERROR_FALLBACK_ENABLED, e);
+            return true;
+        }
+    }
+
+    private void consumeSkippedTableMapTrace() {
+        if (getEntity().nextTraceId == null) {
+            getEntity().nextTraceId =
+                getEntity().lastTraceId != null ? getEntity().lastTraceId : generateFakeTraceId();
+        }
+        getEntity().lastTraceId = getEntity().nextTraceId;
+        getEntity().nextTraceId = null;
+        getEntity().lastRowsQuery = "";
+    }
+
+    private ExternalColumnTxnContext getOrCreateExternalColumnTxnContext() {
+        if (externalColumnTxnContext == null) {
+            externalColumnTxnContext = new ExternalColumnTxnContext(storage);
+        }
+        return externalColumnTxnContext;
+    }
+
+    public ExternalColumnTxnContext getExternalColumnTxnContext() {
+        return externalColumnTxnContext;
+    }
+
+    public void releaseExternalColumnTxnContext() {
+        if (externalColumnTxnContext != null) {
+            externalColumnTxnContext.release();
+            externalColumnTxnContext = null;
+        }
     }
 
     void addTxnBuffer(LogEvent logEvent) {
@@ -344,10 +449,13 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
             getEntity().lastRowsQuery = "/*DRDS" + getEntity().lastRowsQuery + "*/";
         }
         TxnBufferItem txnItem =
-            TxnBufferItem.builder().traceId(logEvent.getTrace()).rowsQuery(getEntity().lastRowsQuery)
+            TxnBufferItem.builder()
+                .traceId(logEvent.getTrace())
+                .rowsQuery(getEntity().lastRowsQuery)
                 .payload(logEvent.toBytes()).eventType(logEvent.getHeader().getType())
                 .originTraceId(getEntity().originalTraceId).binlogFile(getEntity().binlogFileName)
-                .binlogPosition(logEvent.getLogPos()).build();
+                .binlogPosition(logEvent.getLogPos()).returningEvent(logEvent.isReturningDelete())
+                .logicSqlId(logEvent.getLogicSqlId()).build();
 
         // RowsQuery Event后跟紧Table_Map，所以第一个lastRowsQuery不为空
         // 这里将lastRowsQuery设为空之后，后面的Table_Map中的rowsQuery将为空，直到获得下一个RowsQuery中的内容
@@ -390,10 +498,18 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
                 return true;
             }
             if (SystemDB.isSyncPoint(rowsLogEvent.getTable().getDbName(), rowsLogEvent.getTable().getTableName())) {
-                logger.info("meet sync point table event!");
-                if (event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT
-                    || event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT_V1) {
-                    processSyncPoint((WriteRowsLogEvent) rowsLogEvent, rc);
+                boolean syncPointEnabled =
+                    DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_SYNC_POINT_ENABLED);
+                if (syncPointEnabled) {
+                    logger.info("meet sync point table event!");
+                    if (event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT
+                        || event.getHeader().getType() == LogEvent.WRITE_ROWS_EVENT_V1) {
+                        processSyncPoint((WriteRowsLogEvent) rowsLogEvent, rc);
+                    }
+                } else {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("meet sync point table event, but sync point is disabled, skip processing.");
+                    }
                 }
                 releaseTxnBuffer();
                 return true;
@@ -708,7 +824,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
         }
 
         if (currentTso == null) {
-            throw new PolardbxException("tso should not be null " + this.toString());
+            throw new PolardbxException("tso should not be null " + this);
         }
 
         String storageInstId = rc.getStorageInstId();
@@ -851,6 +967,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     private void rollback(RuntimeContext rc) {
         afterCommit(rc);
         releaseTxnBuffer();
+        releaseExternalColumnTxnContext();
         if (isIgnore()) {
             return;
         }
@@ -876,6 +993,7 @@ public class Transaction implements HandlerEvent, IXaTransaction<Transaction> {
     public void release() {
         TransactionMemoryLeakDetectorManager.getInstance().unWatch(this);
         releaseTxnBuffer();
+        releaseExternalColumnTxnContext();
         if (entityPersisted) {
             deleteEntity(buildPersistKey());
         }

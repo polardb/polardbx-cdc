@@ -21,7 +21,6 @@ import com.aliyun.polardbx.binlog.canal.core.handle.SearchTsoEventHandleV2;
 import com.aliyun.polardbx.binlog.canal.core.model.AuthenticationInfo;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.exception.ConsumeOSSBinlogEndException;
-import com.aliyun.polardbx.binlog.canal.exception.PositionNotFoundException;
 import com.aliyun.polardbx.binlog.canal.exception.ServerIdNotMatchException;
 import com.aliyun.polardbx.binlog.canal.unit.SearchRecorder;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
@@ -96,6 +95,8 @@ public class CanalBootstrap {
                     }
                     logger.warn("oss consume end!");
                     Runtime.getRuntime().halt(1);
+                } catch (InterruptedException ie) {
+                    logger.info("binlog extractor thread is interrupted!", ie);
                 } catch (Throwable e) {
                     logger.error("do start dumper failed!", e);
                     Runtime.getRuntime().halt(1);
@@ -123,9 +124,8 @@ public class CanalBootstrap {
 
     /**
      * just for search test
-     * @param mySqlInfo
      */
-    public void searchTestInit(MySqlInfo mySqlInfo){
+    public void searchTestInit(MySqlInfo mySqlInfo) {
         this.mySqlInfo = mySqlInfo;
         this.running.set(true);
     }
@@ -235,7 +235,8 @@ public class CanalBootstrap {
             OssConnection connection = null;
             try {
                 connection = buildOssConnection(requestTso);
-                if (checkServerIdMatch && !connection.isServerIdMatch()) {
+                if (checkServerIdMatch && !connection.isServerIdMatch() && DynamicApplicationConfig.getBoolean(
+                    ConfigKeys.TASK_EXTRACT_CHECK_FORCE_CHECK_SERVER_ID_ENABLED)) {
                     // dn remote build will not match
                     logger.error("oss binlog server id not match mysql, will try other mysql host(follower) !");
                     throw new ServerIdNotMatchException();
@@ -417,7 +418,7 @@ public class CanalBootstrap {
         SearchRecorder searchRecorder = buildRecorder(connection, searchTso);
         while (isRunning()) {
             if (searchTso > 0 && searchTsoEventHandle.isInQuickMode() &&
-                DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_RECOVER_SEARCH_TSO_BINARY_SEARCH_IN_QUICK_MODE)){
+                DynamicApplicationConfig.getBoolean(ConfigKeys.TASK_RECOVER_SEARCH_TSO_BINARY_SEARCH_IN_QUICK_MODE)) {
                 return binarySearch(connection, searchTso, searchRecorder, requestTso);
             }
             if (!doSearchFile(connection, searchFile, searchTsoEventHandle, searchRecorder, searchTso)) {
@@ -436,11 +437,12 @@ public class CanalBootstrap {
         return searchTsoEventHandle.getCommandPosition();
     }
 
-    public BinarySearchTsoEventHandle prepareBinarySearchHandler(long searchTso, String requestTso){
-        return new BinarySearchTsoEventHandle(searchTso, requestTso,  authenticationInfo);
+    public BinarySearchTsoEventHandle prepareBinarySearchHandler(long searchTso, String requestTso) {
+        return new BinarySearchTsoEventHandle(searchTso, requestTso, authenticationInfo);
     }
 
-    public BinlogPosition binarySearch(ErosaConnection connection, long searchTso, SearchRecorder searchRecorder, String requestTso)
+    public BinlogPosition binarySearch(ErosaConnection connection, long searchTso, SearchRecorder searchRecorder,
+                                       String requestTso)
         throws Exception {
         final long originalSearchTSO = searchTso;
         long pushBackwardSec = DynamicApplicationConfig.getInt(
@@ -462,15 +464,16 @@ public class CanalBootstrap {
         BinarySearchALG searchALG = new BinarySearchALG(binlogList.size(), searchTso);
         long finalSearchTso = searchTso;
         searchALG.search(m -> {
-            if (!isRunning()){
+            if (!isRunning()) {
                 throw new InterruptedException("search position occur interrupted!");
             }
             String searchFileName = binlogList.get(m);
             doSearchFile(connection, searchFileName, searchTsoEventHandle, searchRecorder, finalSearchTso);
-            return new BinarySearchALG.Region(searchTsoEventHandle.getMinTSO(), searchTsoEventHandle.getMaxTSO(), searchTsoEventHandle.searchResult(), searchTsoEventHandle.needCheckLossStart());
+            return new BinarySearchALG.Region(searchTsoEventHandle.getMinTSO(), searchTsoEventHandle.getMaxTSO(),
+                searchTsoEventHandle.searchResult(), searchTsoEventHandle.needCheckLossStart());
         });
         searchRecorder.setFinish(true);
-        if (searchTsoEventHandle.needCheckLossStart()){
+        if (searchTsoEventHandle.needCheckLossStart()) {
             // 有丢失start的情况，但是binlog都搜索完了， 可能是本地文件，start在oss上了，需要继续走oss
             return null;
         }

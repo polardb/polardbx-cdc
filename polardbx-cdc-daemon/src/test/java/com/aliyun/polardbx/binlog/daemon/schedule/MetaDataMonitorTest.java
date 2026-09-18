@@ -18,11 +18,35 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.util.Date;
+import com.aliyun.polardbx.binlog.cdc.meta.RollbackMode;
+import com.aliyun.polardbx.binlog.cdc.meta.RollbackModeUtil;
+import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistCleanPointMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogPhyDdlHistoryMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogSemiSnapshotMapper;
+import com.aliyun.polardbx.binlog.dao.SemiSnapshotInfoMapper;
+import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistCleanPoint;
+import com.aliyun.polardbx.binlog.domain.po.SemiSnapshotInfo;
+import org.mybatis.dynamic.sql.delete.DeleteDSLCompleter;
+import org.mybatis.dynamic.sql.select.CountDSLCompleter;
+import org.mybatis.dynamic.sql.select.SelectDSLCompleter;
+import org.mockito.MockedStatic;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.Collections;
+import java.util.Date;
+import java.util.Optional;
+
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SEMI_SNAPSHOT_PRESERVE_HOURS;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PURGE_ENV_CONFIG_HISTORY_THRESHOLD;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PURGE_SCHEDULE_HISTORY_THRESHOLD;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class MetaDataMonitorTest extends BaseTest {
 
@@ -107,5 +131,192 @@ public class MetaDataMonitorTest extends BaseTest {
         Assert.assertEquals(9001,
             mapper.select(s -> s.orderBy(BinlogEnvConfigHistoryDynamicSqlSupport.id).limit(1)).get(0).getId()
                 .intValue());
+    }
+
+    @Test
+    public void testCleanExpiredSemiSnapshot_emptyPreservedList() {
+        MetaDataMonitor monitor = new MetaDataMonitor();
+        BinlogSemiSnapshotMapper binlogSemiSnapshotMapper = mock(BinlogSemiSnapshotMapper.class);
+        registerSpringObject(BinlogSemiSnapshotMapper.class, binlogSemiSnapshotMapper);
+        mockConfig(META_BUILD_SEMI_SNAPSHOT_PRESERVE_HOURS, "24");
+
+        when(binlogSemiSnapshotMapper.getPreservedSnapshot("inst1", 24))
+            .thenReturn(Collections.emptyList());
+
+        monitor.cleanExpiredSemiSnapshot("inst1", 100);
+    }
+
+    @Test
+    public void testCleanExpiredSemiSnapshot_notSnapshotSemi_skipPhyCount() {
+        MetaDataMonitor monitor = new MetaDataMonitor();
+
+        SemiSnapshotInfoMapper semiMapper = mock(SemiSnapshotInfoMapper.class);
+        BinlogSemiSnapshotMapper binlogSemiSnapshotMapper = mock(BinlogSemiSnapshotMapper.class);
+        BinlogPhyDdlHistoryMapper phyHistMapper = mock(BinlogPhyDdlHistoryMapper.class);
+        BinlogPhyDdlHistCleanPointMapper cleanPointMapper = mock(BinlogPhyDdlHistCleanPointMapper.class);
+        TransactionTemplate transTemplate = mock(TransactionTemplate.class);
+
+        registerSpringObject(SemiSnapshotInfoMapper.class, semiMapper);
+        registerSpringObject(BinlogSemiSnapshotMapper.class, binlogSemiSnapshotMapper);
+        registerSpringObject(BinlogPhyDdlHistoryMapper.class, phyHistMapper);
+        registerSpringObject(BinlogPhyDdlHistCleanPointMapper.class, cleanPointMapper);
+        registerSpringObject("metaTransactionTemplate", transTemplate);
+
+        mockConfig(META_BUILD_SEMI_SNAPSHOT_PRESERVE_HOURS, "24");
+
+        SemiSnapshotInfo info = new SemiSnapshotInfo();
+        info.setTso("123456");
+        when(binlogSemiSnapshotMapper.getPreservedSnapshot("inst1", 24))
+            .thenReturn(Collections.singletonList(info));
+        when(semiMapper.delete(any(DeleteDSLCompleter.class))).thenReturn(5);
+
+        try (MockedStatic<RollbackModeUtil> rollbackModeMock = mockStatic(RollbackModeUtil.class)) {
+            rollbackModeMock.when(RollbackModeUtil::getRollbackMode).thenReturn(RollbackMode.SNAPSHOT_EXACTLY);
+
+            monitor.cleanExpiredSemiSnapshot("inst1", 100);
+
+            // Key optimization: phyHistMapper.count() should NOT be called when rollbackMode != SNAPSHOT_SEMI
+            verify(phyHistMapper, never()).count(any(CountDSLCompleter.class));
+            verify(transTemplate, never()).execute(any(TransactionCallback.class));
+        }
+    }
+
+    @Test
+    public void testCleanExpiredSemiSnapshot_snapshotSemi_phyCountBelowThreshold() {
+        MetaDataMonitor monitor = new MetaDataMonitor();
+
+        SemiSnapshotInfoMapper semiMapper = mock(SemiSnapshotInfoMapper.class);
+        BinlogSemiSnapshotMapper binlogSemiSnapshotMapper = mock(BinlogSemiSnapshotMapper.class);
+        BinlogPhyDdlHistoryMapper phyHistMapper = mock(BinlogPhyDdlHistoryMapper.class);
+        BinlogPhyDdlHistCleanPointMapper cleanPointMapper = mock(BinlogPhyDdlHistCleanPointMapper.class);
+        TransactionTemplate transTemplate = mock(TransactionTemplate.class);
+
+        registerSpringObject(SemiSnapshotInfoMapper.class, semiMapper);
+        registerSpringObject(BinlogSemiSnapshotMapper.class, binlogSemiSnapshotMapper);
+        registerSpringObject(BinlogPhyDdlHistoryMapper.class, phyHistMapper);
+        registerSpringObject(BinlogPhyDdlHistCleanPointMapper.class, cleanPointMapper);
+        registerSpringObject("metaTransactionTemplate", transTemplate);
+
+        mockConfig(META_BUILD_SEMI_SNAPSHOT_PRESERVE_HOURS, "24");
+
+        SemiSnapshotInfo info = new SemiSnapshotInfo();
+        info.setTso("123456");
+        when(binlogSemiSnapshotMapper.getPreservedSnapshot("inst1", 24))
+            .thenReturn(Collections.singletonList(info));
+        when(semiMapper.delete(any(DeleteDSLCompleter.class))).thenReturn(5);
+        when(phyHistMapper.count(any(CountDSLCompleter.class))).thenReturn(50L);
+
+        try (MockedStatic<RollbackModeUtil> rollbackModeMock = mockStatic(RollbackModeUtil.class)) {
+            rollbackModeMock.when(RollbackModeUtil::getRollbackMode).thenReturn(RollbackMode.SNAPSHOT_SEMI);
+
+            monitor.cleanExpiredSemiSnapshot("inst1", 100);
+
+            // phyHistMapper.count IS called (rollbackMode == SNAPSHOT_SEMI)
+            verify(phyHistMapper).count(any(CountDSLCompleter.class));
+            // But transTemplate.execute NOT called (phyCount 50 <= threshold 100)
+            verify(transTemplate, never()).execute(any(TransactionCallback.class));
+        }
+    }
+
+    @Test
+    public void testCleanExpiredSemiSnapshot_snapshotSemi_phyCountAboveThreshold_withCleanPoint() {
+        MetaDataMonitor monitor = new MetaDataMonitor();
+
+        SemiSnapshotInfoMapper semiMapper = mock(SemiSnapshotInfoMapper.class);
+        BinlogSemiSnapshotMapper binlogSemiSnapshotMapper = mock(BinlogSemiSnapshotMapper.class);
+        BinlogPhyDdlHistoryMapper phyHistMapper = mock(BinlogPhyDdlHistoryMapper.class);
+        BinlogPhyDdlHistCleanPointMapper cleanPointMapper = mock(BinlogPhyDdlHistCleanPointMapper.class);
+        TransactionTemplate transTemplate = mock(TransactionTemplate.class);
+
+        registerSpringObject(SemiSnapshotInfoMapper.class, semiMapper);
+        registerSpringObject(BinlogSemiSnapshotMapper.class, binlogSemiSnapshotMapper);
+        registerSpringObject(BinlogPhyDdlHistoryMapper.class, phyHistMapper);
+        registerSpringObject(BinlogPhyDdlHistCleanPointMapper.class, cleanPointMapper);
+        registerSpringObject("metaTransactionTemplate", transTemplate);
+
+        mockConfig(META_BUILD_SEMI_SNAPSHOT_PRESERVE_HOURS, "24");
+
+        SemiSnapshotInfo info = new SemiSnapshotInfo();
+        info.setTso("123456");
+        when(binlogSemiSnapshotMapper.getPreservedSnapshot("inst1", 24))
+            .thenReturn(Collections.singletonList(info));
+        when(semiMapper.delete(any(DeleteDSLCompleter.class))).thenReturn(5);
+        when(phyHistMapper.count(any(CountDSLCompleter.class))).thenReturn(200L);
+
+        // Existing cleanPoint
+        BinlogPhyDdlHistCleanPoint existingCleanPoint = new BinlogPhyDdlHistCleanPoint();
+        existingCleanPoint.setId(1);
+        existingCleanPoint.setTso("000000");
+        when(cleanPointMapper.selectOne(any(SelectDSLCompleter.class)))
+            .thenReturn(Optional.of(existingCleanPoint));
+        when(phyHistMapper.delete(any(DeleteDSLCompleter.class))).thenReturn(10);
+        when(cleanPointMapper.updateByPrimaryKeySelective(any(BinlogPhyDdlHistCleanPoint.class))).thenReturn(1);
+
+        // Execute transTemplate callback directly
+        when(transTemplate.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
+            TransactionCallback<Object> callback = invocation.getArgument(0);
+            return callback.doInTransaction(null);
+        });
+
+        try (MockedStatic<RollbackModeUtil> rollbackModeMock = mockStatic(RollbackModeUtil.class)) {
+            rollbackModeMock.when(RollbackModeUtil::getRollbackMode).thenReturn(RollbackMode.SNAPSHOT_SEMI);
+
+            monitor.cleanExpiredSemiSnapshot("inst1", 100);
+
+            verify(phyHistMapper).count(any(CountDSLCompleter.class));
+            verify(transTemplate).execute(any(TransactionCallback.class));
+            // Inside transTemplate callback: phyHistMapper.delete and cleanPointMapper.updateByPrimaryKeySelective
+            verify(phyHistMapper).delete(any(DeleteDSLCompleter.class));
+            verify(cleanPointMapper).updateByPrimaryKeySelective(any(BinlogPhyDdlHistCleanPoint.class));
+        }
+    }
+
+    @Test
+    public void testCleanExpiredSemiSnapshot_snapshotSemi_phyCountAboveThreshold_withoutCleanPoint() {
+        MetaDataMonitor monitor = new MetaDataMonitor();
+
+        SemiSnapshotInfoMapper semiMapper = mock(SemiSnapshotInfoMapper.class);
+        BinlogSemiSnapshotMapper binlogSemiSnapshotMapper = mock(BinlogSemiSnapshotMapper.class);
+        BinlogPhyDdlHistoryMapper phyHistMapper = mock(BinlogPhyDdlHistoryMapper.class);
+        BinlogPhyDdlHistCleanPointMapper cleanPointMapper = mock(BinlogPhyDdlHistCleanPointMapper.class);
+        TransactionTemplate transTemplate = mock(TransactionTemplate.class);
+
+        registerSpringObject(SemiSnapshotInfoMapper.class, semiMapper);
+        registerSpringObject(BinlogSemiSnapshotMapper.class, binlogSemiSnapshotMapper);
+        registerSpringObject(BinlogPhyDdlHistoryMapper.class, phyHistMapper);
+        registerSpringObject(BinlogPhyDdlHistCleanPointMapper.class, cleanPointMapper);
+        registerSpringObject("metaTransactionTemplate", transTemplate);
+
+        mockConfig(META_BUILD_SEMI_SNAPSHOT_PRESERVE_HOURS, "24");
+
+        SemiSnapshotInfo info = new SemiSnapshotInfo();
+        info.setTso("123456");
+        when(binlogSemiSnapshotMapper.getPreservedSnapshot("inst1", 24))
+            .thenReturn(Collections.singletonList(info));
+        when(semiMapper.delete(any(DeleteDSLCompleter.class))).thenReturn(5);
+        when(phyHistMapper.count(any(CountDSLCompleter.class))).thenReturn(200L);
+
+        // No existing cleanPoint
+        when(cleanPointMapper.selectOne(any(SelectDSLCompleter.class)))
+            .thenReturn(Optional.empty());
+        when(phyHistMapper.delete(any(DeleteDSLCompleter.class))).thenReturn(10);
+        when(cleanPointMapper.insert(any(BinlogPhyDdlHistCleanPoint.class))).thenReturn(1);
+
+        // Execute transTemplate callback directly
+        when(transTemplate.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
+            TransactionCallback<Object> callback = invocation.getArgument(0);
+            return callback.doInTransaction(null);
+        });
+
+        try (MockedStatic<RollbackModeUtil> rollbackModeMock = mockStatic(RollbackModeUtil.class)) {
+            rollbackModeMock.when(RollbackModeUtil::getRollbackMode).thenReturn(RollbackMode.SNAPSHOT_SEMI);
+
+            monitor.cleanExpiredSemiSnapshot("inst1", 100);
+
+            verify(phyHistMapper).count(any(CountDSLCompleter.class));
+            verify(transTemplate).execute(any(TransactionCallback.class));
+            // Inside transTemplate callback: cleanPointMapper.insert instead of updateByPrimaryKeySelective
+            verify(cleanPointMapper).insert(any(BinlogPhyDdlHistCleanPoint.class));
+        }
     }
 }

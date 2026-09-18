@@ -116,6 +116,14 @@ public class CdcFile implements Comparable<CdcFile> {
         return ((LocalFileSystem) fileSystem).newFile(name);
     }
 
+    /**
+     * 判断当前文件是否位于本地文件系统。
+     * 远程文件（如 OSS 直连透明消费场景）不支持 newFile()、fileKey 检测等本地文件操作。
+     */
+    public boolean isLocal() {
+        return fileSystem instanceof LocalFileSystem;
+    }
+
     @Override
     public int compareTo(CdcFile o) {
         return BinlogFileUtil.compareBinlogFileName(this.name, o.name);

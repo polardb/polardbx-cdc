@@ -63,6 +63,7 @@ public class Transaction {
     private boolean finished = false;
     private boolean prepared = false;
     private long eventCount;
+    private boolean containsExternalizedTable;
 
     @Getter
     private long insertCount;
@@ -93,6 +94,7 @@ public class Transaction {
         checkOperation();
         appendInternal(event);
         DefaultRowChange rowChange = (DefaultRowChange) event;
+        containsExternalizedTable |= rowChange.hasExternalizedColumns();
         String fullTableName = rowChange.getSchema() + "." + rowChange.getTable();
         tables.add(fullTableName);
         eventCount++;
@@ -138,6 +140,10 @@ public class Transaction {
 
     public Set<String> getTables() {
         return tables;
+    }
+
+    public boolean containsExternalizedTable() {
+        return containsExternalizedTable;
     }
 
     public boolean isFinished() {

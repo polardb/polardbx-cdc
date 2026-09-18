@@ -14,6 +14,9 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
@@ -33,6 +36,7 @@ public class BinlogFileReader implements IFileReader {
     private final File localFile;
     private RandomAccessFile io;
     private int totalReadSize = 0;
+    private Object fileKey;
 
     public BinlogFileReader(String binlogFileName, String binlogFullPath, BinlogFileStatusChecker checker) {
         this.binlogFileName = binlogFileName;
@@ -57,13 +61,20 @@ public class BinlogFileReader implements IFileReader {
     }
 
     @Override
-    public int read(byte[] buffer) throws IOException {
+    public int read(byte[] buffer) throws IOException, InterruptedException {
         long start = System.currentTimeMillis();
         int currentReadLen = 0;
         boolean needWait = true;
         do {
+            if (Thread.interrupted()) {
+                throw new InterruptedException("read thread is interrupted");
+            }
+
             if (io == null && localFile.exists()) {
                 io = new RandomAccessFile(localFile, "r");
+                BasicFileAttributes fileAttr =
+                    Files.readAttributes(localFile.toPath(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                fileKey = fileAttr.fileKey();
             }
             if (io != null) {
                 needWait = checker.needWait(totalReadSize, localFile.getName());
@@ -78,14 +89,29 @@ public class BinlogFileReader implements IFileReader {
             } else {
                 int tmpLen = io.read(buffer, currentReadLen, buffer.length - currentReadLen);
                 // check if read size not equal last cursor
-                if (tmpLen == -1 && totalReadSize == 0) {
-                    try {
-                        io.close();
-                    } catch (Exception e) {
+                if (tmpLen == -1) {
+                    if (totalReadSize == 0) {
+                        try {
+                            io.close();
+                        } catch (Exception e) {
+                        }
+                        io = null;
+                        needWait = true;
+                        continue;
+                    } else {
+                        BasicFileAttributes fileAttr =
+                            Files.readAttributes(localFile.toPath(), BasicFileAttributes.class,
+                                LinkOption.NOFOLLOW_LINKS);
+                        if (!fileKey.equals(fileAttr.fileKey())) {
+                            // 此时文件被LogFileGenerator中的prepare方法重建了，需要重新init io，详见
+                            // https://aliyuque.antfin.com/coronadb/knddog/ggecx612znopghbz
+                            fileKey = fileAttr.fileKey();
+                            io = new RandomAccessFile(localFile, "r");
+                            io.seek(totalReadSize);
+                            needWait = true;
+                            tmpLen = 0;
+                        }
                     }
-                    io = null;
-                    needWait = true;
-                    continue;
                 }
                 totalReadSize += tmpLen;
                 currentReadLen += tmpLen;

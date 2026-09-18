@@ -16,9 +16,9 @@ import com.aliyun.polardbx.binlog.service.BinlogOssRecordService;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.File;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getString;
@@ -40,6 +40,7 @@ public class BinlogRestoreManager {
     private final String binlogFullPath;
     private final BinlogOssRecordService recordService;
     private final BinlogOssRecordMapperExtend mapperExtend;
+    private final AtomicBoolean restoreFlag;
 
     public BinlogRestoreManager(String groupName, String streamName, String rootPath) {
         this.groupName = groupName;
@@ -48,10 +49,23 @@ public class BinlogRestoreManager {
         this.binlogFullPath = BinlogFileUtil.getFullPath(rootPath, groupName, streamName);
         this.recordService = SpringContextHolder.getObject(BinlogOssRecordService.class);
         this.mapperExtend = SpringContextHolder.getObject(BinlogOssRecordMapperExtend.class);
+        this.restoreFlag = new AtomicBoolean(false);
     }
 
-    public void start() {
-        log.info("binlog restore manager start to run");
+    public void tryRestore() {
+        if (restoreFlag.compareAndSet(false, true)) {
+            try {
+                restore();
+            } catch (Throwable t) {
+                restoreFlag.compareAndSet(true, false);
+                log.error("binlog restore error", t);
+                throw t;
+            }
+        }
+    }
+
+    public void restore() {
+        log.info("## binlog restore manager start to run ...");
         if (RemoteBinlogProxy.getInstance().isBackupOn()) {
             int n = DynamicApplicationConfig.getInt(ConfigKeys.BINLOG_BACKUP_DOWNLOAD_LAST_FILE_COUNT);
             List<String> downloadFiles = getDownloadFiles(n);
@@ -59,18 +73,19 @@ public class BinlogRestoreManager {
             BinlogDownloader downloader = new BinlogDownloader(groupName, streamName, binlogFullPath, downloadFiles);
             downloader.start();
         }
+        log.info("## binlog restore manager end to run ...");
     }
 
     /**
      * 获得需要从远端存储下载的文件列表
      * 1. 找文件编号最小的上传中的文件
-     * 2. 如果找到，下载该文件以及该文件之前的n个文件，下载最近产生的这个不完整的文件的目的是为了seekLastTso更快
+     * 2. 如果找到，下载该文件以及该文件之前的n个文件，下载最近产生的这个不完整的文件的目的是为了seekLastTso更快（以及在只有一个上传中文件的情况下，该文件必须下载）
      * 3. 如果没有找到，则下载最近上传成功的n个文件
      *
      * @param n number of files
      * @return binlog file name list
      */
-    private List<String> getDownloadFiles(int n) {
+    public List<String> getDownloadFiles(int n) {
         List<BinlogOssRecord> result;
         Optional<BinlogOssRecord> firstUploadingFile =
             recordService.getFirstUploadingRecord(groupName, streamName, clusterId);
@@ -78,15 +93,16 @@ public class BinlogRestoreManager {
             String fileName = firstUploadingFile.get().getBinlogFile();
             log.info("first uploading file exists, file name:{}", fileName);
             int fileSequence = Integer.parseInt(fileName.substring(fileName.lastIndexOf(".") + 1));
-            result = mapperExtend.getRecordsBefore(groupName, streamName, clusterId, fileSequence, n + 1);
+            result = mapperExtend.getRecordsBefore(groupName, streamName, clusterId, fileSequence, n);
+            result.add(0, firstUploadingFile.get());
         } else {
             result = mapperExtend.getLastUploadSuccessRecords(groupName, streamName, clusterId, n);
         }
 
-        return result.stream().map(BinlogOssRecord::getBinlogFile).filter(f -> {
-            File file = new File(binlogFullPath, f);
-            return !file.exists();
-        }).collect(Collectors.toList());
+        // 不用过滤本地存在的文件
+        // 1. 如果文件是上一次不完整下载导致的，会在之后检测到LOCK锁后，被清空重新下载
+        // 2. 如果文件是上一次完整下载导致的，之后不会触发Downloader的download行为
+        return result.stream().map(BinlogOssRecord::getBinlogFile).collect(Collectors.toList());
     }
 
 }

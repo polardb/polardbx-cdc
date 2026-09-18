@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.19-SNAPSHOT</version>
+        <version>5.4.21-SNAPSHOT</version>
     </parent>
 
     <artifactId>polardbx-cdc-storage</artifactId>
@@ -41,6 +41,11 @@
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.polardbx</groupId>
+            <artifactId>polardbx-cdc-format</artifactId>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 </project>

@@ -32,6 +32,9 @@ import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.util.StorageUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import com.google.common.collect.Lists;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
@@ -68,7 +71,7 @@ public class TopologyServiceHelper {
     private static final BinlogTaskInfoMapper taskInfoMapper = getObject(BinlogTaskInfoMapper.class);
 
     private static final JdbcTemplate jdbcTemplate = getObject("metaJdbcTemplate");
-
+    @Setter
     private static long lastForceRefreshTime = System.currentTimeMillis();
 
     public static void checkContainerStatus(ResourceManager resourceManager) {
@@ -132,25 +135,27 @@ public class TopologyServiceHelper {
         }
     }
 
-    public static boolean shouldRefreshTopology(ResourceManager resourceManager, ClusterSnapshot preClusterSnapshot,
-                                                List<StorageInfo> storages, ExecutionSnapshot executionSnapshot,
-                                                StorageHistoryInfo storageHistoryInfo) {
+    public static CheckResult shouldRefreshTopology(ResourceManager resourceManager,
+                                                    ClusterSnapshot preClusterSnapshot,
+                                                    List<StorageInfo> storages,
+                                                    ExecutionSnapshot executionSnapshot,
+                                                    StorageHistoryInfo storageHistoryInfo) {
         if (SystemDbConfig.getSystemDbConfig(ConfigKeys.CLUSTER_REBALANCE_INSTRUCTION).equals(
             ClusterRebalanceInstruction.SET_REBALANCE_INSTRUCTION)) {
             SystemDbConfig.updateSystemDbConfig(ConfigKeys.CLUSTER_REBALANCE_INSTRUCTION,
                 ClusterRebalanceInstruction.UNSET_REBALANCE_INSTRUCTION);
             log.info("cluster re-balance instruction is set, topology will rebuild");
-            return true;
+            return new CheckResult(true, true, false);
         }
 
         if (preClusterSnapshot.isOrigin()) {
             log.info("cluster snapshot is new, topology will rebuild.");
-            return true;
+            return new CheckResult(true, true, false);
         }
 
         if (preClusterSnapshot.getServerId() == null
             || ServerConfigUtil.getGlobalNumberVarDirect(SERVER_ID) != preClusterSnapshot.getServerId()) {
-            return true;
+            return new CheckResult(true, false, false);
         }
 
         if (storageHistoryInfo != null
@@ -166,7 +171,8 @@ public class TopologyServiceHelper {
             if (System.currentTimeMillis() - lastForceRefreshTime >= intervalMillis) {
                 log.info("force refresh topology, with previous cluster snapshot " + preClusterSnapshot);
                 lastForceRefreshTime = System.currentTimeMillis();
-                return true;
+                boolean randomFullRebalance = Math.random() < (1.0 / 4.0);
+                return new CheckResult(true, randomFullRebalance, true);
             }
         }
 
@@ -177,28 +183,29 @@ public class TopologyServiceHelper {
         if (isStorageChange) {
             log.info("detected storage changing ,will rebuild topology, previous list is {}, latest list is {}",
                 preClusterSnapshot.getStorages(), latestStorages);
-            return true;
+            return new CheckResult(true, false, false);
         }
 
-        Set<String> latestContainers = resourceManager.allOnlineContainers();
-        Set<String> newlyAddContainers = latestContainers.stream().filter(
-            c -> !preClusterSnapshot.getContainers().contains(c)).collect(Collectors.toSet());
+        final Set<String> previousContainers = getPreviousContainers(forceRefreshInterval, preClusterSnapshot);
+        final Set<String> latestContainers = resourceManager.allOnlineContainers();
+        final Set<String> newlyAddContainers = latestContainers.stream().filter(
+            c -> !previousContainers.contains(c)).collect(Collectors.toSet());
         if (!newlyAddContainers.isEmpty()) {
             log.info("detected newly add containers ,will rebuild topology, {}.", newlyAddContainers);
-            return true;
+            return new CheckResult(true, false, false);
         }
 
         // 如果上一个拓扑中有 a b c三个容器，而现在之后a b两个容器
         // 那么可能有两种情况：
         // 1. c容器中的daemon不正常，导致心跳超时，但是其中的Task和Dumper还是有可能正常运行的
         // 2. c容器被删除了
-        Set<String> missedContainers = preClusterSnapshot.getContainers().stream().filter(
+        Set<String> missedContainers = previousContainers.stream().filter(
             c -> !latestContainers.contains(c)).collect(Collectors.toSet());
         if (!missedContainers.isEmpty()) {
             boolean supportRebuild =
                 DynamicApplicationConfig.getBoolean(DAEMON_SUPPORT_REFRESH_TOPOLOGY_ONLY_DAEMON_DOWN);
             if (supportRebuild) {
-                return true;
+                return new CheckResult(true, false, false);
             }
 
             // 有某个Task或者Dumper运行不正常
@@ -209,12 +216,20 @@ public class TopologyServiceHelper {
                 flag |= !missedContainers.stream().allMatch(executionSnapshot::isRunningOk4Container);
                 if (flag) {
                     log.info("detected newly removed containers ,will rebuild topology, {}.", missedContainers);
-                    return true;
+                    return new CheckResult(true, false, false);
                 }
             }
         }
 
-        return false;
+        return new CheckResult(false, false, false);
+    }
+
+    public static Set<String> getPreviousContainers(int forceRefreshInterval, ClusterSnapshot preClusterSnapshot) {
+        if (forceRefreshInterval <= 0) {
+            return preClusterSnapshot.getContainers();
+        } else {
+            return preClusterSnapshot.getContainersBeforeRandomRemove();
+        }
     }
 
     public static boolean lockAndCheck(ClusterSnapshot preClusterSnapshot) {
@@ -278,5 +293,13 @@ public class TopologyServiceHelper {
             Collectors.toMap(StorageInfo::getStorageInstId, s1 -> s1,
                 (s1, s2) -> s1)).values());
         return storageInfos;
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class CheckResult {
+        final boolean needRebalance;
+        final boolean fullRebalance;
+        final boolean forceIntervalRebalance;
     }
 }

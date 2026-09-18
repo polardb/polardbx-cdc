@@ -8,6 +8,7 @@ package com.aliyun.polardbx.rpl.extractor;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.core.dump.MysqlConnection.ProcessJdbcResult;
 import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.canal.binlog.EventRepository;
 import com.aliyun.polardbx.binlog.canal.binlog.LogEvent;
@@ -29,6 +30,7 @@ import com.aliyun.polardbx.binlog.canal.exception.PositionNotFoundException;
 import com.aliyun.polardbx.binlog.canal.exception.ServerIdNotMatchException;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
 import com.aliyun.polardbx.binlog.util.LabEventType;
 import com.aliyun.polardbx.rpl.applier.StatisticalProxy;
@@ -38,10 +40,17 @@ import com.aliyun.polardbx.rpl.extractor.search.PositionFinder;
 import com.aliyun.polardbx.rpl.extractor.search.handler.PositionSearchHandler;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang.exception.ExceptionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
+import java.util.TimerTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -375,6 +384,10 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                 public boolean sink(LogEvent event, LogPosition logPosition) {
                     BinlogPosition entryPosition = null;
                     try {
+                        // 跳过FDE，其timestamp是文件创建/服务器启动时间，不代表数据时间
+                        if (event.getHeader().getType() == LogEvent.FORMAT_DESCRIPTION_EVENT) {
+                            return true;
+                        }
                         MySQLDBMSEvent entry = parseAndProfilingIfNecessary(event, true);
                         String logfilename = binlogParser.getBinlogFileName();
                         // String logfilename = searchBinlogFile;
@@ -480,7 +493,10 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
             StatMetrics.getInstance().setReceiveDelay(now - logEvent.getWhen() * 1000);
             StatMetrics.getInstance().addInMessageCount(1);
             StatMetrics.getInstance().addInBytes(logEvent.getEventLen());
+        } else {
+            StatMetrics.getInstance().addHeartbeatCount(1);
         }
+
         MySQLDBMSEvent event = binlogParser.parse(logEvent, isSeek);
         if (isLabEnv && !isSeek) {
             checkPosition(logEvent);
@@ -536,6 +552,72 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     }
 
     /**
+     * 获取当前多流Binlog的stream名称，通过System Property注入
+     *
+     * @return stream名称，如果未设置或为空则返回null
+     */
+    protected String getStreamName() {
+        String streamName = System.getProperty(ConfigKeys.STREAM_NAME);
+        return StringUtils.isNotBlank(streamName) ? streamName : null;
+    }
+
+    /**
+     * 查询当前的binlog位置，支持多流场景
+     * 多流时使用 show master status with 'stream_name'
+     */
+    @Override
+    protected BinlogPosition findEndPosition(MysqlConnection mysqlConnection) {
+        String streamName = getStreamName();
+        if (streamName == null) {
+            return super.findEndPosition(mysqlConnection);
+        }
+        String sql = "show master status with '" + streamName + "'";
+        return mysqlConnection.query(sql, new ProcessJdbcResult<BinlogPosition>() {
+            @Override
+            public BinlogPosition process(ResultSet rs) throws SQLException {
+                if (rs.next()) {
+                    String fileName = rs.getString(1);
+                    String position = rs.getString(2);
+                    String str = fileName + ':' + position + "#-2.0";
+                    return BinlogPosition.parseFromString(str);
+                } else {
+                    throw new CanalParseException(
+                        "command : '" + sql + "' has an error! pls check. you need (at least one of) the "
+                            + "SUPER,REPLICATION CLIENT privilege(s) for this operation");
+                }
+            }
+        });
+    }
+
+    /**
+     * 查询最早的binlog位置，支持多流场景
+     * 多流时使用 show binlog events with 'stream_name' limit 1
+     */
+    @Override
+    protected BinlogPosition findStartPosition(MysqlConnection mysqlConnection) {
+        String streamName = getStreamName();
+        if (streamName == null) {
+            return super.findStartPosition(mysqlConnection);
+        }
+        String sql = "show binlog events with '" + streamName + "' limit 1";
+        return mysqlConnection.query(sql, new ProcessJdbcResult<BinlogPosition>() {
+            @Override
+            public BinlogPosition process(ResultSet rs) throws SQLException {
+                if (rs.next()) {
+                    String fileName = rs.getString(1);
+                    String position = rs.getString(2);
+                    String str = fileName + ':' + position + "#-2.0";
+                    return BinlogPosition.parseFromString(str);
+                } else {
+                    throw new CanalParseException(
+                        "command : '" + sql + "' has an error! pls check. you need (at least one of) the "
+                            + "SUPER,REPLICATION CLIENT privilege(s) for this operation");
+                }
+            }
+        });
+    }
+
+    /**
      * 检查同一个binlog文件被dump时产生的事件pos是否有序。
      */
     public void checkPosition(LogEvent logEvent) {
@@ -563,6 +645,36 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
     }
 
     @Override
+    protected TimerTask buildHeartBeatTimeTask(ErosaConnection connection) {
+        if (!(connection instanceof MysqlConnection)) {
+            throw new PolardbxException("Unsupported connection type : " + connection.getClass().getSimpleName());
+        }
+
+        // 开始mysql心跳sql
+        if (detectingEnable) {
+            MysqlDetectingTimeTask detectingTimeTask =
+                new MysqlDetectingTimeTask((MysqlConnection) connection.fork(), createHeartbeatTable);
+            detectingTimeTask.setServerId(this.writeServerId);
+            return detectingTimeTask;
+        } else {
+            return super.buildHeartBeatTimeTask(connection);
+        }
+    }
+
+    protected void stopHeartBeat() {
+        TimerTask heartBeatTimerTask = this.heartBeatTimerTask;
+        super.stopHeartBeat();
+        if (heartBeatTimerTask != null && heartBeatTimerTask instanceof MysqlDetectingTimeTask) {
+            MysqlConnection mysqlConnection = ((MysqlDetectingTimeTask) heartBeatTimerTask).getMysqlConnection();
+            try {
+                mysqlConnection.disconnect();
+            } catch (IOException e) {
+                log.error("ERROR # disconnect heartbeat connection for address:" + mysqlConnection.getAddress(), e);
+            }
+        }
+    }
+
+    @Override
     protected boolean processTableMeta(BinlogPosition position) {
         return binlogParser.rollback(position);
     }
@@ -580,7 +692,7 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
                     erosaConnection = buildErosaConnection();
 
                     // 2. 启动一个心跳线程
-                    // startHeartBeat(erosaConnection);
+                    startHeartBeat(erosaConnection);
 
                     // 3. 执行dump前的准备工作，此处会准备好metaConnection
                     preDump(erosaConnection);
@@ -751,4 +863,5 @@ public class MysqlEventParser extends MysqlWithTsoEventParser {
             }
         }
     }
+
 }

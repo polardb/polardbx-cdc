@@ -7,6 +7,7 @@
 package com.aliyun.polardbx.cdc.qatest.flashback;
 
 import com.alibaba.druid.pool.DruidDataSource;
+import com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver;
 import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.cdc.qatest.base.BaseTestCase;
 import com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil;
@@ -257,6 +258,7 @@ public class FlashBackTest extends BaseTestCase {
 
     private static DruidDataSource getDruidDataSource(String url, String user, String password) {
         DruidDataSource druidDs = new DruidDataSource();
+        druidDs.setDriverClassName(PolarDbxCompatDriver.class.getName());
         druidDs.setUrl(url);
         druidDs.setUsername(user);
         druidDs.setPassword(password);
@@ -343,7 +345,7 @@ public class FlashBackTest extends BaseTestCase {
             conn.setCatalog(database);
             sql = "show tables;";
             stmt = conn.prepareStatement(sql);
-            rs = stmt.executeQuery(sql);
+            rs = stmt.executeQuery();
             while (rs.next()) {
                 tables.add(rs.getString(1));
             }
@@ -368,7 +370,7 @@ public class FlashBackTest extends BaseTestCase {
                 "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'",
                 database, tableName);
             stmt = conn.prepareStatement(sql);
-            rs = stmt.executeQuery(sql);
+            rs = stmt.executeQuery();
             while (rs.next()) {
                 columns.add(rs.getString(1));
             }

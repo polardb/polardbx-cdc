@@ -12,7 +12,7 @@ import com.aliyun.polardbx.cdc.qatest.base.ConnectionManager;
 import com.aliyun.polardbx.cdc.qatest.base.JdbcUtil;
 import com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil;
 import com.aliyun.polardbx.cdc.qatest.base.RplBaseTestCase;
-import com.mysql.jdbc.PacketTooBigException;
+import com.alibaba.polardbx.core.cj.jdbc.exceptions.PacketTooBigException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.AfterClass;

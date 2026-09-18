@@ -67,7 +67,7 @@ public class ServerConfigUtil {
 
     private static String get(String key) {
         // change 'select @@GLOBAL.xxx' to 'show global variables like ...'
-        // @see https://aone.alibaba-inc.com/v2/project/860366/bug/51153559
+        // @see historical compatibility behavior
         JdbcTemplate template = SpringContextHolder.getObject("polarxJdbcTemplate");
         List<String> list = template.query("show global variables like '" + key + "'", (rs, rowNum) -> rs.getString(2));
 

@@ -25,6 +25,7 @@ import com.aliyun.polardbx.binlog.dao.BinlogOssRecordMapper;
 import com.aliyun.polardbx.binlog.dao.XStreamDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.XStreamMapper;
 import com.aliyun.polardbx.binlog.domain.BinlogCursor;
+import com.aliyun.polardbx.binlog.domain.TaskRuntimeConfig;
 import com.aliyun.polardbx.binlog.domain.po.BinlogOssRecord;
 import com.aliyun.polardbx.binlog.domain.po.XStream;
 import com.aliyun.polardbx.binlog.enums.BinlogPurgeStatus;
@@ -57,6 +58,7 @@ import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.UnsafeByteOperations;
+import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
@@ -83,6 +85,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -90,7 +93,6 @@ import java.util.stream.Collectors;
 import static com.aliyun.polardbx.binlog.CommonConstants.VERSION_PATH_PREFIX;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_ROCKSDB_BASE_PATH;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_COUNT;
-import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_STREAM_GROUP_NAME;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_BATCH_BYTE_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_BATCH_ITEM_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOGX_TRANSMIT_READ_LOG_DETAIL_ENABLED;
@@ -111,8 +113,10 @@ import static com.aliyun.polardbx.binlog.format.utils.generator.BinlogGenerateUt
 import static com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig.ORIGIN_TSO;
 import static com.aliyun.polardbx.binlog.transmit.relay.RelayKeyUtil.buildMinRelayKeyStr;
 import static com.aliyun.polardbx.binlog.transmit.relay.RelayKeyUtil.buildPrimaryKeyString;
+import static com.aliyun.polardbx.binlog.transmit.relay.RelayStreamUtils.getStreamListAndCheck;
 import static com.aliyun.polardbx.binlog.transmit.relay.WriteItem.buildTxnMergedToken;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.parsePureTso;
+import static com.aliyun.polardbx.binlog.util.RocksDBUtil.clearTempLibFiles;
 import static com.aliyun.polardbx.binlog.util.TxnTokenUtil.cleanTxnBuffer4Token;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
@@ -130,7 +134,9 @@ public class RelayLogEventTransmitter implements Transmitter {
 
     private final String taskName;
     private final Storage storage;
+    @Getter
     private final String taskBasePath;
+    @Getter
     private final String persistPath;
     private final Map<Integer, StoreEngine> storeEngineMap;
     private final Map<Integer, String> streamMaxTsoMap;
@@ -138,6 +144,8 @@ public class RelayLogEventTransmitter implements Transmitter {
     private final AtomicBoolean running;
     private final int streamCount;
     private final long runtimeVersion;
+    private final long subRuntimeVersion;
+    private final String versionTag;
     private final boolean dryRun;
     private final int dryRunMode;
     private final RelayLogEventCleaner hashLogEventCleaner;
@@ -146,15 +154,18 @@ public class RelayLogEventTransmitter implements Transmitter {
     private final Map<String, String> recoverTsoMap;
     private volatile TxnToken latestFormatDescToken;
 
-    public RelayLogEventTransmitter(Storage storage, long runtimeVersion, Map<String, String> recoverTsoMap) {
+    public RelayLogEventTransmitter(Storage storage, TaskRuntimeConfig taskRuntimeConfig,
+                                    Map<String, String> recoverTsoMap) {
         String basePath = DynamicApplicationConfig.getString(BINLOGX_ROCKSDB_BASE_PATH);
 
         this.taskName = DynamicApplicationConfig.getString(TASK_NAME);
         this.storage = storage;
-        this.runtimeVersion = runtimeVersion;
+        this.runtimeVersion = taskRuntimeConfig.getExecutionConfig().getRuntimeVersion();
+        this.subRuntimeVersion = taskRuntimeConfig.getExecutionConfig().getSubRuntimeVersion();
+        this.versionTag = runtimeVersion + "_" + subRuntimeVersion;
         this.recoverTsoMap = recoverTsoMap;
         this.taskBasePath = basePath + File.separator + taskName + File.separator;
-        this.persistPath = taskBasePath + VERSION_PATH_PREFIX + runtimeVersion;
+        this.persistPath = taskBasePath + VERSION_PATH_PREFIX + versionTag;
         this.storeEngineMap = new HashMap<>();
         this.streamMaxTsoMap = new ConcurrentHashMap<>();
         this.writeBuffer = new WriteBuffer();
@@ -187,8 +198,9 @@ public class RelayLogEventTransmitter implements Transmitter {
         this.init();
     }
 
-    private void init() {
+    protected void init() {
         try {
+            clearTempLibFiles();
             RocksDB.loadLibrary();
             tryCleanDirectory();
 
@@ -202,21 +214,23 @@ public class RelayLogEventTransmitter implements Transmitter {
             hashLogEventCleaner.setStoreEngines(storeEngineMap);
         } catch (Throwable e) {
             releaseResource();
-            throw new PolardbxException("Open Repository failed.", e);
+            throw new PolardbxException("relay log event transmitter init failed ...", e);
         }
     }
 
-    private void buildStartTso() {
-        String streamGroupName = DynamicApplicationConfig.getString(BINLOGX_STREAM_GROUP_NAME);
-        List<String> streamsList = X_STREAM_MAPPER.select(
-            s -> s.where(XStreamDynamicSqlSupport.groupName, isEqualTo(streamGroupName))
-                .orderBy(XStreamDynamicSqlSupport.streamName)).stream().map(
-            XStream::getStreamName).collect(Collectors.toList());
-        if (streamsList.size() != streamCount) {
-            throw new PolardbxException("find mismatched stream count, configuration count is " + streamCount
-                + ", count in binlog_x_stream table is " + streamsList.size());
-        }
+    void buildStartTso() {
+        long start = System.currentTimeMillis();
+        log.info("## start to build start tso with relay log.");
 
+        List<String> streamsList = getStreamListAndCheck();
+        parallelSearchStartTso(streamsList);
+        calcStartTso();
+
+        long end = System.currentTimeMillis();
+        log.info("## build start tso finished, cost {} ms, start tso is [{}].", (end - start), startTso);
+    }
+
+    void parallelSearchStartTso(List<String> streamsList) {
         ExecutorService executor = Executors.newCachedThreadPool();
         List<Future<?>> futureList = new ArrayList<>();
         streamsList.forEach(streamName -> {
@@ -230,7 +244,9 @@ public class RelayLogEventTransmitter implements Transmitter {
             }
         });
         executor.shutdownNow();
+    }
 
+    void calcStartTso() {
         for (Map.Entry<Integer, String> entry : streamMaxTsoMap.entrySet()) {
             if (StringUtils.isBlank(entry.getValue())) {
                 // 只要有一个为空，则所有为空
@@ -250,7 +266,6 @@ public class RelayLogEventTransmitter implements Transmitter {
         }
 
         storeEngineMap.get(0).setOriginStartTso(startTso);
-        log.info("build start tso from store engine, start tso is [{}]", startTso);
     }
 
     private void setMaxTsoForStream(String streamName) {
@@ -396,7 +411,19 @@ public class RelayLogEventTransmitter implements Transmitter {
         } finally {
             MDC.remove(MDC_STREAM_SEQ);
             if (relayDataReader != null) {
-                relayDataReader.close();
+                try {
+                    relayDataReader.close();
+                } catch (Exception e) {
+                    log.warn("close relay data reader error", e);
+                }
+            }
+            // DumperX断连后清除maxReadKey，防止stale的maxReadTso导致Cleaner过度清理
+            // 极端场景: DumperX断连 → 删除最新binlog文件进行重建 → DumperX重启startTso < 旧maxReadTso
+            // 如果此时Cleaner已经清理到临近旧maxReadTso的位置，会导致数据丢失或checkValid()触发JVM halt
+            // 清除后maxReadTso为空，Cleaner的Step 0会跳过清理，确保安全性
+            StoreEngine storeEngine = storeEngineMap.get(streamSeq);
+            if (storeEngine != null) {
+                storeEngine.setMaxReadKey(null);
             }
         }
     }
@@ -416,7 +443,7 @@ public class RelayLogEventTransmitter implements Transmitter {
                 String cursorStr = optional.get().getLatestCursor();
                 if (StringUtils.isNotBlank(cursorStr)) {
                     BinlogCursor cursor = JSONObject.parseObject(optional.get().getLatestCursor(), BinlogCursor.class);
-                    if (cursor.getVersion() != null && cursor.getVersion() == runtimeVersion) {
+                    if (checkVersion(cursor)) {
                         log.info("successfully get latest tso {} for stream {}", cursor.getTso(), streamName);
                         return cursor.getTso() == null ? "" : cursor.getTso();
                     }
@@ -435,7 +462,7 @@ public class RelayLogEventTransmitter implements Transmitter {
                         break;
                     }
                 }
-                Thread.sleep(1000);
+                Thread.sleep(10);
             } catch (InterruptedException ignored) {
             }
         }
@@ -443,6 +470,20 @@ public class RelayLogEventTransmitter implements Transmitter {
         String snapshotTso = getSnapshotTsoForStream(streamName);
         String recoverTso = getRecoverTsoForStream(streamName);
         return StringUtils.compare(recoverTso, snapshotTso) < 0 ? recoverTso : snapshotTso;
+    }
+
+    boolean checkVersion(BinlogCursor cursor) {
+        boolean result = cursor.getVersion() != null && (cursor.getVersion() == runtimeVersion);
+        if (cursor.getSubVersion() != null) {
+            // 考虑一下兼容性，老版本的程序不支持sub version，如果sub version为空，则说明是老版本，不进行校验
+            result = result && (cursor.getSubVersion() == subRuntimeVersion);
+        } else {
+            // 如果sub version大于1，说明发生了light rebalance，此时subVersion不能为空
+            if (subRuntimeVersion > 1L) {
+                throw new PolardbxException("sub version should not be null when sub version > 1");
+            }
+        }
+        return result;
     }
 
     private String getSnapshotTsoForStream(String streamName) {
@@ -491,6 +532,17 @@ public class RelayLogEventTransmitter implements Transmitter {
         return null;
     }
 
+    /**
+     * 从给定的TSO中提取物理时间，减去buffer分钟后，重新构造一个TSO作为deleteRange的endKey。
+     * 该TSO不需要是实际存在的key，RocksDB/文件的deleteRange按key范围操作，endKey只需满足排序语义即可。
+     */
+    static String computeTsoBefore(String tso, int bufferMinutes) {
+        long physicalTimeMs = CommonUtils.getTsoPhysicalTime(tso, TimeUnit.MILLISECONDS);
+        long targetTimeMs = physicalTimeMs - bufferMinutes * 60 * 1000L;
+        long targetTsoTimestamp = targetTimeMs << 22;
+        return String.format("%019d", targetTsoTimestamp);
+    }
+
     private void logReadDetail(int streamSeq, String keyStr, TxnMessage txnMessage) {
         boolean logDetailEnable = DynamicApplicationConfig.getBoolean(BINLOGX_TRANSMIT_READ_LOG_DETAIL_ENABLED);
         if (logDetailEnable) {
@@ -509,7 +561,7 @@ public class RelayLogEventTransmitter implements Transmitter {
         }
     }
 
-    private void tryCleanDirectory() throws IOException {
+    void tryCleanDirectory() throws IOException {
         //如果当前版本对应的目录存在，直接使用即可
         //如果当前版本对应的目录不存在，则直接新建新的
         //如果有强制清理的指令，则强制清理
@@ -530,7 +582,7 @@ public class RelayLogEventTransmitter implements Transmitter {
         File baseDir = new File(taskBasePath);
         File[] files = baseDir.listFiles(
             (dir, name) -> StringUtils.startsWith(name, VERSION_PATH_PREFIX) && !StringUtils
-                .equals(name, VERSION_PATH_PREFIX + runtimeVersion));
+                .equals(name, VERSION_PATH_PREFIX + versionTag));
         if (files != null) {
             Arrays.stream(files).forEach(f -> {
                 try {
@@ -564,6 +616,7 @@ public class RelayLogEventTransmitter implements Transmitter {
                 .setTable(eventData.getTableName())
                 .setHashKey(txnItemRef.getHashKey())
                 .addAllPrimaryKey(primaryKeyList)
+                .setPartitionId(txnItemRef.getPartitionId() != null ? txnItemRef.getPartitionId() : "")
                 .build();
 
             // check for trace id rotation

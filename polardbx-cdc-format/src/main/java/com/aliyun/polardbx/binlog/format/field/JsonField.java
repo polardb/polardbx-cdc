@@ -15,6 +15,8 @@ import com.aliyun.polardbx.binlog.format.field.datatype.CreateField;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
 import com.aliyun.polardbx.binlog.format.utils.MySQLType;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -76,13 +78,31 @@ public class JsonField extends BlobField {
     }
 
     /**
-     *  直接简单用short的最大值来评估是否是大对象,大对象会对属性长度使用4个字节记录长度，比小对象多2个字节，不会影响数据正确性
+     * 直接简单用short的最大值来评估是否是大对象,大对象会对属性长度使用4个字节记录长度，比小对象多2个字节，不会影响数据正确性
      **/
-    private boolean isLargeTest(long len){
+    private boolean isLargeTest(long len) {
         return len >= Short.MAX_VALUE;
     }
 
     private void serialJsonValue(AutoExpandBuffer buffer, int typeOffset, Object o) {
+
+        if (o instanceof BigInteger) {
+            // fastjson对超出long范围的整数解析为BigInteger: 可容纳于long时降级为Long,
+            // (Long.MAX_VALUE, UINT64_MAX]区间保留BigInteger由下方分支编码为UINT64(与MySQL一致),
+            // 超出UINT64_MAX则走decimal编码
+            BigInteger bi = (BigInteger) o;
+            if (bi.bitLength() < 64) {
+                o = bi.longValue();
+            } else if (bi.signum() > 0 && bi.bitLength() == 64) {
+                // (Long.MAX_VALUE, UINT64_MAX]区间，保留BigInteger，由下方分支编码为UINT64
+            } else {
+                o = new BigDecimal(bi);
+            }
+        }
+
+        if (o instanceof Float) {
+            o = ((Float) o).doubleValue();
+        }
 
         if (o instanceof Long) {
             Long i = (Long) o;
@@ -104,7 +124,7 @@ public class JsonField extends BlobField {
 
         if (o instanceof JSONObject) {
             byte type;
-            if (isLarge){
+            if (isLarge) {
                 type = (byte) JsonConversion.JSONB_TYPE_LARGE_OBJECT;
             } else {
                 type = (byte) JsonConversion.JSONB_TYPE_SMALL_OBJECT;
@@ -113,7 +133,7 @@ public class JsonField extends BlobField {
             serialJsonObject(buffer, (JSONObject) o, isLarge);
         } else if (o instanceof JSONArray) {
             byte type;
-            if (isLarge){
+            if (isLarge) {
                 type = (byte) JsonConversion.JSONB_TYPE_LARGE_ARRAY;
             } else {
                 type = (byte) JsonConversion.JSONB_TYPE_SMALL_ARRAY;
@@ -145,6 +165,13 @@ public class JsonField extends BlobField {
         } else if (o instanceof Short) {
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_INT16);
             buffer.putShort((Short) o);
+        } else if (o instanceof BigInteger) {
+            // 经前置归一化，此处必为(Long.MAX_VALUE, UINT64_MAX]区间，编码为UINT64，
+            // longValue()取低64位即其无符号表示
+            buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_UINT64);
+            buffer.putLong(((BigInteger) o).longValue());
+        } else if (o instanceof BigDecimal) {
+            serialJsonDecimal(buffer, typeOffset, (BigDecimal) o);
         } else if (o instanceof Double) {
             buffer.putDouble((Double) o);
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_DOUBLE);
@@ -154,17 +181,69 @@ public class JsonField extends BlobField {
         } else if (o == null) {
             buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_LITERAL);
             buffer.put((byte) JsonConversion.JSONB_NULL_LITERAL);
+        } else {
+            // 兜底防护：不能静默跳过，否则value entry的type字节保持占位0x00且不写任何数据，
+            // 会生成内部offset错乱的损坏JSON（下游无法解析）
+            throw new UnsupportedOperationException(
+                "unsupported json value type: " + o.getClass().getName() + ", value: " + o);
         }
+    }
+
+    /**
+     * 将BigDecimal（fastjson对JSON中带小数数值的默认解析类型）编码为MySQL JSONB的OPAQUE decimal格式:
+     * JSONB_TYPE_OPAQUE + field_type(1字节, MYSQL_TYPE_NEWDECIMAL) + varint(数据长度) + precision(1字节)
+     * + scale(1字节) + my_decimal二进制。
+     * 该格式与解码侧JsonConversion的OPAQUE/MYSQL_TYPE_NEWDECIMAL分支对应。
+     * <p>
+     * 取舍说明：reformat链路经过"JSONB二进制-字符串-重编码"中转，源端JSONB数值类型信息已丢失，
+     * DOUBLE与DECIMAL无法区分。此处选择decimal编码，保证数值无损（不受double 17位有效数字限制）；
+     * 代价是文本写入的小数JSON_TYPE()会从DOUBLE变为DECIMAL。文本尾零不做保证：解码侧
+     * LogBuffer.getDecimal在小数末段全为0时会丢失尾零（如10000.00解出10000.0），数值不受影响。
+     * 超出MySQL decimal精度上限(65,30)时退化为JSONB_TYPE_DOUBLE编码。
+     */
+    private void serialJsonDecimal(AutoExpandBuffer buffer, int typeOffset, BigDecimal decimal) {
+        if (decimal.scale() < 0) {
+            // 归一化科学计数法（如1E+2），消除负scale
+            decimal = decimal.setScale(0);
+        }
+        int scale = decimal.scale();
+        int precision = Math.max(decimal.precision(), scale);
+        if (precision > 65 || scale > 30) {
+            buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_DOUBLE);
+            buffer.putDouble(decimal.doubleValue());
+            return;
+        }
+
+        buffer.put(typeOffset, (byte) JsonConversion.JSONB_TYPE_OPAQUE);
+        Field decimalField = MakeFieldFactory.makeField(String.format("decimal(%s,%s)", precision, scale),
+            decimal.toPlainString(), "utf8", false, false);
+        byte[] decimalData = decimalField.encode();
+
+        buffer.put((byte) MySQLType.MYSQL_TYPE_NEWDECIMAL.getType());
+        int length = 2 + decimalData.length;
+        do {
+            byte ch = (byte) (length & 0x7F);
+
+            length >>= 7;
+            if (length != 0) {
+                ch |= 0x80;
+            }
+
+            buffer.put(ch);
+        } while (length != 0);
+        buffer.put((byte) precision);
+        buffer.put((byte) scale);
+        buffer.put(decimalData);
     }
 
     private void serialJsonObject(AutoExpandBuffer buffer, JSONObject object, boolean large) {
         int elementCount = object.values().size();
         int startPosition = buffer.position();
         int sizePos;
-        if (large){
+        if (large) {
             buffer.putInt(elementCount);
             sizePos = buffer.position();
-            buffer.putInt( 0);
+            buffer.putInt(0);
         } else {
             buffer.putShort((short) elementCount);
             sizePos = buffer.position();
@@ -179,8 +258,8 @@ public class JsonField extends BlobField {
         // value entry OFFSET_SIZE + 2
         for (Map.Entry<String, Object> entry : object.entrySet()) {
             int len = entry.getKey().getBytes(charset).length;
-            if (large){
-                buffer.putInt( first_key_offset);
+            if (large) {
+                buffer.putInt(first_key_offset);
             } else {
                 buffer.putShort((short) first_key_offset);
             }
@@ -191,9 +270,9 @@ public class JsonField extends BlobField {
         // value entry 1 + OFFSET_SIZE
         for (Map.Entry<String, Object> entry : object.entrySet()) {
             buffer.put((byte) 0);
-            if (large){
-                buffer.putInt( 0);
-            }else {
+            if (large) {
+                buffer.putInt(0);
+            } else {
                 buffer.putShort((short) 0);
             }
 
@@ -205,18 +284,18 @@ public class JsonField extends BlobField {
         for (Map.Entry<String, Object> entry : object.entrySet()) {
             int typeOffset = mark + i++ * VALUE_ENTRY_SIZE;
             if (!attemptInlineValue(entry.getValue(), buffer, typeOffset)) {
-                if (large){
+                if (large) {
                     buffer.putInt(typeOffset + 1, buffer.position() - startPosition);
-                }else {
-                    buffer.putShort(typeOffset + 1,  buffer.position() - startPosition);
+                } else {
+                    buffer.putShort(typeOffset + 1, buffer.position() - startPosition);
                 }
                 serialJsonValue(buffer, typeOffset, entry.getValue());
             }
         }
-        if (large){
+        if (large) {
             buffer.putInt(sizePos, buffer.position() - startPosition);
-        }else {
-            buffer.putShort(sizePos,  buffer.position() - startPosition);
+        } else {
+            buffer.putShort(sizePos, buffer.position() - startPosition);
         }
     }
 
@@ -258,11 +337,11 @@ public class JsonField extends BlobField {
         int size = array.size();
         int startPosition = buffer.position();
         int sizePos;
-        if (large){
+        if (large) {
             buffer.putInt(size);
             sizePos = buffer.position();
-            buffer.putInt( 0);
-        }else {
+            buffer.putInt(0);
+        } else {
             buffer.putShort((short) size);
             sizePos = buffer.position();
             buffer.putShort((short) 0);
@@ -270,9 +349,9 @@ public class JsonField extends BlobField {
 
         int mark = buffer.position();
         for (int i = 0; i < size; i++) {
-            if (large){
-                buffer.putInt( 0);
-            }else {
+            if (large) {
+                buffer.putInt(0);
+            } else {
                 buffer.putShort((short) 0);
             }
             buffer.put((byte) 0);
@@ -284,8 +363,8 @@ public class JsonField extends BlobField {
             Object o = array.get(i);
             int typeOffset = mark + i * VALUE_ENTRY_SIZE;
             if (!attemptInlineValue(o, buffer, typeOffset)) {
-                if (large){
-                    buffer.putInt(typeOffset + 1,  buffer.position() - startPosition);
+                if (large) {
+                    buffer.putInt(typeOffset + 1, buffer.position() - startPosition);
                 } else {
                     buffer.putShort(typeOffset + 1, (short) (buffer.position() - startPosition));
                 }
@@ -294,7 +373,7 @@ public class JsonField extends BlobField {
         }
         if (large) {
             buffer.putInt(sizePos, buffer.position() - startPosition);
-        }else {
+        } else {
             buffer.putShort(sizePos, (short) (buffer.position() - startPosition));
         }
     }

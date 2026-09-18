@@ -55,7 +55,7 @@ public class BinlogFile implements Comparable<BinlogFile> {
         binlogFile.setLogBeginTime(dbsBinlogFile.getLogBeginTime());
         binlogFile.setLogEndTime(dbsBinlogFile.getLogEndTime());
         binlogFile.setDownloadLink(dbsBinlogFile.getDownloadUrl());
-        if (StringUtils.isNotEmpty(dbsBinlogFile.getDownloadUrl())){
+        if (StringUtils.isNotEmpty(dbsBinlogFile.getDownloadUrl())) {
             binlogFile.setDownloadLink(dbsBinlogFile.getDownloadUrl());
         }
         binlogFile.setInstanceID(dbsBinlogFile.getHostInstanceId());
@@ -68,6 +68,20 @@ public class BinlogFile implements Comparable<BinlogFile> {
             throw new PolardbxException("init region time failed!", e);
         }
         return binlogFile;
+    }
+
+    public boolean needDecompress() {
+        if (StringUtils.isBlank(IntranetDownloadLink)) {
+            throw new PolardbxException(
+                "intranet download link should not be empty, please check DescribeBinlogFiles return value, binlog file: "
+                    + this);
+        }
+        if (StringUtils.isBlank(Logname)) {
+            throw new PolardbxException(
+                "Logname should not be empty, please check DescribeBinlogFiles return value, binlog file: "
+                    + this);
+        }
+        return IntranetDownloadLink.contains(Logname + ".zst");
     }
 
     public static Long format(String utc) throws ParseException {

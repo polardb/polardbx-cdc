@@ -16,6 +16,9 @@ import org.rocksdb.RocksDB;
 import java.io.File;
 import java.io.IOException;
 
+import static com.aliyun.polardbx.binlog.util.RocksDBUtil.ROCKSDB_LIB_PATH;
+import static com.aliyun.polardbx.binlog.util.RocksDBUtil.clearTempLibFiles;
+
 /**
  * created by ziyang.lb
  **/
@@ -24,7 +27,6 @@ public class RplStorage {
     private static final String TASK_NAME = DynamicApplicationConfig.getString(ConfigKeys.TASK_NAME);
     private static final String BASE_PATH = DynamicApplicationConfig.getString(ConfigKeys.RPL_PERSIST_BASE_PATH);
     private static final String TASK_PATH = BASE_PATH + TASK_NAME + "/";
-    private static final String ROCKSDB_LIB_PATH = System.getProperty("java.io.tmpdir");
 
     public static void init() throws IOException {
         clearTempLibFiles();
@@ -51,20 +53,4 @@ public class RplStorage {
         return REPO_UNIT;
     }
 
-    // RocksDB会在临时目录生成临时的lib文件，当通过kill命令的方式终止进程时，临时文件可以被释放掉
-    // 但通过kill -9命令的方式终止进程时，临时文件不会被释放掉，此处做一下手动清理
-    private static void clearTempLibFiles() {
-        File directory = new File(ROCKSDB_LIB_PATH);
-        if (directory.exists()) {
-            File[] files = directory.listFiles((dir, name) ->
-                name.startsWith("librocksdbjni") && name.endsWith(".so")
-            );
-
-            if (files != null && files.length > 0) {
-                for (File file : files) {
-                    FileUtils.deleteQuietly(file);
-                }
-            }
-        }
-    }
 }

@@ -64,6 +64,7 @@ message DumpRequest{
 
 message ShowBinlogDumpStatusRequest{
   string streamName = 1;
+  string instId = 2;
 }
 
 message BinaryLog {

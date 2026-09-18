@@ -8,6 +8,7 @@ package com.aliyun.polardbx.rpl.common;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.po.PolarxCNodeInfo;
+import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpl.taskmeta.DbTaskMetaManager;
 import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
 import com.aliyun.polardbx.rpl.taskmeta.HostType;
@@ -36,6 +37,10 @@ public class HostManager {
 
     private static PolarxCNodeInfo getRandomNode() {
         List<PolarxCNodeInfo> nodes = DbTaskMetaManager.listPolarxCNodeInfo();
+        if (nodes == null || nodes.isEmpty()) {
+            throw new PolardbxException("no alive polarx cn node found in metadb table node_info, please check "
+                + "whether cn heartbeat(gmt_modified) is up to date");
+        }
         int random = new Random().nextInt(nodes.size());
         return nodes.get(random);
     }

@@ -41,6 +41,7 @@ public class LogUtil {
     private static String RPL_LOGGER = "rplLogger";
     private static String ASYNC_DDL_LOGGER = "asyncDdlLogger";
     private static String SKIP_DDL_LOGGER = "skipDdlLogger";
+    private static String DECOMPRESSION_LOGGER = "decompressionLogger";
 
     static {
         loggers.set(new HashMap<>());
@@ -52,6 +53,10 @@ public class LogUtil {
 
     public static Logger getCommitLogger() {
         return LoggerFactory.getLogger(COMMIT_LOGGER);
+    }
+
+    public static Logger getDecompreesionLogger() {
+        return LoggerFactory.getLogger(DECOMPRESSION_LOGGER);
     }
 
     public static Logger getMetaLogger() {

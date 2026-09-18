@@ -113,8 +113,6 @@ public class RplConstants {
 
     public static final String WRITE_TYPE = "WRITE_TYPE";
 
-    public static final String COMPARE_ALL = "COMPARE_ALL";
-
     public static final String INSERT_ON_UPDATE_MISS = "INSERT_ON_UPDATE_MISS";
 
     public static final String CONFLICT_STRATEGY = "CONFLICT_STRATEGY";
@@ -127,8 +125,12 @@ public class RplConstants {
     public static final String SUB_CHANNEL = "SUB_CHANNEL";
 
     public static final String MODE = "MODE";
+    public static final String FULL = "FULL";
+    public static final String STRUCTURE = "STRUCTURE";
 
     public static final String IMAGE_MODE = "IMAGE";
+
+    public static final String EXTRACT_FULL_FROM_DN = "EXTRACT_FULL_FROM_DN";
 
     public static final String STREAM_GROUP = "STREAM_GROUP";
 

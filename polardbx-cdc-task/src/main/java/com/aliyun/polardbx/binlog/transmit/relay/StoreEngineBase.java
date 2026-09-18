@@ -132,7 +132,8 @@ public abstract class StoreEngineBase implements StoreEngine {
         return lockingCleaner;
     }
 
-    protected String getMaxReadTso() {
+    @Override
+    public String getMaxReadTso() {
         return (maxReadKey == null || maxReadKey.length == 0) ? "" : RelayKeyUtil.extractTsoFromKey(maxReadKey);
     }
 }

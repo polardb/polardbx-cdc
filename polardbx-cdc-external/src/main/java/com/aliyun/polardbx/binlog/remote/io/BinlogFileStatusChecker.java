@@ -56,6 +56,6 @@ public class BinlogFileStatusChecker {
         if (cursor == null) {
             return false;
         }
-        return fileSequence != cursor.getFileSequence();
+        return fileSequence < cursor.getFileSequence();
     }
 }

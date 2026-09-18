@@ -8,7 +8,7 @@
           lazy-init="true" init-method="init">
         <constructor-arg name="dnPasswordKey" value="${dnPasswordKey}"/>
         <constructor-arg name="useEncryptedPassword" value="${useEncryptedPassword}"/>
-        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+        <property name="driverClassName" value="com.aliyun.polardbx.binlog.jdbc.PolarDbxCompatDriver"/>
         <property name="url" value="${polarx_url}"/>
         <property name="username" value="${polarx_username}"/>
         <property name="password" value="${polarx_password}"/>

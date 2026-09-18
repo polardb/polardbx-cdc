@@ -40,12 +40,18 @@ public class LockingCleaner {
         }
     }
 
-    public void checkWithCallback(CheckParameter parameter, Supplier<?> supplier) throws InvalidTsoException {
+    /**
+     * 在cleanLock内构建CheckParameter并校验，避免参数在锁外构建导致竞态
+     * 竞态场景: checkValid()在锁外读到旧maxCleanTso → clean执行删除 → 用过期值校验通过 → 丢数据
+     */
+    public void checkWithCallback(Supplier<CheckParameter> parameterSupplier,
+                                  Supplier<?> supplier) throws InvalidTsoException {
         cleanLock.lock();
         try {
+            CheckParameter parameter = parameterSupplier.get();
             if (StringUtils.isNotBlank(parameter.maxCleanTso)
                 && parameter.requestTso.compareTo(parameter.maxCleanTso) < 0) {
-                throw new InvalidTsoException("request tso is less than max lean tso " + parameter);
+                throw new InvalidTsoException("request tso is less than max clean tso " + parameter);
             }
             supplier.get();
         } finally {

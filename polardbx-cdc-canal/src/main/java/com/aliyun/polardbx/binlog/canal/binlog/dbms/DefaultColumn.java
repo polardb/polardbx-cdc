@@ -176,6 +176,10 @@ public class DefaultColumn extends DBMSColumn {
         return generated;
     }
 
+    public void setGenerated(boolean generated) {
+        this.generated = generated;
+    }
+
     @Override
     public boolean isRdsImplicitPk() {
         return rdsImplicitPk;

@@ -112,15 +112,15 @@ public class DumperApiResource {
     public ResultCode<String> getTarget(Map<String, String> params) {
         log.info("receive get target request with params: {}", params);
 
-        String instId = params.get("instId");
+        String instId = DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID);
         String fileName = params.get("fileName");
         long position = Long.parseLong(params.get("pos"));
-        synchronized (DumperApiResource.class) {
-            // 获取dumper，task节点地址
-            List<NodeAddress> dumperAddressList = getDumperAddressList(instId);
-            List<NodeAddress> taskAddressList = getTaskAddressList(instId);
-            NodeAddress masterAddress = MASTER_ADDRESS_MAP.get(instId);
+        // 获取dumper，task节点地址
+        List<NodeAddress> dumperAddressList = getDumperAddressList(instId);
+        List<NodeAddress> taskAddressList = getTaskAddressList(instId);
+        NodeAddress masterAddress = MASTER_ADDRESS_MAP.get(instId);
 
+        synchronized (DumperApiResource.class) {
             if (masterAddress == null) {
                 return new ResultCode<>(FAILURE_CODE, "No Dumper Master!", "");
             }
@@ -188,9 +188,12 @@ public class DumperApiResource {
     @Path("/showBinlogDumpStatus")
     public ResultCode<String> showBinlogDumpStatus(Map<String, String> params) {
         log.info("receive show binlog dump status request with params: {}", params);
-        List<NodeAddress> addressList = getDumperAddressList(params.get("instId"));
+        // 获取本集群的 CDC Dumper 节点
+        List<NodeAddress> addressList =
+            getDumperAddressList(DynamicApplicationConfig.getString(ConfigKeys.POLARX_INST_ID));
         // 构建并发task
-        List<Callable<Pair<String, List<BinlogDumpStatus>>>> tasks = createDumperStatusTasks(addressList);
+        List<Callable<Pair<String, List<BinlogDumpStatus>>>> tasks =
+            createDumperStatusTasks(addressList, params.get("instId"));
 
         // 执行并拼接结果
         List<Map<String, String>> data = new ArrayList<>();
@@ -315,7 +318,7 @@ public class DumperApiResource {
     }
 
     private static List<Callable<Pair<String, List<BinlogDumpStatus>>>> createDumperStatusTasks(
-        List<NodeAddress> addressList) {
+        List<NodeAddress> addressList, String instId) {
         List<Callable<Pair<String, List<BinlogDumpStatus>>>> tasks = new ArrayList<>();
         for (NodeAddress address : addressList) {
             DumperRpcClient client = new DumperRpcClient(address.ip, address.port);
@@ -323,7 +326,7 @@ public class DumperApiResource {
             tasks.add(() -> {
                 Pair<String, List<BinlogDumpStatus>> res;
                 try {
-                    res = client.showDumperStatus();
+                    res = client.showDumperStatus(instId);
                 } finally {
                     client.disconnect();
                 }

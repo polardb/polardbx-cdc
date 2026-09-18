@@ -9,10 +9,8 @@ package com.aliyun.polardbx.rpl.taskmeta;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
-import com.aliyun.polardbx.binlog.dao.PolarxCNodeInfoDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.PolarxCNodeInfoMapper;
+import com.aliyun.polardbx.binlog.dao.NodeInfoMapperExt;
+import com.aliyun.polardbx.binlog.dao.PolarxCNodeInfoMapperExt;
 import com.aliyun.polardbx.binlog.dao.RplDbFullPositionDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.RplDbFullPositionMapper;
 import com.aliyun.polardbx.binlog.dao.RplDdlDynamicSqlSupport;
@@ -89,8 +87,8 @@ public class DbTaskMetaManager {
     private static final RplDbFullPositionMapper dbFullPositionMapper =
         SpringContextHolder.getObject(RplDbFullPositionMapper.class);
 
-    private static final PolarxCNodeInfoMapper polarxCNodeInfoMapper =
-        SpringContextHolder.getObject(PolarxCNodeInfoMapper.class);
+    private static final PolarxCNodeInfoMapperExt polarxCNodeInfoMapperExt =
+        SpringContextHolder.getObject(PolarxCNodeInfoMapperExt.class);
 
     @Setter
     @Getter
@@ -102,8 +100,13 @@ public class DbTaskMetaManager {
     private static final ValidationDiffMapper validationDiffMapper =
         SpringContextHolder.getObject(ValidationDiffMapper.class);
 
-    private static final NodeInfoMapper nodeInfoMapper =
-        SpringContextHolder.getObject(NodeInfoMapper.class);
+    private static final NodeInfoMapperExt nodeInfoMapperExt =
+        SpringContextHolder.getObject(NodeInfoMapperExt.class);
+
+    /**
+     * 节点探活的超时时间，与历史行为保持一致（2分钟）
+     */
+    private static final int NODE_ALIVE_TIMEOUT_MS = 2 * 60 * 1000;
 
     private static final RplTaskConfigMapper taskConfigMapper =
         SpringContextHolder.getObject(RplTaskConfigMapper.class);
@@ -430,6 +433,11 @@ public class DbTaskMetaManager {
             .and(RplDdlDynamicSqlSupport.asyncState, SqlBuilder.isEqualTo(ddlState.name())));
     }
 
+    public static List<RplDdl> getDdlTasksByState(long fsmId, DdlState ddlState) {
+        return ddlMapper.select(s -> s.where(RplDdlDynamicSqlSupport.fsmId, SqlBuilder.isEqualTo(fsmId))
+            .and(RplDdlDynamicSqlSupport.state, SqlBuilder.isEqualTo(ddlState.name())));
+    }
+
     public static void updateDdlSubStateByServiceIdOnce(long serviceId, long fsmId, String tso, DdlState targetState,
                                                         DdlState originState) {
         ddlSubMapper.update(s -> s.set(RplDdlSubDynamicSqlSupport.state).equalTo(targetState.name())
@@ -633,14 +641,11 @@ public class DbTaskMetaManager {
 
     /************************* node ***************************/
     public static List<PolarxCNodeInfo> listPolarxCNodeInfo() {
-        return polarxCNodeInfoMapper.select(s -> s.where(PolarxCNodeInfoDynamicSqlSupport.gmtModified,
-            SqlBuilder.isGreaterThan(DateTime.now().minusMinutes(2).toDate())));  // TODO: 统一时间
+        return polarxCNodeInfoMapperExt.getAliveNodes(NODE_ALIVE_TIMEOUT_MS);
     }
 
     public static List<NodeInfo> listActiveClusterNode(String clusterType) {
-        return nodeInfoMapper.select(s -> s.where(NodeInfoDynamicSqlSupport.gmtHeartbeat,
-                SqlBuilder.isGreaterThan(DateTime.now().minusMinutes(2).toDate()))
-            .and(NodeInfoDynamicSqlSupport.clusterType, SqlBuilder.isEqualTo(clusterType)));
+        return nodeInfoMapperExt.getAliveNodesByClusterType(clusterType, NODE_ALIVE_TIMEOUT_MS);
     }
 
     public static List<XStream> listChosenXStreams() {

@@ -6,6 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.remote.oss;
 
+import com.alibaba.fastjson.JSONObject;
 import com.aliyun.oss.ClientException;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSS;
@@ -20,6 +21,8 @@ import com.aliyun.oss.model.BucketList;
 import com.aliyun.oss.model.BucketVersioningConfiguration;
 import com.aliyun.oss.model.CompleteMultipartUploadRequest;
 import com.aliyun.oss.model.CompleteMultipartUploadResult;
+import com.aliyun.oss.model.DeleteObjectsRequest;
+import com.aliyun.oss.model.DeleteVersionsRequest;
 import com.aliyun.oss.model.DownloadFileRequest;
 import com.aliyun.oss.model.GetObjectRequest;
 import com.aliyun.oss.model.InitiateMultipartUploadRequest;
@@ -176,17 +179,8 @@ public class OssManager implements IRemoteManager {
 
     @Override
     public void deleteAll(String prefix) {
-        List<String> fileList = listFiles(prefix);
-        fileList.forEach(f -> {
-            delete(prefix + f);
-            logger.info("file {} is deleted from remote.", f);
-        });
-
-        List<OSSVersionSummary> versionSummaryList = listVersions(prefix);
-        versionSummaryList.forEach(v -> {
-            deleteVersion(v);
-            logger.info("version {} is deleted from remote.", v);
-        });
+        deleteObjects(prefix);
+        deleteVersions(prefix);
     }
 
     @Override
@@ -293,10 +287,74 @@ public class OssManager implements IRemoteManager {
         return objectList;
     }
 
-    private void deleteVersion(OSSVersionSummary versionSummary) {
+    private void deleteObjects(String prefix) {
+        String ossFilePrefix = BinlogFileUtil.buildRemoteFileFullName(prefix, ossConfig.polardbxInstance);
+        String continuationToken = null;
         OSS ossClient = getOssClient();
-        ossClient.deleteVersion(ossConfig.getBucketName(), versionSummary.getKey(), versionSummary.getVersionId());
-        ossClient.shutdown();
+
+        try {
+            while (true) {
+                ListObjectsV2Request request = new ListObjectsV2Request();
+                request.setBucketName(ossConfig.getBucketName());
+                request.setPrefix(ossFilePrefix);
+                request.setContinuationToken(continuationToken);
+                request.setMaxKeys(1000);
+                ListObjectsV2Result objectListing = ossClient.listObjectsV2(request);
+                List<OSSObjectSummary> ossObjectSummaryList = objectListing.getObjectSummaries();
+
+                List<String> toDeleteKeyList = ossObjectSummaryList.stream()
+                    .map(OSSObjectSummary::getKey).collect(Collectors.toList());
+                if (!toDeleteKeyList.isEmpty()) {
+                    int batchSize = DeleteObjectsRequest.DELETE_OBJECTS_ONETIME_LIMIT;
+                    for (int i = 0; i < toDeleteKeyList.size(); i += batchSize) {
+                        int endIndex = Math.min(i + batchSize, toDeleteKeyList.size());
+                        List<String> batch = toDeleteKeyList.subList(i, endIndex);
+                        DeleteObjectsRequest deleteObjectsRequest = new DeleteObjectsRequest(ossConfig.getBucketName());
+                        deleteObjectsRequest.setKeys(batch);
+                        ossClient.deleteObjects(deleteObjectsRequest);
+                        logger.info("delete files from remote, file list size is {}, key list is {}.",
+                            batch.size(), batch);
+                    }
+                }
+
+                if (objectListing.isTruncated()) {
+                    continuationToken = objectListing.getNextContinuationToken();
+                } else {
+                    break;
+                }
+            }
+        } finally {
+            ossClient.shutdown();
+        }
+    }
+
+    private void deleteVersions(String prefix) {
+        List<OSSVersionSummary> versionSummaryList = listVersions(prefix);
+
+        if (!versionSummaryList.isEmpty()) {
+            OSS ossClient = getOssClient();
+            try {
+                List<DeleteVersionsRequest.KeyVersion> keyVersionList = versionSummaryList
+                    .stream()
+                    .map(v -> new DeleteVersionsRequest.KeyVersion(v.getKey(), v.getVersionId()))
+                    .collect(Collectors.toList());
+
+                // 分批删除，每批1000条
+                int batchSize = 1000;
+                for (int i = 0; i < keyVersionList.size(); i += batchSize) {
+                    int endIndex = Math.min(i + batchSize, keyVersionList.size());
+                    List<DeleteVersionsRequest.KeyVersion> batch = keyVersionList.subList(i, endIndex);
+
+                    DeleteVersionsRequest deleteVersionsRequest = new DeleteVersionsRequest(ossConfig.getBucketName());
+                    deleteVersionsRequest.setKeys(batch);
+                    ossClient.deleteVersions(deleteVersionsRequest);
+                    logger.info("delete versions from remote, batch size is {}, key list is {}.",
+                        batch.size(), JSONObject.toJSONString(batch));
+                }
+            } finally {
+                ossClient.shutdown();
+            }
+        }
     }
 
     List<OSSVersionSummary> listVersions(String prefix) {

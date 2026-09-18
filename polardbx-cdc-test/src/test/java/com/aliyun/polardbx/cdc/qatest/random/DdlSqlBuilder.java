@@ -95,8 +95,30 @@ public class DdlSqlBuilder {
         return String.format("alter table `%s` drop column `%s`", tableName, columnName);
     }
 
+    /**
+     * 构建添加生成列的DDL SQL
+     * 生成列基于非主键列c_idx构建表达式，随机选择STORED或VIRTUAL存储方式
+     */
+    Pair<String, String> buildAddGeneratedColumnSql(String columnName) {
+        // 使用非主键列c_idx构建表达式，因为虚拟列不能引用主键列
+        String[] types = {"bigint", "int", "varchar(64)", "double"};
+        String[] expressions = {"(`c_idx` + 0)", "(`c_idx` % 1000000)", "(CAST(`c_idx` AS CHAR))", "(`c_idx` * 1.0)"};
+        int choice = new Random().nextInt(types.length);
+        String columnType = types[choice];
+        String expression = expressions[choice];
+        boolean stored = new Random().nextBoolean();
+
+        String sql = String.format("alter table `%s` add column `%s` %s GENERATED ALWAYS AS %s %s",
+            tableName, columnName, columnType, expression, stored ? "STORED" : "VIRTUAL");
+        return Pair.of(columnType, sql);
+    }
+
     String buildAlterTableCharsetSql() {
-        if (RandomUtils.nextBoolean()) {
+        // CONVERT TO CHARACTER SET 会将所有字符集敏感列转换为目标charset，当从窄字符集(如gbk 2字节)
+        // 转换为宽字符集(如utf8mb4 4字节)时，列的声明大小会翻倍，积累足够多的varchar/char列后
+        // 容易导致总row size超过MySQL 65535字节限制，从而使下游MySQL同步失败。
+        // 因此大幅降低 CONVERT TO 的触发概率(从50%降至约17%)，配合列数上限(MAX_COLUMN_COUNT)保护。
+        if (RandomUtils.nextInt(0, 6) != 0) {
             return String.format("alter table `%s` DEFAULT CHARACTER SET %s", tableName, columnSeeds.nextCharset());
         } else {
             return String.format("alter table `%s` CONVERT TO CHARACTER SET %s", tableName, columnSeeds.nextCharset());
@@ -193,6 +215,17 @@ public class DdlSqlBuilder {
     }
 
     String findSeedColumn4Drop() {
+        // 优先考虑生成列：如果存在生成列，50%概率直接选中一个生成列进行drop
+        List<Map.Entry<String, String>> generatedColumns = columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.entrySet()
+            .stream()
+            .filter(entry -> columnSeeds.GENERATED_COLUMN_NAMES.contains(entry.getKey()))
+            .collect(Collectors.toList());
+        if (!generatedColumns.isEmpty() && new Random().nextBoolean()) {
+            Map.Entry<String, String> entry = generatedColumns.get(new Random().nextInt(generatedColumns.size()));
+            droppedColumnTypes.add(entry.getValue());
+            return entry.getKey();
+        }
+
         // 尽量每个类型都能执行drop操作
         List<Map.Entry<String, String>> list = new ArrayList<>(columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.entrySet());
         list.removeIf(entry -> droppedColumnTypes.contains(entry.getValue()));
@@ -221,6 +254,7 @@ public class DdlSqlBuilder {
 
     List<Map.Entry<String, String>> filterColumn4Modify() {
         return columnSeeds.COLUMN_NAME_COLUMN_TYPE_MAPPING.entrySet().stream()
+            .filter(i -> !columnSeeds.GENERATED_COLUMN_NAMES.contains(i.getKey()))
             .filter(i -> !i.getValue().startsWith("enum") && !i.getValue().startsWith("set"))
             .filter(i -> !isGeometry(i.getValue()))
             .filter(i -> {

@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
 import static com.aliyun.polardbx.binlog.dao.SystemConfigInfoDynamicSqlSupport.configKey;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 
@@ -41,12 +42,6 @@ public class SystemDbConfig {
         "insert into `binlog_system_config`(`config_key`, `config_value`) values(?, ?) ON DUPLICATE KEY UPDATE `config_value`=VALUES(`config_value`)";
     private static final String UPDATE_SQL =
         "update `binlog_system_config` set `config_value`=? where config_key=?";
-
-    private static final SystemConfigInfoMapper SYSTEM_CONFIG_INFO_MAPPER =
-        SpringContextHolder.getObject(SystemConfigInfoMapper.class);
-    private static final InstConfigMapper INST_CONFIG_MAPPER = SpringContextHolder.getObject(InstConfigMapper.class);
-    private static final JdbcTemplate JDBC_TEMPLATE = SpringContextHolder.getObject("metaJdbcTemplate");
-
     private static final LoadingCache<String, String> CACHE = CacheBuilder.newBuilder()
         .maximumSize(4096)
         .expireAfterWrite(120, TimeUnit.SECONDS)
@@ -159,13 +154,15 @@ public class SystemDbConfig {
     }
 
     public static String getSystemDbConfig(String sysKey) {
-        List<SystemConfigInfo> list = SYSTEM_CONFIG_INFO_MAPPER.select(s -> s.where(configKey, isEqualTo(sysKey)));
+        SystemConfigInfoMapper systemConfigInfoMapper = getObject(SystemConfigInfoMapper.class);
+        List<SystemConfigInfo> list = systemConfigInfoMapper.select(s -> s.where(configKey, isEqualTo(sysKey)));
         return list.isEmpty() ? "" : list.get(0).getConfigValue();
     }
 
     public static String getInstConfig(String sysKey) {
-        List<InstConfig> list =
-            INST_CONFIG_MAPPER.select(s -> s.where(InstConfigDynamicSqlSupport.paramKey, isEqualTo(sysKey)));
+        InstConfigMapper instConfigMapper = getObject(InstConfigMapper.class);
+        List<InstConfig> list = instConfigMapper.select(
+            s -> s.where(InstConfigDynamicSqlSupport.paramKey, isEqualTo(sysKey)));
         return list.isEmpty() ? "" : list.get(0).getParamVal();
     }
 
@@ -185,12 +182,14 @@ public class SystemDbConfig {
     }
 
     public static void upsertSystemDbConfig(String key, String value) {
-        JDBC_TEMPLATE.update(UPSERT_SQL, key, value);
+        JdbcTemplate jdbcTemplate = getObject("metaJdbcTemplate");
+        jdbcTemplate.update(UPSERT_SQL, key, value);
         CACHE.invalidate(key);
     }
 
     public static void updateSystemDbConfig(String key, String value) {
-        JDBC_TEMPLATE.update(UPDATE_SQL, value, key);
+        JdbcTemplate jdbcTemplate = getObject("metaJdbcTemplate");
+        jdbcTemplate.update(UPDATE_SQL, value, key);
         CACHE.invalidate(key);
     }
 }

@@ -22,6 +22,7 @@ import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.aliyun.polardbx.binlog.dumper.dump.client.DumpClient;
+import com.aliyun.polardbx.binlog.dumper.dump.logfile.seekhandler.SeekResult;
 import com.aliyun.polardbx.binlog.dumper.metrics.StreamMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.error.RetryableException;
@@ -29,6 +30,7 @@ import com.aliyun.polardbx.binlog.filesys.CdcFile;
 import com.aliyun.polardbx.binlog.format.utils.ByteArray;
 import com.aliyun.polardbx.binlog.monitor.MonitorManager;
 import com.aliyun.polardbx.binlog.monitor.MonitorType;
+import com.aliyun.polardbx.binlog.restore.BinlogRestoreManager;
 import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
@@ -99,6 +101,8 @@ public class LogFileCopier {
     private TimelineEnvConfig timelineEnvConfig;
     @Setter
     private ExecutionConfig executionConfig;
+    @Setter
+    private BinlogRestoreManager binlogRestoreManager;
     private volatile boolean running;
     /**
      * 不直接使用metrics里面的delay，因为metrics中的delay被初始化为0可能是不准的，这会导致getDumperTarget误判该dumper为可用。
@@ -197,6 +201,7 @@ public class LogFileCopier {
     }
 
     private void prepare() throws IOException {
+        tryRestore();
         clearContactInfo();
         buildTarget();
         buildBinlogFile();
@@ -209,6 +214,12 @@ public class LogFileCopier {
         logFileManager.setLatestFileCursor(
             new BinlogCursor(binlogFile.getFileName(), binlogFile.filePointer(), binlogFile.getFileSequence()));
         metrics.setLatestDelayTimeOnCommit(0);
+    }
+
+    private void tryRestore() {
+        if (binlogRestoreManager != null) {
+            binlogRestoreManager.tryRestore();
+        }
     }
 
     private void buildTarget() {
@@ -429,7 +440,7 @@ public class LogFileCopier {
             if (binlogFile.fileSize() == 0) {
                 binlogFile.writeHeader();
             } else {
-                BinlogFile.SeekResult seekResult = binlogFile.seekLastTso();
+                SeekResult seekResult = binlogFile.seekLastTso();
                 logger.info("seek result is " + seekResult);
 
                 if (binlogFile.filePointer() == 0) {
@@ -460,7 +471,7 @@ public class LogFileCopier {
             BinlogFile binlogFile =
                 new BinlogFile(new File(fullPath, fileName), "rw",
                     writeBufferSize, seekBufferSize, useDirectByteBuffer, metrics);
-            BinlogFile.SeekResult result = binlogFile.seekLastTso();
+            SeekResult result = binlogFile.seekLastTso();
             if (result.getLastEventTimestamp() != null) {
                 lastEventTimeStampSecond = result.getLastEventTimestamp();
             }

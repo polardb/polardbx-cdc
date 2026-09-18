@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS `rpl_task_config` (
     `memory` int(10) NOT NULL DEFAULT '1536',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_task_id` (`task_id`)
-    ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+    ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 
 
 DELIMITER $$

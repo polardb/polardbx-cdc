@@ -24,6 +24,7 @@ public class DDLExtInfo {
     private String serverId;
     private String sqlMode = null;
     private Boolean useOMC;
+    private Boolean externalColumnDdl;
     private String groupName;
 
     /**
@@ -42,7 +43,7 @@ public class DDLExtInfo {
 
     /**
      * 历史原因，originalDdl，拼写成了orginalDdl @承谨
-     * 另外，使用orginalDdl的版本，在对GSI进行打标处理时，也存在诸多缺陷，参见：https://aone.alibaba-inc.com/v2/project/860366/bug/51253282
+     * 另外，使用orginalDdl的版本，在对GSI进行打标处理时，也存在诸多历史兼容性问题。
      * 将错就错，对于isGsi为true的场景，根据原始sql是保存在了orginalDdl，还是originalDdl，来做不同的处理，@see RebuildEventLogFilter
      */
     private String originalDdl;
@@ -119,6 +120,14 @@ public class DDLExtInfo {
 
     public void setUseOMC(Boolean useOMC) {
         this.useOMC = useOMC;
+    }
+
+    public Boolean getExternalColumnDdl() {
+        return externalColumnDdl;
+    }
+
+    public void setExternalColumnDdl(Boolean externalColumnDdl) {
+        this.externalColumnDdl = externalColumnDdl;
     }
 
     @Deprecated

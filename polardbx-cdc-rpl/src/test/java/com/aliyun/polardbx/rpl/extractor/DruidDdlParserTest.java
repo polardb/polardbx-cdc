@@ -30,7 +30,7 @@ public class DruidDdlParserTest {
 
     @Test
     public void testDropTableIfExists() {
-        // see https://aone.alibaba-inc.com/v2/project/860366/bug/55137024
+        // see historical compatibility behavior
         String sql = "DROP TABLE IF EXISTS d1.d2.rename_target_auto";
         DdlResult ddlResult = DruidDdlParser.parse(sql, "abc");
         Assert.assertEquals("d1", ddlResult.getSchemaName());

@@ -18,8 +18,10 @@ import org.apache.commons.io.FileUtils;
 import java.io.File;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.IS_REPLICA;
+import static com.aliyun.polardbx.binlog.ConfigKeys.MEM_SIZE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_BASE_PATH;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_ENABLED;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_PERSIST_MEMORY_THRESHOLD_MB;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_PERSIST_SCHEMA_META_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 
@@ -80,11 +82,14 @@ public class CdcSchemaStoreProvider implements SchemaObjectStoreProvider {
         }
     }
 
-    private boolean getMetaPersistEnabled() {
+    boolean getMetaPersistEnabled() {
         if (CommonConstants.TRUE.equals(System.getProperty(IS_REPLICA))) {
             return DynamicApplicationConfig.getBoolean(RPL_PERSIST_SCHEMA_META_ENABLED);
         } else {
-            return DynamicApplicationConfig.getBoolean(META_PERSIST_ENABLED);
+            int memSize = DynamicApplicationConfig.getInt(MEM_SIZE, Integer.MAX_VALUE);
+            int memThreshold = DynamicApplicationConfig.getInt(META_PERSIST_MEMORY_THRESHOLD_MB);
+            return DynamicApplicationConfig.getBoolean(META_PERSIST_ENABLED) ||
+                (memThreshold > 0 && memSize <= memThreshold);
         }
     }
 }

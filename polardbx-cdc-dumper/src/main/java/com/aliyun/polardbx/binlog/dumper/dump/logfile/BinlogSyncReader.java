@@ -8,6 +8,7 @@ package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.dumper.dump.constants.EnumBinlogChecksumAlg;
+import com.aliyun.polardbx.binlog.dumper.metrics.DumpClientMetric;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.rpc.cdc.EventSplitMode;
 import com.google.protobuf.ByteString;
@@ -24,15 +25,15 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_SYNC_PACKET_SIZE;
 @Slf4j
 public class BinlogSyncReader extends BinlogDumpReader {
 
-    private static final int PACKAGE_LENGTH_LIMIT = DynamicApplicationConfig.getInt(BINLOG_SYNC_PACKET_SIZE);
+    protected static final int PACKAGE_LENGTH_LIMIT = DynamicApplicationConfig.getInt(BINLOG_SYNC_PACKET_SIZE);
     private final EventSplitMode eventSplitMode;
 
     public BinlogSyncReader(LogFileManager logFileManager, String fileName, long pos, EventSplitMode eventSplitMode,
-                            int maxPacketSize, int readBufferSize, EnumBinlogChecksumAlg slaveChecksumAlg)
+                            int maxPacketSize, int readBufferSize, EnumBinlogChecksumAlg slaveChecksumAlg, String trace)
         throws IOException {
-        super(logFileManager, fileName, pos, maxPacketSize, readBufferSize, slaveChecksumAlg);
+        super(logFileManager, fileName, pos, maxPacketSize, readBufferSize, slaveChecksumAlg, trace);
         this.eventSplitMode = eventSplitMode;
-        log.info("event split mode for binlog sync is " + eventSplitMode);
+        log.info("[{}] event split mode for binlog sync is {}", trace, eventSplitMode);
     }
 
     public ByteString nextSyncPacks() {
@@ -68,6 +69,7 @@ public class BinlogSyncReader extends BinlogDumpReader {
             }
 
             int length = buffer.limit() - buffer.position();
+            DumpClientMetric.addReadBytes(length, metric);
             ByteString byteString = ByteString.copyFrom(buffer);
             buffer.position(buffer.limit());
             lastPosition += length;

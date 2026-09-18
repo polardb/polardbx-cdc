@@ -18,6 +18,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Map;
@@ -80,14 +81,19 @@ public class DescribeUnifyArchiveLogFilesRequest {
 
     private boolean skipAuth = false;
 
+    /**
+     * 是否使用Hela，默认false
+     */
+    private boolean useHela = false;
+
     public static String createHmacSha1(String data, String secret) {
         try {
             Mac mac = Mac.getInstance("HmacSHA1");
             SecretKeySpec sec = new SecretKeySpec(secret.getBytes(), "HmacSHA1");
             mac.init(sec);
             byte[] digest = mac.doFinal(data.getBytes());
-            return new String(new Hex().encode(digest), "UTF-8");
-        } catch (NoSuchAlgorithmException | InvalidKeyException | UnsupportedEncodingException e) {
+            return new String(new Hex().encode(digest), StandardCharsets.UTF_8);
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
             throw new PolardbxException("createHmacSha1 error", e);
         }
     }
@@ -121,6 +127,7 @@ public class DescribeUnifyArchiveLogFilesRequest {
         paramMap.put("EndTime", urlEncode(formatDate(EndTime)));
         paramMap.put("PageSize", PageSize + "");
         paramMap.put("PageNumber", PageNumber + "");
+        paramMap.put("UseHela", String.valueOf(useHela));
         if (skipAuth) {
             paramMap.put("__skipAuth", "1");
         }

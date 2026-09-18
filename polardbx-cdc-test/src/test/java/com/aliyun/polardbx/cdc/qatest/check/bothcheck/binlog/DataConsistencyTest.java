@@ -6,19 +6,21 @@
  */
 package com.aliyun.polardbx.cdc.qatest.check.bothcheck.binlog;
 
-import com.alibaba.fastjson.JSONObject;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.format.field.Field;
 import com.aliyun.polardbx.binlog.format.field.MakeFieldFactory;
 import com.aliyun.polardbx.binlog.relay.HashLevel;
 import com.aliyun.polardbx.binlog.util.HexUtil;
-import com.aliyun.polardbx.binlog.util.TableGroupUtils;
 import com.aliyun.polardbx.cdc.qatest.base.CheckParameter;
 import com.aliyun.polardbx.cdc.qatest.base.ColumnType;
 import com.aliyun.polardbx.cdc.qatest.base.JdbcUtil;
 import com.aliyun.polardbx.cdc.qatest.base.PropertiesUtil;
 import com.aliyun.polardbx.cdc.qatest.base.RplBaseTestCase;
 import com.aliyun.polardbx.cdc.qatest.base.StreamHashUtil;
+import com.github.rholder.retry.Retryer;
+import com.github.rholder.retry.RetryerBuilder;
+import com.github.rholder.retry.StopStrategies;
+import com.github.rholder.retry.WaitStrategies;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
@@ -33,7 +35,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -45,7 +46,7 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.function.Function;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -73,6 +74,10 @@ public class DataConsistencyTest extends RplBaseTestCase {
         "SELECT %s FROM (SELECT * FROM( SELECT %s FROM `%s`.`%s`)t1 WHERE (%s) IN (%s))t2 ORDER BY %s";
     private static final String SELECT_FORMAT = "SELECT %s FROM `%s`.`%s` ORDER BY %s";
     private static final String SHOW_CREATE_TABLE = "SHOW FULL CREATE TABLE `%s`.`%s`";
+    private static final String SHOW_CREATE_TABLE_FOR_DIAGNOSIS = "SHOW CREATE TABLE `%s`.`%s`";
+    private static final String INST_CONFIG_QUERY = "select * from `inst_config` where `param_key` = '%s'";
+    private static final String TTL_INFO_QUERY =
+        "select * from metaDB.`ttl_info` where `table_schema` = '%s' and `table_name` = '%s'";
 
     private static final int STREAM_NUM = 3;
     private static final int SOURCE_DS = 0;
@@ -80,6 +85,9 @@ public class DataConsistencyTest extends RplBaseTestCase {
     private static final int SYNC_FIRST_DS = 2;
     private static final int SYNC_SECOND_DS = 3;
     private static final int SYNC_THIRD_DS = 4;
+    private static final int CHECK_TABLE_THREADS = 5;
+    private static final String GENERATED_COLUMN_DROP_SINGLE_DB = "cdc_gen_col_drop_single";
+    private static final String GENERATED_COLUMN_DROP_BINLOGX_DB = "cdc_gen_col_drop_binlogx";
 
     private final ThreadLocal<DetailReport>
         threadLocalReport = new ThreadLocal<>();
@@ -128,26 +136,23 @@ public class DataConsistencyTest extends RplBaseTestCase {
         log.info("backward data check test is finished! total table count is " + testSummary.getTotalTableCount());
     }
 
-    private boolean dstIsReplica() throws SQLException {
-        ResultSet resultSet = JdbcUtil.executeQuery("select version()", getCdcSyncDbConnection());
-        if (resultSet.next()) {
-            String version = resultSet.getString(1);
-            return StringUtils.contains(version, "TDDL") ||
-                StringUtils.contains(version, "PXC");
-        }
-        return false;
-    }
-
     /**
      * 校验polarx和下游Mysql中库表数据是否一致
      *
      * @param srcDs 取srcDs中的表来校验
      */
     public void check(int srcDs) throws SQLException {
+        // 规避可能的实验室报错
+        // 2025-08-07 06:33:58.228 [pool-5-thread-1] &amp#27;[1;31mERROR&amp#27;[0;39m &amp#27;[36mc.a.p.c.q.c.b.b.DataConsistencyTest&amp#27;[0;39m  - check table exception, table:pk_range_test.large_table_check_auto1
+        // com.google.common.truth.AssertionErrorWithFacts: 语句并未按照预期执行成功:[1a3ad20440801000][192.0.2.31:3306][pk_range_test]ERR-CODE: [TDDL-4614][ERR_EXECUTE_ON_MYSQL] Error occurs when execute on GROUP 'PK_RANGE_TEST_P00000_GROUP' ATOM 'dskey_pk_range_test_p00000_group#test-instance-dn-0#192.0.2.32-3306#pk_range_test_p00000': ERR-CODE: [TDDL-10000][ERR_X_PROTOCOL_BAD_PACKET] X-NIO-Client /192.0.2.31:55196 to /192.0.2.32:31306 sent packet length (119246754) exceeds the allowed maximum (67108864).
+        JdbcUtil.executeUpdate(polardbxConnection, "set global conn_pool_xproto_max_packet_size=134217728");
+        JdbcUtil.executeUpdate(polardbxConnection, "set global polarx_rpc_max_allowed_packet=134217728");
+        JdbcUtil.executeUpdate(polardbxConnection, "set global max_allowed_packet=134217728");
+
         List<Pair<String, String>> testTables = getTestTables(srcDs);
         testSummary.setTotalTableCount(testTables.size());
         Map<Future<?>, String> futures = new HashMap<>();
-        ExecutorService executorService = Executors.newFixedThreadPool(10);
+        ExecutorService executorService = Executors.newFixedThreadPool(CHECK_TABLE_THREADS);
         ExecutorCompletionService<DetailReport> completionService =
             new ExecutorCompletionService<>(executorService);
         for (Pair<String, String> tablePair : testTables) {
@@ -221,6 +226,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
     }
 
     public boolean checkSrcTableExists(String db, String table) throws SQLException {
+        JdbcUtil.useDb(polardbxConnection, db);
         return checkTableExists(db, table, polardbxConnection);
     }
 
@@ -254,42 +260,48 @@ public class DataConsistencyTest extends RplBaseTestCase {
     }
 
     public DetailReport checkTable(String db, String table) throws Exception {
-        try {
-            if (log.isDebugEnabled()) {
-                log.debug("start to check table {}.{}", db, table);
-            }
-            DetailReport report = new DetailReport();
-            threadLocalReport.set(report);
-            report.setTable(db + "." + table);
+        Retryer<Object> retryer = RetryerBuilder.newBuilder().retryIfException()
+            .withWaitStrategy(WaitStrategies.fixedWait(2, TimeUnit.SECONDS))
+            .withStopStrategy(StopStrategies.stopAfterAttempt(30)).build();
+        DetailReport report = new DetailReport();
+        retryer.call(() -> {
+            try {
+                if (log.isDebugEnabled()) {
+                    log.debug("start to check table {}.{}", db, table);
+                }
+                threadLocalReport.set(report);
+                report.setTable(db + "." + table);
 
-            if (!allExists(db, table, report)) {
-                // 有表不存在的场景，直接返回
-                return report;
-            }
+                if (!allExists(db, table, report)) {
+                    // 有表不存在的场景，直接返回
+                    return null;
+                }
 
-            if (!checkColumns(db, table)) {
-                log.error("failed to check columns, table:{}.{}", db, table);
-                report.setSuccess(false);
-                report.setReason("check columns failed");
-                return report;
-            }
-            if (!checkRows(db, table)) {
-                log.error("failed to check data, table:{}.{}", db, table);
-                report.setSuccess(false);
-                report.setReason("check rows failed");
-                return report;
-            }
+                if (!checkColumns(db, table)) {
+                    log.error("failed to check columns, table:{}.{}", db, table);
+                    report.setSuccess(false);
+                    report.setReason("check columns failed");
+                    return null;
+                }
+                if (!checkRows(db, table)) {
+                    log.error("failed to check data, table:{}.{}", db, table);
+                    report.setSuccess(false);
+                    report.setReason("check rows failed");
+                    return null;
+                }
 
-            if (log.isDebugEnabled()) {
-                // 降低一下日志输出量，否则会导致实验室解析sql失败
-                log.debug("check table success, table:{}.{}", db, table);
+                if (log.isDebugEnabled()) {
+                    // 降低一下日志输出量，否则会导致实验室解析sql失败
+                    log.debug("check table success, table:{}.{}", db, table);
+                }
+                report.setSuccess(true);
+                return null;
+            } catch (Throwable t) {
+                log.error("check table exception, table:{}.{}", db, table, t);
+                throw new PolardbxException(String.format("check error %s:%s", db, table), t);
             }
-            report.setSuccess(true);
-            return report;
-        } catch (Throwable t) {
-            log.error("check table exception, table:{}.{}", db, table, t);
-            throw new PolardbxException(String.format("check error %s:%s", db, table), t);
-        }
+        });
+        return report;
     }
 
     private Set<String> getIgnoreTableSet() throws SQLException {
@@ -368,6 +380,16 @@ public class DataConsistencyTest extends RplBaseTestCase {
     }
 
     private boolean filterDatabase(String database) {
+        // Single-stream and BinlogX prechecks run concurrently. The sibling GeneratedColumnDropTest
+        // intentionally exposes a transient DROP COLUMN schema and owns validation of its dedicated database.
+        // Exclude only the sibling database; keep this runner's database in the global scan so standalone
+        // runs and RECORD-level BinlogX checks retain full coverage.
+        String siblingGeneratedColumnDropDb =
+            usingBinlogX ? GENERATED_COLUMN_DROP_SINGLE_DB : GENERATED_COLUMN_DROP_BINLOGX_DB;
+        if (StringUtils.equalsIgnoreCase(database, siblingGeneratedColumnDropDb)) {
+            return true;
+        }
+
         String checkDbBlackList = PropertiesUtil.getCdcCheckDbBlackList();
         if (StringUtils.isNotBlank(checkDbBlackList)) {
             String[] blackList = StringUtils.split(
@@ -454,7 +476,81 @@ public class DataConsistencyTest extends RplBaseTestCase {
         List<Pair<String, String>> dstColumnPairs = getDstColumnsList(destDs, db, tb);
         List<String> dstColumns = dstColumnPairs.stream().map(c -> c.getLeft().toLowerCase())
             .collect(Collectors.toList());
-        return ListUtils.isEqualList(srcColumns, dstColumns);
+        boolean result = ListUtils.isEqualList(srcColumns, dstColumns);
+        if (!result) {
+            logColumnMismatch(db, tb, destDs, srcColumnPairs, dstColumnPairs, srcColumns, dstColumns);
+        }
+        return result;
+    }
+
+    private void logColumnMismatch(String db, String tb, int destDs,
+                                   List<Pair<String, String>> srcColumnPairs,
+                                   List<Pair<String, String>> dstColumnPairs,
+                                   List<String> srcColumns,
+                                   List<String> dstColumns) {
+        List<String> missingColumns = srcColumns.stream()
+            .filter(column -> !dstColumns.contains(column))
+            .collect(Collectors.toList());
+        List<String> extraColumns = dstColumns.stream()
+            .filter(column -> !srcColumns.contains(column))
+            .collect(Collectors.toList());
+
+        log.error("column mismatch, table: {}.{}, target: {}", db, tb, getDataSourceName(destDs));
+        log.error("source DESC columns: {}", formatColumnPairs(srcColumnPairs));
+        log.error("target DESC columns: {}", formatColumnPairs(dstColumnPairs));
+        log.error("missing columns on target: {}, extra columns on target: {}, first order mismatch: {}",
+            missingColumns, extraColumns, getFirstOrderMismatch(srcColumns, dstColumns));
+        log.error("source SHOW CREATE TABLE: {}", getShowCreateTableForDiagnosis(SOURCE_DS, db, tb));
+        log.error("target SHOW CREATE TABLE: {}", getShowCreateTableForDiagnosis(destDs, db, tb));
+    }
+
+    private List<String> formatColumnPairs(List<Pair<String, String>> columnPairs) {
+        return columnPairs.stream()
+            .map(column -> column.getLeft() + " " + column.getRight())
+            .collect(Collectors.toList());
+    }
+
+    private String getFirstOrderMismatch(List<String> srcColumns, List<String> dstColumns) {
+        int commonSize = Math.min(srcColumns.size(), dstColumns.size());
+        for (int i = 0; i < commonSize; i++) {
+            if (!StringUtils.equals(srcColumns.get(i), dstColumns.get(i))) {
+                return String.format("index=%d, source=%s, target=%s", i, srcColumns.get(i), dstColumns.get(i));
+            }
+        }
+        if (srcColumns.size() != dstColumns.size()) {
+            return String.format("index=%d, source=%s, target=%s", commonSize,
+                commonSize < srcColumns.size() ? srcColumns.get(commonSize) : "<end>",
+                commonSize < dstColumns.size() ? dstColumns.get(commonSize) : "<end>");
+        }
+        return "none";
+    }
+
+    private String getShowCreateTableForDiagnosis(int ds, String db, String tb) {
+        try (Connection conn = getDruidConnection(ds);
+            ResultSet rs = JdbcUtil.executeQuerySuccess(conn,
+                String.format(SHOW_CREATE_TABLE_FOR_DIAGNOSIS, escape(db), escape(tb)))) {
+            if (rs.next()) {
+                return rs.getString(2);
+            }
+            return "<no row returned>";
+        } catch (Exception t) {
+            return "<failed to query: " + t.getMessage() + ">";
+        }
+    }
+
+    private String getDataSourceName(int ds) {
+        switch (ds) {
+        case SYNC_DS:
+            return "sync(ds=1)";
+        case SYNC_FIRST_DS:
+            return "sync-first(ds=2)";
+        case SYNC_SECOND_DS:
+            return "sync-second(ds=3)";
+        case SYNC_THIRD_DS:
+            return "sync-third(ds=4)";
+        default:
+            return "unknown(ds=" + ds + ")";
+        }
     }
 
     /**
@@ -692,7 +788,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
             try (PreparedStatement stmt = conn.prepareStatement(calculateSql, ResultSet.TYPE_FORWARD_ONLY,
                 ResultSet.CONCUR_READ_ONLY)) {
                 stmt.setFetchSize(Integer.MIN_VALUE);
-                try (ResultSet rs = stmt.executeQuery(calculateSql)) {
+                try (ResultSet rs = stmt.executeQuery()) {
                     int columnCount = rs.getMetaData().getColumnCount();
                     while (rs.next()) {
                         for (int i = 0; i < columnCount; i++) {
@@ -802,7 +898,7 @@ public class DataConsistencyTest extends RplBaseTestCase {
     }
 
     private boolean hasNoPrimaryKeys(String db, String table) throws SQLException {
-        try (Connection conn = getPolardbxConnection()) {
+        try (Connection conn = getPolardbxConnection(db)) {
             List<String> pks = JdbcUtil.getPrimaryKeyNames(conn, db, table);
             return CollectionUtils.isEmpty(pks);
         }
@@ -823,9 +919,13 @@ public class DataConsistencyTest extends RplBaseTestCase {
     }
 
     private List<Pair<String, String>> getColumnsListHelper(int ds, String db, String tb) throws SQLException {
-        try (Connection conn = getDruidConnection(ds)) {
+        try (Connection conn = getSchemaAwareConnection(ds, db)) {
             return JdbcUtil.getColumnNamesByDesc(conn, db, tb);
         }
+    }
+
+    private Connection getSchemaAwareConnection(int ds, String db) {
+        return ds == SOURCE_DS ? getPolardbxConnection(db) : getDruidConnection(ds);
     }
 
     private List<String> getSrcPrimaryKeys(String db, String tb) throws SQLException {
@@ -837,14 +937,14 @@ public class DataConsistencyTest extends RplBaseTestCase {
     }
 
     private List<String> getPrimaryKeysHelper(int ds, String db, String tb) throws SQLException {
-        try (Connection conn = getDruidConnection(ds)) {
+        try (Connection conn = getSchemaAwareConnection(ds, db)) {
             return JdbcUtil.getPrimaryKeyNames(conn, db, tb);
         }
     }
 
     private Map<String, ColumnType> getSrcColumnTypeMap(
         String db, String tb) throws SQLException {
-        try (Connection conn = getPolardbxConnection()) {
+        try (Connection conn = getPolardbxConnection(db)) {
             return JdbcUtil.getColumnTypesByDesc(conn, db, tb);
         }
     }

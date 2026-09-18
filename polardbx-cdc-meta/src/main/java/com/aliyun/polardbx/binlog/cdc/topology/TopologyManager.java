@@ -15,6 +15,8 @@ import com.aliyun.polardbx.binlog.cdc.topology.vo.TopologyRecord;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
@@ -44,7 +46,15 @@ import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.tryShare
 @Slf4j
 public class TopologyManager {
     private final Map<Pair<String, String>, LogicBasicInfo> cache = Maps.newHashMap();
+    /**
+     * dbName.tbName -> tableId
+     */
+    private final Map<Pair<String, String>, Long> tableIdMap = Maps.newHashMap();
     private LogicMetaTopology topology;
+    // apply History 最大的tso, 在apply History后自动设置
+    @Getter
+    @Setter
+    private String rollBackTso;
 
     public TopologyManager() {
     }
@@ -52,6 +62,11 @@ public class TopologyManager {
     public TopologyManager(LogicMetaTopology topology) {
         this.checkTopology(topology);
         this.topology = topology;
+    }
+
+    public void applyHistory(final String tso, String schema, String table, TopologyRecord record) {
+        this.rollBackTso = null;
+        apply(tso, schema, table, record);
     }
 
     public void apply(final String tso, String schema, String table, TopologyRecord record) {
@@ -64,7 +79,7 @@ public class TopologyManager {
         trySharedRecord(record);
 
         Preconditions.checkNotNull(schema);
-        Preconditions.checkArgument((StringUtils.isEmpty(table) ^ record.getLogicTableMeta() == null) == false,
+        Preconditions.checkArgument(StringUtils.isEmpty(table) == (record.getLogicTableMeta() == null),
             "table name [%s] and logicTableMeta [%s] should both exist or both not exist", table,
             record.getLogicTableMeta());
         if (record.getLogicDbMeta() != null) {
@@ -94,16 +109,24 @@ public class TopologyManager {
             }
         } else if (record.getLogicTableMeta() != null) {
             Preconditions.checkNotNull(table);
-            //insert or update table
+            //create or update table meta
             LogicTableMetaTopology meta = record.getLogicTableMeta();
             Pair<LogicDbTopology, LogicTableMetaTopology> topology = getTopology(schema, table);
             final LogicTableMetaTopology origin = topology.getRight();
+            if (rollBackTso == null || tso.compareTo(rollBackTso) > 0) {
+                // rollBackTso是apply History 结束时的最大tso
+                // 如果tso小于该值，证明其已经update过table id，不能重复update
+                // rollBackTso == null 说明还没有snapshot或者是applyHistory过来的，必须分配table id
+                updateTableId(schema, meta.getTableName());
+            } else {
+                log.warn("ignore update table id record {} tso {} less than rollBackTso {}", record, tso, rollBackTso);
+            }
             if (origin == null) {
-                //insert
+                // create table
                 topology.getLeft().getLogicTableMetas().add(meta);
             } else {
                 invalidCache(tso, schema, table);
-                //update
+                // update table meta
                 //origin.setPhySchemas(phySchemas);
                 origin.setTableName(meta.getTableName());
                 origin.setTableType(meta.getTableType());
@@ -267,4 +290,49 @@ public class TopologyManager {
             throw new PolardbxException("topology should be lowerCased, but is not!");
         }
     }
+
+    public Long getTableId(String dbName, String tbName) {
+        Pair<String, String> key = Pair.of(dbName, tbName);
+        Long value = tableIdMap.get(key);
+        if (value == null) {
+            throw new RuntimeException(String.format("Table id for %s.%s not found.", dbName, tbName));
+        }
+        return value;
+    }
+
+    public void updateTableId(String dbName, String tbName) {
+        Pair<String, String> key = Pair.of(dbName, tbName);
+        tableIdMap.put(key, topology.incrementAndGetTableId());
+        log.info("{}.{} table id: {}", dbName, tbName, topology.getMaxTableId());
+    }
+
+    /**
+     * 仅对virtual table主动设置table id
+     */
+    public void setTableIdForVirtualTable(Pair<String, String> key, long tableId) {
+        Long value = tableIdMap.get(key);
+        if (value == null || value < tableId) {
+            tableIdMap.put(key, tableId);
+            log.info("set table id for virtual table! {}.{} table id: {}",
+                key.getKey(), key.getValue(), tableId);
+        }
+    }
+
+    public void reAllocateAllTableId() {
+        reAllocateAllTableId(topology);
+    }
+
+    public void reAllocateAllTableId(LogicMetaTopology topology) {
+        log.info("start reallocate all table id.");
+        tableIdMap.clear();
+        topology.getSortedLogicDbMetas().forEach(s -> {
+            String dbName = s.getSchema();
+            s.getSortedLogicTableMetas().forEach(t -> {
+                String tbName = t.getTableName();
+                updateTableId(dbName, tbName);
+            });
+        });
+        log.info("reallocate all table id finished.");
+    }
+
 }

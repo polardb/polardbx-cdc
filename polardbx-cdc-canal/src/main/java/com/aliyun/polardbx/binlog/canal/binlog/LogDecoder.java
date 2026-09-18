@@ -7,6 +7,7 @@
 package com.aliyun.polardbx.binlog.canal.binlog;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.canal.DecompressionStatistics;
 import com.aliyun.polardbx.binlog.canal.IBinlogFileInfoFetcher;
 import com.aliyun.polardbx.binlog.canal.binlog.event.AppendBlockLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.BeginLoadQueryLogEvent;
@@ -35,6 +36,7 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.StartLogEventV3;
 import com.aliyun.polardbx.binlog.canal.binlog.event.StopLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TableMapLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.TransactionContextLogEvent;
+import com.aliyun.polardbx.binlog.canal.binlog.event.TransactionPayloadLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.UnknownLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.UpdateRowsLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.UserVarLogEvent;
@@ -48,13 +50,19 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.MariaGtidLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.mariadb.StartEncryptionLogEvent;
 import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.google.common.collect.Lists;
+import io.grpc.netty.shaded.io.netty.buffer.ByteBufUtil;
+import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream;
+import org.apache.commons.io.IOUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.text.MessageFormat;
 import java.util.BitSet;
+import java.util.List;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVAL_MS;
 
@@ -79,7 +87,8 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.DAEMON_TSO_HEARTBEAT_INTERVA
  * @author Changyuan.lh
  * @version 1.0
  */
-public final class LogDecoder {
+@Slf4j
+public class LogDecoder {
 
     protected static final Logger logger = LoggerFactory.getLogger(LogDecoder.class);
 
@@ -94,22 +103,30 @@ public final class LogDecoder {
     protected long curMaxPosition = 0;
     protected long totalMaxPosition = 0;
     protected boolean needFixBigBinlogFileLogPos = true;
+    private final DecodeMode decodeMode;
 
     public LogDecoder() {
+        decodeMode = DecodeMode.NORMAL;
     }
 
     public LogDecoder(final int fromIndex, final int toIndex) {
         handleSet.set(fromIndex, toIndex);
+        decodeMode = DecodeMode.NORMAL;
     }
 
+    public LogDecoder(final int fromIndex, final int toIndex, DecodeMode decodeMode) {
+        handleSet.set(fromIndex, toIndex);
+        this.decodeMode = decodeMode;
+    }
 
     public LogEvent decode(LogBuffer buffer, LogHeader header, LogContext context) throws IOException {
         LogEvent event = innerDecode(buffer, header, context);
-        if (needFixBigBinlogFileLogPos){
+        if (needFixBigBinlogFileLogPos) {
             if (header.getType() == LogEvent.HEARTBEAT_LOG_EVENT ||
-                header.getType() == LogEvent.ROTATE_EVENT){
-                // 忽略心跳事件和ROTATE_EVENT
-                // rotate event logPosition和header.getLogPos 值不同
+                header.getType() == LogEvent.ROTATE_EVENT ||
+                context.isIterateDecode()) {
+                // 忽略心跳事件和ROTATE_EVENT以 及 解压事件， 解压事件的pos均为0
+                // rotate event logPosition 和 header.getLogPos 值不同
                 return event;
             }
             long curPosition = header.getLogPos();
@@ -118,19 +135,20 @@ public final class LogDecoder {
             // 避免服务器端生成的虚拟event被误统计到位点当中的情况，也会保证event的位点幂等性和单调递增的特性。
             // totalMaxPosition 和 curMaxPosition 在文件rotate的时候，自动归0， 针对 rotate 文件出现在文件中的时候，在rotate处做了判断
             String warningMsg = null;
-            if (curPosition < curMaxPosition){
-                warningMsg = String.format("receive log pos reset event, will use history max pos to make position linearly increasing, last max pos %d, cur pos %d, history max pos %d",
+            if (curPosition < curMaxPosition) {
+                warningMsg = String.format(
+                    "receive log pos reset event, will use history max pos to make position linearly increasing, last max pos %d, cur pos %d, history max pos %d",
                     curMaxPosition, curPosition, totalMaxPosition);
                 // 计算真实文件中的offset
                 long length = header.getEventLen();
                 totalMaxPosition = totalMaxPosition + curMaxPosition + length - curPosition;
             }
             curMaxPosition = curPosition;
-            if (totalMaxPosition == 0){
+            if (totalMaxPosition == 0) {
                 // 不需要调整
                 return event;
             }
-            if (warningMsg != null){
+            if (warningMsg != null) {
                 logger.warn(warningMsg);
             }
             long newPos = curPosition + totalMaxPosition;
@@ -140,6 +158,7 @@ public final class LogDecoder {
 
         return event;
     }
+
     /**
      * Deserialize an event from buffer.
      *
@@ -158,8 +177,12 @@ public final class LogDecoder {
         }
 
         if (checksumAlg != LogEvent.BINLOG_CHECKSUM_ALG_OFF && checksumAlg != LogEvent.BINLOG_CHECKSUM_ALG_UNDEF) {
-            // remove checksum bytes
-            buffer.limit(header.getEventLen() - LogEvent.BINLOG_CHECKSUM_LEN);
+            if (context.isIterateDecode()) {
+                // transaction compress payload在主事件已经处理了checksum,遍历解析event忽略checksum处理
+            } else {
+                // remove checksum bytes
+                buffer.limit(header.getEventLen() - LogEvent.BINLOG_CHECKSUM_LEN);
+            }
         }
 
         switch (header.getType()) {
@@ -195,7 +218,7 @@ public final class LogDecoder {
             return mapEvent;
         }
         case LogEvent.WRITE_ROWS_EVENT_V1: {
-            RowsLogEvent event = new WriteRowsLogEvent(header, buffer, descriptionEvent);
+            RowsLogEvent event = new WriteRowsLogEvent(header, buffer, descriptionEvent, decodeMode);
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
@@ -209,7 +232,7 @@ public final class LogDecoder {
             return event;
         }
         case LogEvent.DELETE_ROWS_EVENT_V1: {
-            RowsLogEvent event = new DeleteRowsLogEvent(header, buffer, descriptionEvent);
+            RowsLogEvent event = new DeleteRowsLogEvent(header, buffer, descriptionEvent, decodeMode);
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
@@ -222,10 +245,10 @@ public final class LogDecoder {
                 event = tryFixRotateEvent(event, logPosition);
             }
             /* updating position in context */
-            logPosition = new LogPosition(event.getFilename(), event.getPosition());
+            logPosition = rotateToNextBinlog(logPosition, event);
             context.setLogPosition(logPosition);
             // 只有正常rotate event ， 触发maxPosition 归0
-            if (oldEvent == event){
+            if (oldEvent == event) {
                 curMaxPosition = 0;
                 totalMaxPosition = 0;
             }
@@ -369,7 +392,7 @@ public final class LogDecoder {
             return event;
         }
         case LogEvent.WRITE_ROWS_EVENT: {
-            RowsLogEvent event = new WriteRowsLogEvent(header, buffer, descriptionEvent);
+            RowsLogEvent event = new WriteRowsLogEvent(header, buffer, descriptionEvent, decodeMode);
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
@@ -383,7 +406,7 @@ public final class LogDecoder {
             return event;
         }
         case LogEvent.DELETE_ROWS_EVENT: {
-            RowsLogEvent event = new DeleteRowsLogEvent(header, buffer, descriptionEvent);
+            RowsLogEvent event = new DeleteRowsLogEvent(header, buffer, descriptionEvent, decodeMode);
             /* updating position in context */
             logPosition.position = header.getLogPos();
             event.fillTable(context);
@@ -451,6 +474,12 @@ public final class LogDecoder {
             logPosition.position = header.getLogPos();
             return event;
         }
+        case LogEvent.TRANSACTION_PAYLOAD_EVENT: {
+            TransactionPayloadLogEvent event = new TransactionPayloadLogEvent(header, buffer, descriptionEvent);
+            /* updating position in context */
+            logPosition.position = header.getLogPos();
+            return event;
+        }
 
         default:
             /*
@@ -476,12 +505,72 @@ public final class LogDecoder {
         return new UnknownLogEvent(header);
     }
 
+    protected LogPosition rotateToNextBinlog(LogPosition logPosition, RotateLogEvent event) {
+        return new LogPosition(event.getFilename(), event.getPosition());
+    }
+
     public final void handle(final int fromIndex, final int toIndex) {
         handleSet.set(fromIndex, toIndex);
     }
 
     public final void handle(final int flagIndex) {
         handleSet.set(flagIndex);
+    }
+
+    /**
+     * 在此解压TRANSACTION_PAYLOAD_EVENT
+     * 注意，和canal不同的是: 解压出的 event.header.next_pos = TRANSACTION_PAYLOAD_EVENT.header.begin_pos (canal是next_pos)
+     * 另外，event_size就是单个原事件大小 (canal是 TRANSACTION_PAYLOAD_EVENT.header.event_size)
+     */
+    public List<LogEvent> processIterateDecode(LogEvent event, LogContext context) throws IOException {
+        List<LogEvent> events = Lists.newArrayList();
+        long startTime = System.currentTimeMillis();
+        long eventSizeSum = 0;
+        if (event.getHeader().getType() == LogEvent.TRANSACTION_PAYLOAD_EVENT) {
+            // iterate for compresss payload
+            TransactionPayloadLogEvent compressEvent = ((TransactionPayloadLogEvent) event);
+            LogBuffer iterateBuffer = null;
+            if (compressEvent.isCompressByZstd()) {
+                try (ZstdCompressorInputStream in = new ZstdCompressorInputStream(
+                    new ByteArrayInputStream(compressEvent.getPayload()))) {
+                    byte[] decodeBytes = IOUtils.toByteArray(in);
+                    iterateBuffer = new LogBuffer(decodeBytes, 0, decodeBytes.length);
+                }
+            } else if (compressEvent.isCompressByNone()) {
+                iterateBuffer = new LogBuffer(compressEvent.getPayload(), 0, compressEvent.getPayload().length);
+            } else {
+                throw new IllegalArgumentException("unknow compress type at " + ":" + event.getHeader().getLogPos());
+            }
+
+            try {
+                context.setIterateDecode(true);
+                while (iterateBuffer.hasRemaining()) {// iterate
+                    LogEvent deEvent = decode(iterateBuffer, context);
+                    if (deEvent == null) {
+                        break;
+                    }
+                    eventSizeSum += deEvent.getEventLen();
+
+                    // compress event logPos = 0
+                    // 这样设置是为了replica消费到一个事务中间时挂掉之后记录的位点是事务开头，从而不会丢失数据
+                    deEvent.getHeader().setLogPos(event.getHeader().getLogPos() - event.getEventLen());
+                    // 需要重置payload每个event的eventLen , ack位点更新依赖logPos - eventLen,
+                    // 原因:每个payload都是uncompress的eventLen,无法对应物理binlog的eventLen
+                    // 隐患:memory计算空间大小时会出现放大的情况,影响getBatch的数量
+                    // deEvent.getHeader().setEventLen(event.getHeader().getEventLen());
+                    events.add(deEvent);
+                }
+            } finally {
+                context.setIterateDecode(false);
+            }
+        }
+        // 设置context pos 回父压缩事件的下一事件位置
+        context.getLogPosition().setPosition(event.getHeader().getLogPos());
+        long timeCost = System.currentTimeMillis() - startTime;
+        DecompressionStatistics.updateDecompressionStatistics(event.getEventLen(), events.size(), eventSizeSum,
+            timeCost,
+            context.getLogPosition());
+        return events;
     }
 
     /**
@@ -571,7 +660,7 @@ public final class LogDecoder {
         } else {
             //如果下一个binlog文件已经存在，则当前文件肯定不会再有增量写入，可以直接返回获取到的fileSize
             //如果下一个binlog文件还不存在，则等待若干个心跳时间看是否有数据写入，尽最大可能进行判断
-            String nextFileName = BinlogFileUtil.getNextBinlogFileName(fileName);
+            String nextFileName = getNextBinlogFileName(fileName);
             boolean isNextFileExisting = binlogFileSizeFetcher.isFileExisting(nextFileName);
             if (!isNextFileExisting) {
                 logger.info("prepare to wait for newly binlog data , {}:{}", fileName, expectFileSize);
@@ -579,6 +668,10 @@ public final class LogDecoder {
             }
             return binlogFileSizeFetcher.fetch(fileName);
         }
+    }
+
+    protected String getNextBinlogFileName(String fileName) {
+        return BinlogFileUtil.getNextBinlogFileName(fileName);
     }
 
     private RotateLogEvent rebuildRotateLogEvent(RotateLogEvent event, LogPosition logPosition, long expectFileSize) {
@@ -611,5 +704,38 @@ public final class LogDecoder {
 
     public void setNeedFixBigBinlogFileLogPos(boolean needFixBigBinlogFileLogPos) {
         this.needFixBigBinlogFileLogPos = needFixBigBinlogFileLogPos;
+    }
+
+    /**
+     * 仅供测试用
+     *
+     * @return {@link LogEvent }
+     */
+    public static LogEvent simpleDecode(byte[] data) throws IOException {
+        LogDecoder decoder = new LogDecoder();
+        LogContext logContext = new LogContext();
+        logContext.setServerCharactorSet(new ServerCharactorSet());
+        logContext.setFormatDescription(new FormatDescriptionLogEvent(4));
+        logContext.setLogPosition(new LogPosition("binlog.000001", 4));
+        decoder.handle(0, LogEvent.ENUM_END_EVENT);
+        LogBuffer logBuffer = new LogBuffer(data, 0, data.length);
+        LogEvent event = decoder.decode(logBuffer, logContext);
+        LogEvent res = event;
+        while (event != null) {
+            if (event instanceof FormatDescriptionLogEvent) {
+                FormatDescriptionLogEvent fde = (FormatDescriptionLogEvent) event;
+                log.info("fde:{}", fde);
+            }
+            if (event instanceof TransactionPayloadLogEvent) {
+                TransactionPayloadLogEvent tpe = (TransactionPayloadLogEvent) event;
+                List<LogEvent> events = decoder.processIterateDecode(tpe, logContext);
+                for (LogEvent e : events) {
+                    log.info(e.getHeader().getType() + "");
+                }
+                log.info("tpe:{}", tpe);
+            }
+            event = decoder.decode(logBuffer, logContext);
+        }
+        return res;
     }
 }

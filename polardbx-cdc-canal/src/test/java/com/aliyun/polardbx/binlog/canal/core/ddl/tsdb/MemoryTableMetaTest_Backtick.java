@@ -60,13 +60,13 @@ public class MemoryTableMetaTest_Backtick extends MemoryTableMetaBase {
 
     @Test
     public void testBacktick_3() {
-        String sql1 = "/*drds /11.122.76.56/13e123c82c802001/null// */"
+        String sql1 = "/*drds /192.0.2.1/13e123c82c802001/null// */"
             + "create table if not exists `gxw_test``backtick_bpzj` ( "
             + "`col-minus` int, "
             + "c2 int, "
             + "_drds_implicit_id_ bigint auto_increment, "
             + "primary key (_drds_implicit_id_) )";
-        String sql2 = "/*drds /11.122.76.56/13e123c894402001/null// */"
+        String sql2 = "/*drds /192.0.2.1/13e123c894402001/null// */"
             + "alter table `gxw_test``backtick_bpzj` add column c3 int";
 
         MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);

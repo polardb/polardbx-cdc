@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
+import java.util.TimerTask;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_NAME;
 
@@ -54,6 +55,16 @@ public class LocalBinlogEventParser extends MysqlEventParser {
     protected ErosaConnection buildErosaConnection() {
         log.info("start build local connection");
         return new LocalBinLogConnection(localDirectory, binlogList, needWait, eventListener, currentServerId);
+    }
+
+    /**
+     * 本地 binlog 场景仅读取本地文件，不涉及 MySQL 连接，因此不需要 MySQL 心跳检测。
+     * 此处返回 null 以跳过心跳任务的创建，避免父类 MysqlEventParser 因连接类型为
+     * LocalBinLogConnection（非 MysqlConnection）而抛出 "Unsupported connection type" 异常。
+     */
+    @Override
+    protected TimerTask buildHeartBeatTimeTask(ErosaConnection connection) {
+        return null;
     }
 
     @Override

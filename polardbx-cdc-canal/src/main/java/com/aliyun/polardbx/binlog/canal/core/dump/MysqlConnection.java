@@ -21,9 +21,11 @@ import com.aliyun.polardbx.binlog.canal.core.model.ServerCharactorSet;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.MySQLConnectionException;
 import com.aliyun.polardbx.binlog.canal.exception.SQLExecuteException;
+import lombok.extern.slf4j.Slf4j;
 import com.aliyun.polardbx.binlog.util.AddressUtil;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.Getter;
+import lombok.Setter;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
@@ -39,6 +41,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -47,6 +50,7 @@ import java.util.Properties;
  * @author agapple 2017年7月19日 下午2:59:41
  * @since 3.2.4
  */
+@Slf4j
 public class MysqlConnection implements ErosaConnection {
 
     private static Logger logger = LoggerFactory.getLogger(MysqlConnection.class);
@@ -57,7 +61,7 @@ public class MysqlConnection implements ErosaConnection {
     /**
      * 1小时
      */
-    protected int soTimeout = 60 * 60 * 1000;
+    protected int soTimeout = 5 * 60 * 1000;
     /**
      * 16k
      */
@@ -70,7 +74,10 @@ public class MysqlConnection implements ErosaConnection {
     private ServerCharactorSet serverCharactorSet;
     private int lowerCaseTableNames;
     private int binlogChecksum = LogEvent.BINLOG_CHECKSUM_ALG_OFF;
+    @Setter
+    private String ignoreServerIds = "";
     private String sqlMode;
+    private static final String SET_SQL = "set `%s`='%s'";
 
     public MysqlConnection(AuthenticationInfo authInfo) {
         this.authInfo = authInfo;
@@ -151,6 +158,7 @@ public class MysqlConnection implements ErosaConnection {
             decoder.handle(LogEvent.DELETE_ROWS_EVENT);
             decoder.handle(LogEvent.TABLE_MAP_EVENT);
             decoder.handle(LogEvent.ROWS_QUERY_LOG_EVENT);
+            decoder.handle(LogEvent.TRANSACTION_PAYLOAD_EVENT);
             LogContext context = new LogContext();
             context.setServerCharactorSet(getDefaultDatabaseCharset());
             context.setFormatDescription(new FormatDescriptionLogEvent(4, binlogChecksum));
@@ -177,10 +185,16 @@ public class MysqlConnection implements ErosaConnection {
     @Override
     public void dump(String binlogfilename, Long binlogPosition, Long startTimestampMills, SinkFunction func)
         throws Exception {
+        dump(binlogfilename, binlogPosition, startTimestampMills, func, null);
+    }
+
+    @Override
+    public void dump(String binlogfilename, Long binlogPosition, Long startTimestampMills, SinkFunction func,
+                     Map<String, String> extraParams) throws Exception {
         loadBinlogChecksum();
         getDefaultDatabaseCharset();
         reconnect();
-        updateSettings();
+        updateSettings(extraParams);
         try (DirectLogFetcher fetcher = new DirectLogFetcher(bufferSize)) {
             fetcher.open(conn, binlogfilename, binlogPosition, (int) generateUniqueServerId());
             LogDecoder decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
@@ -189,11 +203,25 @@ public class MysqlConnection implements ErosaConnection {
             LogContext context = new LogContext();
             context.setFormatDescription(new FormatDescriptionLogEvent(4, binlogChecksum));
             context.setServerCharactorSet(getDefaultDatabaseCharset());
+            boolean shouldBreak = false;
 
             while (fetcher.fetch()) {
                 LogEvent event = decoder.decode(fetcher, context);
-
                 if (event == null) {
+                    continue;
+                }
+
+                if (event.getHeader().getType() == LogEvent.TRANSACTION_PAYLOAD_EVENT) {
+                    List<LogEvent> eventList = decoder.processIterateDecode(event, context);
+                    for (LogEvent e : eventList) {
+                        if (!func.sink(e, context.getLogPosition())) {
+                            shouldBreak = true;
+                            break;
+                        }
+                    }
+                    if (shouldBreak) {
+                        break;
+                    }
                     continue;
                 }
 
@@ -249,6 +277,7 @@ public class MysqlConnection implements ErosaConnection {
     }
 
     public int update(String sql) {
+        logger.info("try execute sql: {} ...", sql);
         synchronized (this) {
             Statement stmt = null;
             try {
@@ -330,6 +359,33 @@ public class MysqlConnection implements ErosaConnection {
         } catch (Exception e) {
             logger.warn(ExceptionUtils.getStackTrace(e));
         }
+
+        try {
+            // slave server id 用于控制双向复制的过滤
+            update("SET @ignore_server_ids='" + ignoreServerIds + "'");
+        } catch (Exception e) {
+            logger.warn(ExceptionUtils.getStackTrace(e));
+        }
+
+        try {
+            // server_id 过滤时不过滤 DDL，由下游 Replica 端兜底过滤
+            update("SET @server_id_filter_ddl='false'");
+        } catch (Exception e) {
+            logger.warn(ExceptionUtils.getStackTrace(e));
+        }
+    }
+
+    public void updateSettings(Map<String, String> params) throws IOException {
+        if (params != null) {
+            for (String key : params.keySet()) {
+                try {
+                    update(String.format(SET_SQL, key, params.get(key)));
+                } catch (Exception e) {
+                    logger.warn(ExceptionUtils.getStackTrace(e));
+                }
+            }
+        }
+        updateSettings();
     }
 
     public int loadBinlogChecksum() {

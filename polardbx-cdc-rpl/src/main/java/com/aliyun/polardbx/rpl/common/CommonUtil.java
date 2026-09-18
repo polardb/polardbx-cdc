@@ -6,14 +6,18 @@
  */
 package com.aliyun.polardbx.rpl.common;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.domain.po.RplTask;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpl.taskmeta.HostInfo;
+import com.aliyun.polardbx.rpl.taskmeta.HostType;
 import com.aliyun.polardbx.rpl.taskmeta.ServiceType;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.MutableTriple;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -31,6 +35,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static com.aliyun.polardbx.binlog.ConfigKeys.DN_PASSWORD_KEY;
+
 /**
  * @author shicai.xsc 2021/1/14 17:50
  * @since 5.0.0.0
@@ -44,6 +50,10 @@ public class CommonUtil {
         "show binary streams";
     private static final String SHOW_MASTER_STATUS =
         "show master status";
+    private static final String SHOW_STORAGE =
+        "select storage_inst_id,inst_id,ip,port,user,AES_DECRYPT(from_base64(passwd_enc),'%s') as password from metadb.storage_info where is_vip = 1 and inst_kind != 2";
+
+    private static final String SHOW_DS = "show ds where STORAGE_INST_ID = '%s' and db = '%s'";
 
     public static String createInitialBinlogPosition() {
         String timeStr = new SimpleDateFormat(RplConstants.DEFAULT_DATE_FORMAT).format(System.currentTimeMillis());
@@ -188,16 +198,17 @@ public class CommonUtil {
         return null;
     }
 
-    public static List<String> getStreamLatestPositions(Connection connection, String streamGroupName) {
-        List<String> positions = new ArrayList<>();
+    public static List<Pair<String, String>> getStreamLatestPositions(Connection connection, String streamGroupName) {
+        List<Pair<String, String>> positions = new ArrayList<>();
         try (Statement st = connection.createStatement()) {
             ResultSet rs = st.executeQuery(SHOW_BINARY_STREAMS);
             while (rs.next()) {
                 String groupName = rs.getString("GROUP");
                 if (StringUtils.equals(groupName, streamGroupName)) {
+                    String streamName = rs.getString("STREAM");
                     String file = rs.getString("FILE");
                     String offset = rs.getString("POSITION");
-                    positions.add(file + ":" + offset);
+                    positions.add(Pair.of(streamName, file + ":" + offset));
                 }
             }
         } catch (SQLException e) {
@@ -221,6 +232,44 @@ public class CommonUtil {
             throw new PolardbxException("connect to master failed ", e);
         }
         throw new PolardbxException("can not get master latest position automatically");
+    }
+
+    public static Map<String, HostInfo> getDnInfoMap(Connection connection) {
+        Map<String, HostInfo> dnInfo = new HashMap<>();
+        String dnPasswordKey = DynamicApplicationConfig.getString(DN_PASSWORD_KEY);
+        try (Statement st = connection.createStatement()) {
+            ResultSet rs = st.executeQuery(String.format(SHOW_STORAGE, dnPasswordKey));
+            while (rs.next()) {
+                String dnId = rs.getString("STORAGE_INST_ID");
+                HostInfo hostInfo = new HostInfo(rs.getString("ip"), rs.getInt("port"),
+                    rs.getString("user"),
+                    rs.getString("password"), "", HostType.RDS, 0L);
+                dnInfo.put(dnId, hostInfo);
+            }
+            return dnInfo;
+        } catch (SQLException e) {
+            throw new PolardbxException("connect to master failed ", e);
+        }
+    }
+
+    public static List<String> getPhysicalDbInfoList(Connection connection, String dnId,
+                                                     String logicalDbName) {
+        List<String> physicalDbInfoList = new ArrayList<>();
+        try (Statement st = connection.createStatement()) {
+            ResultSet rs = st.executeQuery(String.format(SHOW_DS, dnId, logicalDbName));
+            while (rs.next()) {
+                String physicalDbName = rs.getString("PHY_DB");
+                physicalDbInfoList.add(physicalDbName);
+            }
+            return physicalDbInfoList;
+        } catch (SQLException e) {
+            throw new PolardbxException("connect to master failed ", e);
+        }
+    }
+
+    public static HostInfo getDnInfoByDnId(Connection connection, String dnId) {
+        Map<String, HostInfo> dnInfo = getDnInfoMap(connection);
+        return dnInfo.get(dnId);
     }
 
     public static PolardbxException waitAllTaskFinishedAndReturn(List<Future<Void>> futures) {

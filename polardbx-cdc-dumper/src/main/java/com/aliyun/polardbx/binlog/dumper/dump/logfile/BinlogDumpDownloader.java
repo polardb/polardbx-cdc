@@ -69,38 +69,38 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
     /**
      * 用于获得本地文件列表，确定下载结束时刻
      */
-    private final LogFileManager logFileManager;
+    protected final LogFileManager logFileManager;
 
     /**
      * 滑动窗口大小
      */
-    private final int windowSize;
+    protected final int windowSize;
 
     /**
      * 下载文件在本地保存的位置
      */
-    private final String downloadPath;
+    protected final String downloadPath;
     /**
      * 待下载文件列表
      */
     // private final List<String> downloadList;
-    private final PriorityQueue<Integer> downloadQueue;
+    protected final PriorityQueue<Integer> downloadQueue;
     /**
      * 已下载或下载中的文件列表
      */
-    private final Set<String> downloadedSet;
+    protected final Set<String> downloadedSet;
     /**
      * 下载线程池
      */
     private ThreadPoolExecutor downloadThreadPool;
     private final Map<String, Throwable> fileDownLoadErrorMap;
     private final LocalFileSystem fileSystem;
-    private final long masterHeartbeatPeriod;
-    private final ServerCallStreamObserver<DumpStream> observer;
+    protected final long masterHeartbeatPeriod;
+    protected final ServerCallStreamObserver<DumpStream> observer;
     /**
      * used to send heartbeat while waiting
      */
-    private final BinlogDumpReader dumpReader;
+    protected final BinlogDumpReader dumpReader;
     private final AtomicBoolean downloadStartFlag;
     /**
      * 开始下载的文件
@@ -116,9 +116,27 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
     @Getter
     private boolean finished = false;
 
+    /**
+     * parallelism for oss downloading a single file
+     */
+    protected final int parallelismPerFile;
+
+    /**
+     * 512 * 1024 * 1024 / parallelismPerFile
+     */
+    protected final long partSize;
+
+    protected final String clientTraceMark;
+
+    /**
+     * 是否跳过文件大小检查，在链路初始化时读取配置，避免 wait() 中反复调用 getBoolean。
+     */
+    private final boolean skipSizeCheck;
+
     public BinlogDumpDownloader(LogFileManager logFileManager, String downloadPath, int windowSize, String startFile,
                                 long masterHeartbeatPeriod, ServerCallStreamObserver<DumpStream> observer,
-                                BinlogDumpReader dumpReader) {
+                                BinlogDumpReader dumpReader, int parallelismPerFile, long partSize,
+                                String clientTraceMark) {
         this.logFileManager = logFileManager;
         this.windowSize = windowSize;
         this.startFile = startFile;
@@ -140,15 +158,22 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
         if (!StringUtils.isEmpty(startFile)) {
             this.filePrefix = startFile.split("\\.")[0];
         }
+        this.clientTraceMark = clientTraceMark;
+        this.parallelismPerFile = parallelismPerFile;
+        this.partSize = partSize;
+        this.skipSizeCheck = DynamicApplicationConfig.getBoolean(
+            ConfigKeys.BINLOG_DUMP_DOWNLOAD_SKIP_SIZE_CHECK);
 
-        log.info("start file:{}, window size:{}, download path:{}", startFile, windowSize, downloadPath);
+        log.info("[{}] start file:{}, window size:{}, download path:{}", clientTraceMark, startFile, windowSize,
+            downloadPath);
     }
 
     public static BinlogDumpDownloader buildBinlogDumpDownloader(BinlogDumpDownloader binlogDumpDownloader,
-                                                                 String startFile) {
+                                                                 String startFile, String trace) {
         return new BinlogDumpDownloader(binlogDumpDownloader.logFileManager, binlogDumpDownloader.downloadPath,
             binlogDumpDownloader.windowSize, startFile, binlogDumpDownloader.masterHeartbeatPeriod,
-            binlogDumpDownloader.observer, binlogDumpDownloader.dumpReader);
+            binlogDumpDownloader.observer, binlogDumpDownloader.dumpReader, binlogDumpDownloader.parallelismPerFile,
+            binlogDumpDownloader.partSize, trace);
     }
 
     public void init() {
@@ -211,7 +236,7 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
 
         if (downloadQueue.isEmpty() && downloadedSet.isEmpty()) {
             // 透明消费追数据过程中可能有些本地文件被清理
-            startFile = BinlogFileUtil.getNextBinlogFileName(fileName);
+            startFile = getNextBinlogFileName(fileName);
             getDownloadFileList(startFile);
             if (downloadQueue.isEmpty()) {
                 close();
@@ -221,6 +246,10 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
                 }
             }
         }
+    }
+
+    protected String getNextBinlogFileName(String fileName) {
+        return BinlogFileUtil.getNextBinlogFileName(fileName);
     }
 
     public CdcFile getFile(String fileName) throws Exception {
@@ -252,12 +281,15 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
     private void wait(String fileName) throws Exception {
         try {
             File f = fileSystem.newFile(fileName);
-            long fileSize = getFileSize(fileName);
+            // 当 skipSizeCheck 为 false 时仍保留原有的 size 检查逻辑
+            long fileSize = skipSizeCheck ? 0 : getFileSize(fileName);
             long maxWaitSeconds = DynamicApplicationConfig.getLong(BINLOG_DUMP_DOWNLOAD_MAX_WAIT_TIME_SECONDS);
             Timer waitTimeoutTimer = new Timer(maxWaitSeconds * 1000);
             Timer heartbeatTimer = new Timer(masterHeartbeatPeriod / 1000000);
             long sleepTime = Math.min(1000, masterHeartbeatPeriod / 1000000);
-            while (!observer.isCancelled() && (!f.exists() || f.length() < fileSize)) {
+            // skipSizeCheck 为 true 时，仅等待文件出现即可（跳过 size check 不影响下游读取链路，
+            // 因为大多数存储后端下载具有原子性，且 reader 本身支持读取正在写入的文件）
+            while (!observer.isCancelled() && (!f.exists() || (!skipSizeCheck && f.length() < fileSize))) {
                 if (fileDownLoadErrorMap.containsKey(fileName)) {
                     throw new IOException("download file " + fileName + " from oss error!",
                         fileDownLoadErrorMap.get(fileName));
@@ -276,6 +308,12 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
 
                 log.info("waiting for file {} download finished", fileName);
                 Thread.sleep(sleepTime);
+            }
+
+            // 循环退出后再次检查是否有下载错误，确保异步下载失败的错误能被正确传播
+            if (fileDownLoadErrorMap.containsKey(fileName)) {
+                throw new IOException("download file " + fileName + " from oss error!",
+                    fileDownLoadErrorMap.get(fileName));
             }
 
             if (observer.isCancelled()) {
@@ -356,7 +394,7 @@ public class BinlogDumpDownloader implements BinlogDumpRotateObserver {
      * 查询binlog_oss_record，对比本地文件列表，确定下载文件列表
      * 此方法可能需要调用多次，因为在滑动消费的过程中binlog文件可能还在不断地产生和清理
      */
-    private void getDownloadFileList(String startFile) {
+    protected void getDownloadFileList(String startFile) {
         List<String> localFiles = logFileManager.getAllLocalBinlogFileNamesOrdered();
         BinlogOssRecordMapperExtend mapperExtend = SpringContextHolder.getObject(BinlogOssRecordMapperExtend.class);
         int startFileSequence = BinlogFileUtil.getBinlogSequence(startFile);

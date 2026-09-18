@@ -13,12 +13,13 @@ import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.dao.BinlogScheduleHistoryMapper;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskConfigMapper;
+import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
+import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.dao.NodeInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.NodeInfoMapper;
 import com.aliyun.polardbx.binlog.dao.StorageHistoryInfoMapper;
-import com.aliyun.polardbx.binlog.domain.BinlogCursor;
 import com.aliyun.polardbx.binlog.domain.StorageContent;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.domain.po.BinlogScheduleHistory;
@@ -38,25 +39,22 @@ import com.aliyun.polardbx.binlog.util.ServerConfigUtil;
 import com.aliyun.polardbx.binlog.util.SystemDbConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.apache.commons.lang3.tuple.Pair;
 import org.mybatis.dynamic.sql.SqlBuilder;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static com.alibaba.fastjson.JSON.toJSONString;
 import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SNAPSHOT_VERSION_KEY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_SUSPEND_TOPOLOGY_REBUILDING;
-import static com.aliyun.polardbx.binlog.ConfigKeys.CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.daemon.cluster.topology.RebalanceUtil.isLightRebalance;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildExpectedStorageTso;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildStorageHistoryInfo;
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.buildStorageInfos;
@@ -66,6 +64,7 @@ import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyService
 import static com.aliyun.polardbx.binlog.daemon.cluster.topology.TopologyServiceHelper.shouldRefreshTopology;
 import static com.aliyun.polardbx.binlog.util.ServerConfigUtil.SERVER_ID;
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
+import static org.mybatis.dynamic.sql.SqlBuilder.isNotIn;
 
 /**
  * Created by ShuGuang & ziyang.lb
@@ -85,16 +84,20 @@ public class GlobalBinlogTopologyService implements TopologyService {
 
     private final BinlogScheduleHistoryMapper scheduleHistoryMapper = getObject(BinlogScheduleHistoryMapper.class);
 
-    private final NodeInfoMapper nodeInfoMapper = getObject(NodeInfoMapper.class);
-
     private final BinlogTaskInfoMapper taskInfoMapper = getObject(BinlogTaskInfoMapper.class);
 
     private final TransactionTemplate transactionTemplate = getObject("metaTransactionTemplate");
+
+    private final NodeInfoMapper nodeInfoMapper = getObject(NodeInfoMapper.class);
 
     public GlobalBinlogTopologyService(String clusterId, String clusterType) {
         this.clusterId = clusterId;
         this.clusterType = clusterType;
         this.topologyBuilder = new GlobalBinlogTopologyBuilder(clusterId);
+    }
+
+    protected void initDependencies() {
+
     }
 
     @Override
@@ -121,22 +124,35 @@ public class GlobalBinlogTopologyService implements TopologyService {
         List<StorageInfo> storageInfos = buildStorageInfos(storageHistoryInfo);
 
         // 为集群计算一个新的运行拓扑
-        if (shouldRefreshTopology(resourceManager, preClusterSnapshot, storageInfos, executionSnapshot,
-            storageHistoryInfo)) {
-            long newVersion = preClusterSnapshot.getVersion() + 1;
-            List<Container> containers = resourceManager.availableContainers();
-            String dumperMasterNode = selectDumperMasterNode(
-                containers.stream().map(Container::getContainerId).collect(Collectors.toSet()),
+        TopologyServiceHelper.CheckResult checkResult = shouldRefreshTopology(resourceManager, preClusterSnapshot,
+            storageInfos, executionSnapshot, storageHistoryInfo);
+        if (checkResult.needRebalance) {
+            List<Container> containersBeforeRandomRemove = resourceManager.availableContainers();
+            List<Container> containersAfterRandomRemove = resourceManager.tryRandomRemoveContainer(
+                containersBeforeRandomRemove, checkResult.forceIntervalRebalance);
+
+            DumperMasterSelector dumperMasterSelector = new DumperMasterSelector(clusterId,
+                getObject(NodeInfoMapper.class), getObject(DumperInfoMapper.class));
+            String dumperMasterNode = dumperMasterSelector.selectDumperMasterNode(
+                containersAfterRandomRemove.stream().map(Container::getContainerId).collect(Collectors.toSet()),
                 preClusterSnapshot);
 
+            boolean isLightRebalance = !checkResult.fullRebalance
+                && isLightRebalance(clusterId, preClusterSnapshot.getDumperMasterNode(), dumperMasterNode);
+            long newVersion = isLightRebalance ? preClusterSnapshot.getVersion() : preClusterSnapshot.getVersion() + 1;
+            long newSubVersion = isLightRebalance ? preClusterSnapshot.getSubVersion() + 1 : 1;
+
             long serverId = ServerConfigUtil.getGlobalNumberVarDirect(SERVER_ID);
-            Pair<Long, List<BinlogTaskConfig>> newTaskConfigs = topologyBuilder.buildTopology(containers, storageInfos,
-                expectedStorageTso, newVersion, dumperMasterNode, serverId);
-            ClusterSnapshot postClusterSnapshot = buildPostClusterSnapshot(newTaskConfigs,
-                containers, storageInfos, newVersion, dumperMasterNode, storageHistoryInfo);
-            persist(clusterId, storageHistoryInfo, storageInfos, newTaskConfigs.getValue(), preClusterSnapshot,
-                postClusterSnapshot, executionSnapshot);
-            log.info("Topology with version {} is successfully build.", newVersion);
+            TopologyEntity topologyEntity = topologyBuilder.buildTopology(containersAfterRandomRemove, storageInfos,
+                expectedStorageTso, newVersion, newSubVersion, dumperMasterNode, serverId,
+                preClusterSnapshot.getFinalTaskNode());
+
+            ClusterSnapshot postClusterSnapshot = buildPostClusterSnapshot(topologyEntity,
+                containersAfterRandomRemove, containersBeforeRandomRemove, storageInfos, newVersion,
+                newSubVersion, dumperMasterNode, storageHistoryInfo);
+            persist(clusterId, storageHistoryInfo, storageInfos, topologyEntity.getTaskConfigs(),
+                preClusterSnapshot, postClusterSnapshot, executionSnapshot, isLightRebalance);
+            log.info("Topology with version {}:{} is successfully build.", newVersion, newSubVersion);
         }
     }
 
@@ -165,25 +181,27 @@ public class GlobalBinlogTopologyService implements TopologyService {
         });
     }
 
-    private ClusterSnapshot buildPostClusterSnapshot(Pair<Long, List<BinlogTaskConfig>> topologyConfigs,
+    private ClusterSnapshot buildPostClusterSnapshot(TopologyEntity topologyEntity,
                                                      List<Container> containers,
+                                                     List<Container> containersBeforeRandomRemove,
                                                      List<StorageInfo> storageInfos,
                                                      long newVersion,
+                                                     long newSubVersion,
                                                      String dumperMasterNode,
                                                      StorageHistoryInfo storageHistoryInfo) {
-        Optional<String> dumperMasterOptional = topologyConfigs.getValue().stream()
+        Optional<String> dumperMasterOptional = topologyEntity.getTaskConfigs().stream()
             .filter(c -> TaskType.Dumper.name().equals(c.getRole()) && c.getContainerId().equals(dumperMasterNode))
             .map(BinlogTaskConfig::getTaskName)
             .findFirst();
         String dumperMasterName;
         if (!dumperMasterOptional.isPresent()) {
             throw new PolardbxException("can not found dumper on container " + dumperMasterNode +
-                " with topology configs :" + topologyConfigs);
+                " with topology configs :" + topologyEntity);
         } else {
             dumperMasterName = dumperMasterOptional.get();
         }
 
-        return new ClusterSnapshot(newVersion,
+        ClusterSnapshot postClusterSnapshot = new ClusterSnapshot(newVersion,
             System.currentTimeMillis(),
             containers.stream().map(Container::getContainerId).collect(Collectors.toSet()),
             storageInfos.stream().map(StorageInfo::getStorageInstId).collect(Collectors.toSet()),
@@ -191,52 +209,19 @@ public class GlobalBinlogTopologyService implements TopologyService {
             dumperMasterName,
             storageHistoryInfo == null ? ExecutionConfig.ORIGIN_TSO : storageHistoryInfo.getTso(),
             clusterType,
-            topologyConfigs.getKey());
+            topologyEntity.getServerId(),
+            newSubVersion,
+            topologyEntity.getFinalTaskNode());
+
+        postClusterSnapshot.setContainersBeforeRandomRemove(
+            containersBeforeRandomRemove.stream().map(Container::getContainerId).collect(Collectors.toSet()));
+        return postClusterSnapshot;
     }
 
-    private String selectDumperMasterNode(Set<String> containers, ClusterSnapshot preClusterSnapshot) {
-
-        //如果强制指定了master node, 且node状态正常，则使用强制指定的node
-        String assignedDumperNode = DynamicApplicationConfig.getString(CLUSTER_TOPOLOGY_DUMPER_MASTER_NODE_KEY);
-        if (StringUtils.isNotBlank(assignedDumperNode) && containers.contains(assignedDumperNode)) {
-            log.info("Dumper master node is selected by force mode, with name {}", assignedDumperNode);
-            return assignedDumperNode;
-        }
-
-        //取位点最大的Container对应的Dumper为MasterDumper
-        Map<BinlogCursor, List<Pair<BinlogCursor, String>>> cursorsMap =
-            nodeInfoMapper.select(s -> s.where(NodeInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId))
-                    .and(NodeInfoDynamicSqlSupport.containerId, SqlBuilder.isIn(containers)))
-                .stream().filter(d -> StringUtils.isNotBlank(d.getLatestCursor()))
-                .map(s -> new ImmutablePair<>(JSONObject.parseObject(s.getLatestCursor(), BinlogCursor.class),
-                    s.getContainerId()))
-                .collect(Collectors.groupingBy(Pair::getLeft));
-        Optional<BinlogCursor> maxCursorOptional = cursorsMap.keySet().stream().max(Comparator.comparing(s -> s));
-        if (maxCursorOptional.isPresent()) {
-            //如果有多个container的cursor并列最大，则随机取一个
-            String selectedContainer = cursorsMap.get(maxCursorOptional.get()).get(0).getRight();
-            log.info("Dumper master node is selected by max cursor mode, with name {} and max cursor {}.",
-                selectedContainer, maxCursorOptional.get());
-            return selectedContainer;
-        }
-
-        //优先取上一次的Node继续当master
-        String lastNode = preClusterSnapshot.getDumperMasterNode();
-        if (StringUtils.isNotBlank(lastNode) && containers.contains(lastNode)) {
-            log.info("Dumper master node is selected by previous mode, with name {}.", lastNode);
-            return lastNode;
-        }
-
-        //随机取一个container作为MasterNode
-        String masterNode = containers.stream().findAny().get();
-        log.warn("Dumper master is selected by min-load mode, with name {}.", masterNode);
-        return masterNode;
-    }
-
-    private void persist(final String cluster, final StorageHistoryInfo storageHistoryInfo,
-                         final List<StorageInfo> storageInfos, final List<BinlogTaskConfig> taskConfigs,
+    private void persist(final String clusterId, final StorageHistoryInfo storageHistoryInfo,
+                         final List<StorageInfo> storageInfos, final List<BinlogTaskConfig> taskConfigList,
                          final ClusterSnapshot preClusterSnapshot, final ClusterSnapshot postClusterSnapshot,
-                         final ExecutionSnapshot executionSnapshot) {
+                         final ExecutionSnapshot executionSnapshot, final boolean lightRebalance) {
         // 持久化之前再次进行一下验证，如果已经不是Leader，则放弃持久化
         if (!RuntimeLeaderElector.isDaemonLeader()) {
             log.info("current daemon is not a leader, skip the topology persisting.!");
@@ -248,58 +233,97 @@ public class GlobalBinlogTopologyService implements TopologyService {
                 return null;
             }
 
-            //执行拓扑保存
-            for (BinlogTaskConfig taskConfig : taskConfigs) {
-                Optional<BinlogTaskConfig> config = taskConfigMapper.selectOne(
-                    s -> s.where(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(cluster))
-                        .and(BinlogTaskConfigDynamicSqlSupport.taskName, isEqualTo(taskConfig.getTaskName())));
-                if (config.isPresent()) {
-                    BinlogTaskConfig origin = config.get();
-                    taskConfig.setId(origin.getId());
-                    taskConfig.setStatus(null);
-                    taskConfigMapper.updateByPrimaryKeySelective(taskConfig);
-                } else {
-                    taskConfigMapper.insertSelective(taskConfig);
-                }
-            }
-            Set<String> configs = taskConfigs.stream().map(BinlogTaskConfig::getTaskName).collect(Collectors.toSet());
-            taskConfigMapper.delete(
-                s -> s.where(BinlogTaskConfigDynamicSqlSupport.taskName, SqlBuilder.isNotIn(configs))
-                    .and(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(cluster)));
-
-            // 删除Dumper_info和Task_info
-            dumperInfoMapper.delete(s -> s);
-            taskInfoMapper.delete(s -> s);
-
-            //初始化storageHistory
-            if (storageHistoryInfo == null) {
-                StorageContent content = new StorageContent();
-                content.setStorageInstIds(storageInfos.stream()
-                    .map(StorageInfo::getStorageInstId).collect(Collectors.toList()));
-
-                StorageHistoryInfo info = new StorageHistoryInfo();
-                info.setStatus(0);
-                info.setTso(ExecutionConfig.ORIGIN_TSO);
-                info.setStorageContent(JSONObject.toJSONString(content));
-                info.setInstructionId("-1");
-                info.setClusterId(clusterId);
-                info.setGroupName(GROUP_NAME_GLOBAL);
-                storageHistoryMapper.insertSelective(info);
-            }
-
-            //对版本号进行+1并更新
-            SystemDbConfig
-                .updateSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY, JSONObject.toJSONString(postClusterSnapshot));
-
-            //记录历史
-            BinlogScheduleHistory history = new BinlogScheduleHistory();
-            history.setVersion(postClusterSnapshot.getVersion());
-            history.setClusterId(clusterId);
-            history.setContent(JSONObject
-                .toJSONString(new ScheduleHistoryContent(executionSnapshot, taskConfigs, postClusterSnapshot)));
-            scheduleHistoryMapper.insertSelective(history);
+            updateBinlogTaskConfig(clusterId, taskConfigList);
+            cleanStaleRunningInfo(taskConfigList, lightRebalance);
+            initStorageHistoryInfo(storageHistoryInfo, storageInfos, clusterId);
+            SystemDbConfig.updateSystemDbConfig(CLUSTER_SNAPSHOT_VERSION_KEY, toJSONString(postClusterSnapshot));
+            deleteNonAvailableNode(clusterId, postClusterSnapshot);
+            recordScheduleHistory(executionSnapshot, postClusterSnapshot, taskConfigList);
             return null;
         });
+    }
+
+    private void updateBinlogTaskConfig(final String clusterId, final List<BinlogTaskConfig> taskConfigList) {
+        for (BinlogTaskConfig taskConfig : taskConfigList) {
+            Optional<BinlogTaskConfig> config = taskConfigMapper.selectOne(
+                s -> s.where(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(clusterId))
+                    .and(BinlogTaskConfigDynamicSqlSupport.taskName, isEqualTo(taskConfig.getTaskName())));
+            if (config.isPresent()) {
+                BinlogTaskConfig origin = config.get();
+                taskConfig.setId(origin.getId());
+                taskConfig.setStatus(null);
+                taskConfigMapper.updateByPrimaryKeySelective(taskConfig);
+            } else {
+                taskConfigMapper.insertSelective(taskConfig);
+            }
+        }
+
+        Set<String> allRoleNameList = taskConfigList.stream()
+            .map(BinlogTaskConfig::getTaskName).collect(Collectors.toSet());
+        taskConfigMapper.delete(
+            s -> s.where(BinlogTaskConfigDynamicSqlSupport.taskName, SqlBuilder.isNotIn(allRoleNameList))
+                .and(BinlogTaskConfigDynamicSqlSupport.clusterId, isEqualTo(clusterId)));
+    }
+
+    private void cleanStaleRunningInfo(final List<BinlogTaskConfig> taskConfigList, final boolean lightRebalance) {
+        // prepare for different role
+        Set<String> dumperRoleConfigList = taskConfigList.stream()
+            .filter(c -> c.getRole().equals(TaskType.Dumper.name()))
+            .map(BinlogTaskConfig::getTaskName).collect(Collectors.toSet());
+        Set<String> taskRoleConfigList = taskConfigList.stream()
+            .filter(c -> c.getRole().equals(TaskType.Final.name()) || c.getRole().equals(TaskType.Relay.name()))
+            .map(BinlogTaskConfig::getTaskName).collect(Collectors.toSet());
+
+        if (lightRebalance) {
+            dumperInfoMapper.delete(s -> s.where
+                    (DumperInfoDynamicSqlSupport.taskName, SqlBuilder.isNotIn(dumperRoleConfigList))
+                .and(DumperInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
+            taskInfoMapper.delete(s -> s.where(
+                    BinlogTaskInfoDynamicSqlSupport.taskName, SqlBuilder.isNotIn(taskRoleConfigList))
+                .and(BinlogTaskInfoDynamicSqlSupport.clusterId, SqlBuilder.isEqualTo(clusterId)));
+        } else {
+            dumperInfoMapper.delete(s -> s.where(DumperInfoDynamicSqlSupport.clusterId, isEqualTo(clusterId)));
+            taskInfoMapper.delete(s -> s.where(BinlogTaskInfoDynamicSqlSupport.clusterId, isEqualTo(clusterId)));
+        }
+    }
+
+    private void initStorageHistoryInfo(StorageHistoryInfo storageHistoryInfo, final List<StorageInfo> storageInfos,
+                                        final String clusterId) {
+        //初始化storageHistory
+        if (storageHistoryInfo == null) {
+            StorageContent storageContent = new StorageContent();
+            storageContent.setStorageInstIds(storageInfos.stream()
+                .map(StorageInfo::getStorageInstId).collect(Collectors.toList()));
+
+            StorageHistoryInfo info = new StorageHistoryInfo();
+            info.setStatus(0);
+            info.setTso(ExecutionConfig.ORIGIN_TSO);
+            info.setStorageContent(toJSONString(storageContent));
+            info.setInstructionId("-1");
+            info.setClusterId(clusterId);
+            info.setGroupName(GROUP_NAME_GLOBAL);
+            storageHistoryMapper.insertSelective(info);
+        }
+    }
+
+    private void recordScheduleHistory(ExecutionSnapshot executionSnapshot, ClusterSnapshot clusterSnapshot,
+                                       List<BinlogTaskConfig> taskConfigList) {
+        //记录历史
+        BinlogScheduleHistory history = new BinlogScheduleHistory();
+        history.setVersion(clusterSnapshot.getVersion());
+        history.setSubVersion(clusterSnapshot.getSubVersion());
+        history.setClusterId(clusterId);
+        history.setContent(
+            toJSONString(new ScheduleHistoryContent(executionSnapshot, taskConfigList, clusterSnapshot)));
+        scheduleHistoryMapper.insertSelective(history);
+    }
+
+    private void deleteNonAvailableNode(final String clusterId, ClusterSnapshot postClusterSnapshot) {
+        Set<String> containers = postClusterSnapshot.getContainers();
+        if (!containers.isEmpty()) {
+            nodeInfoMapper.delete(s -> s.where(NodeInfoDynamicSqlSupport.clusterId, isEqualTo(clusterId))
+                .and(NodeInfoDynamicSqlSupport.containerId, isNotIn(containers)));
+        }
     }
 
     private boolean needRestart(BinlogTaskConfig newConfig, BinlogTaskConfig oldConfig) {

@@ -6,7 +6,6 @@
  */
 package com.aliyun.polardbx.binlog.cdc.topology;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -14,9 +13,15 @@ import lombok.NoArgsConstructor;
  *
  **/
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
 public class LogicBasicInfo {
     private String schemaName;
     private String tableName;
+    private String virtualSchemaName;
+    private String virtualTableName;
+
+    public LogicBasicInfo(String schemaName, String tableName) {
+        this.schemaName = schemaName;
+        this.tableName = tableName;
+    }
 }

@@ -129,7 +129,7 @@ public class ColumnarMetaManagerTest {
 
             // get leader info success
             checkNodeResult(TEST_NODE_INFO);
-            checkNodeResult(TEST_NODE_INFO, "11.167.60.147");
+            checkNodeResult(TEST_NODE_INFO, "192.0.2.1");
             checkNodeResult(TEST_NODE_INFO, "xxxx");
 
             // failed because getMetaDbConnection return null

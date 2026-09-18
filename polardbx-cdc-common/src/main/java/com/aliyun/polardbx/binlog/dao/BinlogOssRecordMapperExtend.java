@@ -30,14 +30,14 @@ public interface BinlogOssRecordMapperExtend {
                                      @Param("groupId") String groupId, @Param("rb") int rb, @Param("re") int re);
 
     @Select(
-        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and upload_status = 2 and purge_status = 0 and CAST(SUBSTRING_INDEX(binlog_file, '.', -1) AS UNSIGNED) >= #{binlogFileSequence} order by CAST(SUBSTRING_INDEX(binlog_file, '.', -1) AS UNSIGNED)"
+        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and upload_status = 2 and purge_status = 0 and binlog_file_seq >= #{binlogFileSequence} order by binlog_file_seq"
     )
     List<BinlogOssRecord> getRecordsForBinlogDump(@Param("groupId") String groupId, @Param("streamId") String streamId,
                                                   @Param("clusterId") String clusterId,
                                                   @Param("binlogFileSequence") Integer binlogFileSequence);
 
     @Select(
-        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and upload_status = 2 and purge_status = 0 and CAST(SUBSTRING_INDEX(binlog_file, '.', -1) AS UNSIGNED) <= #{binlogFileSequence} order by CAST(SUBSTRING_INDEX(binlog_file, '.', -1) AS UNSIGNED) DESC limit #{n}"
+        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and upload_status = 2 and purge_status = 0 and binlog_file_seq <= #{binlogFileSequence} order by binlog_file_seq DESC limit #{n}"
     )
     List<BinlogOssRecord> getRecordsBefore(@Param("groupId") String groupId, @Param("streamId") String streamId,
                                            @Param("clusterId") String clusterId,
@@ -45,7 +45,7 @@ public interface BinlogOssRecordMapperExtend {
                                            @Param("n") Integer n);
 
     @Select(
-        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and upload_status = 2 and purge_status = 0 order by CAST(SUBSTRING_INDEX(binlog_file, '.', -1) AS UNSIGNED) DESC limit #{n}"
+        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and upload_status = 2 and purge_status = 0 order by binlog_file_seq DESC limit #{n}"
     )
     List<BinlogOssRecord> getLastUploadSuccessRecords(@Param("groupId") String groupId,
                                                       @Param("streamId") String streamId,
@@ -58,7 +58,7 @@ public interface BinlogOssRecordMapperExtend {
      * 如果没有开启远端存储，仅仅是将记录的purge_status设置为COMPLETE
      */
     @Select(
-        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and purge_status = 0 and gmt_modified < #{gmtModified} order by CAST(SUBSTRING_INDEX(binlog_file, '.', -1) AS UNSIGNED)"
+        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and purge_status = 0 and gmt_modified < #{gmtModified} order by binlog_file_seq"
     )
     List<BinlogOssRecord> getRecordsForPurge(@Param("groupId") String groupId,
                                              @Param("streamId") String streamId,
@@ -66,7 +66,7 @@ public interface BinlogOssRecordMapperExtend {
                                              @Param("gmtModified") Date gmtModified);
 
     @Select(
-        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and CAST(SUBSTRING_INDEX(binlog_file, '.', -1) AS UNSIGNED) <= #{endFileSequence} and CAST(SUBSTRING_INDEX(binlog_file, '.', -1) AS UNSIGNED) >= #{startFileSequence}"
+        "select * from binlog_oss_record where group_id = #{groupId} and stream_id = #{streamId} and cluster_id = #{clusterId} and binlog_file_seq <= #{endFileSequence} and binlog_file_seq >= #{startFileSequence}"
     )
     List<BinlogOssRecord> getRecordsInFileRange(@Param("groupId") String groupId,
                                                 @Param("streamId") String streamId,

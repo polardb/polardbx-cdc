@@ -15,14 +15,11 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddColumn;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableDropColumnItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropDatabaseStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLDropTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLExprTableSource;
-import com.alibaba.polardbx.druid.sql.ast.statement.SQLTableElement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableChangeColumn;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
-import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.polardbx.druid.sql.dialect.mysql.ast.statement.MySqlRenameTableStatement;
 import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
@@ -34,6 +31,7 @@ import com.aliyun.polardbx.binlog.canal.system.SystemDB;
 import com.aliyun.polardbx.binlog.cdc.meta.LogicTableMeta.FieldMetaExt;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo;
 import com.aliyun.polardbx.binlog.cdc.meta.domain.DDLRecord;
+import com.aliyun.polardbx.binlog.cdc.meta.mapping.TableNameMapper;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicBasicInfo;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology;
 import com.aliyun.polardbx.binlog.cdc.topology.LogicMetaTopology.LogicDbTopology;
@@ -53,8 +51,8 @@ import com.aliyun.polardbx.binlog.util.LabEventType;
 import com.aliyun.polardbx.binlog.util.PropertyChangeListener;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
@@ -63,7 +61,6 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -76,6 +73,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_CHECK_VIRTUAL_TABLE_CONSISTENCY;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_RECORD_IGNORED_DDL_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SEMI_SNAPSHOT_CHECK_DELTA_INTERVAL_SEC;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_SEMI_SNAPSHOT_ENABLED;
@@ -83,9 +81,12 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_COMPARE_RESULT_EN
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_RETRIEVE_INSTANT_CREATE_TABLE_MODES;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.SpringContextHolder.getObject;
+import static com.aliyun.polardbx.binlog.cdc.meta.ExternalColumnMetaConstants.EXTERNALIZED_ADDR_SUFFIX;
+import static com.aliyun.polardbx.binlog.cdc.meta.ExternalColumnMetaConstants.EXTERNALIZED_BLOB_REF_TYPE;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_EXACTLY;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_SEMI;
 import static com.aliyun.polardbx.binlog.cdc.meta.RollbackMode.SNAPSHOT_UNSAFE;
+import static com.aliyun.polardbx.binlog.cdc.topology.LowerCaseUtil.toLowerCaseLogicMetaTopology;
 import static com.aliyun.polardbx.binlog.monitor.MonitorType.META_DATA_INCONSISTENT_WARNNIN;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.buildCreateLikeSql;
@@ -107,10 +108,12 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
     private final Map<String, LogicTableMeta> compareCache;
     private final RollbackMode rollbackMode;
     private final boolean supportHiddenPk;
+    @Setter
     private TopologyManager topologyManager;
     private PolarDbXLogicTableMeta polarDbXLogicTableMeta;
     private PolarDbXStorageTableMeta polarDbXStorageTableMeta;
     private ConsistencyChecker consistencyChecker;
+    private TableNameMapper tableNameMapper;
     private long lastCheckAllDeltaTime;
     private long rollbackCostTime = -1L;
     private String lastApplyLogicTSO;
@@ -155,6 +158,7 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
         this.rollbackMode = getRollbackMode();
         this.supportHiddenPk = hiddenPkSupplier.get();
         this.dnVersion = dnVersionSupplier.get();
+        DynamicApplicationConfig.setValue(ConfigKeys.BINLOG_WRITE_TABLE_ID_FROM_TASK, "true");
     }
 
     public void init() {
@@ -168,6 +172,9 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
 
             this.consistencyChecker = ConsistencyCheckerFactory.create(topologyManager, polarDbXLogicTableMeta,
                 this, storageInstId);
+
+            this.tableNameMapper = new TableNameMapper();
+
             this.registerToMetaMonitor();
             DynamicApplicationConfig.addPropListener(ConfigKeys.TASK_REFORMAT_ATTACH_DRDS_HIDDEN_PK_ENABLED, this);
         }
@@ -263,17 +270,8 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
 
         TableMeta phy = findPhyTable(schema, table, true);
         Preconditions.checkNotNull(phy, "TableMeta is not found for physical table " + schema + "." + table);
+        TableMeta logic = findLogicTableMeta(schema, table);
 
-        LogicBasicInfo logicTopology = getLogicBasicInfo(schema, table);
-        Preconditions.checkArgument(logicTopology != null && StringUtils.isNotBlank(logicTopology.getTableName()),
-            "Logic TableMeta is not found for physical table " + schema + "." + table + " , found result is "
-                + logicTopology);
-
-        TableMeta logic =
-            findLogicTable(logicTopology.getSchemaName(), logicTopology.getTableName());
-        Preconditions.checkNotNull(logic, "phyTable [" + schema + "." + table + "], logic tableMeta["
-            + logicTopology.getSchemaName() + "." + logicTopology.getTableName()
-            + "] should not be null!");
         boolean hasRdsHiddenPK = false;
         boolean forceRebuild =
             getBoolean(ConfigKeys.TASK_REFORMAT_EVENT_FORCE_ENABLED);
@@ -311,9 +309,19 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
         meta.setCompatible(phy.getFields().size() == logic.getFields().size());
         FieldMeta hiddenPK = null;
         int logicIndex = 0;
+        boolean hasExternalMappingError = false;
         for (int i = 0; i < logic.getFields().size(); i++) {
             FieldMeta fieldMeta = logic.getFields().get(i);
-            final int x = columnNames.indexOf(fieldMeta.getColumnName());
+            final int x;
+            final String externalMappingError;
+            if (fieldMeta.isExternalized()) {
+                validateExternalizedLogicType(fieldMeta, logic);
+                x = indexOfIgnoreCase(columnNames, fieldMeta.getColumnName() + EXTERNALIZED_ADDR_SUFFIX);
+                externalMappingError = getExternalizedBlobRefError(fieldMeta, phy, x);
+            } else {
+                x = columnNames.indexOf(fieldMeta.getColumnName());
+                externalMappingError = null;
+            }
             if (x != logicIndex) {
                 meta.setCompatible(false);
             }
@@ -328,7 +336,18 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
             }
 
             FieldMetaExt destFieldMeta = new FieldMetaExt(fieldMeta, logicIndex++, x);
-            if (x != -1) {
+            if (fieldMeta.isExternalized()) {
+                // The logical TEXT/BLOB column uses a physical VARCHAR BlobRef column and must always be rebuilt.
+                destFieldMeta.setTypeNotMatch();
+                meta.setCompatible(false);
+                if (externalMappingError != null) {
+                    if (!getBoolean(ConfigKeys.TASK_REFORMAT_EXTERNAL_COLUMN_BLOB_REF_ERROR_FALLBACK_ENABLED)) {
+                        throw new PolardbxException(externalMappingError);
+                    }
+                    destFieldMeta.markExternalMappingUnavailable(externalMappingError);
+                    hasExternalMappingError = true;
+                }
+            } else if (x != -1) {
                 FieldMeta phyField = phy.getFields().get(x);
                 String defaultLogicCharset = logic.getCharset();
                 String defaultPhyCharset = phy.getCharset();
@@ -366,10 +385,59 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
             log.warn("meta is not compatible, return meta {}, logic TableMeta {}, phy TableMeta {}", meta, logic, phy);
         }
 
-        if (enableCompareCache) {
+        // An emergency fallback decision is dynamic. Do not cache an invalid mapping and accidentally retain it
+        // after the switch is turned off.
+        if (enableCompareCache && !hasExternalMappingError) {
             compareCache.computeIfAbsent(cacheKey, k -> meta);
         }
         return meta;
+    }
+
+    private static int indexOfIgnoreCase(List<String> columnNames, String target) {
+        for (int i = 0; i < columnNames.size(); i++) {
+            if (StringUtils.equalsIgnoreCase(columnNames.get(i), target)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void validateExternalizedLogicType(FieldMeta logicField, TableMeta logicTable) {
+        String type = StringUtils.substringBefore(logicField.getColumnType(), "(");
+        type = StringUtils.substringBefore(StringUtils.trim(type), " ");
+        if (!StringUtils.equalsAnyIgnoreCase(type, "tinytext", "text", "mediumtext", "longtext",
+            "tinyblob", "blob", "mediumblob", "longblob")) {
+            throw new PolardbxException(String.format(
+                "unsupported externalized logical column type %s for %s.%s.%s",
+                logicField.getColumnType(), logicTable.getSchema(), logicTable.getTable(),
+                logicField.getColumnName()));
+        }
+        if (StringUtils.endsWithIgnoreCase(type, "text")) {
+            String charset = logicField.getCharset();
+            if (!StringUtils.equalsAnyIgnoreCase(charset, "utf8", "utf8mb3", "utf8mb4")) {
+                throw new PolardbxException(String.format(
+                    "unsupported externalized TEXT charset %s for %s.%s.%s",
+                    charset, logicTable.getSchema(), logicTable.getTable(), logicField.getColumnName()));
+            }
+        }
+    }
+
+    private static String getExternalizedBlobRefError(FieldMeta logicField, TableMeta phyTable, int phyIndex) {
+        String expectedName = logicField.getColumnName() + EXTERNALIZED_ADDR_SUFFIX;
+        if (phyIndex < 0) {
+            return String.format(
+                "externalized physical BlobRef column %s is not found for %s.%s.%s",
+                expectedName, phyTable.getSchema(), phyTable.getTable(), logicField.getColumnName());
+        }
+        FieldMeta blobRefField = phyTable.getFields().get(phyIndex);
+        String blobRefType = StringUtils.deleteWhitespace(StringUtils.lowerCase(blobRefField.getColumnType()));
+        if (!StringUtils.equals(blobRefType, EXTERNALIZED_BLOB_REF_TYPE)) {
+            return String.format(
+                "invalid externalized physical BlobRef column type %s for %s.%s.%s, expected %s",
+                blobRefField.getColumnType(), phyTable.getSchema(), phyTable.getTable(), expectedName,
+                EXTERNALIZED_BLOB_REF_TYPE);
+        }
+        return null;
     }
 
     private boolean columnTypeMatch(FieldMeta logicField, FieldMeta phyField, String logicCharset, String phyCharset) {
@@ -472,6 +540,21 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
     }
 
     /**
+     * 获取源端（PolarDB-X）索引的类型，如 BTREE、HASH、VECTOR 等。
+     * 用于在 DROP INDEX 场景下判断被删除的索引是否属于可抑制类型。
+     *
+     * @return 索引类型字符串，如果索引不存在则返回 null
+     */
+    public String getIndexType(String schema, String table, String indexName) {
+        TableMeta tableMeta = polarDbXLogicTableMeta.find(schema, table);
+        if (tableMeta == null) {
+            return null;
+        }
+        TableMeta.IndexMeta indexMeta = tableMeta.getIndexes().get(indexName);
+        return indexMeta != null ? indexMeta.getIndexType() : null;
+    }
+
+    /**
      * 从存储中获取小于等于rollback tso的最新一次Snapshot的位点
      */
     protected String getLatestSnapshotTso(String rollbackTso) {
@@ -489,6 +572,35 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
         return metaJdbcTemplate.queryForObject(
             "select max(tso) tso from binlog_logic_meta_history where tso <= '" + rollbackTso + "' +"
                 + "and type = " + MetaType.DDL.getValue(), String.class);
+    }
+
+    protected TableMeta findLogicTableMeta(String phySchema, String phyTable) {
+        LogicBasicInfo logicBasicInfo = getLogicBasicInfo(phySchema, phyTable, tableNameMapper);
+        Preconditions.checkArgument(logicBasicInfo != null && StringUtils.isNotBlank(logicBasicInfo.getTableName()),
+            String.format("found invalid logic basic info for physical table %s.%s, info is %s",
+                phySchema, phyTable, logicBasicInfo));
+
+        TableMeta logic = findLogicTable(logicBasicInfo.getSchemaName(), logicBasicInfo.getTableName());
+        Preconditions.checkNotNull(logic,
+            "phyTable [" + phySchema + "." + phyTable + "], logic tableMeta["
+                + logicBasicInfo.getSchemaName() + "." + logicBasicInfo.getTableName() + "] should not be null!");
+
+        if (StringUtils.isNotBlank(logicBasicInfo.getVirtualTableName())) {
+            TableMeta lt = findLogicTable(logicBasicInfo.getVirtualSchemaName(), logicBasicInfo.getVirtualTableName());
+            Preconditions.checkNotNull(lt,
+                "phyTable [" + phySchema + "." + phyTable + "], logic tableMeta["
+                    + logicBasicInfo.getVirtualSchemaName() + "." + logicBasicInfo.getVirtualTableName()
+                    + "] should not be null!");
+
+            if (!logic.basicEquals(lt) && getBoolean(META_BUILD_CHECK_VIRTUAL_TABLE_CONSISTENCY)) {
+                throw new PolardbxException("logic tableMeta[" + logicBasicInfo.getSchemaName() + "."
+                    + logicBasicInfo.getTableName() + "] should be equal to virtual table`s logic tableMeta["
+                    + logicBasicInfo.getVirtualSchemaName() + "." + logicBasicInfo.getVirtualTableName() + "]");
+            }
+            return lt;
+        }
+
+        return logic;
     }
 
     private void processSnapshotSemi(BinlogPosition position, DDLRecord record) {
@@ -547,6 +659,30 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
     }
 
     public int buildSnapshot(BinlogPosition position, String topology, String cmdId) {
+        // 与TopologyManager.apply中基于rollBackTso的table id防重分配逻辑保持一致：
+        // 崩溃恢复时若起始位点被锚定在某条build-snapshot指令自身(searchPosition走getCommandPosition兜底)，
+        // 该指令tso等于rollBackTso，其realloc效果已由回滚阶段的applySnapshot等价重建，若再次执行
+        // reAllocateAllTableId会导致全表table id整体平移，恢复前后binlog字节不一致，此处跳过以保证幂等
+        String rollBackTso = topologyManager.getRollBackTso();
+        if (rollBackTso != null && position.getRtso().compareTo(rollBackTso) <= 0) {
+            log.warn("ignore build snapshot, tso {} is not greater than rollBackTso {}, table ids have already been "
+                + "rebuilt in rollback stage", position.getRtso(), rollBackTso);
+            return 0;
+        }
+
+        // 存储maxTableId到topology
+        LogicMetaTopology logicMetaTopology = JSONObject.parseObject(topology, LogicMetaTopology.class);
+        // Keep live snapshot consistent with the snapshot recovery path. PolarDB-X preserves the original case of
+        // logical identifiers, while physical events and incremental topology records use lower-case identifiers.
+        toLowerCaseLogicMetaTopology(logicMetaTopology);
+        logicMetaTopology.setMaxTableId(topologyManager.getTopology().getMaxTableId());
+        log.info("record table id {} to db", topologyManager.getTopology().getMaxTableId());
+        topology = JSON.toJSONString(logicMetaTopology);
+
+        // 每次snapshot需清空tableId映射关系,并重新开始分配
+        // 需要用CN传过来的topology，原因是内存中的topology可能包含一些不存在的逻辑表（如归档表）
+        topologyManager.reAllocateAllTableId(logicMetaTopology);
+
         JSONArray array = JSON.parseObject(topology).getJSONArray("logicDbMetas");
         JSONObject ddlObj = new JSONObject();
         for (int i = 0; i < array.size(); i++) {
@@ -567,6 +703,7 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
         }
         DDLRecord ddlRecord = DDLRecord.builder().schemaName("*").ddlSql("").metaInfo(topology).build();
         log.warn("build snapshot for : " + JSON.toJSONString(ddlRecord));
+
         return polarDbXLogicTableMeta.applyToDb(position, ddlRecord, MetaType.SNAPSHOT.getValue(), cmdId, true);
     }
 
@@ -991,6 +1128,19 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
         return topologyManager.getLogicBasicInfo(phySchema, phyTable);
     }
 
+    public LogicBasicInfo getLogicBasicInfo(String phySchema, String phyTable, TableNameMapper mapper) {
+        LogicBasicInfo logicBasicInfo = topologyManager.getLogicBasicInfo(phySchema, phyTable);
+        if (mapper != null && logicBasicInfo != null) {
+            Pair<String, String> key = Pair.of(logicBasicInfo.getSchemaName(), logicBasicInfo.getTableName());
+            Pair<String, String> value = mapper.mapToVirtualTableName(key);
+            // virtual table 没有被DDL分配过table id，这里补分配
+            setTableIdForVirtualTable(key, value);
+            logicBasicInfo.setVirtualSchemaName(value.getKey());
+            logicBasicInfo.setVirtualTableName(value.getValue());
+        }
+        return logicBasicInfo;
+    }
+
     /**
      * 获取存储实例id下面的所有物理库表信息
      */
@@ -1005,6 +1155,18 @@ public class PolarDbXTableMetaManager implements PropertyChangeListener {
 
     public LogicMetaTopology getTopology() {
         return topologyManager.getTopology();
+    }
+
+    public long getTableId(String dbName, String tbName) {
+        return topologyManager.getTableId(dbName, tbName);
+    }
+
+    public void setTableIdForVirtualTable(Pair<String, String> realTb, Pair<String, String> virtualTb) {
+        if (realTb == null || virtualTb == null) {
+            return;
+        }
+        long tableId = topologyManager.getTableId(realTb.getKey(), realTb.getValue());
+        topologyManager.setTableIdForVirtualTable(virtualTb, tableId);
     }
 
     public PolarDbXLogicTableMeta getPolarDbXLogicTableMeta() {

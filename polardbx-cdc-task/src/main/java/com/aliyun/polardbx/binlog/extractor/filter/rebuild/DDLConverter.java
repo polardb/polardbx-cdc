@@ -8,13 +8,16 @@ package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.polardbx.druid.sql.SQLUtils;
+import com.alibaba.polardbx.druid.sql.ast.SQLDataType;
 import com.alibaba.polardbx.druid.sql.ast.SQLIndexDefinition;
 import com.alibaba.polardbx.druid.sql.ast.SQLIndexOptions;
 import com.alibaba.polardbx.druid.sql.ast.SQLPartition;
 import com.alibaba.polardbx.druid.sql.ast.SQLPartitionBy;
 import com.alibaba.polardbx.druid.sql.ast.SQLStatement;
-import com.alibaba.polardbx.druid.sql.ast.expr.SQLBinaryOpExpr;
+import com.alibaba.polardbx.druid.sql.ast.SQLStatementImpl;
+import com.alibaba.polardbx.druid.sql.ast.expr.SQLCharExpr;
 import com.alibaba.polardbx.druid.sql.ast.expr.SQLIdentifierExpr;
+import com.alibaba.polardbx.druid.sql.ast.expr.SQLIntegerExpr;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsMovePartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.DrdsSplitPartition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableAddColumn;
@@ -27,6 +30,7 @@ import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableItem;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableSetOption;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLAssignItem;
+import com.alibaba.polardbx.druid.sql.ast.statement.SQLCharacterDataType;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnConstraint;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.polardbx.druid.sql.ast.statement.SQLColumnPrimaryKey;
@@ -58,7 +62,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.tuple.Triple;
 
 import java.util.Base64;
 import java.util.HashSet;
@@ -66,11 +69,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_DDL_SET_TABLE_GROUP_ENABLED;
 import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_DDL_ALGORITHM_BLACKLIST;
+import static com.aliyun.polardbx.binlog.ConfigKeys.TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS;
 import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 import static com.aliyun.polardbx.binlog.util.SQLUtils.parseSQLStatement;
@@ -257,6 +260,7 @@ public class DDLConverter {
         if (sqlStatement != null) {
             SQLHintsFilter.filter(sqlStatement);
             removeSomeHints(sqlStatement);
+            removeAsyncDdlFlags(sqlStatement);
             privateDdlSql = toSQLStringWithTrueUcase(sqlStatement);
         }
 
@@ -307,6 +311,12 @@ public class DDLConverter {
         }
 
         SQLStatement sqlStatement = parseSQLStatement(ddlSqlForNormalMysql);
+
+        // 去掉异步DDL相关的hint和标志，避免下游PolarDB-X也异步执行DDL
+        SQLHintsFilter.filter(sqlStatement);
+        removeSomeHints(sqlStatement);
+        removeAsyncDdlFlags(sqlStatement);
+
         if (sqlStatement instanceof SQLCreateDatabaseStatement) {
             SQLCreateDatabaseStatement createDatabaseStatement = (SQLCreateDatabaseStatement) sqlStatement;
             createDatabaseStatement.setPartitionMode(null);
@@ -316,13 +326,14 @@ public class DDLConverter {
         } else if (sqlStatement instanceof MySqlCreateTableStatement) {
             MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) sqlStatement;
             normalizeCreateTable(tableName, tbCollation, createTableStatement, ddlRecordSql);
-            sqlBuilder.append(createTableStatement.toUnformattedString());
-            return;
         } else if (sqlStatement instanceof SQLAlterTableStatement) {
             SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
             normalizeAlterTable(sqlAlterTableStatement);
         } else if (sqlStatement instanceof SQLCreateIndexStatement) {
             SQLCreateIndexStatement sqlCreateIndexStatement = (SQLCreateIndexStatement) sqlStatement;
+            if ("VECTOR".equalsIgnoreCase(sqlCreateIndexStatement.getIndexDefinition().getType())) {
+                return;
+            }
             sqlCreateIndexStatement.getIndexDefinition().setKey(true);
             reformatIndex(sqlCreateIndexStatement.getIndexDefinition());
         } else if (sqlStatement instanceof SQLDropTableStatement) {
@@ -353,6 +364,9 @@ public class DDLConverter {
         createTableStatement.setLocalPartitioning(null);
         createTableStatement.setLocation(null);
         createTableStatement.setSingle(false);
+        // DBLE复制表语法，可以指定locality的表，对mysql过滤
+        // https://aliyuque.antfin.com/coronadb/design/wh5lbx3b722geqkg#0ff7ea86
+        createTableStatement.setReplicas(false);
 
         // try attache character info
         tryAttacheCharacterInfo(createTableStatement, tbCollation);
@@ -371,10 +385,12 @@ public class DDLConverter {
                 definition.setLogical(false);
                 definition.setVirtual(false);
                 definition.setStored(false);
+                definition.setExternalize(false);
                 definition.setGeneratedAlawsAs(null);
                 definition.setUnitCount(null);
                 definition.setUnitIndex(null);
                 definition.setStep(null);
+                convertVectorToVarbinary(definition);
                 if (definition.isAutoIncrement() && !definition.isPrimaryKey() &&
                     !isColumnDefContainsUnique(definition)) {
                     autoColumnDefinedWithoutKey = definition.getColumnName();
@@ -409,12 +425,29 @@ public class DDLConverter {
 
             if (el instanceof MySqlTableIndex) {
                 MySqlTableIndex tableIndex = (MySqlTableIndex) el;
+                if ("VECTOR".equalsIgnoreCase(tableIndex.getIndexDefinition().getType())) {
+                    it.remove();
+                    continue;
+                }
                 tableIndex.getIndexDefinition().setKey(true);
                 tableIndex.getIndexDefinition().setIndex(false);
                 reformatIndex(tableIndex.getIndexDefinition());
                 keyColumnSet.add(tableIndex.getIndexDefinition().getColumns().get(0).toString());
                 if (tableIndex.getName() != null) {
                     keySet.add(SQLUtils.normalize(tableIndex.getName().getSimpleName()));
+                }
+
+                String indexType = tableIndex.getIndexDefinition().getOptions().getIndexType();
+                if (indexType != null && indexType.equalsIgnoreCase("HASH")) {
+                    for (SQLSelectOrderByItem item : tableIndex.getIndexDefinition().getColumns()) {
+                        if (item.getType() != null) {
+                            if (item.getType().name().equalsIgnoreCase("ASC")) {
+                                item.setType(null);
+                            } else if (item.getType().name().equalsIgnoreCase("DESC")) {
+                                item.setType(null);
+                            }
+                        }
+                    }
                 }
             }
             if (el instanceof MySqlKey) {
@@ -423,6 +456,18 @@ public class DDLConverter {
                 keyColumnSet.add(mySqlKey.getIndexDefinition().getColumns().get(0).toString());
                 if (mySqlKey.getName() != null) {
                     keySet.add(SQLUtils.normalize(mySqlKey.getName().getSimpleName()));
+                }
+                String indexType = mySqlKey.getIndexDefinition().getOptions().getIndexType();
+                if (indexType != null && indexType.equalsIgnoreCase("HASH")) {
+                    for (SQLSelectOrderByItem item : mySqlKey.getIndexDefinition().getColumns()) {
+                        if (item.getType() != null) {
+                            if (item.getType().name().equalsIgnoreCase("ASC")) {
+                                item.setType(null);
+                            } else if (item.getType().name().equalsIgnoreCase("DESC")) {
+                                item.setType(null);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -447,7 +492,7 @@ public class DDLConverter {
         return false;
     }
 
-    //@see https://aone.alibaba-inc.com/v2/project/860366/bug/56165115
+    //@see historical compatibility behavior
     private static void tryAddAutoShardIndex(MySqlCreateTableStatement createTableStatement, String ddlRecordSql,
                                              Set<String> keySet) {
         if (StringUtils.isBlank(ddlRecordSql)) {
@@ -496,6 +541,10 @@ public class DDLConverter {
             SQLAlterTableItem item = iterator.next();
             if (item instanceof SQLAlterTableAddIndex) {
                 SQLAlterTableAddIndex addIndex = (SQLAlterTableAddIndex) item;
+                if ("VECTOR".equalsIgnoreCase(addIndex.getIndexDefinition().getType())) {
+                    iterator.remove();
+                    continue;
+                }
                 reformatIndex(addIndex.getIndexDefinition());
                 SQLIndexOptions sqlIndexOptions = addIndex.getIndexDefinition().getOptions();
                 if (sqlIndexOptions != null) {
@@ -538,7 +587,10 @@ public class DDLConverter {
                 modifyColumn.getNewColumnDefinition().setLogical(false);
                 modifyColumn.getNewColumnDefinition().setVirtual(false);
                 modifyColumn.getNewColumnDefinition().setStored(false);
+                modifyColumn.getNewColumnDefinition().setExternalize(false);
                 modifyColumn.getNewColumnDefinition().setGeneratedAlawsAs(null);
+                deduplicateCharsetExpr(modifyColumn.getNewColumnDefinition());
+                convertVectorToVarbinary(modifyColumn.getNewColumnDefinition());
             }
 
             if (item instanceof SQLAlterTableAddColumn) {
@@ -554,6 +606,9 @@ public class DDLConverter {
                     c.setLogical(false);
                     c.setVirtual(false);
                     c.setStored(false);
+                    c.setExternalize(false);
+                    deduplicateCharsetExpr(c);
+                    convertVectorToVarbinary(c);
                 });
             }
 
@@ -574,7 +629,8 @@ public class DDLConverter {
         }
     }
 
-    private static void tryAttacheCharacterInfo(MySqlCreateTableStatement createTableStatement, String tbCollation) {
+    // 包级可见，便于单测直接对 charset/collate 归一化与补全逻辑做验证
+    static void tryAttacheCharacterInfo(MySqlCreateTableStatement createTableStatement, String tbCollation) {
         boolean isLike = createTableStatement.getLike() != null;
         List<SQLAssignItem> optionItemList = createTableStatement.getTableOptions();
         Set<String> optionSet = new HashSet<>();
@@ -583,44 +639,32 @@ public class DDLConverter {
         for (SQLAssignItem i : optionItemList) {
             String option = StringUtils.upperCase(SQLUtils.normalize(i.getTarget().toString()));
             optionSet.add(option);
-            String oldValue = i.getValue().toString();
-            if (i.getValue() instanceof SQLBinaryOpExpr) {
-                SQLBinaryOpExpr opExpr = (SQLBinaryOpExpr) i.getValue();
-                String operator = StringUtils.upperCase(SQLUtils.normalize(opExpr.getOperator().toString()));
-                if (!StringUtils.equalsAny(operator, "CHARACTER SET", "CHARACTER", "CHARSET", "COLLATE")) {
-                    continue;
-                }
-                optionSet.add(operator);
-                SQLIdentifierExpr right = tryToNormalize(opExpr.getRight().toString());
-                if (right != null) {
-                    opExpr.setRight(right);
-                }
-                continue;
-            }
             if (!StringUtils.equalsAny(option, "CHARACTER SET", "CHARACTER", "CHARSET", "COLLATE")) {
                 continue;
             }
-            SQLIdentifierExpr value = tryToNormalize(oldValue);
-            if (value != null) {
-                i.setValue(value);
+            // 只有取值是单纯的名字或字符串字面量时才做归一化，其它表达式（如 SQLBinaryOpExpr）保持原样，
+            // 避免把整段表达式拍平成一个标识符，破坏语句结构
+            if (!(i.getValue() instanceof SQLIdentifierExpr) && !(i.getValue() instanceof SQLCharExpr)) {
+                continue;
             }
-            if (StringUtils.equalsAny(option, "CHARACTER", "CHARSET", "CHARACTER SET")) {
-                optionCharset = i.getValue().toString();
+            i.setValue(buildCharacterOptionValue(i.getValue().toString()));
+            if (!StringUtils.equals(option, "COLLATE")) {
+                optionCharset = SQLUtils.normalize(i.getValue().toString());
             }
         }
         if (!isLike && StringUtils.isNotBlank(tbCollation)) {
             String charset = CharsetConversion.getCharsetByCollation(tbCollation);
             if (!optionSet.contains("CHARACTER") && !optionSet.contains("CHARSET") && !optionSet.contains(
                 "CHARACTER SET") && StringUtils.isNotBlank(charset)) {
-                createTableStatement.addOption("CHARACTER SET", new SQLIdentifierExpr(charset));
+                createTableStatement.addOption("CHARACTER SET", buildCharacterOptionValue(charset));
             }
 
             if (!optionSet.contains("COLLATE")) {
                 if (StringUtils.isBlank(optionCharset) || optionCharset.equalsIgnoreCase(charset)) {
                     // 仅在以下情况补全collate信息：
-                    // 1. charset为空
-                    // 2. 或者collate与charset相同
-                    createTableStatement.addOption("COLLATE", new SQLIdentifierExpr(tbCollation));
+                    // 1. DDL中未显式指定charset
+                    // 2. 或者DDL中显式指定的charset与tbCollation对应的charset相同
+                    createTableStatement.addOption("COLLATE", buildCharacterOptionValue(tbCollation));
                 }
             }
         }
@@ -698,29 +742,62 @@ public class DDLConverter {
         indexDefinition.getOptions().setDictionaryColumns(null);
     }
 
-    private static boolean isAutoShardKey(String indexName) {
+    static boolean isAutoShardKey(String indexName) {
         if (indexName != null && indexName.startsWith("`")) {
             indexName = indexName.substring(1);
         }
         return StringUtils.startsWithIgnoreCase(indexName, "auto_shard_key");
     }
 
-    public static String tryRemoveAutoShardKey(String schema, String tableName, String sql,
-                                               Function<Triple<String, String, String>, Boolean> indexExistenceChecker) {
+    /**
+     * 从 DROP INDEX / ALTER TABLE DROP INDEX 语句中提取被 DROP 的索引名列表。
+     */
+    public static Set<String> extractDroppedIndexNames(String sql) {
+        Set<String> names = new HashSet<>();
+        try {
+            SQLStatement sqlStatement = parseSQLStatement(sql);
+            if (sqlStatement instanceof SQLDropIndexStatement) {
+                SQLDropIndexStatement stmt = (SQLDropIndexStatement) sqlStatement;
+                names.add(SQLUtils.normalize(stmt.getIndexName().getSimpleName()));
+            } else if (sqlStatement instanceof SQLAlterTableStatement) {
+                SQLAlterTableStatement stmt = (SQLAlterTableStatement) sqlStatement;
+                for (SQLAlterTableItem item : stmt.getItems()) {
+                    if (item instanceof SQLAlterTableDropIndex) {
+                        names.add(SQLUtils.normalize(((SQLAlterTableDropIndex) item).getIndexName().getSimpleName()));
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            log.error("extractDroppedIndexNames failed, sql: " + sql, t);
+        }
+        return names;
+    }
+
+    /**
+     * 从 SQL 中移除指定索引的 DROP 操作（纯 SQL 改写，无业务逻辑）。
+     * <p>
+     * 调用方提前确定哪些索引的 DROP 需要被抑制，将其名称放入 indexNamesToSuppress。
+     *
+     * @param indexNamesToSuppress 需要被抑制的索引名集合（大小写不敏感匹配）
+     * @return 改写后的 SQL；整条被抑制则返回 null；无需改写则返回原 sql
+     */
+    public static String tryRemoveDropIndex(String sql, Set<String> indexNamesToSuppress) {
+        if (indexNamesToSuppress == null || indexNamesToSuppress.isEmpty()) {
+            return sql;
+        }
         try {
             SQLStatement sqlStatement = parseSQLStatement(sql);
 
             if (sqlStatement instanceof SQLDropIndexStatement) {
                 SQLDropIndexStatement dropIndexStatement = (SQLDropIndexStatement) sqlStatement;
                 String indexName = SQLUtils.normalize(dropIndexStatement.getIndexName().getSimpleName());
-                if (isAutoShardKey(indexName) && !indexExistenceChecker.apply(
-                    Triple.of(schema, tableName, indexName))) {
+                if (indexNamesToSuppress.stream().anyMatch(n -> StringUtils.equalsIgnoreCase(n, indexName))) {
+                    log.info("skip drop index sql, index: {}, sql: {}", indexName, sql);
                     return null;
                 }
             } else if (sqlStatement instanceof SQLAlterTableStatement) {
                 SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
-                int itemSize = sqlAlterTableStatement.getItems().size();
-                if (itemSize != 0) {
+                if (!sqlAlterTableStatement.getItems().isEmpty()) {
                     boolean changeFlag = false;
                     Iterator<SQLAlterTableItem> iterator = sqlAlterTableStatement.getItems().iterator();
                     while (iterator.hasNext()) {
@@ -728,42 +805,61 @@ public class DDLConverter {
                         if (alterTableItem instanceof SQLAlterTableDropIndex) {
                             SQLAlterTableDropIndex dropIndex = (SQLAlterTableDropIndex) alterTableItem;
                             String indexName = SQLUtils.normalize(dropIndex.getIndexName().getSimpleName());
-                            if (isAutoShardKey(indexName) && !indexExistenceChecker.apply(
-                                Triple.of(schema, tableName, indexName))) {
+                            if (indexNamesToSuppress.stream()
+                                .anyMatch(n -> StringUtils.equalsIgnoreCase(n, indexName))) {
+                                log.info("skip drop index item, index: {}", indexName);
                                 iterator.remove();
                                 changeFlag = true;
                             }
                         }
                     }
-
                     if (changeFlag) {
                         String newSql = sqlAlterTableStatement.toUnformattedString();
                         try {
-                            //只要还能正常解析，就对外输出
                             parseSQLStatement(newSql);
                         } catch (Throwable t) {
                             log.error("skip drop index sql " + sql);
                             return null;
                         }
-                        log.info("rewrite drop index sql, before sql is " + sql + ", after sql is " + newSql);
+                        log.info("rewrite drop index sql, before: {}, after: {}", sql, newSql);
                         return newSql;
                     }
                 }
             }
-
             return sql;
         } catch (Throwable t) {
-            log.error("try rewrite drop index sql error !", t);
+            log.error("try rewrite drop index sql error!", t);
             throw t;
         }
     }
 
-    private static SQLIdentifierExpr tryToNormalize(String value) {
-        String normalizeValue = SQLUtils.normalize(value);
-        if (!StringUtils.equalsIgnoreCase(normalizeValue, value)) {
-            return new SQLIdentifierExpr(normalizeValue);
+    /**
+     * 构造 CHARACTER SET / COLLATE 选项的值表达式。
+     * 部分 charset、collation 名同时也是 SQL 保留字（如 binary 对应 token BINARY），
+     * 归一化为裸词后 Druid 再次解析该 DDL 时会把它识别为 BINARY token，表现为两种故障：
+     * 1. 抛 ParserException（如 DEFAULT CHARSET = binary ROW_FORMAT = Dynamic）；
+     * 2. 静默吞并后续 option（如 DEFAULT CHARSET = binary DEFAULT COLLATE = `binary` 会被解析成
+     * 一个值为 SQLUnaryExpr 的 CHARSET 选项，COLLATE 选项直接丢失，charset 元数据被污染）。
+     * 故对这类保留字保留反引号，确保 reformat 产出的 DDL 可被再次解析且语义不变。
+     * MySQL 侧对 charset/collation 名支持裸词、反引号、字符串字面量三种写法，加反引号不影响下游消费。
+     * 需要保留反引号的保留字通过配置 {@code task_reformat_ddl_character_quote_keywords} 维护，
+     * 后续新增同类保留字只需改配置。
+     */
+    private static SQLIdentifierExpr buildCharacterOptionValue(String rawValue) {
+        String normalized = SQLUtils.normalize(rawValue);
+        if (getCharacterQuoteKeywords().contains(StringUtils.lowerCase(normalized))) {
+            return new SQLIdentifierExpr("`" + normalized + "`");
         }
-        return null;
+        return new SQLIdentifierExpr(normalized);
+    }
+
+    private static Set<String> getCharacterQuoteKeywords() {
+        String configValue = DynamicApplicationConfig.getString(TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS);
+        if (StringUtils.isNotBlank(configValue)) {
+            String[] splitValues = StringUtils.split(configValue.toLowerCase(), ",");
+            return Sets.newHashSet(splitValues);
+        }
+        return new HashSet<>();
     }
 
     private static boolean hasImplicitPk(SQLIndexDefinition indexDefinition) {
@@ -778,7 +874,7 @@ public class DDLConverter {
         return false;
     }
 
-    //hack reason : https://aone.alibaba-inc.com/issue/36088240
+    //hack reason : historical compatibility behavior
     private static void hack4RepairTableName(String tableName, SQLCreateTableStatement createTableStatement) {
         if (StringUtils.isBlank(tableName)) {
             return;
@@ -798,6 +894,20 @@ public class DDLConverter {
             item -> item.getTarget() != null && StringUtils.equalsIgnoreCase(item.getTarget().toString(), "TTL"));
     }
 
+    /**
+     * 去掉DDL语句上的异步执行标志（async=true）。
+     * 带async=true的DDL（如 ALTER TABLE ADD INDEX xxx async=true）
+     * 在输出到binlog时需要去掉异步特性，以避免影响DTS等下游同步工具。
+     */
+    static void removeAsyncDdlFlags(SQLStatement sqlStatement) {
+        if (sqlStatement instanceof SQLStatementImpl) {
+            SQLStatementImpl stmtImpl = (SQLStatementImpl) sqlStatement;
+            if (stmtImpl.getAsync() != null) {
+                stmtImpl.setAsync(null);
+            }
+        }
+    }
+
     private static Set<String> getAlgorithmBlacklist() {
         String configValue = DynamicApplicationConfig.getString(TASK_REFORMAT_DDL_ALGORITHM_BLACKLIST);
         if (StringUtils.isNotBlank(configValue)) {
@@ -805,6 +915,39 @@ public class DDLConverter {
             return Sets.newHashSet(splitValues);
         }
         return new HashSet<>();
+    }
+
+    private static void convertVectorToVarbinary(SQLColumnDefinition columnDefinition) {
+        SQLDataType dataType = columnDefinition.getDataType();
+        if (dataType == null || !"VECTOR".equalsIgnoreCase(dataType.getName())) {
+            return;
+        }
+        int dimension = 0;
+        if (!dataType.getArguments().isEmpty()) {
+            com.alibaba.polardbx.druid.sql.ast.SQLExpr arg = dataType.getArguments().get(0);
+            if (arg instanceof SQLIntegerExpr) {
+                dimension = ((SQLIntegerExpr) arg).getNumber().intValue();
+            }
+        }
+        dataType.setName("VARBINARY");
+        dataType.getArguments().clear();
+        if (dimension > 0) {
+            // VECTOR(N) stores N float32 values, each 4 bytes
+            dataType.getArguments().add(new SQLIntegerExpr(dimension * 4));
+        }
+    }
+
+    /**
+     * Druid解析含 CHARACTER SET 的生成列时，会将字符集信息同时存储在 SQLCharacterDataType.charSetName
+     * 和 SQLColumnDefinition.charsetExpr 两处。移除 GENERATED ALWAYS AS 后序列化时两处均会输出，导致重复。
+     * 此方法在数据类型已携带 charset 时清除列定义级别的 charsetExpr，避免重复输出。
+     */
+    private static void deduplicateCharsetExpr(SQLColumnDefinition columnDef) {
+        if (columnDef.getCharsetExpr() != null
+            && columnDef.getDataType() instanceof SQLCharacterDataType
+            && StringUtils.isNotBlank(((SQLCharacterDataType) columnDef.getDataType()).getCharSetName())) {
+            columnDef.setCharsetExpr(null);
+        }
     }
 
     private static String indexName(SQLIndexDefinition indexDefinition) {

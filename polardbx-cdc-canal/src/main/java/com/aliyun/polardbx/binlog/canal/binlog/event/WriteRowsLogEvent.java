@@ -6,6 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.canal.binlog.event;
 
+import com.aliyun.polardbx.binlog.canal.binlog.DecodeMode;
 import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
 
 /**
@@ -17,8 +18,9 @@ import com.aliyun.polardbx.binlog.canal.binlog.LogBuffer;
  */
 public final class WriteRowsLogEvent extends RowsLogEvent {
 
-    public WriteRowsLogEvent(LogHeader header, LogBuffer buffer, FormatDescriptionLogEvent descriptionEvent) {
-        super(header, buffer, descriptionEvent);
+    public WriteRowsLogEvent(LogHeader header, LogBuffer buffer, FormatDescriptionLogEvent descriptionEvent,
+                             DecodeMode decodeMode) {
+        super(header, buffer, descriptionEvent, decodeMode);
     }
 
     @Override

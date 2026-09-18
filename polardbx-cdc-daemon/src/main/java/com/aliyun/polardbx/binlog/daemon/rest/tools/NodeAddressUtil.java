@@ -6,12 +6,15 @@
  */
 package com.aliyun.polardbx.binlog.daemon.rest.tools;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.BinlogTaskInfoMapper;
 import com.aliyun.polardbx.binlog.dao.DumperInfoDynamicSqlSupport;
 import com.aliyun.polardbx.binlog.dao.DumperInfoMapper;
 import com.aliyun.polardbx.binlog.domain.po.BinlogTaskInfo;
+import com.aliyun.polardbx.binlog.domain.DumperType;
 import com.aliyun.polardbx.binlog.domain.po.DumperInfo;
 import com.github.rholder.retry.Retryer;
 import com.github.rholder.retry.RetryerBuilder;
@@ -29,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
+import static org.mybatis.dynamic.sql.SqlBuilder.isNotEqualTo;
 
 /**
  * @author zm
@@ -37,6 +41,11 @@ import static org.mybatis.dynamic.sql.SqlBuilder.isEqualTo;
 public class NodeAddressUtil {
     public static final Map<String, NodeAddress> MASTER_ADDRESS_MAP = new ConcurrentHashMap<>();
 
+    /**
+     * 获取所有 Dumper 类型节点的地址列表（不含 DumperX）。
+     * DumperX 节点没有 global stream，向其发送 STREAM_NAME_GLOBAL 的 getDumperInfo 请求
+     * 会导致 PolardbxException，触发 RPC 超时重试，严重影响负载均衡响应速度。
+     */
     public static List<NodeAddress> getDumperAddressList(String instId) {
         List<NodeAddress> addressList = new ArrayList<>();
         List<DumperInfo> dumperInfoList = getMetaDbDumperInfos(instId);
@@ -61,16 +70,19 @@ public class NodeAddressUtil {
 
     private static List<DumperInfo> getMetaDbDumperInfos(String instId) {
         DumperInfoMapper dumperInfoMapper = SpringContextHolder.getObject(DumperInfoMapper.class);
+        String clusterId = DynamicApplicationConfig.getString(ConfigKeys.CLUSTER_ID);
         Retryer<List<DumperInfo>> retryer =
             RetryerBuilder.<List<DumperInfo>>newBuilder().retryIfResult(List::isEmpty)
-                .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.SECONDS))
+                .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.MILLISECONDS))
                 .withStopStrategy(StopStrategies.stopAfterAttempt(10)).build();
 
         List<DumperInfo> dumperInfoList;
         try {
             dumperInfoList = retryer.call(() -> dumperInfoMapper.select(s -> s
                 .where(DumperInfoDynamicSqlSupport.status, isEqualTo(0))
+                .and(DumperInfoDynamicSqlSupport.clusterId, isEqualTo(clusterId))
                 .and(DumperInfoDynamicSqlSupport.polarxInstId, isEqualTo(instId))
+                .and(DumperInfoDynamicSqlSupport.role, isNotEqualTo(DumperType.XSTREAM.getName()))
             ));
         } catch (Exception e) {
             log.error("No Dumper Infos in metaDB!", e);
@@ -83,7 +95,7 @@ public class NodeAddressUtil {
         BinlogTaskInfoMapper taskInfoMapper = SpringContextHolder.getObject(BinlogTaskInfoMapper.class);
         Retryer<List<BinlogTaskInfo>> retryer =
             RetryerBuilder.<List<BinlogTaskInfo>>newBuilder().retryIfResult(List::isEmpty)
-                .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.SECONDS))
+                .withWaitStrategy(WaitStrategies.fixedWait(1, TimeUnit.MILLISECONDS))
                 .withStopStrategy(StopStrategies.stopAfterAttempt(10)).build();
 
         List<BinlogTaskInfo> taskInfoList;

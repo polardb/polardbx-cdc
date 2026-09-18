@@ -139,6 +139,10 @@ public class PropertiesUtil {
         return configProp.getProperty("cdcCheckTableBlackList", "");
     }
 
+    public static String getCdcCheckDdlDbTypeBlackList() {
+        return configProp.getProperty("cdcCheckDdlDbTypeBlackList", "");
+    }
+
     public static String getCdcCheckTableWhiteList() {
         String str = configProp.getProperty("cdcCheckTableWhiteList", "");
         // 表名可能有中文

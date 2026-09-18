@@ -8,6 +8,7 @@ package com.aliyun.polardbx.binlog.extractor.filter.rebuild;
 
 import com.aliyun.polardbx.binlog.format.BinlogBuilder;
 import com.aliyun.polardbx.binlog.format.utils.AutoExpandBuffer;
+import com.aliyun.polardbx.binlog.extractor.log.ExternalColumnTxnContext;
 import com.aliyun.polardbx.binlog.storage.IteratorBuffer;
 
 public class ReformatContext {
@@ -19,6 +20,9 @@ public class ReformatContext {
     private long serverId;
     private IteratorBuffer it;
     private String virtualTSO;
+    private ExternalColumnTxnContext externalColumnTxnContext;
+    private boolean externalColumnAddressFallbackLogged;
+    private boolean externalColumnNullFallbackLogged;
 
     private String binlogFile;
 
@@ -62,6 +66,32 @@ public class ReformatContext {
 
     public void setVirtualTSO(String virtualTSO) {
         this.virtualTSO = virtualTSO;
+    }
+
+    public ExternalColumnTxnContext getExternalColumnTxnContext() {
+        return externalColumnTxnContext;
+    }
+
+    public void setExternalColumnTxnContext(ExternalColumnTxnContext externalColumnTxnContext) {
+        this.externalColumnTxnContext = externalColumnTxnContext;
+        this.externalColumnAddressFallbackLogged = false;
+        this.externalColumnNullFallbackLogged = false;
+    }
+
+    public boolean markExternalColumnAddressFallbackLogged() {
+        if (externalColumnAddressFallbackLogged) {
+            return false;
+        }
+        externalColumnAddressFallbackLogged = true;
+        return true;
+    }
+
+    public boolean markExternalColumnNullFallbackLogged() {
+        if (externalColumnNullFallbackLogged) {
+            return false;
+        }
+        externalColumnNullFallbackLogged = true;
+        return true;
     }
 
     public long getServerId() {

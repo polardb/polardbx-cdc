@@ -6,10 +6,12 @@
  */
 package com.aliyun.polardbx.rpl.taskmeta;
 
+import com.aliyun.polardbx.rpl.common.ReplicaMode;
 import lombok.Data;
 import org.apache.commons.lang3.tuple.MutableTriple;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author shicai.xsc 2021/2/3 21:51
@@ -40,7 +42,7 @@ public class ReplicaMeta {
     String wildIgnoreTable;
     String rewriteDb;
     String extra;
-    boolean imageMode;
+    ReplicaMode mode;
     String skipTso;
     String skipUntilTso;
 
@@ -50,8 +52,6 @@ public class ReplicaMeta {
      * applier参数
      */
     ApplierType applierType = ApplierType.SPLIT;
-
-    boolean compareAll;
 
     /*
      * 只在 ConflictStrategy.OVERWRITE 下起作用
@@ -66,6 +66,7 @@ public class ReplicaMeta {
      */
     boolean enableDdl = true;
     String streamGroup;
+    String streamName;
 
     /*
      * 源为2.0时该参数控制是否采用快照解析
@@ -79,4 +80,8 @@ public class ReplicaMeta {
     boolean enableDynamicMasterHost;
     List<MutableTriple<String, Integer, String>> masterHostList;
     String masterInstId;
+
+    boolean extractFullFromDn = false;
+    String dnId;
+    Map<String, String> dnInfoMap;
 }

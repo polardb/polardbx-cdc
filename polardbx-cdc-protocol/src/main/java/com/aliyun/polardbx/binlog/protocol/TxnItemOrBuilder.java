@@ -169,4 +169,26 @@ public interface TxnItemOrBuilder extends
    * @return The primaryKey at the given index.
    */
   com.google.protobuf.ByteString getPrimaryKey(int index);
+
+  /**
+   * <pre>
+   * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+   * 保证不同Dispatcher拓扑下输出顺序一致
+   * </pre>
+   *
+   * <code>string partitionId = 9;</code>
+   * @return The partitionId.
+   */
+  java.lang.String getPartitionId();
+  /**
+   * <pre>
+   * DN分区标识，用于Dumper多流归并时按partitionId进行确定性排序，
+   * 保证不同Dispatcher拓扑下输出顺序一致
+   * </pre>
+   *
+   * <code>string partitionId = 9;</code>
+   * @return The bytes for partitionId.
+   */
+  com.google.protobuf.ByteString
+      getPartitionIdBytes();
 }

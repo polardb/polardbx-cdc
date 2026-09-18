@@ -45,13 +45,24 @@ JAVA_OPTS="${JAVA_OPTS} -server -Xms${MEMORY}m -Xmx${MEMORY}m -Xss1m -DtaskName=
 if [[ ! "$JVM_PARAMS" =~ "PermSize" ]]; then
   JAVA_OPTS="${JAVA_OPTS} -XX:PermSize=${PERM_MEMORY}m -XX:MaxPermSize=${PERM_MEMORY}m"
 fi
-JAVA_OPTS="${JAVA_OPTS} -XX:+UseConcMarkSweepGC"
-JAVA_OPTS="${JAVA_OPTS} -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRatio=2"
+
+# 移除CMS垃圾回收器相关参数，使用G1垃圾回收器替代
+# 原来的CMS参数:
+# JAVA_OPTS="${JAVA_OPTS} -XX:+UseConcMarkSweepGC -XX:-UseAdaptiveSizePolicy -XX:SurvivorRatio=2 -XX:NewRatio=2 -XX:CMSInitiatingOccupancyFraction=80 -XX:+UseCMSInitiatingOccupancyOnly"
+JAVA_OPTS="${JAVA_OPTS} -XX:+UseG1GC"
+# G1 的停顿时间目标（毫秒）。G1会根据它来调节年轻代大小、每次混合回收的老年代 Region 数等。是“目标”而非严格保证。
+JAVA_OPTS="${JAVA_OPTS} -XX:MaxGCPauseMillis=200"
+# 启用G1垃圾回收器的“Concurrent Cycle”（并发标记+后续 Mixed GC），而不是立即 Full GC，降低因显式 GC 造成的长时间停顿。
+JAVA_OPTS="${JAVA_OPTS} -XX:+ExplicitGCInvokesConcurrent"
+# JVM 启动时预触碰全部内存页，把虚拟内存提前映射为物理页，降低后续运行中的缺页中断和内存碎片对停顿的影响。配合大页更有效
+# 开启此参数会导致启动变慢，但运行期间更稳定 (实验室反应开启该参数会导致反复重启，因此禁用)
+# JAVA_OPTS="${JAVA_OPTS} -XX:+AlwaysPreTouch"
+# G1MaxNewSizePercent 年轻代的最大百分比上限（占总堆）。限制 G1 自适应扩大的天花板。
+# JAVA_OPTS="${JAVA_OPTS} -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=50"
+
+
 JAVA_OPTS="${JAVA_OPTS} -XX:-OmitStackTraceInFastThrow"
-JAVA_OPTS="${JAVA_OPTS} -XX:CMSInitiatingOccupancyFraction=80"
-JAVA_OPTS="${JAVA_OPTS} -XX:+UseCMSInitiatingOccupancyOnly"
 JAVA_OPTS="${JAVA_OPTS} -Djava.net.preferIPv4Stack=true"
-#JAVA_OPTS="${JAVA_OPTS} -XX:+UseG1GC -XX:MaxGCPauseMillis=250 -XX:+UseGCOverheadLimit -XX:+ExplicitGCInvokesConcurrent"
 JAVA_OPTS="${JAVA_OPTS} -Xlog:gc*:${HOME}/logs/polardbx-binlog/$TASK_NAME/gc.log:time"
 JAVA_OPTS="${JAVA_OPTS} -Dmemory=${MEMORY}"
 JAVA_OPTS="${JAVA_OPTS} -Djava.util.prefs.systemRoot=${HOME}/.java -Djava.util.prefs.userRoot=${HOME}/.java/.userPrefs -Dfile.encoding=UTF-8"
@@ -108,7 +119,6 @@ if [ -f ${HOME}/env/env.properties ]; then
   fi
   CLASSPATH="${HOME}/env:$CLASSPATH"
 fi
-
 
 if [ ! -d $HOME/logs/polardbx-binlog/$TASK_NAME ]; then
   mkdir $HOME/logs/polardbx-binlog/$TASK_NAME

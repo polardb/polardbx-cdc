@@ -50,6 +50,7 @@ import com.aliyun.polardbx.binlog.canal.core.model.BinlogPosition;
 import com.aliyun.polardbx.binlog.canal.core.model.MySQLDBMSEvent;
 import com.aliyun.polardbx.binlog.canal.exception.CanalParseException;
 import com.aliyun.polardbx.binlog.canal.exception.TableIdNotFoundException;
+import com.aliyun.polardbx.binlog.util.CharsetCache;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
 import com.aliyun.polardbx.rpl.common.DataSourceUtil;
 import com.aliyun.polardbx.rpl.common.RplConstants;
@@ -68,10 +69,14 @@ import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.nio.charset.UnsupportedCharsetException;
 import java.sql.Types;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_DDL_PARSE_ERROR_PROCESS_MODE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.RPL_FILTER_TABLE_ERROR;
@@ -302,6 +307,17 @@ public class LogEventConvert {
             String originSql = extractPolarxOriginSql(queryString);
             originSql = StringUtils.isNotBlank(originSql) ? originSql : queryString;
 
+            // Strip leading comments before TDDL hint when enabled
+            if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_DDL_STRIP_LEADING_COMMENTS)) {
+                int tddlIdx = StringUtils.indexOfIgnoreCase(originSql, "/*+TDDL:");
+                if (tddlIdx > 0) {
+                    String before = originSql;
+                    originSql = originSql.substring(tddlIdx);
+                    log.warn("[DDL Comment Strip] stripped leading comments before TDDL hint in parseQueryEvent, "
+                        + "original length: {}, stripped from index: {}", before.length(), tddlIdx);
+                }
+            }
+
             // 如果上游是polardbx，则不能过滤，正常同步
             if (StringUtils.isBlank(tso) && (StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "flush")
                 || StringUtils.startsWithIgnoreCase(StringUtils.trim(originSql), "grant")
@@ -341,15 +357,11 @@ public class LogEventConvert {
             }
             DBMSAction action = ddlResult == null ? DBMSAction.OTHER : ddlResult.getType();
             String rewriteDbName = filter.getRewriteDb(event.getDbName(), action);
-            if (filter.ignoreEvent(rewriteDbName,
+
+            // 先判断是否被过滤，但不立即返回，因为 tableMetaCache 需要始终更新
+            boolean filtered = filter.ignoreEvent(rewriteDbName,
                 (ddlResult == null || ddlResult.getTableName() == null) ? "" : ddlResult.getTableName(),
-                action, event.getServerId())) {
-                if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
-                    extractorLogger.warn("ignoreDdlByFilter: " + nowTso + ":[" + event.getDbName() + "]:["
-                        + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
-                }
-                return null;
-            }
+                action, event.getServerId());
 
             // 跨库 ddl，构造 DDL 事件时，要使用其真正的 db，即 result.getSchemaName()
             // 但polardbx不需要
@@ -358,7 +370,7 @@ public class LogEventConvert {
                 rewriteDbName = filter.getRewriteDb(ddlResult.getSchemaName(), action);
             }
 
-            // 更新内存 tableMetaCache
+            // 更新内存 tableMetaCache（无论是否被过滤都需要执行，保证 schema 一致性）
             TableMeta preVersionTableMeta = null;
             if (ddlResult != null) {
                 if (StringUtils.isNotBlank(ddlResult.getTableName())) {
@@ -368,7 +380,36 @@ public class LogEventConvert {
                 tableMetaCache.apply(position, rewriteDbName, originSql);
             }
 
-            // 构造对象
+            // 根据过滤结果决定返回方式
+            if (filtered) {
+                if (filter.isFilteredByServerId(event.getServerId())) {
+                    // 被 server_id 过滤的 DDL，仅用于 schema 刷新，不实际执行
+                    DefaultQueryLog queryEvent = new DefaultQueryLog(rewriteDbName,
+                        queryString,
+                        new java.sql.Timestamp(event.getHeader().getWhen() * 1000),
+                        event.getErrorCode(),
+                        event.getSqlMode(),
+                        action,
+                        event.getExecTime());
+                    queryEvent.setTableMeta(preVersionTableMeta);
+                    queryEvent.setSchemaRefreshOnly(true);
+                    if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
+                        extractorLogger.warn("schemaRefreshOnlyDdl: " + nowTso + ":[" + event.getDbName() + "]:["
+                            + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
+                    }
+                    return new MySQLDBMSEvent(queryEvent, createPosition(event.getHeader()),
+                        event.getHeader().getEventLen());
+                } else {
+                    // 被其他规则过滤的 DDL，直接忽略
+                    if (DynamicApplicationConfig.getBoolean(ConfigKeys.RPL_EXTRACTOR_DDL_LOG_OPEN)) {
+                        extractorLogger.warn("ignoreDdlByFilter: " + nowTso + ":[" + event.getDbName() + "]:["
+                            + binlogFileName + ":" + event.getLogPos() + "]," + queryString);
+                    }
+                    return null;
+                }
+            }
+
+            // 未被过滤，构造正常 DDL 事件
             DefaultQueryLog queryEvent = new DefaultQueryLog(rewriteDbName,
                 queryString,
                 new java.sql.Timestamp(event.getHeader().getWhen() * 1000),
@@ -393,9 +434,10 @@ public class LogEventConvert {
         // mysql5.6支持，需要设置binlog-rows-query-log-events=1，可详细打印原始DML语句
         String queryString = null;
         try {
-            queryString = new String(event.getRowsQuery().getBytes(ISO_8859_1), charset);
+            queryString =
+                new String(event.getRowsQuery().getBytes(StandardCharsets.ISO_8859_1), CharsetCache.lookup(charset));
             return buildRowsQueryEntry(queryString, event.getHeader(), DBMSAction.ROWQUERY);
-        } catch (UnsupportedEncodingException e) {
+        } catch (UnsupportedCharsetException e) {
             throw new CanalParseException(e);
         }
     }
@@ -407,9 +449,10 @@ public class LogEventConvert {
         // mariaDb支持，需要设置binlog_annotate_row_events=true，可详细打印原始DML语句
         String queryString = null;
         try {
-            queryString = new String(event.getRowsQuery().getBytes(ISO_8859_1), charset);
+            queryString =
+                new String(event.getRowsQuery().getBytes(StandardCharsets.ISO_8859_1), CharsetCache.lookup(charset));
             return buildQueryEntry(queryString, event.getHeader(), null);
-        } catch (UnsupportedEncodingException e) {
+        } catch (UnsupportedCharsetException e) {
             throw new CanalParseException(e);
         }
     }
@@ -507,6 +550,7 @@ public class LogEventConvert {
 
             // 构造列信息
             List<DBMSColumn> dbmsColumns = Lists.newArrayList();
+            Set<String> externalizedColumnNames = null;
             List<FieldMeta> fieldMetas = tableMeta.getFields();
             // 兼容一下canal的逻辑,认为DDL新增列都加在末尾,如果表结构的列比binlog的要多
             int size = fieldMetas.size();
@@ -528,12 +572,19 @@ public class LogEventConvert {
                     fieldMeta.isOnUpdate()
                 );
                 dbmsColumns.add(column);
+                if (fieldMeta.isExternalized()) {
+                    if (externalizedColumnNames == null) {
+                        externalizedColumnNames = new LinkedHashSet<>();
+                    }
+                    externalizedColumnNames.add(fieldMeta.getColumnName());
+                }
             }
 
             DefaultRowChange rowChange = new DefaultRowChange(action,
                 rewriteDbName,
                 table.getTableName(),
-                new DefaultColumnSet(dbmsColumns));
+                externalizedColumnNames == null ? new DefaultColumnSet(dbmsColumns) :
+                    new DefaultColumnSet(dbmsColumns, externalizedColumnNames));
             BitSet actualChangeColumns = new BitSet(columnSize); // 需要处理到update类型时，基于数据内容进行判定
             rowChange.setChangeColumnsBitSet(actualChangeColumns);
 
@@ -666,7 +717,7 @@ public class LogEventConvert {
                     // mysql binlog中blob/text都处理为blob类型，需要反查table
                     // meta，按编码解析text
                     if (fieldMeta != null && isText(fieldMeta.getColumnType())) {
-                        dataValue = new String((byte[]) value, javaCharset);
+                        dataValue = new String((byte[]) value, CharsetCache.lookup(javaCharset));
                         javaType = Types.CLOB;
                     } else {
                         // byte数组，直接使用iso-8859-1保留对应编码，浪费内存
@@ -698,9 +749,12 @@ public class LogEventConvert {
 
         if (isAfter) {
             rowChange.addChangeData(rowData);
-            // 处理一下变更列
             DBMSRowData beforeRowData = rowChange.getRowData(rowChange.getRowSize());
-            buildChangeColumns(beforeRowData, rowData, columnCnt, actualChangeColumns);
+            if (rowChange.hasExternalizedColumns()) {
+                buildExternalizedChangeColumns(beforeRowData, rowData, columnCnt, cols, actualChangeColumns);
+            } else {
+                buildChangeColumns(beforeRowData, rowData, columnCnt, actualChangeColumns);
+            }
         } else {
             rowChange.addRowData(rowData);
         }
@@ -709,6 +763,24 @@ public class LogEventConvert {
     protected void buildChangeColumns(DBMSRowData beforeRowData, DBMSRowData afterRowData, int size,
                                       BitSet changeColumns) {
         for (int i = 1; i <= size; i++) {
+            Serializable before = beforeRowData.getRowValue(i);
+            Serializable after = afterRowData.getRowValue(i);
+
+            boolean check = isUpdate(before, after);
+            if (check) {
+                changeColumns.set(i - 1, true);
+            }
+        }
+    }
+
+    private void buildExternalizedChangeColumns(DBMSRowData beforeRowData, DBMSRowData afterRowData, int size,
+                                                BitSet afterImageColumns, BitSet changeColumns) {
+        for (int i = 1; i <= size; i++) {
+            // With MINIMAL/PARTIAL row images, an omitted column means "not included", not SQL NULL.
+            // Skip it to avoid falsely marking the column as changed against the before image.
+            if (!afterImageColumns.get(i - 1)) {
+                continue;
+            }
             Serializable before = beforeRowData.getRowValue(i);
             Serializable after = afterRowData.getRowValue(i);
 
@@ -801,10 +873,12 @@ public class LogEventConvert {
             || "TEXT".equalsIgnoreCase(columnType) || "TINYTEXT".equalsIgnoreCase(columnType);
     }
 
-    protected boolean isRDSHeartBeat(String schema, String table) {
+    public boolean isRDSHeartBeat(String schema, String table) {
         return (MYSQL.equalsIgnoreCase(schema) && HA_HEALTH_CHECK.equalsIgnoreCase(table))
             || DRDS_SYSTEM_MYSQL_HEARTBEAT.equalsIgnoreCase(table) ||
-            "__drds__systable__leadership__".equalsIgnoreCase(table);
+            "__drds__systable__leadership__".equalsIgnoreCase(table) ||
+            (MysqlDetectingTimeTask.DEFAULT_HEARTBEAT_DATABASE.equalsIgnoreCase(schema)
+                && MysqlDetectingTimeTask.DEFAULT_HEARTBEAT_TABLE.equalsIgnoreCase(table));
     }
 
     protected String getXid(String queryString, XATransactionType type) throws CanalParseException {

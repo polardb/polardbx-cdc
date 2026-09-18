@@ -34,6 +34,8 @@ public class BinlogFileRecoverBuilder {
     public static RecoverInfo build(LogFileManager logFileManager, String recoverTso, String recoverFileName) {
         String fileName;
         String startTso;
+        // last commit xid
+        Long lastXid = null;
 
         if (StringUtils.isBlank(recoverTso) || recoverTso.equals(ExecutionConfig.ORIGIN_TSO)) {
             log.info("build recover tso from origin tso");
@@ -52,8 +54,10 @@ public class BinlogFileRecoverBuilder {
                 }
 
                 // last tso, need rotate to next file
+                lastXid = record.get().getLastXid();
                 fileName = BinlogFileUtil.getNextBinlogFileName(record.get().getBinlogFile());
-                log.info("build recover tso by last tso:{}, from binlog file:{}", recoverTso, fileName);
+                log.info("build recover tso by last tso:{}, last xid {} from binlog file:{}", recoverTso,
+                    lastXid, fileName);
             } else {
                 if (StringUtils.isBlank(recoverFileName)) {
                     throw new PolardbxException(
@@ -67,7 +71,7 @@ public class BinlogFileRecoverBuilder {
             startTso = recoverTso;
         }
 
-        return new RecoverInfo(fileName, startTso);
+        return new RecoverInfo(fileName, startTso, lastXid);
     }
 
     @Data
@@ -76,5 +80,6 @@ public class BinlogFileRecoverBuilder {
     public static class RecoverInfo {
         private String fileName;
         private String startTso;
+        private Long lastXid;
     }
 }

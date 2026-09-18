@@ -86,9 +86,16 @@ public class ReplicaFullValidRunner {
         HostInfo dstHostInfo = applierConfig.getHostInfo();
 
         // 所有的全量校验任务共用一个连接池
+        // 连接池大小必须不小于线程池最大线程数，否则并发任务会因连接不足而超时
         int poolSize = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_CN_CONN_POOL_COUNT);
-        srcMetaCache = new DbMetaCache(srcHostInfo, poolSize, poolSize, true);
-        dstMetaCache = new DbMetaCache(dstHostInfo, poolSize, poolSize, true);
+        int threadPoolMaxSize = DynamicApplicationConfig.getInt(ConfigKeys.RPL_FULL_VALID_RUNNER_THREAD_POOL_MAX_SIZE);
+        int effectivePoolSize = Math.max(poolSize, threadPoolMaxSize);
+        if (effectivePoolSize > poolSize) {
+            log.warn("connection pool size {} is less than thread pool max size {}, "
+                + "auto adjusted to {}", poolSize, threadPoolMaxSize, effectivePoolSize);
+        }
+        srcMetaCache = new DbMetaCache(srcHostInfo, effectivePoolSize, effectivePoolSize, true);
+        dstMetaCache = new DbMetaCache(dstHostInfo, effectivePoolSize, effectivePoolSize, true);
 
         // 所有的全量校验任务共用一个线程池
         subTaskExecutor = createThreadPool();

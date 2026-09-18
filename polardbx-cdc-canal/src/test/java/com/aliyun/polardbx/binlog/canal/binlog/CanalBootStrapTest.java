@@ -7,6 +7,7 @@
 package com.aliyun.polardbx.binlog.canal.binlog;
 
 import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.canal.CanalBootstrap;
 import com.aliyun.polardbx.binlog.canal.HandlerContext;
 import com.aliyun.polardbx.binlog.canal.LogEventFilter;
@@ -63,8 +64,10 @@ public class CanalBootStrapTest extends BaseTest {
         String polarxServerVersion = "";
         String localBinlogDir = "";
         Long preferHostId = null;
-        String startCmdTSO = 7305964338139889730L +"000000000000000000";
-        CanalBootstrap canalBootstrap = Mockito.mock(CanalBootstrap.class, withSettings().useConstructor(authenticationInfo, polarxServerVersion, localBinlogDir, preferHostId, startCmdTSO));
+        String startCmdTSO = 7305964338139889730L + "000000000000000000";
+        CanalBootstrap canalBootstrap = Mockito.mock(CanalBootstrap.class,
+            withSettings().useConstructor(authenticationInfo, polarxServerVersion, localBinlogDir, preferHostId,
+                startCmdTSO));
         when(canalBootstrap.binarySearch(any(), anyLong(), any(), anyString())).thenCallRealMethod();
         when(canalBootstrap.searchPosition(any(), anyString())).thenCallRealMethod();
         when(canalBootstrap.extractPhysicalTso(anyString())).thenCallRealMethod();
@@ -667,4 +670,99 @@ public class CanalBootStrapTest extends BaseTest {
 //
 //
 //    }
+
+    /**
+     * consumeOss: checkServerIdMatch=true, isServerIdMatch=false, 配置开启 -> 抛出 ServerIdNotMatchException
+     */
+    @Test
+    public void testConsumeOss_ServerIdNotMatch_ConfigEnabled() throws Exception {
+        mockConfig(ConfigKeys.TASK_EXTRACT_CHECK_FORCE_CHECK_SERVER_ID_ENABLED, "true");
+
+        CanalBootstrap canalBootstrap = Mockito.mock(CanalBootstrap.class);
+        OssConnection ossConnection = mock(OssConnection.class);
+
+        when(canalBootstrap.buildOssConnection(anyString())).thenReturn(ossConnection);
+        when(ossConnection.isServerIdMatch()).thenReturn(false);
+        doCallRealMethod().when(canalBootstrap).consumeOss(anyString(), anyBoolean());
+
+        Exception thrown = null;
+        try {
+            canalBootstrap.consumeOss("1651782957000", true);
+        } catch (Exception e) {
+            thrown = e;
+        }
+
+        Assert.assertNotNull(thrown);
+        Assert.assertEquals(ServerIdNotMatchException.class, thrown.getClass());
+        // 确认不会走到 searchPosition
+        verify(canalBootstrap, times(0)).searchPosition(any(), anyString());
+        verify(ossConnection, times(1)).disconnect();
+    }
+
+    /**
+     * consumeOss: checkServerIdMatch=true, isServerIdMatch=false, 配置关闭 -> 不抛异常，继续搜索
+     */
+    @Test
+    public void testConsumeOss_ServerIdNotMatch_ConfigDisabled() throws Exception {
+        mockConfig(ConfigKeys.TASK_EXTRACT_CHECK_FORCE_CHECK_SERVER_ID_ENABLED, "false");
+
+        CanalBootstrap canalBootstrap = Mockito.mock(CanalBootstrap.class);
+        OssConnection ossConnection = mock(OssConnection.class);
+        BinlogPosition position = new BinlogPosition("mysql-bin.000001", 4, -1, -1);
+
+        when(canalBootstrap.buildOssConnection(anyString())).thenReturn(ossConnection);
+        when(ossConnection.isServerIdMatch()).thenReturn(false);
+        when(canalBootstrap.searchPosition(any(), anyString())).thenReturn(position);
+        doNothing().when(canalBootstrap).consume(any(), any(), anyString());
+        when(canalBootstrap.isRunning()).thenReturn(true);
+        doCallRealMethod().when(canalBootstrap).consumeOss(anyString(), anyBoolean());
+
+        Exception thrown = null;
+        try {
+            canalBootstrap.consumeOss("1651782957000", true);
+        } catch (Exception e) {
+            thrown = e;
+        }
+
+        // 配置关闭，不抛 ServerIdNotMatchException，而是继续搜索并消费，最后抛 ConsumeOSSBinlogEndException
+        Assert.assertNotNull(thrown);
+        Assert.assertEquals(ConsumeOSSBinlogEndException.class, thrown.getClass());
+        // 确认走到了 searchPosition 和 consume
+        verify(canalBootstrap, times(1)).searchPosition(any(), anyString());
+        verify(canalBootstrap, times(1)).consume(any(), any(), anyString());
+        verify(ossConnection, times(1)).disconnect();
+    }
+
+    /**
+     * consumeOss: checkServerIdMatch=false -> 跳过 serverId 检查，直接搜索
+     */
+    @Test
+    public void testConsumeOss_CheckServerIdMatchFalse_SkipsCheck() throws Exception {
+        mockConfig(ConfigKeys.TASK_EXTRACT_CHECK_FORCE_CHECK_SERVER_ID_ENABLED, "true");
+
+        CanalBootstrap canalBootstrap = Mockito.mock(CanalBootstrap.class);
+        OssConnection ossConnection = mock(OssConnection.class);
+        BinlogPosition position = new BinlogPosition("mysql-bin.000001", 4, -1, -1);
+
+        when(canalBootstrap.buildOssConnection(anyString())).thenReturn(ossConnection);
+        when(ossConnection.isServerIdMatch()).thenReturn(false);
+        when(canalBootstrap.searchPosition(any(), anyString())).thenReturn(position);
+        doNothing().when(canalBootstrap).consume(any(), any(), anyString());
+        when(canalBootstrap.isRunning()).thenReturn(true);
+        doCallRealMethod().when(canalBootstrap).consumeOss(anyString(), anyBoolean());
+
+        Exception thrown = null;
+        try {
+            canalBootstrap.consumeOss("1651782957000", false);
+        } catch (Exception e) {
+            thrown = e;
+        }
+
+        // checkServerIdMatch=false，跳过 serverId 检查，正常搜索并消费
+        Assert.assertNotNull(thrown);
+        Assert.assertEquals(ConsumeOSSBinlogEndException.class, thrown.getClass());
+        verify(canalBootstrap, times(1)).searchPosition(any(), anyString());
+        verify(canalBootstrap, times(1)).consume(any(), any(), anyString());
+        verify(ossConnection, times(1)).disconnect();
+    }
 }

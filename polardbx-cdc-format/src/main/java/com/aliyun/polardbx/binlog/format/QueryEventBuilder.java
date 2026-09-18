@@ -13,6 +13,7 @@ import com.aliyun.polardbx.binlog.format.utils.CollationCharset;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 
 public class QueryEventBuilder extends BinlogBuilder {
 
@@ -191,7 +192,7 @@ public class QueryEventBuilder extends BinlogBuilder {
             if (StringUtils.isBlank(needSetDb)) {
                 needSetDb = "mysql";
             }
-            byte[] data = needSetDb.getBytes(ISO_8859_1);
+            byte[] data = needSetDb.getBytes(StandardCharsets.ISO_8859_1);
             statuVarPars.putByte(Q_UPDATED_DB_NAMES, 1);
             statuVarPars.put(data);
             statuVarPars.putByte(0);
@@ -240,7 +241,7 @@ public class QueryEventBuilder extends BinlogBuilder {
         }
 
         public void putString(int code, String value) throws UnsupportedEncodingException {
-            byte[] datas = value.getBytes(ISO_8859_1);
+            byte[] datas = value.getBytes(StandardCharsets.ISO_8859_1);
             outputData.put((byte) code);
             outputData.put((byte) datas.length);
             outputData.put(datas);

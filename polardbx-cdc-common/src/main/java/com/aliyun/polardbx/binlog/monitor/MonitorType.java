@@ -210,7 +210,7 @@ public enum MonitorType {
     IMPORT_INC_ERROR(
         "polarx_cdc_import_inc_error",
         true,
-        "评估升级增量迁移任务 %s 错误退出, 请及时关注， 异常： %s",
+        "评估升级增量迁移任务 %s 异常, 请及时关注， 异常： %s",
         1,
         30,
         false
@@ -218,7 +218,7 @@ public enum MonitorType {
     RPL_PROCESS_ERROR(
         "polarx_cdc_rpl_process_error",
         true,
-        "RPL任务 %s 错误退出, 请及时关注， 异常： %s",
+        "RPL任务 %s 异常, 请及时关注， 异常： %s",
         1,
         30,
         false

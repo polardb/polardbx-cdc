@@ -24,6 +24,7 @@ import com.alibaba.polardbx.druid.sql.parser.SQLParserUtils;
 import com.alibaba.polardbx.druid.sql.parser.SQLStatementParser;
 import com.alibaba.polardbx.druid.sql.visitor.VisitorFeature;
 import com.aliyun.polardbx.binlog.ConfigKeys;
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.SpringContextHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +41,7 @@ import java.util.List;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.alibaba.polardbx.druid.sql.SQLUtils.toSQLString;
 import static com.aliyun.polardbx.binlog.util.CommonUtils.escape;
 
 /**
@@ -122,13 +124,90 @@ public class SQLUtils {
         }
         if (sqlStatement.hasBeforeComment()) {
             // 对于before comment，只有当prettyFormat为true时，parser才支持打印
-            return com.alibaba.polardbx.druid.sql.SQLUtils.toSQLString(sqlStatement, DbType.mysql);
+            return toSQLString(sqlStatement, DbType.mysql);
         } else {
             com.alibaba.polardbx.druid.sql.SQLUtils.FormatOption formatOption =
                 new com.alibaba.polardbx.druid.sql.SQLUtils.FormatOption(true, false);
             formatOption.config(VisitorFeature.OutputHashPartitionsByRange, true);
-            return com.alibaba.polardbx.druid.sql.SQLUtils.toSQLString(sqlStatement, DbType.mysql, formatOption);
+            formatOption.config(VisitorFeature.OutputLineCommentAsBlockComment, true);
+            String result = toSQLString(sqlStatement, DbType.mysql, formatOption);
+
+            // parser 层应在单行输出时把 -- / # 行注释转换为块注释；如果仍有漏网，则回退到
+            // prettyFormat=true，让下游 DDLConverter 走 base64 兜底，避免单行 SQL 吞掉后续内容。
+            if (shouldFallbackForLineComment(result)) {
+                return toSQLString(sqlStatement, DbType.mysql);
+            }
+            return result;
         }
+    }
+
+    private static boolean shouldFallbackForLineComment(String result) {
+        return isLineCommentDefenseEnabled() && containsLineComment(result);
+    }
+
+    private static boolean isLineCommentDefenseEnabled() {
+        try {
+            return DynamicApplicationConfig.getBoolean(ConfigKeys.BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED, true);
+        } catch (Throwable t) {
+            log.warn("get {} failed, use default true.", ConfigKeys.BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED, t);
+            return true;
+        }
+    }
+
+    private static boolean containsLineComment(String sql) {
+        if (StringUtils.isBlank(sql)) {
+            return false;
+        }
+        // MySQL 行注释：-- 后必须跟空白字符；# 注释到行尾
+        int index = 0;
+        int len = sql.length();
+        while (index < len) {
+            char c = sql.charAt(index);
+            if (c == '\'' || c == '"' || c == '`') {
+                index = skipQuoted(sql, index, len);
+            } else if (c == '/' && index + 1 < len && sql.charAt(index + 1) == '*') {
+                index = skipMultiLineComment(sql, index, len);
+            } else if (c == '-' && index + 2 < len && sql.charAt(index + 1) == '-' &&
+                Character.isWhitespace(sql.charAt(index + 2))) {
+                return true;
+            } else if (c == '#') {
+                return true;
+            } else {
+                index++;
+            }
+        }
+        return false;
+    }
+
+    private static int skipQuoted(String sql, int index, int len) {
+        char quote = sql.charAt(index);
+        index++;
+        while (index < len) {
+            char ch = sql.charAt(index);
+            if (ch == quote) {
+                // 处理转义引号 '' / "" / ``
+                if (index + 1 < len && sql.charAt(index + 1) == quote) {
+                    index += 2;
+                    continue;
+                }
+                index++;
+                break;
+            }
+            index++;
+        }
+        return index;
+    }
+
+    private static int skipMultiLineComment(String sql, int index, int len) {
+        index += 2;
+        while (index < len) {
+            if (sql.charAt(index) == '*' && index + 1 < len && sql.charAt(index + 1) == '/') {
+                index += 2;
+                break;
+            }
+            index++;
+        }
+        return index;
     }
 
     public static String removeSomeHints(String sql) {

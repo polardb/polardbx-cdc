@@ -21,7 +21,9 @@ import org.junit.runner.RunWith;
 import org.mockito.MockedStatic;
 import org.mockito.junit.MockitoJUnitRunner;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Random;
 
 import static com.aliyun.polardbx.binlog.CommonConstants.GROUP_NAME_GLOBAL;
@@ -249,17 +251,73 @@ public class BinlogFileUtilTest {
         assertEquals(1, BinlogFileUtil.compareBinlogFileName(fileNameSrc, fileNameTarget));
     }
 
-
     @Test
-    public void testFileSize(){
+    public void testFileSize() {
         String filePath = BinlogFileUtilTest.class.getResource("/mysql_bin.00000").getPath();
         Assert.assertEquals(952, BinlogFileUtil.readFileSize(filePath));
     }
-
 
     @Test
     public void testReadServerId() throws IOException {
         String filePath = BinlogFileUtilTest.class.getResource("/mysql_bin.00000").getPath();
         Assert.assertEquals(809110050, BinlogFileUtil.readServerId(filePath));
+    }
+
+    @Test
+    public void testListFilesOfStreamGroup() throws IOException {
+        // 创建临时目录结构用于测试
+        String tempDir = System.getProperty("java.io.tmpdir");
+        String testRootPath = tempDir + File.separator + "test_binlog_" + System.currentTimeMillis();
+        String groupName = "test_group";
+        String groupPath = testRootPath + File.separator + groupName;
+
+        // 确保测试目录干净
+        File testRootDir = new File(testRootPath);
+        File testGroupDir = new File(groupPath);
+
+        try {
+            // 测试场景1：目录存在且包含文件
+            testRootDir.mkdirs();
+            testGroupDir.mkdirs();
+
+            // 创建一些测试文件
+            File file1 = new File(testGroupDir, "binlog.000001");
+            File file2 = new File(testGroupDir, "binlog.000002");
+            file1.createNewFile();
+            file2.createNewFile();
+
+            List<File> result = BinlogFileUtil.listFilesOfStreamGroup(testRootPath, groupName);
+            assertEquals(2, result.size());
+            assertTrue(result.contains(file1));
+            assertTrue(result.contains(file2));
+
+            // 清理测试文件
+            file1.delete();
+            file2.delete();
+
+            // 测试场景2：目录存在但为空
+            result = BinlogFileUtil.listFilesOfStreamGroup(testRootPath, groupName);
+            assertEquals(0, result.size());
+
+            // 删除组目录
+            testGroupDir.delete();
+
+            // 测试场景3：目录不存在
+            result = BinlogFileUtil.listFilesOfStreamGroup(testRootPath, groupName);
+            assertEquals(0, result.size());
+
+            // 测试场景4：groupName为空字符串
+            result = BinlogFileUtil.listFilesOfStreamGroup(testRootPath, "");
+            assertEquals(0, result.size());
+
+        } finally {
+            // 清理测试目录
+            if (testGroupDir.exists()) {
+                testGroupDir.delete();
+            }
+            if (testRootDir.exists()) {
+                testRootDir.delete();
+            }
+        }
     }
 }

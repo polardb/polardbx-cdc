@@ -7,11 +7,14 @@
 package com.aliyun.polardbx.binlog.restore;
 
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.LabEventManager;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
 import com.aliyun.polardbx.binlog.remote.DownloadModeEnum;
 import com.aliyun.polardbx.binlog.remote.DownloadParameter;
 import com.aliyun.polardbx.binlog.remote.RemoteBinlogProxy;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
+import com.aliyun.polardbx.binlog.util.LabEventType;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 
@@ -19,10 +22,14 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MAX_THREAD_NUM;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_DOWNLOAD_MODE;
 import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_DOWNLOAD_PART_SIZE;
+import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_RESTORE_FORCE_DOWN_IF_LOCAL_FILE_ABSENT;
+import static com.aliyun.polardbx.binlog.ConfigKeys.IS_LAB_ENV;
+import static com.aliyun.polardbx.binlog.DynamicApplicationConfig.getBoolean;
 
 /**
  * Binlog下载工具，负责将远端存储的binlog文件下载到本地
@@ -32,10 +39,14 @@ import static com.aliyun.polardbx.binlog.ConfigKeys.BINLOG_BACKUP_DOWNLOAD_PART_
  **/
 @Slf4j
 public class BinlogDownloader {
-    private final String group;
-    private final String stream;
-    private final String binlogFullPath;
-    private final List<String> downloadFiles;
+    @Setter
+    private String group;
+    @Setter
+    private String stream;
+    @Setter
+    private String binlogFullPath;
+    @Setter
+    private List<String> downloadFiles;
     /**
      * 标志文件，开始下载binlog文件之前创建文件，文件全部下载完成之后删除文件
      * 如果BinlogDownloader启动后发现binlog目录下有该文件，说明上次下载的过程中出现了异常，所以需要清空目录，重新下载
@@ -61,7 +72,7 @@ public class BinlogDownloader {
 
         // 如果文件锁存在，说明之前下载过程出现中断退出的情况，需要重新下载
         // 如果文件锁不存在，可能是首次启动没有创建文件锁，也有可能是上次下载过程顺利完成，删除了文件锁
-        if (hasLock()) {
+        if (hasLock() || needForceDownload()) {
             log.info("detect download lock, will clean previous downloaded binlog files");
             deleteBadFiles();
         }
@@ -100,9 +111,11 @@ public class BinlogDownloader {
             for (String fileName : downloadFiles) {
                 doDownload(fileName);
             }
+            checkDownload();
             unlock();
         } catch (Throwable e) {
             log.error("download files error", e);
+            throw new PolardbxException("download files error!", e);
         }
     }
 
@@ -110,12 +123,16 @@ public class BinlogDownloader {
         String binlogRootPath = BinlogFileUtil.extractRootPathFromFullPath(binlogFullPath, group, stream);
         String remoteFileName = BinlogFileUtil.buildRemoteFilePartName(fileName, group, stream);
         if (RemoteBinlogProxy.getInstance().isObjectsExistForPrefix(remoteFileName)) {
+            long startTime = System.currentTimeMillis();
             log.info("start download remote binlog file {}", remoteFileName);
+
             RemoteBinlogProxy.getInstance().download(remoteFileName, binlogRootPath, new DownloadParameter(
                 DownloadModeEnum.valueOf(DynamicApplicationConfig.getString(BINLOG_BACKUP_DOWNLOAD_MODE)),
                 DynamicApplicationConfig.getInt(BINLOG_BACKUP_DOWNLOAD_MAX_THREAD_NUM),
                 DynamicApplicationConfig.getLong(BINLOG_BACKUP_DOWNLOAD_PART_SIZE)));
-            log.info("success download remote binlog file {}", remoteFileName);
+
+            long endTime = System.currentTimeMillis();
+            log.info("success download remote binlog file {}, cost time {}", remoteFileName, endTime - startTime);
         } else {
             log.warn("binlog file {} does not exist on remote", remoteFileName);
         }
@@ -140,5 +157,31 @@ public class BinlogDownloader {
     private boolean hasLock() {
         File file = new File(lockFileName);
         return file.exists();
+    }
+
+    boolean needForceDownload() {
+        boolean flag = getBoolean(BINLOG_RESTORE_FORCE_DOWN_IF_LOCAL_FILE_ABSENT);
+        List<String> localFiles = BinlogFileUtil.listLocalBinlogFiles(binlogFullPath, group, stream)
+            .stream().map(File::getName).collect(Collectors.toList());
+        boolean result = (!downloadFiles.isEmpty() && flag && downloadFiles.stream().noneMatch(localFiles::contains));
+        log.info("check if need force download : {}", result);
+        return result;
+    }
+
+    public void checkDownload() {
+        if (getBoolean(IS_LAB_ENV)) {
+            for (String fileName : downloadFiles) {
+                String remoteFileName = BinlogFileUtil.buildRemoteFilePartName(fileName, group, stream);
+                if (RemoteBinlogProxy.getInstance().isObjectsExistForPrefix(remoteFileName)) {
+                    // 本地应该存在于fullPath中
+                    String localFilePath = binlogFullPath + File.separator + fileName;
+                    File localFile = new File(localFilePath);
+                    if (!localFile.exists()) {
+                        LabEventManager.logEvent(LabEventType.FORCE_DOWNLOAD_BINLOG_CHECK, fileName);
+                        log.error("{} download failed!", fileName);
+                    }
+                }
+            }
+        }
     }
 }

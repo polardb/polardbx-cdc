@@ -36,6 +36,7 @@ import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.S3Object;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.thrift.TConfiguration;
 import org.apache.thrift.protocol.TBinaryProtocol;
@@ -45,6 +46,7 @@ import org.apache.thrift.transport.TTransportException;
 import java.io.UnsupportedEncodingException;
 import java.net.URL;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -62,8 +64,10 @@ public class LindormClient implements AutoCloseable {
     private final TSocket tTransport;
     private final LindormFileService.Client thriftClient;
     private final AmazonS3 s3Client;
-    private final String accessKey;
-    private final String accessSecret;
+    @Setter
+    private String accessKey;
+    @Setter
+    private String accessSecret;
 
     public LindormClient(String accessKey, String accessSecret, String endPoint, int thriftPort, int s3Port) {
         this.accessKey = accessKey;
@@ -272,10 +276,10 @@ public class LindormClient implements AutoCloseable {
         return auth;
     }
 
-    private String signature(long timestamp, String action)
+    public String signature(long timestamp, String action)
         throws UnsupportedEncodingException, NoSuchAlgorithmException {
-        byte[] hashedPassword = toSHA1(accessSecret.getBytes("utf-8"));
-        byte[] akBytes = accessKey.getBytes("utf-8");
+        byte[] hashedPassword = toSHA1(accessSecret.getBytes(StandardCharsets.UTF_8));
+        byte[] akBytes = accessKey.getBytes(StandardCharsets.UTF_8);
         byte[] encodedNameAndPass = toSHA1(merge(hashedPassword, akBytes));
         return hmacSHA1Signature(hashedPassword, encodedNameAndPass, timestamp, action);
     }
@@ -300,9 +304,11 @@ public class LindormClient implements AutoCloseable {
         return data;
     }
 
-    private String hmacSHA1Signature(byte[] hashedPassword, byte[] encodedNameAndPass, long timestamp, String action)
+    public String hmacSHA1Signature(byte[] hashedPassword, byte[] encodedNameAndPass, long timestamp, String action)
         throws UnsupportedEncodingException, NoSuchAlgorithmException {
-        byte[] bytes1 = toSHA1(merge((timestamp + "").getBytes("utf-8"), action.getBytes("utf-8"), encodedNameAndPass));
+        byte[] bytes1 = toSHA1(
+            merge((timestamp + "").getBytes(StandardCharsets.UTF_8), action.getBytes(StandardCharsets.UTF_8),
+                encodedNameAndPass));
         return xor(bytes1, hashedPassword);
     }
 

@@ -47,7 +47,7 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -66,7 +66,7 @@ public class HttpHelper {
 
     private static final int READ_TIMEOUT = 50000;
     private static final int CONNECT_TIMEOUT = 20000;
-    private static Logger logger = LoggerFactory.getLogger(HttpHelper.class);
+    private static final Logger logger = LoggerFactory.getLogger(HttpHelper.class);
 
     public static String get(String url, int timeout) {
         // logger.info("get url is :" + url);
@@ -191,7 +191,7 @@ public class HttpHelper {
                 NameValuePair nameValuePair = new BasicNameValuePair(key, params.get(key));
                 parameters.add(nameValuePair);
             }
-            httpPost.setEntity(new UrlEncodedFormEntity(parameters, Charset.forName("UTF-8")));
+            httpPost.setEntity(new UrlEncodedFormEntity(parameters, StandardCharsets.UTF_8));
             HttpClientContext context = HttpClientContext.create();
             context.setRequestConfig(config);
             context.setCookieStore(cookieStore);
@@ -208,7 +208,7 @@ public class HttpHelper {
                 long cost = end - start;
                 String curlRequest = getCurlRequest(url, cookieStore, params, cost);
                 throw new PolardbxException(
-                    "requestPost(Https) remote error, request : " + curlRequest + ", statusCode=" + statusCode + "");
+                    "requestPost(Https) remote error, request : " + curlRequest + ", statusCode=" + statusCode);
             }
         } catch (Throwable t) {
             long end = System.currentTimeMillis();
@@ -252,7 +252,7 @@ public class HttpHelper {
                 NameValuePair nameValuePair = new BasicNameValuePair(key, params.get(key));
                 parameters.add(nameValuePair);
             }
-            httpPost.setEntity(new UrlEncodedFormEntity(parameters, Charset.forName("UTF-8")));
+            httpPost.setEntity(new UrlEncodedFormEntity(parameters, StandardCharsets.UTF_8));
             HttpClientContext context = HttpClientContext.create();
             context.setRequestConfig(config);
             context.setCookieStore(cookieStore);
@@ -308,7 +308,7 @@ public class HttpHelper {
                 }
             }
             if (cookieStore == null) {
-                return "curl '" + url + "' -d '" + paramsStr.toString() + "'\ncost : " + cost;
+                return "curl '" + url + "' -d '" + paramsStr + "'\ncost : " + cost;
             } else {
                 StringBuilder cookieStr = new StringBuilder();
                 List<Cookie> cookies = cookieStore.getCookies();
@@ -320,7 +320,7 @@ public class HttpHelper {
                         cookieStr.append(";");
                     }
                 }
-                return "curl '" + url + "' -b '" + cookieStr + "' -d '" + paramsStr.toString() + "'\ncost : " + cost;
+                return "curl '" + url + "' -b '" + cookieStr + "' -d '" + paramsStr + "'\ncost : " + cost;
             }
         }
     }
@@ -375,7 +375,7 @@ public class HttpHelper {
             String curlRequest = getCurlRequest(url, null, params, cost);
             throw new PolardbxException("requestPost(Https) remote error, request : " + curlRequest, t);
         } finally {
-            if (logger){
+            if (logger) {
                 long end = System.currentTimeMillis();
                 long cost = end - start;
                 printCurlRequest(url, null, null, cost);
@@ -440,7 +440,7 @@ public class HttpHelper {
                 long cost = end - start;
                 String curlRequest = getCurlRequest(url, null, null, cost);
                 throw new PolardbxException(
-                    "requestPost(Https) remote error, request : " + curlRequest + ", statusCode=" + statusCode + "");
+                    "requestPost(Https) remote error, request : " + curlRequest + ", statusCode=" + statusCode);
             }
         } catch (Throwable t) {
             long end = System.currentTimeMillis();
@@ -529,7 +529,7 @@ public class HttpHelper {
         return httpclient;
     }
 
-    public static interface IDownloadHandle {
+    public interface IDownloadHandle {
 
         void handle(InputStream inputStream);
     }

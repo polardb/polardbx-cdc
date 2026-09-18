@@ -8,8 +8,10 @@ package com.aliyun.polardbx.rpl.applier;
 
 import com.aliyun.polardbx.binlog.canal.unit.StatMetrics;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import com.aliyun.polardbx.rpl.common.JdbcParameterBinder;
 import com.aliyun.polardbx.rpl.common.RplConstants;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections.CollectionUtils;
 
 import javax.sql.DataSource;
 import java.io.Serializable;
@@ -32,6 +34,19 @@ public class SqlContextExecutor {
     private static final String QUERY_SQL_MODE = "show variables like 'sql_mode'";
 
     public static int execUpdate(Connection conn, SqlContext sqlContext) throws SQLException {
+        return executeWithContext(conn, sqlContext, false);
+    }
+
+    /**
+     * DDL and administrative statements (for example ANALYZE TABLE) may return a result set.
+     * Do not use executeUpdate here, or interpret execute's result-set flag as execution success.
+     * DML callers must keep using execUpdate so their affected-row checks retain their semantics.
+     */
+    public static void execDdl(Connection conn, SqlContext sqlContext) throws SQLException {
+        executeWithContext(conn, sqlContext, true);
+    }
+
+    private static int executeWithContext(Connection conn, SqlContext sqlContext, boolean ddl) throws SQLException {
         String holdingSqlMode = null;
         try {
             if (null != sqlContext.getSqlMode()) {
@@ -48,17 +63,29 @@ public class SqlContextExecutor {
                 }
             }
 
-            try (PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql())) {
-                if (sqlContext.getParams() != null) {
-                    // set value
+            if (CollectionUtils.isEmpty(sqlContext.getParams())) {
+                try (Statement statement = conn.createStatement()) {
+                    logExecUpdateDebug(sqlContext);
+                    if (ddl) {
+                        statement.execute(sqlContext.getSql());
+                        return 0;
+                    }
+                    return statement.executeUpdate(sqlContext.getSql());
+                }
+            } else {
+                try (PreparedStatement stmt = conn.prepareStatement(sqlContext.getSql())) {
                     int i = 1;
                     for (Serializable dataValue : sqlContext.getParams()) {
-                        stmt.setObject(i, dataValue);
+                        JdbcParameterBinder.bind(stmt, i, dataValue);
                         i++;
                     }
+                    logExecUpdateDebug(sqlContext);
+                    if (ddl) {
+                        stmt.execute();
+                        return 0;
+                    }
+                    return stmt.executeUpdate();
                 }
-                logExecUpdateDebug(sqlContext);
-                return stmt.executeUpdate();
             }
         } finally {
             if (null != sqlContext.sqlMode && holdingSqlMode != null) {
@@ -96,7 +123,7 @@ public class SqlContextExecutor {
                 for (List<Serializable> values : sqlContext.getParamsList()) {
                     int i = 1;
                     for (Serializable dataValue : values) {
-                        stmt.setObject(i, dataValue);
+                        JdbcParameterBinder.bind(stmt, i, dataValue);
                         i++;
                     }
                     stmt.addBatch();
@@ -112,6 +139,10 @@ public class SqlContextExecutor {
             return;
         }
         StringBuilder sb = new StringBuilder();
+        if (sqlContext.getParams() == null) {
+            log.debug("execUpdate, sql: {}, params: null", sqlContext.getSql());
+            return;
+        }
         for (Serializable p : sqlContext.getParams()) {
             if (p == null) {
                 sb.append("null-value").append(RplConstants.COMMA);

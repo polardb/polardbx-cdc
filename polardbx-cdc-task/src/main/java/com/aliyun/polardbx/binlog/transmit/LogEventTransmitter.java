@@ -6,6 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.transmit;
 
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.collect.message.MessageEvent;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -26,6 +27,7 @@ import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.aliyun.polardbx.binlog.util.CommonUtils;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.ByteString;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -37,6 +39,9 @@ import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -80,6 +85,9 @@ public class LogEventTransmitter implements Transmitter {
     private MessageChunk messageChunk;
     private volatile TxnToken latestFormatDescToken;
     private volatile boolean running;
+    private final ThreadPoolExecutor sendChunkExecutor;
+    private final int packetBuilderParallelism =
+        DynamicApplicationConfig.getInt(ConfigKeys.TASK_BUILD_PACKET_PARALLELISM);
 
     public LogEventTransmitter(boolean relayStage, int transmitBufferSize, Storage storage, ChunkMode chunkMode,
                                int chunkItemSize, int maxMessageSize, boolean dryRun, String startTso) {
@@ -97,6 +105,12 @@ public class LogEventTransmitter implements Transmitter {
         this.startTso = startTso;
         this.firstToken = new AtomicReference<>(null);
         this.executor = Executors.newFixedThreadPool(1, getThreadFactory("txn-packet-builder" + "-%d", false));
+        this.sendChunkExecutor =
+            new ThreadPoolExecutor(packetBuilderParallelism, packetBuilderParallelism, 60L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                new ThreadFactoryBuilder().setNameFormat("txn-packet-builder-chunk-parse-%d").build(),
+                new ThreadPoolExecutor.CallerRunsPolicy());
+        this.sendChunkExecutor.allowCoreThreadTimeOut(true);
     }
 
     @Override
@@ -279,7 +293,7 @@ public class LogEventTransmitter implements Transmitter {
         }
     }
 
-    private void checkIfFlushChunk(MessageEvent messageEvent, boolean forceSend)
+    public void checkIfFlushChunk(MessageEvent messageEvent, boolean forceSend)
         throws InterruptedException {
         if (messageChunk == null) {
             messageChunk = new MessageChunk(chunkMode, chunkItemSize);
@@ -305,7 +319,8 @@ public class LogEventTransmitter implements Transmitter {
         }
 
         if ((chunkMode == ChunkMode.ITEMSIZE && messageChunk.getMessageEvents().size() == chunkItemSize) ||
-            (chunkMode == ChunkMode.MEMSIZE && messageChunk.getTotalMemSize() >= chunkItemSize * CHUNK_MEM_UNIT)) {
+            (chunkMode == ChunkMode.MEMSIZE
+                && messageChunk.getTotalMemSize() >= (long) chunkItemSize * CHUNK_MEM_UNIT)) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Flush message chunk caused by item size threshold, chunk item size [{}], "
                     + "chunk mem size [{}].", messageChunk.getMessageEvents().size(), messageChunk.getTotalMemSize());
@@ -324,25 +339,44 @@ public class LogEventTransmitter implements Transmitter {
         }
     }
 
-    private void sendChunk() throws InterruptedException {
+    public void sendChunk() throws InterruptedException {
         if (isMessageChunkEmpty()) {
             return;
         }
 
         DumpReply.Builder builder = DumpReply.newBuilder();
-        for (MessageEvent messageEvent : messageChunk.getMessageEvents()) {
-            if (messageEvent.isAlreadyBuild()) {
-                addTxnMessage(builder, messageEvent);
-            } else {
-                TxnMessage message = MessageBuilder.buildTxnMessage(messageEvent.getToken(),
-                    messageEvent.getTxnBuffers().get(0), relayStage);
-                if (packetMode == PacketMode.OBJECT) {
-                    builder.addTxnMessage(message);
-                } else {
-                    builder.addTxnMessageBytes(message.toByteString());
+        List<MessageEvent> events = messageChunk.getMessageEvents();
+        List<Future<Void>> futures = new ArrayList<>(events.size());
+
+        for (MessageEvent messageEvent : events) {
+            // 并发build message
+            futures.add(sendChunkExecutor.submit(
+                () -> {
+                    if (!messageEvent.isAlreadyBuild()) {
+                        TxnMessage message = MessageBuilder.buildTxnMessage(messageEvent.getToken(),
+                            messageEvent.getTxnBuffers().get(0), relayStage);
+                        if (packetMode == PacketMode.OBJECT) {
+                            messageEvent.setTxnMessage(message);
+                        } else {
+                            messageEvent.setTxnMessageBytes(message.toByteString());
+                        }
+                    }
+                    clearCache(messageEvent);
+                    return null;
                 }
+            ));
+        }
+
+        for (Future<Void> feature : futures) {
+            try {
+                feature.get();
+            } catch (Exception e) {
+                throw new RuntimeException("parallel send parse chunk failed!", e);
             }
-            clearCache(messageEvent);
+        }
+
+        for (MessageEvent messageEvent : events) {
+            addTxnMessage(builder, messageEvent);
         }
 
         DumpReply dumpReply = builder.setPacketMode(packetMode).build();
@@ -437,7 +471,7 @@ public class LogEventTransmitter implements Transmitter {
         dumpingQueueSize.incrementAndGet();
     }
 
-    private DumpReply pollFromDumpingQueue() throws InterruptedException {
+    public DumpReply pollFromDumpingQueue() throws InterruptedException {
         DumpReply reply = dumpingQueue.poll(500, TimeUnit.MILLISECONDS);
         if (reply != null) {
             dumpingQueueSize.decrementAndGet();

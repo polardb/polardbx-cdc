@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Set;
 
 public class BinlogEventProcessor {
@@ -141,7 +142,13 @@ public class BinlogEventProcessor {
                 this.serverIdMatch = serverId == event.getHeader().getServerId();
                 this.binlogFileName = logPosition.getFileName();
             }
-            handle.handle(event, context.getLogPosition());
+            if (event.getHeader().getType() == LogEvent.TRANSACTION_PAYLOAD_EVENT) {
+                // logger.info("Start to parse TRANSACTION_PAYLOAD_EVENT in {} at {}", binlogFileName, lastLogPosition);
+                List<LogEvent> eventList = decoder.processIterateDecode(event, context);
+                eventList.forEach(e -> handle.handle(e, context.getLogPosition()));
+            } else {
+                handle.handle(event, context.getLogPosition());
+            }
             lastLogPosition = context.getLogPosition();
             if (searchRecorder != null) {
                 searchRecorder.setPosition(event.getLogPos());

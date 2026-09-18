@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static com.alibaba.polardbx.druid.sql.SQLUtils.normalizeNoTrim;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_IGNORE_APPLY_ERROR;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_BUILD_RECORD_SQL_WITH_EXISTS_ENABLED;
-import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES;
+import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_META_EXPIRE_TIME_MINUTES;
 import static com.aliyun.polardbx.binlog.ConfigKeys.META_CACHE_TABLE_META_MAX_SIZE;
 import static com.aliyun.polardbx.binlog.cdc.meta.domain.DDLExtInfo.parseExtInfo;
 import static com.aliyun.polardbx.binlog.cdc.topology.TopologyShareUtil.buildSnapshotTopology;
@@ -87,7 +87,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
     public PolarDbXLogicTableMeta(TopologyManager topologyManager, String dnVersion) {
         super(logger, CdcSchemaStoreProvider.getInstance(),
             DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_MAX_SIZE),
-            DynamicApplicationConfig.getInt(META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES),
+            DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_EXPIRE_TIME_MINUTES),
             DynamicApplicationConfig.getBoolean(META_BUILD_IGNORE_APPLY_ERROR));
         this.topologyManager = topologyManager;
         this.dnVersion = dnVersion;
@@ -107,16 +107,26 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
     private MemoryTableMeta initDistinctPhyMeta() {
         MemoryTableMeta distinctPhyMeta = new MemoryTableMeta(logger, CdcSchemaStoreProvider.getInstance(),
             DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_MAX_SIZE),
-            DynamicApplicationConfig.getInt(META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES),
+            DynamicApplicationConfig.getInt(META_CACHE_TABLE_META_EXPIRE_TIME_MINUTES),
             DynamicApplicationConfig.getBoolean(META_BUILD_IGNORE_APPLY_ERROR));
         distinctPhyMeta.setForceReplace(true);
         return distinctPhyMeta;
     }
 
     public void applyBase(BinlogPosition position, LogicMetaTopology topology, String cmdId) {
+        // 每次更新snapshot时记录maxTableId到db中，并清空缓存的table -> id的映射关系
+        if (topologyManager.getTopology() != null) {
+            topology.setMaxTableId(topologyManager.getTopology().getMaxTableId());
+        } else {
+            topology.setMaxTableId(0);
+        }
+        logger.info("record snapshot with table id: {}", topology.getMaxTableId());
+
         applySnapshotInternal(topology);
         DDLRecord record = DDLRecord.builder().schemaName("*").ddlSql(JSONObject.toJSONString(snapshot()))
             .metaInfo(JSONObject.toJSONString(topology)).build();
+        // 为拓扑中的所有表分配table Id
+        topologyManager.reAllocateAllTableId();
         try {
             if (applyBaseFlag.compareAndSet(false, true)) {
                 applyToDb(position, record, MetaType.SNAPSHOT.getValue(), cmdId, true);
@@ -178,7 +188,11 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         // do apply
         destroy();
         LogicMetaTopology topology = fetchLogicMetaTopology(snapshotTso);
+        logger.info("read table id {} from db.", topology.getMaxTableId());
         applyCount.set(applySnapshotInternal(topology));
+
+        // 为拓扑中所有表分配tableId
+        topologyManager.reAllocateAllTableId();
 
         //log after apply snapshot
         long costTime = System.currentTimeMillis() - startTime;
@@ -249,7 +263,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
                     // apply topology
                     if (StringUtils.isNotEmpty(h.getTopology())) {
                         TopologyRecord topologyRecord = JSONObject.parseObject(h.getTopology(), TopologyRecord.class);
-                        topologyManager.apply(h.getTso(), h.getDbName(), h.getTableName(), topologyRecord);
+                        topologyManager.applyHistory(h.getTso(), h.getDbName(), h.getTableName(), topologyRecord);
                         latestAppliedTopologyTso = h.getTso();
                     }
 
@@ -276,6 +290,7 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
                 break;
             }
         }
+        topologyManager.setRollBackTso(rollbackTso);
 
         //log after apply
         long costTime = System.currentTimeMillis() - startTime;
@@ -400,8 +415,8 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
             result = !createDatabaseStatement.isIfNotExists()
                 || (topologyManager.getTopology(schema) == null && !isSchemaExists(schema));
         } else if (stmt instanceof MySqlCreateTableStatement) {
-            // fix https://aone.alibaba-inc.com/issue/38023203
-            // fix https://aone.alibaba-inc.com/issue/39665786
+            // fix historical compatibility behavior
+            // fix historical compatibility behavior
             MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) stmt;
             boolean isIfNotExists = createTableStatement.isIfNotExists();
             if (isIfNotExists) {
@@ -480,7 +495,8 @@ public class PolarDbXLogicTableMeta extends MemoryTableMeta implements ICdcTable
         querySnapshotCostTime = System.currentTimeMillis() - queryStartTime;
         if (snapshot.isPresent()) {
             BinlogLogicMetaHistory s = snapshot.get();
-            logger.warn("apply logic snapshot: [id={}, dbName={}, tso={}]", s.getId(), s.getDbName(), s.getTso());
+            logger.warn("apply logic snapshot: [id={}, dbName={}, tso={}]", s.getId(), s.getDbName(),
+                s.getTso());
             return JSONObject.parseObject(s.getTopology(), LogicMetaTopology.class);
         }
 

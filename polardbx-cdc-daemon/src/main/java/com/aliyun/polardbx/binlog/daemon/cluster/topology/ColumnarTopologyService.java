@@ -134,10 +134,10 @@ public class ColumnarTopologyService implements TopologyService {
         }
     }
 
-    private ClusterSnapshot buildPostClusterSnapshot(List<Container> containers,
-                                                     List<StorageInfo> storageInfos,
-                                                     long newVersion,
-                                                     StorageHistoryInfo storageHistoryInfo) {
+    ClusterSnapshot buildPostClusterSnapshot(List<Container> containers,
+                                             List<StorageInfo> storageInfos,
+                                             long newVersion,
+                                             StorageHistoryInfo storageHistoryInfo) {
         return new ClusterSnapshot(newVersion,
             System.currentTimeMillis(),
             containers.stream().map(Container::getContainerId).collect(Collectors.toSet()),
@@ -146,7 +146,9 @@ public class ColumnarTopologyService implements TopologyService {
             null,
             storageHistoryInfo == null ? ExecutionConfig.ORIGIN_TSO : storageHistoryInfo.getTso(),
             clusterType,
-            0L);
+            0L,
+            1L,
+            "");
     }
 
     private void persist(final String cluster, final List<ColumnarTaskConfig> taskConfigs,

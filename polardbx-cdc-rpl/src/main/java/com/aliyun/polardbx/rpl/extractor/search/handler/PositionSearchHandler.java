@@ -89,6 +89,11 @@ public class PositionSearchHandler implements ISearchHandler {
             return true;
         }
 
+        if (event.getHeader().getType() == LogEvent.TRANSACTION_PAYLOAD_EVENT) {
+            // 压缩事务
+            return true;
+        }
+
         if (event instanceof XidLogEvent) {
             return true;
         }

@@ -25,4 +25,8 @@ public class BinlogEndInfo {
      * Binlog文件中最后一个完整Event的Tso
      */
     private String lastEventTso;
+    /**
+     * Binlog文件中最后一个xid
+     */
+    private Long lastXid;
 }

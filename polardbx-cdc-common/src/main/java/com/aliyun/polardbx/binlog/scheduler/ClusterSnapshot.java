@@ -8,6 +8,8 @@ package com.aliyun.polardbx.binlog.scheduler;
 
 import com.aliyun.polardbx.binlog.enums.ClusterType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.ToString;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.util.CollectionUtils;
@@ -18,31 +20,48 @@ import java.util.Set;
 /**
  * Created by ziyang.lb
  **/
+@Setter
+@Getter
 @ToString
 public class ClusterSnapshot {
     private long version;
+    private Long subVersion;
     private Long timestamp;
     private Set<String> containers;
+    private Set<String> containersBeforeRandomRemove;
     private Set<String> storages;
     private String dumperMaster;
     private String dumperMasterNode;
     private String storageHistoryTso;
     private Long serverId;
     private Map<String, String> streamStorageMap;
+    private Map<String, StreamEntitySet> containerStreamMap;
+    private String finalTaskNode;
 
     public ClusterSnapshot() {
+        this.version = 1L;
+        this.subVersion = 1L;
     }
 
     public ClusterSnapshot(long version, Long timestamp, Set<String> containers, Set<String> storages,
                            String dumperMasterNode, String dumperMaster, String storageHistoryTso,
-                           String clusterType, Long serverId) {
-        this(version, timestamp, containers, storages, dumperMasterNode, dumperMaster, storageHistoryTso, clusterType,
-            serverId, null);
+                           String clusterType, Long serverId, long subVersion, String finalTaskNode) {
+        this(version, timestamp, containers, storages, dumperMasterNode, dumperMaster,
+            storageHistoryTso, clusterType, serverId, null, subVersion, finalTaskNode, null);
     }
 
     public ClusterSnapshot(long version, Long timestamp, Set<String> containers, Set<String> storages,
                            String dumperMasterNode, String dumperMaster, String storageHistoryTso,
-                           String clusterType, Long serverId, Map<String, String> streamStorageMap) {
+                           String clusterType, Long serverId, Map<String, String> streamStorageMap,
+                           Map<String, StreamEntitySet> containerStreamMap, long subVersion) {
+        this(version, timestamp, containers, storages, dumperMasterNode, dumperMaster,
+            storageHistoryTso, clusterType, serverId, streamStorageMap, subVersion, null, containerStreamMap);
+    }
+
+    public ClusterSnapshot(long version, Long timestamp, Set<String> containers, Set<String> storages,
+                           String dumperMasterNode, String dumperMaster, String storageHistoryTso,
+                           String clusterType, Long serverId, Map<String, String> streamStorageMap,
+                           long subVersion, String finalTaskNode, Map<String, StreamEntitySet> containerStreamMap) {
         if (version != 1L && timestamp == null) {
             throw new PolardbxException("timestamp can not be null.");
         }
@@ -66,6 +85,10 @@ public class ClusterSnapshot {
         if (version != 1L && serverId == null) {
             throw new PolardbxException("server_id can not be null.");
         }
+        if (version != 1L && StringUtils
+            .equals(clusterType, ClusterType.BINLOG.name()) && StringUtils.isBlank(finalTaskNode)) {
+            throw new PolardbxException("finalTaskNode can not be null or empty.");
+        }
 
         this.version = version;
         this.timestamp = timestamp;
@@ -76,83 +99,12 @@ public class ClusterSnapshot {
         this.storageHistoryTso = storageHistoryTso;
         this.serverId = serverId;
         this.streamStorageMap = streamStorageMap;
+        this.containerStreamMap = containerStreamMap;
+        this.subVersion = subVersion;
+        this.finalTaskNode = finalTaskNode;
     }
 
     public boolean isOrigin() {
         return version == 1L;
     }
-
-    public long getVersion() {
-        return version;
-    }
-
-    public void setVersion(long version) {
-        this.version = version;
-    }
-
-    public Set<String> getContainers() {
-        return containers;
-    }
-
-    public void setContainers(Set<String> containers) {
-        this.containers = containers;
-    }
-
-    public Set<String> getStorages() {
-        return storages;
-    }
-
-    public void setStorages(Set<String> storages) {
-        this.storages = storages;
-    }
-
-    public String getDumperMaster() {
-        return dumperMaster;
-    }
-
-    public void setDumperMaster(String dumperMaster) {
-        this.dumperMaster = dumperMaster;
-    }
-
-    public Long getTimestamp() {
-        return timestamp;
-    }
-
-    public void setTimestamp(Long timestamp) {
-        this.timestamp = timestamp;
-    }
-
-    public String getDumperMasterNode() {
-        return dumperMasterNode;
-    }
-
-    public void setDumperMasterNode(String dumperMasterNode) {
-        this.dumperMasterNode = dumperMasterNode;
-    }
-
-    public String getStorageHistoryTso() {
-        return storageHistoryTso;
-    }
-
-    public void setStorageHistoryTso(String storageHistoryTso) {
-        this.storageHistoryTso = storageHistoryTso;
-    }
-
-    public Long getServerId() {
-        return serverId;
-    }
-
-    public void setServerId(Long serverId) {
-        this.serverId = serverId;
-    }
-
-    public Map<String, String> getStreamStorageMap() {
-        return streamStorageMap;
-    }
-
-    public void setStreamStorageMap(Map<String, String> streamStorageMap) {
-        this.streamStorageMap = streamStorageMap;
-    }
-
-
 }

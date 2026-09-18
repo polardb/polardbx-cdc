@@ -138,75 +138,76 @@ public final class DumperServer {
       "\001 \001(\t\022\020\n\010position\030\002 \001(\003\022)\n\tsplitMode\030\003 \001" +
       "(\0162\026.dumper.EventSplitMode\022\022\n\nregistered" +
       "\030\004 \001(\010\022\013\n\003ext\030\005 \001(\t\022\022\n\nstreamName\030\006 \001(\t\"" +
-      "1\n\033ShowBinlogDumpStatusRequest\022\022\n\nstream" +
-      "Name\030\001 \001(\t\".\n\tBinaryLog\022\017\n\007logName\030\001 \001(\t" +
-      "\022\020\n\010fileSize\030\002 \001(\003\"\330\001\n\rFullBinaryLog\022\017\n\007" +
-      "logName\030\001 \001(\t\022\020\n\010fileSize\030\002 \001(\003\022\023\n\013creat" +
-      "edTime\030\003 \001(\t\022\026\n\016lastModifyTime\030\004 \001(\t\022\026\n\016" +
-      "firstEventTime\030\005 \001(\t\022\025\n\rlastEventTime\030\006 " +
-      "\001(\t\022\017\n\007lastTso\030\007 \001(\t\022\024\n\014uploadStatus\030\010 \001" +
-      "(\t\022\024\n\014fileLocation\030\t \001(\t\022\013\n\003ext\030\n \001(\t\"s\n" +
-      "\014MasterStatus\022\014\n\004file\030\001 \001(\t\022\020\n\010position\030" +
-      "\002 \001(\003\022\022\n\nbinlogDoDB\030\003 \001(\t\022\026\n\016binlogIgnor" +
-      "eDB\030\004 \001(\t\022\027\n\017executedGtidSet\030\005 \001(\t\"\366\001\n\020F" +
-      "ullMasterStatus\022\014\n\004file\030\001 \001(\t\022\020\n\010positio" +
-      "n\030\002 \001(\003\022\017\n\007lastTso\030\003 \001(\t\022\021\n\tdelayTime\030\004 " +
-      "\001(\003\022\021\n\tavgRevEps\030\005 \001(\003\022\021\n\tavgRevBps\030\006 \001(" +
-      "\003\022\023\n\013avgWriteEps\030\007 \001(\003\022\023\n\013avgWriteBps\030\010 " +
-      "\001(\003\022\023\n\013avgWriteTps\030\t \001(\003\022\024\n\014avgUploadBps" +
-      "\030\n \001(\003\022\022\n\navgDumpBps\030\013 \001(\003\022\017\n\007extInfo\030\014 " +
-      "\001(\t\"q\n\013BinlogEvent\022\017\n\007logName\030\001 \001(\t\022\013\n\003p" +
-      "os\030\002 \001(\003\022\021\n\teventType\030\003 \001(\t\022\020\n\010serverId\030" +
-      "\004 \001(\003\022\021\n\tendLogPos\030\005 \001(\003\022\014\n\004info\030\006 \001(\t\"2" +
-      "\n\nDumpStream\022\017\n\007payload\030\001 \001(\014\022\023\n\013isHeart" +
-      "Beat\030\002 \001(\010\"7\n\022RplCommandResponse\022\022\n\nresu" +
-      "ltCode\030\001 \001(\005\022\r\n\005error\030\002 \001(\t\"&\n\023ChangeMas" +
-      "terRequest\022\017\n\007request\030\001 \001(\t\"$\n\021StartSlav" +
-      "eRequest\022\017\n\007request\030\001 \001(\t\"#\n\020StopSlaveRe" +
-      "quest\022\017\n\007request\030\001 \001(\t\"$\n\021ResetSlaveRequ" +
-      "est\022\017\n\007request\030\001 \001(\t\"1\n\036ChangeReplicatio" +
-      "nFilterRequest\022\017\n\007request\030\001 \001(\t\")\n\026ShowS" +
-      "laveStatusRequest\022\017\n\007request\030\001 \001(\t\"+\n\027Sh" +
-      "owSlaveStatusResponse\022\020\n\010response\030\001 \001(\t\"" +
-          "\271\001\n\020BinlogDumpStatus\022\n\n\002ip\030\001 \001(\t\022\n\n\002id\030\002" +
-          " \001(\003\022\017\n\007traceId\030\003 \001(\t\022\014\n\004port\030\004 \001(\005\022\020\n\010f" +
-          "ileName\030\005 \001(\t\022\020\n\010position\030\006 \001(\003\022\r\n\005delay" +
-          "\030\007 \001(\003\022\013\n\003bps\030\010 \001(\003\022\031\n\021lastSyncTimeStamp" +
-          "\030\t \001(\003\022\023\n\013aliveSecond\030\n \001(\003\"\241\001\n\025GetDumpe" +
-          "rInfoResponse\022\014\n\004file\030\001 \001(\t\022\020\n\010position\030" +
-          "\002 \001(\003\022\032\n\022lastEventTimestamp\030\003 \001(\003\022\r\n\005del" +
-          "ay\030\004 \001(\003\022\024\n\014sessionCount\030\005 \001(\005\022\025\n\ravgDum" +
-          "pBpsSum\030\006 \001(\003\022\020\n\010cpuUsage\030\007 \001(\001*4\n\016Event" +
-          "SplitMode\022\n\n\006SERVER\020\000\022\n\n\006CLIENT\020\001\022\n\n\006RAN" +
-          "DOM\020\0022\313\010\n\nCdcService\0228\n\016ShowBinaryLogs\022\017" +
-          ".dumper.Request\032\021.dumper.BinaryLog\"\0000\001\022@" +
-          "\n\022ShowFullBinaryLogs\022\017.dumper.Request\032\025." +
-          "dumper.FullBinaryLog\"\0000\001\022;\n\020ShowMasterSt" +
-          "atus\022\017.dumper.Request\032\024.dumper.MasterSta" +
-          "tus\"\000\022C\n\024ShowFullMasterStatus\022\017.dumper.R" +
-          "equest\032\030.dumper.FullMasterStatus\"\000\022L\n\020Sh" +
-          "owBinlogEvents\022\037.dumper.ShowBinlogEvents" +
-          "Request\032\023.dumper.BinlogEvent\"\0000\001\0223\n\004Dump" +
-          "\022\023.dumper.DumpRequest\032\022.dumper.DumpStrea" +
-          "m\"\0000\001\0223\n\004Sync\022\023.dumper.DumpRequest\032\022.dum" +
-          "per.DumpStream\"\0000\001\022I\n\014ChangeMaster\022\033.dum" +
-          "per.ChangeMasterRequest\032\032.dumper.RplComm" +
-          "andResponse\"\000\022_\n\027ChangeReplicationFilter" +
-          "\022&.dumper.ChangeReplicationFilterRequest" +
-          "\032\032.dumper.RplCommandResponse\"\000\022E\n\nStartS" +
-          "lave\022\031.dumper.StartSlaveRequest\032\032.dumper" +
-          ".RplCommandResponse\"\000\022C\n\tStopSlave\022\030.dum" +
-          "per.StopSlaveRequest\032\032.dumper.RplCommand" +
-          "Response\"\000\022E\n\nResetSlave\022\031.dumper.ResetS" +
-          "laveRequest\032\032.dumper.RplCommandResponse\"" +
-          "\000\022V\n\017ShowSlaveStatus\022\036.dumper.ShowSlaveS" +
-          "tatusRequest\032\037.dumper.ShowSlaveStatusRes" +
-          "ponse\"\0000\001\022Y\n\024ShowBinlogDumpStatus\022#.dump" +
-          "er.ShowBinlogDumpStatusRequest\032\030.dumper." +
-          "BinlogDumpStatus\"\0000\001\022U\n\rgetDumperInfo\022#." +
-          "dumper.ShowBinlogDumpStatusRequest\032\035.dum" +
-          "per.GetDumperInfoResponse\"\000B!\n\033com.aliyu" +
-          "n.polardbx.rpc.cdcH\001P\001b\006proto3"
+      "A\n\033ShowBinlogDumpStatusRequest\022\022\n\nstream" +
+      "Name\030\001 \001(\t\022\016\n\006instId\030\002 \001(\t\".\n\tBinaryLog\022" +
+      "\017\n\007logName\030\001 \001(\t\022\020\n\010fileSize\030\002 \001(\003\"\330\001\n\rF" +
+      "ullBinaryLog\022\017\n\007logName\030\001 \001(\t\022\020\n\010fileSiz" +
+      "e\030\002 \001(\003\022\023\n\013createdTime\030\003 \001(\t\022\026\n\016lastModi" +
+      "fyTime\030\004 \001(\t\022\026\n\016firstEventTime\030\005 \001(\t\022\025\n\r" +
+      "lastEventTime\030\006 \001(\t\022\017\n\007lastTso\030\007 \001(\t\022\024\n\014" +
+      "uploadStatus\030\010 \001(\t\022\024\n\014fileLocation\030\t \001(\t" +
+      "\022\013\n\003ext\030\n \001(\t\"s\n\014MasterStatus\022\014\n\004file\030\001 " +
+      "\001(\t\022\020\n\010position\030\002 \001(\003\022\022\n\nbinlogDoDB\030\003 \001(" +
+      "\t\022\026\n\016binlogIgnoreDB\030\004 \001(\t\022\027\n\017executedGti" +
+      "dSet\030\005 \001(\t\"\366\001\n\020FullMasterStatus\022\014\n\004file\030" +
+      "\001 \001(\t\022\020\n\010position\030\002 \001(\003\022\017\n\007lastTso\030\003 \001(\t" +
+      "\022\021\n\tdelayTime\030\004 \001(\003\022\021\n\tavgRevEps\030\005 \001(\003\022\021" +
+      "\n\tavgRevBps\030\006 \001(\003\022\023\n\013avgWriteEps\030\007 \001(\003\022\023" +
+      "\n\013avgWriteBps\030\010 \001(\003\022\023\n\013avgWriteTps\030\t \001(\003" +
+      "\022\024\n\014avgUploadBps\030\n \001(\003\022\022\n\navgDumpBps\030\013 \001" +
+      "(\003\022\017\n\007extInfo\030\014 \001(\t\"q\n\013BinlogEvent\022\017\n\007lo" +
+      "gName\030\001 \001(\t\022\013\n\003pos\030\002 \001(\003\022\021\n\teventType\030\003 " +
+      "\001(\t\022\020\n\010serverId\030\004 \001(\003\022\021\n\tendLogPos\030\005 \001(\003" +
+      "\022\014\n\004info\030\006 \001(\t\"2\n\nDumpStream\022\017\n\007payload\030" +
+      "\001 \001(\014\022\023\n\013isHeartBeat\030\002 \001(\010\"7\n\022RplCommand" +
+      "Response\022\022\n\nresultCode\030\001 \001(\005\022\r\n\005error\030\002 " +
+      "\001(\t\"&\n\023ChangeMasterRequest\022\017\n\007request\030\001 " +
+      "\001(\t\"$\n\021StartSlaveRequest\022\017\n\007request\030\001 \001(" +
+      "\t\"#\n\020StopSlaveRequest\022\017\n\007request\030\001 \001(\t\"$" +
+      "\n\021ResetSlaveRequest\022\017\n\007request\030\001 \001(\t\"1\n\036" +
+      "ChangeReplicationFilterRequest\022\017\n\007reques" +
+      "t\030\001 \001(\t\")\n\026ShowSlaveStatusRequest\022\017\n\007req" +
+      "uest\030\001 \001(\t\"+\n\027ShowSlaveStatusResponse\022\020\n" +
+      "\010response\030\001 \001(\t\"\271\001\n\020BinlogDumpStatus\022\n\n\002" +
+      "ip\030\001 \001(\t\022\n\n\002id\030\002 \001(\003\022\017\n\007traceId\030\003 \001(\t\022\014\n" +
+      "\004port\030\004 \001(\005\022\020\n\010fileName\030\005 \001(\t\022\020\n\010positio" +
+      "n\030\006 \001(\003\022\r\n\005delay\030\007 \001(\003\022\013\n\003bps\030\010 \001(\003\022\031\n\021l" +
+      "astSyncTimeStamp\030\t \001(\003\022\023\n\013aliveSecond\030\n " +
+      "\001(\003\"\241\001\n\025GetDumperInfoResponse\022\014\n\004file\030\001 " +
+      "\001(\t\022\020\n\010position\030\002 \001(\003\022\032\n\022lastEventTimest" +
+      "amp\030\003 \001(\003\022\r\n\005delay\030\004 \001(\003\022\024\n\014sessionCount" +
+      "\030\005 \001(\005\022\025\n\ravgDumpBpsSum\030\006 \001(\003\022\020\n\010cpuUsag" +
+      "e\030\007 \001(\001*4\n\016EventSplitMode\022\n\n\006SERVER\020\000\022\n\n" +
+      "\006CLIENT\020\001\022\n\n\006RANDOM\020\0022\313\010\n\nCdcService\0228\n\016" +
+      "ShowBinaryLogs\022\017.dumper.Request\032\021.dumper" +
+      ".BinaryLog\"\0000\001\022@\n\022ShowFullBinaryLogs\022\017.d" +
+      "umper.Request\032\025.dumper.FullBinaryLog\"\0000\001" +
+      "\022;\n\020ShowMasterStatus\022\017.dumper.Request\032\024." +
+      "dumper.MasterStatus\"\000\022C\n\024ShowFullMasterS" +
+      "tatus\022\017.dumper.Request\032\030.dumper.FullMast" +
+      "erStatus\"\000\022L\n\020ShowBinlogEvents\022\037.dumper." +
+      "ShowBinlogEventsRequest\032\023.dumper.BinlogE" +
+      "vent\"\0000\001\0223\n\004Dump\022\023.dumper.DumpRequest\032\022." +
+      "dumper.DumpStream\"\0000\001\0223\n\004Sync\022\023.dumper.D" +
+      "umpRequest\032\022.dumper.DumpStream\"\0000\001\022I\n\014Ch" +
+      "angeMaster\022\033.dumper.ChangeMasterRequest\032" +
+      "\032.dumper.RplCommandResponse\"\000\022_\n\027ChangeR" +
+      "eplicationFilter\022&.dumper.ChangeReplicat" +
+      "ionFilterRequest\032\032.dumper.RplCommandResp" +
+      "onse\"\000\022E\n\nStartSlave\022\031.dumper.StartSlave" +
+      "Request\032\032.dumper.RplCommandResponse\"\000\022C\n" +
+      "\tStopSlave\022\030.dumper.StopSlaveRequest\032\032.d" +
+      "umper.RplCommandResponse\"\000\022E\n\nResetSlave" +
+      "\022\031.dumper.ResetSlaveRequest\032\032.dumper.Rpl" +
+      "CommandResponse\"\000\022V\n\017ShowSlaveStatus\022\036.d" +
+      "umper.ShowSlaveStatusRequest\032\037.dumper.Sh" +
+      "owSlaveStatusResponse\"\0000\001\022Y\n\024ShowBinlogD" +
+      "umpStatus\022#.dumper.ShowBinlogDumpStatusR" +
+      "equest\032\030.dumper.BinlogDumpStatus\"\0000\001\022U\n\r" +
+      "getDumperInfo\022#.dumper.ShowBinlogDumpSta" +
+      "tusRequest\032\035.dumper.GetDumperInfoRespons" +
+      "e\"\000B!\n\033com.aliyun.polardbx.rpc.cdcH\001P\001b\006" +
+      "proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -235,7 +236,7 @@ public final class DumperServer {
     internal_static_dumper_ShowBinlogDumpStatusRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_dumper_ShowBinlogDumpStatusRequest_descriptor,
-        new java.lang.String[] { "StreamName", });
+        new java.lang.String[] { "StreamName", "InstId", });
     internal_static_dumper_BinaryLog_descriptor =
       getDescriptor().getMessageTypes().get(4);
     internal_static_dumper_BinaryLog_fieldAccessorTable = new
@@ -325,16 +326,13 @@ public final class DumperServer {
     internal_static_dumper_BinlogDumpStatus_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_dumper_BinlogDumpStatus_descriptor,
-        new java.lang.String[] {
-            "Ip", "Id", "TraceId", "Port", "FileName", "Position", "Delay", "Bps", "LastSyncTimeStamp",
-            "AliveSecond",});
+        new java.lang.String[] { "Ip", "Id", "TraceId", "Port", "FileName", "Position", "Delay", "Bps", "LastSyncTimeStamp", "AliveSecond", });
     internal_static_dumper_GetDumperInfoResponse_descriptor =
       getDescriptor().getMessageTypes().get(19);
     internal_static_dumper_GetDumperInfoResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_dumper_GetDumperInfoResponse_descriptor,
-        new java.lang.String[] {
-            "File", "Position", "LastEventTimestamp", "Delay", "SessionCount", "AvgDumpBpsSum", "CpuUsage",});
+        new java.lang.String[] { "File", "Position", "LastEventTimestamp", "Delay", "SessionCount", "AvgDumpBpsSum", "CpuUsage", });
   }
 
   // @@protoc_insertion_point(outer_class_scope)

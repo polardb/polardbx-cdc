@@ -22,6 +22,7 @@ import com.aliyun.polardbx.binlog.domain.po.BinlogPhyDdlHistory;
 import com.aliyun.polardbx.binlog.testing.BaseTestWithGmsData;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -69,6 +70,9 @@ public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
             s -> s.where(BinlogLogicMetaHistoryDynamicSqlSupport.type, isEqualTo((byte) 1))
                 .orderBy(BinlogLogicMetaHistoryDynamicSqlSupport.tso));
         BinlogLogicMetaHistory logicSnapshot = logicSnapshotList.get(0);
+        List<BinlogLogicMetaHistory> logicList = logicMapper.select(
+            s -> s.where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, isGreaterThan(logicSnapshot.getTso()))
+                .and(BinlogLogicMetaHistoryDynamicSqlSupport.type, isEqualTo((byte) 2)));
 
         executeWithCallback(k -> {
             buildMetaManager(k.getValue());
@@ -76,9 +80,6 @@ public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
                 buildSnapshotTopology(logicSnapshot.getTso(),
                     () -> buildLogicMetaTopology(logicMapper, logicSnapshot.getTso())), null);
 
-            List<BinlogLogicMetaHistory> logicList = logicMapper.select(
-                s -> s.where(BinlogLogicMetaHistoryDynamicSqlSupport.tso, isGreaterThan(logicSnapshot.getTso()))
-                    .and(BinlogLogicMetaHistoryDynamicSqlSupport.type, isEqualTo((byte) 2)));
             List<BinlogPhyDdlHistory> phyList = phyMapper.select(s ->
                 s.where(BinlogPhyDdlHistoryDynamicSqlSupport.tso, isGreaterThan(logicSnapshot.getTso()))
                     .and(BinlogPhyDdlHistoryDynamicSqlSupport.clusterId, isEqualTo(k.getKey()))
@@ -141,10 +142,23 @@ public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
         mockConfig(META_BUILD_SHARE_TOPOLOGY_ENABLED, "OFF");
     }
 
+    @After
+    public void after() {
+        destroyMetaManager();
+    }
+
     protected void buildMetaManager(String storageInstId) {
+        destroyMetaManager();
         metaManager = new PolarDbXTableMetaManager(storageInstId, hiddenPkSupplier, dnVersionSupplier);
         metaManager.init();
         metaManager.getConsistencyChecker().setOriginMetaSupplier(i -> "");
+    }
+
+    protected void destroyMetaManager() {
+        if (metaManager != null) {
+            metaManager.destroy();
+            metaManager = null;
+        }
     }
 
     protected void rollback(String rollbackMode) {
@@ -169,18 +183,17 @@ public class PolarDbXTableMetaManagerTest_Full extends BaseTestWithGmsData {
 
     protected void executeWithCallback(Callback<Pair<String, String>> callback) {
         JdbcTemplate jdbcTemplate = SpringContextHolder.getObject("metaJdbcTemplate");
-        List<String> storageInstIds =
-            jdbcTemplate.queryForList("select distinct storage_inst_id from binlog_phy_ddl_history", String.class);
-        log.info("storage inst ids for test is " + storageInstIds);
+        List<Pair<String, String>> storageNodes = jdbcTemplate.query(
+            "select distinct cluster_id, storage_inst_id from binlog_phy_ddl_history",
+            (rs, rowNum) -> Pair.of(rs.getString("cluster_id"), rs.getString("storage_inst_id")));
+        log.info("storage nodes for test are {}", storageNodes);
 
-        List<String> clusterIds =
-            jdbcTemplate.queryForList("select distinct cluster_id from binlog_phy_ddl_history", String.class);
-        log.info("cluster ids for test is " + clusterIds);
-
-        for (String clusterId : clusterIds) {
-            mockConfig(ConfigKeys.CLUSTER_ID, clusterId);
-            for (String storageInstId : storageInstIds) {
-                callback.call(Pair.of(clusterId, storageInstId));
+        for (Pair<String, String> storageNode : storageNodes) {
+            mockConfig(ConfigKeys.CLUSTER_ID, storageNode.getKey());
+            try {
+                callback.call(storageNode);
+            } finally {
+                destroyMetaManager();
             }
         }
     }

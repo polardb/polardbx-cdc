@@ -22,8 +22,11 @@ public interface TaskInfoMapper {
     Long maxTaskHeartbeatDelay(@Param("clusterId") String clusterId);
 
     @Update(
-        "update binlog_task_info set gmt_heartbeat = now(), status = 0 where cluster_id = #{clusterId} and task_name = #{taskName}")
-    int updateTaskHeartbeat(@Param("taskName") String taskName, @Param("clusterId") String clusterId);
+        "update binlog_task_info set gmt_heartbeat = now(), status = 0, sub_version = #{subVersion}, enable_light_rebalance = #{enableLightRebalance} where cluster_id = #{clusterId} and task_name = #{taskName}")
+    int updateTaskHeartbeat(@Param("taskName") String taskName,
+                            @Param("clusterId") String clusterId,
+                            @Param("subVersion") long subVersion,
+                            @Param("enableLightRebalance") boolean enableLightRebalance);
 
     @Select(
         "select timestampdiff(MICROSECOND, gmt_heartbeat, now())/1000 from binlog_task_info where cluster_id= #{clusterId} and task_name = #{taskName}")

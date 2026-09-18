@@ -43,4 +43,6 @@ public interface IBinlogListener {
      * @param file binlog文件
      */
     void onDeleteFile(File file);
+
+    void stop();
 }

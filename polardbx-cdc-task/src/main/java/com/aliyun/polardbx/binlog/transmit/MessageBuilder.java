@@ -24,6 +24,7 @@ import com.aliyun.polardbx.binlog.storage.TxnBuffer;
 import com.aliyun.polardbx.binlog.storage.TxnItemRef;
 import com.aliyun.polardbx.binlog.storage.TxnKey;
 import com.google.common.collect.Lists;
+import com.google.protobuf.ByteString;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;

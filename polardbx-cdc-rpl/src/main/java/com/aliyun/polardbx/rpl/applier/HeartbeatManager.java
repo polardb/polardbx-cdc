@@ -29,6 +29,7 @@ public class HeartbeatManager {
     private ScheduledExecutorService executorService;
 
     private static final HeartbeatManager INSTANCE = new HeartbeatManager();
+
     public static HeartbeatManager getInstance() {
         return INSTANCE;
     }
@@ -52,21 +53,46 @@ public class HeartbeatManager {
     }
 
     public void flushHeartbeat() {
-        // get the latest status before update
-        RplTask task = DbTaskMetaManager.getTask(taskId);
-        if (task == null) {
-            log.error("task has been deleted from db");
-            throw new RuntimeException("task is not exist");
-        }
-        Date gmtHeartBeat;
-        if (lastEventTimestamp > 0) {
-            gmtHeartBeat = new Date(lastEventTimestamp);
-            if (TaskStatus.valueOf(task.getStatus()) == TaskStatus.RUNNING) {
-                DbTaskMetaManager.updateTask(taskId, null, null, null, null, gmtHeartBeat);
-            } else {
-                log.error("task is not in running status");
-                throw new RuntimeException("task is not in running status");
+        int maxRetries = 3;
+        Throwable lastException = null;
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                // get the latest status before update
+                RplTask task = DbTaskMetaManager.getTask(taskId);
+                if (task == null) {
+                    log.error("task has been deleted from db, taskId={}, process will exit", taskId);
+                    Runtime.getRuntime().halt(1);
+                    return;
+                }
+                if (lastEventTimestamp > 0) {
+                    Date gmtHeartBeat = new Date(lastEventTimestamp);
+                    TaskStatus status = TaskStatus.valueOf(task.getStatus());
+                    if (status == TaskStatus.RUNNING) {
+                        DbTaskMetaManager.updateTask(taskId, null, null, null, null, gmtHeartBeat);
+                    } else {
+                        log.error("task is not in running status ({}), taskId={}, process will exit",
+                            status, taskId);
+                        Runtime.getRuntime().halt(1);
+                        return;
+                    }
+                }
+                return; // success
+            } catch (Throwable e) {
+                lastException = e;
+                log.warn("flushHeartbeat failed, attempt={}/{}, taskId={}", attempt, maxRetries, taskId, e);
+                if (attempt < maxRetries) {
+                    try {
+                        Thread.sleep(1000L * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
             }
         }
+        // Transient errors: only log, keep scheduled task alive for next cycle retry
+        log.error("flushHeartbeat failed after {} retries, taskId={}, will retry next cycle",
+            maxRetries, taskId, lastException);
     }
 }

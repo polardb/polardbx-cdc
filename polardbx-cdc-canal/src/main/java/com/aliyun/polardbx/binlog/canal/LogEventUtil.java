@@ -11,17 +11,22 @@ import com.aliyun.polardbx.binlog.canal.binlog.event.GcnLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.QueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.RowsQueryLogEvent;
 import com.aliyun.polardbx.binlog.canal.binlog.event.SequenceLogEvent;
+import com.aliyun.polardbx.binlog.util.CharsetCache;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Scanner;
 
 /**
  * @author chengjin.lyf on 2020/7/17 5:50 下午
  * @since 1.0.25
  */
+@Slf4j
 public class LogEventUtil {
 
     /**
@@ -99,7 +104,7 @@ public class LogEventUtil {
 
     public static String getHexTranIdFromXid(String xid, String encoding) throws Exception {
         xid = StringUtils.substringBefore(xid, ",");
-        String hexTid = new String(Hex.decodeHex(unwrap(xid)), encoding);
+        String hexTid = new String(Hex.decodeHex(unwrap(xid)), CharsetCache.lookup(encoding));
         hexTid = hexTid.substring(DRDS_TRAN_PREFIX.length());
         return hexTid.split("@")[0];
     }
@@ -113,7 +118,8 @@ public class LogEventUtil {
     // 在开启写并行策略时，一个group可以对应多个事务提交分支，此时需要通过 group + readViewSeq 来唯一标识一个事务提交分支
     public static String getGroupWithReadViewSeqFromXid(String xid, String encoding) throws Exception {
         String partTwo = StringUtils.substringAfter(xid, ",");
-        return new String(Hex.decodeHex(unwrap(StringUtils.substringBefore(partTwo, ","))), encoding);
+        Charset charset = CharsetCache.lookup(encoding);
+        return new String(Hex.decodeHex(unwrap(StringUtils.substringBefore(partTwo, ","))), charset);
     }
 
     private static String unwrap(String str) {
@@ -133,7 +139,7 @@ public class LogEventUtil {
     }
 
     private static Long processTranId(String xid, String charset) throws Exception {
-        String hexTid = new String(Hex.decodeHex(unwrap(xid)), charset);
+        String hexTid = new String(Hex.decodeHex(unwrap(xid)), CharsetCache.lookup(charset));
         hexTid = hexTid.substring(DRDS_TRAN_PREFIX.length());
         hexTid = hexTid.split("@")[0];
         return Long.parseLong(hexTid, 16);
@@ -227,6 +233,9 @@ public class LogEventUtil {
 
     /**
      * DRDS / ip / trace-seq / subseq
+     * trace： 事务 id
+     * seq: 逻辑sql id
+     * subseq：物理sql id
      *
      * @return / 10 / 2/, serverId
      */
@@ -239,32 +248,44 @@ public class LogEventUtil {
                 return null;
             }
             query = query.substring(beginIdx + 1, endIdx);
-            String[] results = new String[2];
+            String[] results = new String[4];
             Scanner scanner = new Scanner(query);
             scanner.useDelimiter("/");
             int index = 0;
             String seq = null;
             String subSeq = null;
             String serverId = null;
+            String markCode = null;
             while (scanner.hasNext()) {
-                String keyWorkd = StringUtils.trim(scanner.next());
+                String keyWord = StringUtils.trim(scanner.next());
 
                 if (index == 1) {
                     // trace-seq
-                    String[] secondarySplitArray = StringUtils.split(keyWorkd, "-");
+                    String[] secondarySplitArray = StringUtils.split(keyWord, "-");
                     seq = secondarySplitArray.length < 2 ? "0" : secondarySplitArray[1];
                 }
 
                 if (index == 2) {
                     // subseq
-                    if (NumberUtils.isCreatable(keyWorkd)) {
-                        subSeq = keyWorkd;
+                    if (NumberUtils.isCreatable(keyWord)) {
+                        subSeq = keyWord;
                     }
                 }
+
                 if (index == 3) {
                     // serverid
-                    if (NumberUtils.isCreatable(keyWorkd)) {
-                        serverId = keyWorkd;
+                    if (NumberUtils.isCreatable(keyWord)) {
+                        serverId = keyWord;
+                    }
+                }
+
+                // replace returning or insert ignore 可能会有insert/update比delete先执行的情况，但为了保证uk的唯一性，在binlog内不能这样做
+                // binlog内的顺序应该是delete 比 insert先做，因此，先执行的insert的subSeq
+                // 所以加个标代表这个trace id的顺序是乱序的，不进行检查
+                if (index == 8) {
+                    // markCode
+                    if (NumberUtils.isCreatable(keyWord)) {
+                        markCode = keyWord;
                     }
                 }
                 index++;
@@ -273,6 +294,8 @@ public class LogEventUtil {
             String trace = buildTraceId(seq, subSeq);
             results[0] = trace;
             results[1] = serverId;
+            results[2] = markCode;
+            results[3] = seq;
             return results;
         }
         return null;
@@ -284,6 +307,10 @@ public class LogEventUtil {
         String main = StringUtils.leftPad(mainSeq, TRACE_MAIN_LEN, "0");
         String sub = StringUtils.leftPad(subSeq, TRACE_SUB_LEN, "0");
         return main + sub;
+    }
+
+    public static int getLogicSqlIdFromTraceId(String traceId) {
+        return Integer.parseInt(traceId.substring(TRACE_MAIN_LEN));
     }
 
     /**
@@ -314,32 +341,42 @@ public class LogEventUtil {
      * # CTS::12321321321
      */
     public static String getTsoFromRowQuery(String rowsQueryLog) {
-        String query = rowsQueryLog;
-        Scanner scanner = new Scanner(query);
-        while (scanner.hasNextLine()) {
-            String line = scanner.nextLine();
-            int cts = line.indexOf("CTS");
-            if (cts != -1) {
-                int begin = line.indexOf("::", cts);
-                int end = line.indexOf("::", begin + 2);
-                if (end != -1) {
-                    return line.substring(begin + 2, end);
-                } else {
-                    return line.substring(begin + 2);
-                }
-            }
-
+        if (rowsQueryLog == null) {
+            return null;
         }
-        return null;
+
+        // 使用字符串查找替换Scanner，性能更好
+        int ctsIndex = rowsQueryLog.indexOf("CTS");
+        if (ctsIndex == -1) {
+            return null;
+        }
+
+        int beginIndex = rowsQueryLog.indexOf("::", ctsIndex);
+        if (beginIndex == -1) {
+            return null;
+        }
+
+        beginIndex += 2; // 跳过 "::"
+
+        // 查找下一个 "::" 作为结束位置
+        int endIndex = rowsQueryLog.indexOf("::", beginIndex);
+
+        if (endIndex != -1) {
+            // 存在下一个 "::"，提取中间部分
+            return rowsQueryLog.substring(beginIndex, endIndex);
+        } else {
+            // 没有下一个 "::"，提取到字符串末尾
+            return rowsQueryLog.substring(beginIndex);
+        }
     }
 
     public static String makeXid(Long tranId, String groupName) throws UnsupportedEncodingException {
         StringBuffer sb = new StringBuffer();
         sb.append("X'")
-            .append(Hex.encodeHex((LogEventUtil.DRDS_TRAN_PREFIX + Long.toHexString(tranId) + "@1").getBytes(
-                "UTF-8")))
+            .append(Hex.encodeHex((LogEventUtil.DRDS_TRAN_PREFIX + Long.toHexString(tranId) + "@1")
+                .getBytes(StandardCharsets.UTF_8)))
             .append("','")
-            .append(Hex.encodeHex(groupName.getBytes("UTF-8")))
+            .append(Hex.encodeHex(groupName.getBytes(StandardCharsets.UTF_8)))
             .append("',1");
         return sb.toString();
     }

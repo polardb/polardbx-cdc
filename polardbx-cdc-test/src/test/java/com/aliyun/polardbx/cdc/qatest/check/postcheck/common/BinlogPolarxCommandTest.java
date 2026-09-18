@@ -6,8 +6,9 @@
  */
 package com.aliyun.polardbx.cdc.qatest.check.postcheck.common;
 
-import com.aliyun.polardbx.cdc.qatest.base.BaseTestCase;
+import com.aliyun.polardbx.cdc.qatest.base.CheckParameter;
 import com.aliyun.polardbx.cdc.qatest.base.JdbcUtil;
+import com.aliyun.polardbx.cdc.qatest.base.RplBaseTestCase;
 import lombok.SneakyThrows;
 import org.apache.commons.lang.StringUtils;
 import org.junit.Assert;
@@ -23,10 +24,12 @@ import java.sql.SQLException;
  * @author yudong
  * @since 2023/8/9 14:38
  **/
-public class BinlogPolarxCommandTest extends BaseTestCase {
+public class BinlogPolarxCommandTest extends RplBaseTestCase {
     @SneakyThrows
     @Test
     public void testBinlogPolarxCommand() {
+        sendTokenAndWait(CheckParameter.builder().build());
+
         try (Connection conn = getMetaConnection()) {
             String queryFailedCommand =
                 "select * from `binlog_polarx_command` where `cmd_type` = 'BUILD_META_SNAPSHOT' order by `id`";

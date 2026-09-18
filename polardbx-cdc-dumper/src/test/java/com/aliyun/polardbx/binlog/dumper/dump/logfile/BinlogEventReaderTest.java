@@ -37,7 +37,7 @@ public class BinlogEventReaderTest extends BaseTest {
         binlogFileReader.skipOffset();
 
         while (binlogFileReader.hasNext()) {
-            BinlogEvent binlogEvent = binlogFileReader.nextBinlogEvent();
+            BinlogEvent binlogEvent = binlogFileReader.nextBinlogEvent().get(0);
             System.out.println(binlogEvent);
         }
     }
@@ -54,7 +54,7 @@ public class BinlogEventReaderTest extends BaseTest {
         binlogFileReader.skipPos();
         binlogFileReader.skipOffset();
         while (binlogFileReader.hasNext()) {
-            BinlogEvent binlogEvent = binlogFileReader.nextBinlogEvent();
+            BinlogEvent binlogEvent = binlogFileReader.nextBinlogEvent().get(0);
             bw.write(
                 binlogEvent.getEndLogPos() + "---" + binlogEvent.getServerId() + "---" + binlogEvent.getEventType()
                     + " " + binlogEvent.getInfo() + " size : " + binlogEvent.getSerializedSize() + "\n");

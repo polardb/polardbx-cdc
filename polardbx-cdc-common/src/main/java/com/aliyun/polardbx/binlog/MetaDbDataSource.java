@@ -27,7 +27,6 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Properties;
@@ -65,8 +64,14 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
 
     private static final String METADB_URL_SCAN_SQL = "SHOW STORAGE";
 
+    private static final String METADB_URL_SCAN_SQL_BY_SELECT =
+        "select * from metadb.storage_info where status != 2 and inst_kind = 2";
+
     private static final String CN_URL_TEMPLATE =
         "jdbc:mysql://%s/__cdc__?useSSL=false&socketTimeout=30000&connectTimeout=2000";
+
+    private static final String DN_URL_TEMPLATE =
+        "jdbc:mysql://%s:%s/mysql?useSSL=false&connectTimeout=5000&socketTimeout=5000&readTimeout=5000";
 
     private boolean bootstrap = true;
 
@@ -157,27 +162,24 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
     }
 
     /**
-     * 连接cn执行show storage获得meta db的ip:port
+     * 连接cn执行show storage 或 select * from metaDb.storage_info;获得meta db的ip:port
      */
-    private synchronized void scan() {
-        try (Connection conn = getCnConnection();
-            Statement stmt = conn.createStatement();
-            ResultSet resultSet = stmt.executeQuery(METADB_URL_SCAN_SQL)) {
-            while (resultSet.next()) {
-                String instKind = resultSet.getString("INST_KIND");
-                if (!"META_DB".equals(instKind)) {
-                    continue;
-                }
-                String ipAndPort = resultSet.getString("LEADER_NODE");
-                if (StringUtils.isEmpty(ipAndPort)) {
-                    log.error("meta db url is empty!");
-                    return;
-                }
-                String newUrl = String.format(this.metaDbUrlTemplate, ipAndPort);
-                if (!newUrl.equals(this.getUrl())) {
-                    log.info("meta db url has changed, old url:{}, new url:{}", this.metaDbUrl, newUrl);
-                    haWitch(newUrl);
-                }
+    public synchronized void scan() {
+        try (Connection conn = getCnConnection()) {
+            String newUrl;
+            if (ConfigPropMap.getSpringPropertyBoolean(ConfigKeys.DAEMON_METADB_SCAN_BY_SELECT_ENABLED)) {
+                newUrl = getMetaDBUrlBySelect(conn);
+            } else {
+                newUrl = getMetaDBUrlByShowStorage(conn);
+            }
+            haWitch(newUrl);
+            log.info("meta db url got from cn: {}, now url is:{}", newUrl, this.metaDbUrl);
+            boolean checkEnv = ConfigPropMap.getSpringPropertyBoolean(ConfigKeys.DAEMON_METADB_SCAN_CHECK_ENV_ENABLED);
+            if (checkEnv && (!isConnective() || !isLeaderAndAvailable())) {
+                // read env
+                newUrl = ConfigPropMap.getSpringPropertyValue(ConfigKeys.METADB_URL);
+                haWitch(newUrl);
+                log.info("meta db url invalid! try get from env: {}, now url is:{}", newUrl, this.metaDbUrl);
             }
         } catch (Throwable e) {
             // 启动过程中调用scan时抛出异常，说明env中的meta url不可用
@@ -187,16 +189,61 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
             }
 
             // catch exception, 防止扫描线程退出
-            log.error("scan meta db url error", e);
+            log.error("scan meta db url error, url:" + metaDbUrl, e);
         }
 
         bootstrap = false;
     }
 
-    private void haWitch(String newUrl) {
-        metaDbDataSource.close();
-        setUrl(newUrl);
-        metaDbDataSource = buildMetaDbDataSource();
+    public String getMetaDBUrlByShowStorage(Connection conn) throws SQLException {
+        ResultSet resultSet = conn.createStatement().executeQuery(METADB_URL_SCAN_SQL);
+        while (resultSet.next()) {
+            String instKind = resultSet.getString("INST_KIND");
+            if (!"META_DB".equals(instKind)) {
+                continue;
+            }
+            String ipAndPort = resultSet.getString("LEADER_NODE");
+            if (StringUtils.isEmpty(ipAndPort)) {
+                log.error("meta db url is empty!");
+                return null;
+            }
+            return String.format(this.metaDbUrlTemplate, ipAndPort);
+        }
+        return null;
+    }
+
+    public String getMetaDBUrlBySelect(Connection conn) throws SQLException {
+        ResultSet resultSet = conn.createStatement().executeQuery(METADB_URL_SCAN_SQL_BY_SELECT);
+        while (resultSet.next()) {
+            String ip = resultSet.getString("ip");
+            int port = resultSet.getInt("port");
+            String userName = resultSet.getString("user");
+            String passwordEnc = resultSet.getString("passwd_enc");
+            try {
+                if (SQLUtils.isLeaderBySqlQuery(getDNConnection(ip, port, userName, passwordEnc))) {
+                    return String.format(this.metaDbUrlTemplate, ip + ":" + port);
+                }
+            } catch (SQLException e) {
+                log.error("get dn connection error, may connect logger, will ignore {}:{}", ip, port, e);
+            }
+        }
+        return null;
+    }
+
+    public Connection getDNConnection(String ip, int port, String userName, String passwordEnc) throws SQLException {
+        String url = String.format(DN_URL_TEMPLATE, ip, port);
+        String password =
+            PasswdUtil.decryptBase64(passwordEnc, ConfigPropMap.getSpringPropertyValue(ConfigKeys.DN_PASSWORD_KEY));
+        return DriverManager.getConnection(url, userName, password);
+    }
+
+    public void haWitch(String newUrl) {
+        if (StringUtils.isNotBlank(newUrl) && !newUrl.equalsIgnoreCase(this.getUrl())) {
+            log.info("meta db url has changed, old url:{}, new url:{}", this.metaDbUrl, newUrl);
+            metaDbDataSource.close();
+            setUrl(newUrl);
+            metaDbDataSource = buildMetaDbDataSource();
+        }
     }
 
     private boolean isConnective() {
@@ -252,7 +299,7 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
      * 首次启动的时候 CnDataSource的初始化依赖MetaDataSource，所以metaDataSource需要从文件中获得CN的连接
      * 启动完成之后CnDataSource维持了CN datasource的一个缓存，所以MetaDataSource可以使用CnDataSource
      */
-    private Connection getCnConnection() throws SQLException {
+    public Connection getCnConnection() throws SQLException {
         if (bootstrap) {
             CnDataSourceFileCache.CnDataSourceStruct struct = CnDataSourceFileCache.getInstance().read();
             if (struct == null || struct.getUrls().isEmpty()) {
@@ -293,7 +340,7 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
         }
     }
 
-    private DataSource buildMetaDbDataSource() {
+    public DataSource buildMetaDbDataSource() {
         return new DataSource(poolProperties);
     }
 
@@ -649,6 +696,9 @@ public class MetaDbDataSource implements javax.sql.DataSource, PoolConfiguration
     public void setUrl(String s) {
         if (!StringUtils.contains(s, "socketTimeout")) {
             s = s + "&socketTimeout=30000";
+        }
+        if (!StringUtils.contains(s, "connectTimeout")) {
+            s = s + "&connectTimeout=5000";
         }
         this.metaDbUrl = s;
         this.poolProperties.setUrl(s);

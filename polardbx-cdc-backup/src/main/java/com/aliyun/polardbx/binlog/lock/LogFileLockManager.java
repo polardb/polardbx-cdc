@@ -6,7 +6,7 @@
  */
 package com.aliyun.polardbx.binlog.lock;
 
-import com.aliyun.polardbx.binlog.backup.StreamContext;
+import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.filesys.LocalFileSystem;
 import com.aliyun.polardbx.binlog.util.BinlogFileUtil;
 import lombok.Setter;
@@ -27,17 +27,17 @@ public class LogFileLockManager {
     private LocalFileSystem localFileSystem;
     private final String streamName;
 
-    public LogFileLockManager(String streamName, StreamContext context) {
-        fileLockMap = new ConcurrentHashMap<>();
+    public LogFileLockManager(String streamName, TaskType taskType, long version, String group) {
+        this.fileLockMap = new ConcurrentHashMap<>();
         this.streamName = streamName;
-        String rootPath = BinlogFileUtil.getRootPath(context.getTaskType(), context.getVersion());
-        this.localFileSystem = new LocalFileSystem(rootPath, context.getGroup(), streamName);
+        String rootPath = BinlogFileUtil.getRootPath(taskType, version);
+        this.localFileSystem = new LocalFileSystem(rootPath, group, streamName);
     }
 
     public void init() {
         clear();
         // 不再在初始化的时候就尝试加文件锁，转而使用了懒加载的方法
-        log.info("{} log file lock manager is running...", streamName);
+        log.info("## log file lock manager is running, with stream {} ...", streamName);
     }
 
     public void putFileLock(String fileName) {

@@ -6,26 +6,25 @@
  */
 package com.aliyun.polardbx.binlog.dumper.dump.logfile;
 
+import com.aliyun.polardbx.binlog.scheduler.model.ExecutionConfig;
 import com.aliyun.polardbx.binlog.task.IDumperStatisticProvider;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Created by ziyang.lb
  **/
+@Slf4j
 public class LogFileManagerCollection {
     private final Map<String, LogFileManager> nestedLogFileManagers;
 
     public LogFileManagerCollection() {
-        this.nestedLogFileManagers = new HashMap<>();
+        this.nestedLogFileManagers = new ConcurrentHashMap<>();
     }
 
     public void add(String key, LogFileManager value) {
@@ -36,26 +35,44 @@ public class LogFileManagerCollection {
         return this.nestedLogFileManagers.get(key);
     }
 
-    /**
-     * 多线程启动各个流的LogFileManager，加快恢复速度
-     */
+    public boolean contains(String key) {
+        return this.nestedLogFileManagers.containsKey(key);
+    }
+
     public void start() {
-        ExecutorService executorService = Executors.newCachedThreadPool();
-        List<Future<?>> futureList = new ArrayList<>();
-        nestedLogFileManagers.forEach(
-            (streamName, logFileManager) -> {
-                futureList.add(executorService.submit(logFileManager::start));
-            });
+        nestedLogFileManagers.forEach((key, value) -> value.start());
+    }
 
-        futureList.forEach(f -> {
-            try {
-                f.get();
-            } catch (InterruptedException | ExecutionException e) {
-                throw new RuntimeException(e);
-            }
-        });
+    public void start(Map<String, LogFileManager> logFileManagerMap) {
+        nestedLogFileManagers.putAll(logFileManagerMap);
+        logFileManagerMap.forEach(
+            (streamName, logFileManager) -> logFileManager.start());
+    }
 
-        executorService.shutdownNow();
+    public void stop(String streamName) {
+        LogFileManager logFileManager = nestedLogFileManagers.get(streamName);
+        if (logFileManager != null) {
+            logFileManager.stop();
+        }
+    }
+
+    @SneakyThrows
+    public void clean(String streamName) {
+        LogFileManager logFileManager = nestedLogFileManagers.get(streamName);
+        if (logFileManager != null) {
+            logFileManager.clean();
+            nestedLogFileManagers.remove(streamName);
+        }
+    }
+
+    public void refreshAndRestart(String streamName, ExecutionConfig executionConfig) {
+        LogFileManager logFileManager = nestedLogFileManagers.get(streamName);
+        logFileManager.refreshAndRestart(executionConfig);
+    }
+
+    public void refresh(String streamName, ExecutionConfig executionConfig) {
+        LogFileManager logFileManager = nestedLogFileManagers.get(streamName);
+        logFileManager.refresh(executionConfig);
     }
 
     public void stop() {

@@ -32,9 +32,10 @@ public class FlushLogCmdCheckTest extends RplBaseTestCase {
 
     @Test
     public void testCheckFlushLog() throws ExecutionException, RetryException {
-        Retryer retryer = RetryerBuilder.newBuilder()
+        Retryer<Void> retryer = RetryerBuilder.<Void>newBuilder()
             .withWaitStrategy(WaitStrategies.fixedWait(2, TimeUnit.SECONDS))
             .retryIfException()
+            .retryIfExceptionOfType(AssertionError.class)
             .withStopStrategy(
                 StopStrategies.stopAfterDelay(2, TimeUnit.MINUTES)).build();
         retryer.call(() -> {

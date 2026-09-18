@@ -14,8 +14,11 @@ import com.aliyun.polardbx.binlog.protocol.TxnServiceGrpc;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
+import io.grpc.netty.shaded.io.netty.channel.ChannelOption;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
+import lombok.Setter;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +30,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
+import static com.aliyun.polardbx.binlog.util.CommonUtils.getFormatDateTimeFromTso;
 import static io.grpc.internal.GrpcUtil.getThreadFactory;
 
 /**
@@ -40,7 +44,10 @@ public class TxnStreamRpcServer {
     private final int port;
     private final Server server;
     private final TaskType taskType;
+    @Setter
     private long version;
+    @Setter
+    private long subVersion;
 
     public TxnStreamRpcServer(int port, TxnMessageProvider provider) {
         this((NettyServerBuilder) ServerBuilder.forPort(port), port, provider, TaskType.Dispatcher);
@@ -60,6 +67,7 @@ public class TxnStreamRpcServer {
         this.server = serverBuilder.maxInboundMessageSize(MAX_INBOUND_MESSAGE_SIZE)
             .flowControlWindow(1048576 * 200)
             .addService(new TxnStreamRpcServer.TxnStreamingService(provider, this.taskType))
+            .withOption(ChannelOption.SO_REUSEADDR, true)
             .build();
     }
 
@@ -90,7 +98,7 @@ public class TxnStreamRpcServer {
         }
     }
 
-    private class TxnStreamingService extends TxnServiceGrpc.TxnServiceImplBase {
+    class TxnStreamingService extends TxnServiceGrpc.TxnServiceImplBase {
 
         private final TxnMessageProvider provider;
         private final Map<String, ReentrantLock> locks;
@@ -107,7 +115,7 @@ public class TxnStreamRpcServer {
         // 同一时刻，暂时只支持一个消费者，其它消费者连接上来之后进行互斥等待
         @Override
         public void dump(DumpRequest request, StreamObserver<DumpReply> responseObserver) {
-            checkVersion(request.getVersion());
+            checkVersion(request.getVersion(), request.getSubVersion());
             String dumperName = request.getDumperName();
             int streamSeq = request.getStreamSeq();
             String lockId = dumperName + "_" + streamSeq;
@@ -133,9 +141,10 @@ public class TxnStreamRpcServer {
                         return;
                     }
 
+                    // important log
+                    printRequestLog(request, lockId);
+
                     txnOutputStream.setExecutingThead(Thread.currentThread());
-                    logger.info("The client successfully acquired lock, with lockId {}.", lockId);
-                    logger.info("request tso is : [" + request.getTso() + "], with lockId {}.", lockId);
                     provider.dump(request, txnOutputStream);
 
                     // 如果出现没有抛异常，dump方法退出的情况，只有一种可能：Provider执行了stop操作，此时通过报错的方式通知客户端
@@ -152,16 +161,28 @@ public class TxnStreamRpcServer {
             });
         }
 
-        private void checkVersion(long requestVersion) {
-            if (requestVersion != 0 && requestVersion != TxnStreamRpcServer.this.version) {
-                throw new PolardbxException(
-                    "version is inconsistent, request version is " + requestVersion + " , current version is "
-                        + version);
+        void printRequestLog(DumpRequest request, String lockId) {
+            logger.info("The client successfully acquired lock, with lockId {}.", lockId);
+            if (StringUtils.isNotBlank(request.getTso())) {
+                logger.info("request tso is [{}][{}], with lockId {}.", request.getTso(),
+                    getFormatDateTimeFromTso(request.getTso()), lockId);
+            } else {
+                logger.info("request tso is empty string, with lockId {}.", lockId);
             }
         }
-    }
 
-    public void setVersion(long version) {
-        this.version = version;
+        void checkVersion(long requestMainVersion, long requestSubVersion) {
+            if (requestMainVersion != 0 && requestMainVersion != TxnStreamRpcServer.this.version) {
+                throw new PolardbxException(
+                    "main version is inconsistent, request version is " + requestMainVersion +
+                        " , current version is " + version);
+            }
+
+            if (requestSubVersion != 0 && requestSubVersion != TxnStreamRpcServer.this.subVersion) {
+                throw new PolardbxException(
+                    "sub version is inconsistent, request version is " + requestSubVersion +
+                        " , current version is " + subVersion);
+            }
+        }
     }
 }

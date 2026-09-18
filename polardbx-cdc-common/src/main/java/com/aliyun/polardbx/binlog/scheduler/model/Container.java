@@ -10,13 +10,15 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.util.LinkedList;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Created by ShuGuang
  */
 @Builder
 @Data
-public class Container implements Comparable<Container> {
+public class Container {
     private String containerId; //全局唯一的container标示
     private Resource capability;  //该container的资源信息
     private String ip; //该container可以启动的NodeManager的hostname
@@ -40,10 +42,37 @@ public class Container implements Comparable<Container> {
         return availablePorts.pop();
     }
 
+    public static void sortByResourceDesc(List<Container> containerList) {
+        containerList.sort(((o1, o2) -> -1 * compareResourceWithId(o1, o2)));
+    }
+
+    public static int compareResourceWithId(Container o1, Container o2) {
+        int result = compareResource(o1, o2);
+        return result == 0 ? o1.getContainerId().compareTo(o2.getContainerId()) : result;
+    }
+
+    public static int compareResource(Container o1, Container o2) {
+        int free1 = o1.getCapability().getFreeMemMb();
+        int free2 = o2.getCapability().getFreeMemMb();
+        int result = Integer.compare(free1, free2);
+        return result == 0 ? Integer.compare(o1.getCapability().getCpu(), o2.getCapability().getCpu()) : result;
+    }
+
     @Override
-    public int compareTo(Container o) {
-        int mem = o.getCapability().getFreeMemMb() - this.getCapability().getFreeMemMb();
-        return mem == 0 ? this.ip.compareTo(o.ip) : mem;
+    public boolean equals(Object object) {
+        if (this == object) {
+            return true;
+        }
+        if (object == null || getClass() != object.getClass()) {
+            return false;
+        }
+        Container container = (Container) object;
+        return Objects.equals(containerId, container.containerId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(containerId);
     }
 
     @Override

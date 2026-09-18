@@ -35,6 +35,8 @@ public class Metrics {
     //ddl
     private AtomicLong addColumnSuccess = new AtomicLong();
     private AtomicLong addColumnFail = new AtomicLong();
+    private AtomicLong addGeneratedColumnSuccess = new AtomicLong();
+    private AtomicLong addGeneratedColumnFail = new AtomicLong();
     private AtomicLong dropColumnSuccess = new AtomicLong();
     private AtomicLong dropColumnFail = new AtomicLong();
     private AtomicLong modifyColumnSuccess = new AtomicLong();
@@ -64,8 +66,10 @@ public class Metrics {
         double ratio1 = ((double) dmlSuccessCount) / ((double) dmlSuccessCount + (double) dmlFailCount);
         Assert.assertTrue("dml success ratio must greater than 0.9, actual is " + ratio1, ratio1 >= 0.8d);
 
-        long ddlSuccessCount = addColumnSuccess.get() + dropColumnSuccess.get() + modifyColumnSuccess.get();
-        long ddlFailCount = addColumnFail.get() + dropColumnFail.get() + modifyColumnFail.get();
+        long ddlSuccessCount = addColumnSuccess.get() + addGeneratedColumnSuccess.get()
+            + dropColumnSuccess.get() + modifyColumnSuccess.get();
+        long ddlFailCount = addColumnFail.get() + addGeneratedColumnFail.get()
+            + dropColumnFail.get() + modifyColumnFail.get();
         double ratio2 = ((double) ddlSuccessCount) / ((double) ddlSuccessCount + (double) ddlFailCount);
         Assert.assertTrue("ddl success ratio must greater than 0.8, actual is " + ratio2, ratio2 >= 0.8d);
     }

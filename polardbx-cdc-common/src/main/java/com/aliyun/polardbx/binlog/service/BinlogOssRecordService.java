@@ -236,7 +236,7 @@ public class BinlogOssRecordService {
                 .and(gmtModified, isLessThan(endDate)));
         if (!records.isEmpty()) {
             records = records.stream()
-                .filter(r -> BinlogFileUtil.compareBinlogFileName(r.getBinlogFile(), fileName) <= 0)
+                .filter(r -> BinlogFileUtil.compareBinlogFileName(r.getBinlogFile(), fileName) < 0)
                 .collect(Collectors.toList());
         }
         return records;

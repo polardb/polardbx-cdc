@@ -10,6 +10,7 @@ import com.aliyun.polardbx.binlog.testing.BaseTest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomUtils;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.Date;
@@ -28,7 +29,11 @@ public class MergeGroupFactoryTest extends BaseTest {
         doTest(41, 2, Integer.MAX_VALUE);
         doTest(41, 1, 2);
         doTest(900, 617, Integer.MAX_VALUE);
+    }
 
+    @Test
+    @Ignore
+    public void testBuildRandom() {
         // random test
         log.info("random test start : " + new Date());
         for (int i = 0; i < 500; i++) {

@@ -6,8 +6,8 @@
  */
 package com.aliyun.polardbx.binlog.util;
 
-import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.CommonConstants;
+import com.aliyun.polardbx.binlog.ConfigKeys;
 import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import com.aliyun.polardbx.binlog.error.PolardbxException;
@@ -158,6 +158,27 @@ public class BinlogFileUtil {
         return pair.getLeft() + BINLOG_FILE_NAME_SEPARATOR + newSuffix;
     }
 
+    public static String getNextBinlogFileName(String fileName, int step) {
+        Pair<String, Integer> pair = splitBinlogFileName(fileName);
+        int currentSequence = pair.getRight();
+        currentSequence = getNextSequence(currentSequence, step);
+        String newSuffix = String.format(BINLOG_FILE_NAME_SUFFIX_FORMAT, currentSequence);
+        return pair.getLeft() + BINLOG_FILE_NAME_SEPARATOR + newSuffix;
+    }
+
+    private static int getNextSequence(int current, int step) {
+        if (step >= BINLOG_FILE_NAME_MAX_SEQUENCE) {
+            throw new IllegalArgumentException(
+                "step " + step + " should not be greater than " + BINLOG_FILE_NAME_MAX_SEQUENCE);
+        }
+        if (current - BINLOG_FILE_NAME_MAX_SEQUENCE + step > 0) {
+            // overflow
+            log.warn("binlog file seq has reached to max, will start from 1");
+            return (int) (((long) current + step) % BINLOG_FILE_NAME_MAX_SEQUENCE);
+        }
+        return current + step;
+    }
+
     public static String getPrevBinlogFileName(String fileName) {
         Pair<String, Integer> pair = splitBinlogFileName(fileName);
         int currentSequence = pair.getRight();
@@ -270,6 +291,20 @@ public class BinlogFileUtil {
         }
     }
 
+    public static List<File> listFilesOfStreamGroup(String rootPath, String groupName) {
+        String parentPath = rootPath + File.separator + groupName;
+        File parentFile = new File(parentPath);
+        if (parentFile.exists() && parentFile.isDirectory()) {
+            File[] files = parentFile.listFiles();
+            if (files != null) {
+                return Arrays.asList(files);
+            }
+        } else {
+            log.warn("parent file {} does not exist", parentPath);
+        }
+        return new ArrayList<>();
+    }
+
     // ============== binlog file operation related method ==============
 
     public static List<File> listLocalBinlogFiles(String binlogFullPath, String groupName, String streamName) {
@@ -284,7 +319,6 @@ public class BinlogFileUtil {
     }
 
     public static void deleteBinlogFiles(String binlogFullPath) throws IOException {
-        log.warn("try to clean local binlog dir!");
         FileUtils.cleanDirectory(new File(binlogFullPath));
     }
 
@@ -333,7 +367,7 @@ public class BinlogFileUtil {
         int len = 0;
         int totalRead = 0;
         File f = new File(absFile);
-        try(FileInputStream fis = new FileInputStream(f)){
+        try (FileInputStream fis = new FileInputStream(f)) {
             while ((len = fis.read(buf, totalRead, 20 - totalRead)) != -1) {
                 totalRead += len;
                 if (totalRead >= 20) {
@@ -346,7 +380,7 @@ public class BinlogFileUtil {
             (long) (0xff & buf[position++]) << 16) | ((long) (0xff & buf[position++]) << 24);
     }
 
-    public static long readFileSize(String absFile){
+    public static long readFileSize(String absFile) {
         return new File(absFile).length();
     }
 

@@ -28,6 +28,30 @@ import java.util.stream.Collectors;
 public class MemoryTableMetaTest_CreateTable extends MemoryTableMetaBase {
 
     @Test
+    public void testExternalizedColumnMetadataFromCreateTable() {
+        MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
+        memoryTableMeta.apply(null, "test_db", "CREATE TABLE ext_meta ("
+                + "id BIGINT NOT NULL, body LONGTEXT EXTERNALIZE, payload LONGBLOB EXTERNALIZE, note VARCHAR(32))",
+            null);
+        TableMeta tableMeta = memoryTableMeta.find("test_db", "ext_meta");
+
+        Assert.assertFalse(tableMeta.getFieldMetaByName("id").isExternalized());
+        Assert.assertTrue(tableMeta.getFieldMetaByName("body").isExternalized());
+        Assert.assertTrue(tableMeta.getFieldMetaByName("payload").isExternalized());
+        Assert.assertFalse(tableMeta.getFieldMetaByName("note").isExternalized());
+
+        TableMeta.FieldMeta original = tableMeta.getFieldMetaByName("body");
+        TableMeta.FieldMeta copy = new TableMeta.FieldMeta("body", "longtext", true, false, null, false,
+            null);
+        copy.setExternalized(true);
+        Assert.assertEquals(original, copy);
+        Assert.assertEquals(original.hashCode(), copy.hashCode());
+        Assert.assertTrue(original.toString().contains("externalized=true"));
+        copy.setExternalized(false);
+        Assert.assertNotEquals(original, copy);
+    }
+
+    @Test
     public void testCreateTableLike() {
         MemoryTableMeta memoryTableMeta = new MemoryTableMeta(null, false);
         String sql = "CREATE TABLE lbkkfddjvc (\n"
@@ -137,6 +161,33 @@ public class MemoryTableMetaTest_CreateTable extends MemoryTableMetaBase {
         Assert.assertTrue(tableMeta.getFieldMetaByName("d").isGenerated());
         Assert.assertTrue(tableMeta.getFieldMetaByName("d").isGenerated());
         Assert.assertTrue(tableMeta.getFieldMetaByName("g").isGenerated());
+    }
+
+    @Test
+    public void testGeneratedColumnNullable() {
+        MemoryTableMeta memoryTableMeta = newMemoryTableMeta();
+        applySql(memoryTableMeta, "d1", "create table if not exists gen_col_nullable_tbl (\n"
+            + "  a int,\n"
+            + "  b int not null,\n"
+            + "  c int GENERATED ALWAYS AS (a + b) LOGICAL,\n"
+            + "  d int GENERATED ALWAYS AS (a * 2) stored\n"
+            + ")");
+        applySql(memoryTableMeta, "d1", "alter table gen_col_nullable_tbl add column e bigint as (a + 1) virtual");
+        TableMeta tableMeta = memoryTableMeta.find("d1", "gen_col_nullable_tbl");
+
+        // 普通列保持原始 nullable 设置
+        Assert.assertTrue(tableMeta.getFieldMetaByName("a").isNullable());
+        Assert.assertFalse(tableMeta.getFieldMetaByName("b").isNullable());
+
+        // 生成列（无论 LOGICAL/STORED/VIRTUAL）都应被强制设置为非空
+        Assert.assertFalse(tableMeta.getFieldMetaByName("c").isNullable());
+        Assert.assertFalse(tableMeta.getFieldMetaByName("d").isNullable());
+        Assert.assertFalse(tableMeta.getFieldMetaByName("e").isNullable());
+
+        // 同时验证生成列标记
+        Assert.assertTrue(tableMeta.getFieldMetaByName("c").isGenerated());
+        Assert.assertTrue(tableMeta.getFieldMetaByName("d").isGenerated());
+        Assert.assertTrue(tableMeta.getFieldMetaByName("e").isGenerated());
     }
 
     @Test

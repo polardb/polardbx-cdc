@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.19-SNAPSHOT</version>
+        <version>5.4.21-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>polardbx-cdc-columnar</artifactId>
@@ -83,13 +83,13 @@
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-task</artifactId>
-            <version>5.4.19-SNAPSHOT</version>
+            <version>5.4.21-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.aliyun.polardbx</groupId>
             <artifactId>polardbx-cdc-task</artifactId>
-            <version>5.4.19-SNAPSHOT</version>
+            <version>5.4.21-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
 

@@ -108,6 +108,30 @@ public abstract class ConfigKeys {
      */
     public static final String DESCRIBE_BINLOG_LIST_API_USE_DBS = "describe_binlog_list_api_use_dbs";
     /**
+     * 是否使用dbs api下载binlog
+     */
+    public static final String DOWNLOAD_BINLOG_USE_DBS = "download_binlog_use_dbs";
+
+    /**
+     * describeBinlogFiles接口返回的binlog文件列表回退分钟数，默认0
+     */
+    public static final String DESCRIBE_BINLOG_LIST_API_GO_BACK_MINUTE = "describe_binlog_list_api_go_back_minute";
+    /**
+     * describeBinlogFiles接口的最大并发数，用于限流保护下游API，默认3
+     */
+    public static final String DESCRIBE_BINLOG_LIST_API_MAX_CONCURRENCY =
+        "describe_binlog_list_api_max_concurrency";
+    /**
+     * describeBinlogFiles单次分页请求的最大重试次数，默认3
+     */
+    public static final String DESCRIBE_BINLOG_LIST_API_RETRY_COUNT =
+        "describe_binlog_list_api_retry_count";
+    /**
+     * describeBinlogFiles单次分页请求重试间隔，单位：毫秒，默认1000
+     */
+    public static final String DESCRIBE_BINLOG_LIST_API_RETRY_INTERVAL_MS =
+        "describe_binlog_list_api_retry_interval_ms";
+    /**
      * 是否使用dbs api gareth
      */
     public static final String DBS_DOWNLOAD_DN_BINLOG_USE_DBS_GARETH = "dbs_download_dn_binlog_use_dbs_gareth";
@@ -142,9 +166,23 @@ public abstract class ConfigKeys {
     public static final String DBS_API_ACCESS_KEY = "dbs_api_access_key";
 
     /**
+     * DescribeUnifyArchiveLogFiles接口是否传递UseHela参数，默认false
+     */
+    public static final String DBS_API_USE_HELA = "dbs_api_use_hela";
+
+    /**
      * 是否打印metrics
      */
     public static final String PRINT_METRICS = "print_metrics";
+    /**
+     * 是否采集ddl history count指标（全表count较重，大表场景建议关闭）
+     */
+    public static final String TASK_COLLECT_DDL_HISTORY_COUNT_ENABLED = "task_collect_ddl_history_count_enabled";
+    /**
+     * ddl history count指标采集间隔（单位：轮次，每轮5s；首轮一定采集，之后默认720即1小时采集一次）
+     */
+    public static final String TASK_COLLECT_DDL_HISTORY_COUNT_INTERVAL_ROUND =
+        "task_collect_ddl_history_count_interval_round";
     /**
      * 激活Daemon接口ACL
      */
@@ -262,6 +300,8 @@ public abstract class ConfigKeys {
      * 单个逻辑Binlog文件的大小,单位：字节
      */
     public static final String BINLOG_FILE_SIZE = "binlog_file_size";
+
+    public static final String BINLOG_FIRST_FILE_CHECK_ENABLED = "binlog_first_file_check_enabled";
     /**
      * 是否测试流式消费功能
      */
@@ -284,6 +324,15 @@ public abstract class ConfigKeys {
      * 对逻辑Binlog进行seek操作时，获取lastTso的模式，0-获取文件中的最后一个cts，1-获取文件中的最后一个事务策略为TSO的cts，默认0
      */
     public static final String BINLOG_FILE_SEEK_LAST_TSO_MODE = "binlog_file_seek_last_tso_mode";
+    /**
+     * 对逻辑Binlog进行seek操作时，用于控制扩容buffer速率的参数，每次扩容将buffer_size 扩大到x倍当前值
+     */
+    public static final String BINLOG_FILE_SEEK_LAST_TSO_EXPAND_FACTOR = "binlog_file_seek_last_tso_expand_factor";
+    /**
+     * 对逻辑Binlog进行seek操作时,是否开启内存优化，将BUFFER SIZE固定为1M，默认开启
+     */
+    public static final String BINLOG_FILE_SEEK_LAST_TSO_MEMORY_OPTIMIZE_ENABLED =
+        "binlog_file_seek_last_tso_memory_optimize_enabled";
     /**
      * 写binlog文件时是否开启dry run
      */
@@ -340,6 +389,10 @@ public abstract class ConfigKeys {
      * 心跳是否以事务的形式记录
      */
     public static final String BINLOG_WRITE_HEARTBEAT_AS_TXN = "binlog_write_heartbeat_as_txn";
+    /**
+     * 是否使用Task生产的tableId
+     */
+    public static final String BINLOG_WRITE_TABLE_ID_FROM_TASK = "binlog_write_tableid_from_task";
     /**
      * tableId的初始值
      */
@@ -507,6 +560,67 @@ public abstract class ConfigKeys {
         "binlog_dump_wait_cursor_ready_times_limit";
 
     /**
+     * binlog dump 是否不向下游传递rows query event
+     */
+    public static final String BINLOG_DUMP_ROWS_QUERY_IGNORE_ENABLED = "binlog_dump_rows_query_ignore_enabled";
+
+    /**
+     * binlog dump 时忽略的表名列表形如db1.table1,db2.table2,db3.table3（优先级高于白名单）
+     */
+    public static final String BINLOG_DUMP_IGNORE_TABLE = "binlog_dump_ignore_table";
+
+    /**
+     * binlog dump 时允许的表名列表形如db1.table1,db2.table2,db3.table3
+     */
+    public static final String BINLOG_DUMP_DO_TABLE = "binlog_dump_do_table";
+
+    /**
+     * binlog dump  时是否忽略由归档表产生的binlog事件
+     */
+    public static final String BINLOG_DUMP_ARCHIVE_IGNORE_ENABLED = "binlog_dump_archive_ignore_enabled";
+
+    /**
+     * binlog dump  时是否使用set flag的方式过滤event，不要设置改参数，暂时不支持
+     */
+    public static final String BINLOG_DUMP_IGNORE_BY_SET_FLAG = "binlog_dump_ignore_by_set_flag";
+
+    /**
+     * binlog dump  时是否忽略指定server_ids产生的binlog事件
+     */
+    public static final String BINLOG_DUMP_SERVER_ID_IGNORE_ENABLED = "binlog_dump_server_id_ignore_enabled";
+
+    /**
+     * binlog dump 按 server_id 过滤时，是否同时过滤 DDL 事件（QUERY_EVENT）
+     * true: 过滤 DDL（向后兼容）；false: DDL 不被 server_id 过滤
+     */
+    public static final String BINLOG_DUMP_SERVER_ID_FILTER_DDL = "binlog_dump_server_id_filter_ddl";
+
+    /**
+     * binlog dump  时列存是否忽略由归档表产生的binlog事件
+     */
+    public static final String BINLOG_DUMP_COLUMNAR_ARCHIVE_IGNORE_ENABLED =
+        "binlog_dump_columnar_archive_ignore_enabled";
+    /**
+     * binlog dump  时列存是否忽略rows query event
+     */
+    public static final String BINLOG_DUMP_COLUMNAR_ROWS_QUERY_IGNORE_ENABLED =
+        "binlog_dump_columnar_rows_query_ignore_enabled";
+    /**
+     * binlog dump  时列存表名黑名单(优先生效)
+     */
+    public static final String BINLOG_DUMP_COLUMNAR_TABLE_IGNORE =
+        "binlog_dump_columnar_table_ignore";
+    /**
+     * binlog dump  时列存允许的表名列表
+     */
+    public static final String BINLOG_DUMP_COLUMNAR_TABLE_ALLOW =
+        "binlog_dump_columnar_table_allow";
+    /**
+     * binlog dump  时列存是否使用set flag的方式过滤event，不要设置改参数，暂时不支持
+     */
+    public static final String BINLOG_DUMP_COLUMNAR_IGNORE_BY_SET_FLAG = "binlog_dump_ignore_by_set_flag";
+
+    /**
      * dump下载本地路径
      */
     public static final String BINLOG_DUMP_DOWNLOAD_PATH = "binlog_dump_download_path";
@@ -533,6 +647,36 @@ public abstract class ConfigKeys {
     public static final String BINLOG_DUMP_DOWNLOAD_PARALLELISM_PER_FILE = "binlog_dump_download_parallelism_per_file";
 
     public static final String BINLOG_DUMP_DOWNLOAD_PART_SIZE = "binlog_dump_download_part_size";
+
+    /**
+     * 是否跳过下载等待时的文件大小检查。
+     * 开启后，下载等待仅检查文件是否存在（f.exists()），不再检查 f.length() < fileSize。
+     * 跳过 size check 不会影响下游读取链路，原因：
+     * （1）大多数存储后端（OSS/S3）下载具有原子性（temp+rename），f.exists() 为 true 时文件已完整；
+     * （2）BinlogDumpReader 本身就是为读取正在被写入的文件而设计的，行为与正常写文件场景一致。
+     */
+    public static final String BINLOG_DUMP_DOWNLOAD_SKIP_SIZE_CHECK = "binlog_dump_download_skip_size_check";
+
+    /**
+     * 是否启用 binlog dump 读取时的文件身份校验（检测文件是否被 rename/delete/recreate）。
+     * 关闭后，read() 中 read <= 0 && hasNext() 分支将跳过文件身份校验逻辑。
+     */
+    public static final String BINLOG_DUMP_FILE_STATUS_CHECK_ENABLED = "binlog_dump_file_status_check_enabled";
+
+    /**
+     * 是否使用旧的 size 比较方案进行文件身份校验（已废弃，仅作回退用）。
+     * 默认使用 fileKey（inode）方案，与 BinlogFileReader 保持一致。
+     *
+     * @deprecated 旧方案通过比较 channel.size() 与 cdcFile.size() 检测文件变化，但当 binlog 重建后
+     * cdcFile.size() 返回的 logSize（来自 DB）与实际磁盘文件大小不一致时会误抛异常。
+     */
+    public static final String BINLOG_DUMP_FILE_STATUS_USE_LEGACY_SIZE_CHECK =
+        "binlog_dump_file_status_use_legacy_size_check";
+
+    /**
+     * 是否在实验室中检查cdc_server重启是否有问题
+     */
+    public static final String CDC_SERVER_RESTART_CHECK_ENABLED = "cdc_server_restart_check_enabled";
 
     /**
      * 逻辑Binlog文件的备份方式，OSS or Lindorm or NULL
@@ -625,6 +769,8 @@ public abstract class ConfigKeys {
      * 清理本地binlog时是否忽略正在dump的本地文件（以及该文件之后的文件）
      */
     public static final String BINLOG_PURGE_IGNORE_DUMPING_FILES_MODE = "binlog_purge_ignore_dumping_files_mode";
+    public static final String BINLOG_RESTORE_FORCE_DOWN_IF_LOCAL_FILE_ABSENT =
+        "binlog_restore_force_down_if_local_file_absent";
 
     /**
      * 通过该配置，可以对binlog文件中的last tso进行overwrite，格式 [old tso, overwritten tso]
@@ -635,6 +781,11 @@ public abstract class ConfigKeys {
         "binlog_ddl_alter_manually_table_group_enabled";
     public static final String BINLOG_DDL_ALTER_IMPLICIT_TABLE_GROUP_ENABLED =
         "binlog_ddl_alter_implicit_table_group_enabled";
+    /**
+     * 是否开启DDL单行SQL行注释防御回退，默认true
+     */
+    public static final String BINLOG_DDL_LINE_COMMENT_DEFENSE_ENABLED =
+        "binlog_ddl_line_comment_defense_enabled";
 
     /**
      * meta db leader ddl检测开关
@@ -646,6 +797,26 @@ public abstract class ConfigKeys {
      * 是否忽略事务中的DDL语句
      */
     public static final String BINLOG_SKIP_DDL_IN_TRANSACTION = "binlog_skip_ddl_in_transaction";
+
+    /**
+     * 是否开启binlog压缩
+     */
+    public static final String BINLOG_TRANSACTION_COMPRESSION = "binlog_transaction_compression";
+    /**
+     * 设置binlog事务压缩的压缩算法
+     */
+    public static final String BINLOG_TRANSACTION_COMPRESSION_TYPE = "binlog_transaction_compression_type";
+
+    /**
+     * 设置 zstd 压缩算法的压缩率，取值范围为(0,21)
+     */
+    public static final String BINLOG_TRANSACTION_COMPRESSION_LEVEL_ZSTD = "binlog_transaction_compression_level_zstd";
+
+    public static final String BINLOG_TRANSACTION_COMPRESSION_USE_HISTORY_PARAMS =
+        "binlog_transaction_compression_use_history_params";
+
+    public static final String BINLOG_TRANSACTION_COMPRESSION_MAX_UNCOMPRESSED_SIZE =
+        "binlog_transaction_compression_max_uncompressed_size";
 
     /**
      * 逻辑Binlog文件上传到OSS的accessKeyId
@@ -751,6 +922,15 @@ public abstract class ConfigKeys {
     public static final String TASK_DUMP_OFFLINE_BINLOG_RECALL_DAYS_LIMIT =
         "task_dump_offline_binlog_recall_days_limit";
 
+    public static final String TASK_DUMP_OFFLINE_BINLOG_USE_HELA =
+        "task_dump_offline_binlog_use_hela";
+
+    public static final String TASK_DUMP_OFFLINE_BINLOG_RDS_API_PASS_HELA =
+        "task_dump_offline_binlog_rds_api_pass_hela";
+
+    public static final String TASK_DUMP_OFFLINE_BINLOG_RDS_BINLOG_AUTO_DECOMPRESS =
+        "task_dump_offline_binlog_rds_binlog_auto_decompress";
+
     /**
      * 任务回溯时，往前多回溯多长时间，默认1个小时
      */
@@ -843,6 +1023,10 @@ public abstract class ConfigKeys {
      * transmitter dry run mode, 0 - before dumping queue ,1 - before send to dumper
      */
     public static final String TASK_TRANSMIT_DRY_RUN_MODE = "task_transmit_dry_run_mode";
+    /**
+     * 是否主动修复由于replace returning导致的乱序event
+     */
+    public static final String TASK_REFORMAT_RETURNING_FIX_ENABLED = "task_reformat_returning_fix_enabled";
     /**
      * 是否支持binlog中显示隐藏主键
      */
@@ -988,6 +1172,50 @@ public abstract class ConfigKeys {
     public static final String TASK_DUMP_DN_HEALTH_CHECKER_CONN_TIMEOUT_SEC =
         "task_dump_dn_health_checker_conn_timeout_sec";
     /**
+     * oss 下载建连失败后的最大重试次数，不含首次建连，默认3
+     */
+    public static final String TASK_DUMP_OFFLINE_BINLOG_CONNECT_RETRY_COUNT =
+        "task_dump_offline_binlog_connect_retry_count";
+
+    /**
+     * oss 下载建连重试的退避基数，按重试次数指数递增，单位毫秒，默认1000
+     */
+    public static final String TASK_DUMP_OFFLINE_BINLOG_CONNECT_RETRY_BACKOFF_BASE_MS =
+        "task_dump_offline_binlog_connect_retry_backoff_base_ms";
+
+    /**
+     * oss 下载建连重试的退避上限，单位毫秒，默认5000
+     */
+    public static final String TASK_DUMP_OFFLINE_BINLOG_CONNECT_RETRY_BACKOFF_MAX_MS =
+        "task_dump_offline_binlog_connect_retry_backoff_max_ms";
+
+    /**
+     * oss 下载建连（TCP 握手）超时，单位毫秒，默认20000
+     */
+    public static final String TASK_DUMP_OFFLINE_BINLOG_CONNECT_TIMEOUT_MS =
+        "task_dump_offline_binlog_connect_timeout_ms";
+
+    /**
+     * oss 下载读取超时，控制两次数据到达的最大间隔（含响应头读取），单位毫秒，默认300000。
+     * 该超时处于建连重试循环内，调大会成倍拉长“TCP 已连接但服务端不响应”场景下的整体挂起时长
+     */
+    public static final String TASK_DUMP_OFFLINE_BINLOG_READ_TIMEOUT_MS =
+        "task_dump_offline_binlog_read_timeout_ms";
+
+    /**
+     * oss 下载建连异常分类时回溯 cause 链的最大深度，防止异常链自引用或成环导致死循环，默认16。
+     * 取值小于1时按1处理，以保证至少检查异常自身
+     */
+    public static final String TASK_DUMP_OFFLINE_BINLOG_CAUSE_TRACE_MAX_DEPTH =
+        "task_dump_offline_binlog_cause_trace_max_depth";
+
+    /**
+     * oss 下载读取失败后重连重试的最大次数，默认2
+     */
+    public static final String TASK_DUMP_OFFLINE_BINLOG_READ_RETRY_COUNT =
+        "task_dump_offline_binlog_read_retry_count";
+
+    /**
      * oss 下载cache大小
      */
     public static final String TASK_DUMP_OFFLINE_BINLOG_CACHE_UNIT_SIZE = "task_dump_offline_binlog_cache_unit_size";
@@ -1078,10 +1306,47 @@ public abstract class ConfigKeys {
      */
     public static final String TASK_REFORMAT_NO_FOREIGN_KEY_CHECK = "task_reformat_no_foreign_key_check";
 
+    /**
+     * Maximum raw staging bytes retained in memory for one physical branch transaction.
+     */
+    public static final String TASK_REFORMAT_EXTERNAL_COLUMN_MEMORY_LIMIT_BYTES =
+        "task_reformat_external_column_memory_limit_bytes";
+
+    /**
+     * Hard limit for raw staging bytes accepted in one physical branch transaction.
+     */
+    public static final String TASK_REFORMAT_EXTERNAL_COLUMN_MAX_TXN_BYTES =
+        "task_reformat_external_column_max_txn_bytes";
+
+    /**
+     * Hard limit for staging entries accepted in one physical branch transaction.
+     */
+    public static final String TASK_REFORMAT_EXTERNAL_COLUMN_MAX_ENTRIES =
+        "task_reformat_external_column_max_entries";
+
+    /**
+     * Whether unchanged external columns are omitted from UPDATE after images. When enabled, external-table
+     * UPDATE_ROWS events are split by row so that every event can carry its exact after-column bitmap.
+     */
+    public static final String TASK_REFORMAT_EXTERNAL_COLUMN_PARTIAL_UPDATE_ROW_IMAGE_ENABLED =
+        "task_reformat_external_column_partial_update_row_image_enabled";
+
+    /**
+     * Whether external-column BlobRef errors may use the narrow field-level emergency fallback.
+     */
+    public static final String TASK_REFORMAT_EXTERNAL_COLUMN_BLOB_REF_ERROR_FALLBACK_ENABLED =
+        "task_reformat_external_column_blob_ref_error_fallback_enabled";
+
+    public static final String TASK_SYNC_POINT_ENABLED = "task_sync_point_enabled";
+
     public static final String TASK_EXTRACT_CHECK_SYNC_POINT_ENABLED = "task_extract_check_sync_point_enabled";
+    public static final String TASK_EXTRACT_CHECK_FORCE_CHECK_SERVER_ID_ENABLED =
+        "task_extract_check_force_check_server_id_enabled";
 
     public static final String TASK_PROCESS_SYNC_POINT_WAIT_TIMEOUT_MILLISECOND =
         "task_process_sync_point_wait_timeout_millisecond";
+
+    public static final String TASK_BUILD_PACKET_PARALLELISM = "task_build_packet_parallelism";
 
     //******************************************************************************************************************
     //***********************************************Daemon和调度相关参数*************************************************
@@ -1131,6 +1396,8 @@ public abstract class ConfigKeys {
      */
     public static final String DAEMON_TSO_HEARTBEAT_SELF_ADAPTION_EPS_THRESHOLD =
         "daemon_tso_heartbeat_self_adaption_eps_threshold";
+
+    public static final String DAEMON_TSO_HEARTBEAT_SUSPEND_ENABLED = "daemon_tso_heartbeat_suspend_enabled";
     /**
      * 对ddl相关维度的数据进行监控检测的周期频率
      */
@@ -1153,6 +1420,16 @@ public abstract class ConfigKeys {
      * Daemon master收到clean binlog之后，给daemon slave发送clean binlog，等待请求返回的超时时间
      */
     public static final String DAEMON_WAIT_CLEAN_BINLOG_TIMEOUT_SECOND = "daemon_wait_clean_binlog_timeout_second";
+    /**
+     * 决定daemon获取metadb的方式是否使用select * from metadb.storage_info;
+     * 如果关闭，则使用show storage;(需等待所有cn同步，较慢)
+     */
+    public static final String DAEMON_METADB_SCAN_BY_SELECT_ENABLED = "daemon_metadb_scan_by_select_enabled";
+
+    /**
+     * 如果向CN发送sql scan出来的meta db url不可用，是否尝试使用env中的meta db。
+     */
+    public static final String DAEMON_METADB_SCAN_CHECK_ENV_ENABLED = "daemon_metadb_scan_check_env_enabled";
     /**
      * dn 健康检测间隔
      */
@@ -1185,6 +1462,10 @@ public abstract class ConfigKeys {
      * 启动自动flush log测试开关
      */
     public static final String DAEMON_AUTO_FLUSH_LOG_TEST = "daemon_auto_flush_log_test";
+    /**
+     * 启动自动set compression测试开关
+     */
+    public static final String DAEMON_AUTO_SET_COMPRESSION_TEST = "daemon_auto_set_compression_test";
 
     /**
      * Daemon clean接口是否强制检查集群参数
@@ -1210,6 +1491,12 @@ public abstract class ConfigKeys {
      */
     public static final String TOPOLOGY_WORK_PROCESS_HEARTBEAT_INTERVAL_MS =
         "topology_work_process_heartbeat_interval_ms";
+    /**
+     * 等待sub version callback完成的超时时间
+     */
+    public static final String TOPOLOGY_WAIT_SUB_VERSION_CALLBACK_TIMEOUT_MS =
+        "topology_wait_sub_version_callback_timeout_ms";
+
     /**
      * 触发使用relay task的阈值，即DN数量达到多少之后，构建拓扑时会考虑relay task
      */
@@ -1259,6 +1546,10 @@ public abstract class ConfigKeys {
      * 是否测试recover tso功能
      */
     public static final String TOPOLOGY_FORCE_USE_RECOVER_TSO_ENABLED = "topology_force_use_recover_tso_enabled";
+    /**
+     * 是否支持light rebalance
+     */
+    public static final String TOPOLOGY_ENABLE_LIGHT_REBALANCE = "topology_enable_light_rebalance";
     /**
      * 是否测试binlog下载功能
      */
@@ -1437,6 +1728,8 @@ public abstract class ConfigKeys {
     public static final String META_BUILD_RECORD_SQL_WITH_EXISTS_ENABLED =
         "meta_build_record_sql_with_exists_enabled";
 
+    public static final String META_BUILD_FORCE_REPLACE_DATABASE = "meta_build_force_replace_database";
+
     public static final String META_BUILD_RECORD_IGNORED_DDL_ENABLED = "meta_build_record_ignored_ddl_enabled";
     /**
      * 逻辑ddl 软删除支持
@@ -1490,11 +1783,28 @@ public abstract class ConfigKeys {
     public static final String META_BUILD_SNAPSHOT_ERROR_INJECT =
         "meta_build_snapshot_error_inject";
     /**
+     * 在mysql命令行执行示例如下：
+     * set cdc global meta_virtual_table_mapping_rule = `cdc_virtual_table_mapping\.user_balance_log_\d+|cdc_virtual_table_mapping.user_balance_log_virtual`;
+     * java代码中执行的话，需要使用双反引号
+     */
+    public static final String META_VIRTUAL_TABLE_MAPPING_RULE = "meta_virtual_table_mapping_rule";
+    /**
      * ddl sql中需要过滤掉的语法特性，多个特性之间用逗号风格
      * 举例：alter table vvv modify column b bigint after c ALGORITHM=OMC，需要把OMC去掉
      */
     public static final String TASK_REFORMAT_DDL_ALGORITHM_BLACKLIST = "task_reformat_ddl_algorithm_blacklist";
+    /**
+     * 作为 CHARACTER SET / COLLATE 取值时需要保留反引号的 SQL 保留字，多个值之间用逗号分隔。
+     * 典型场景：binary 既是合法的 charset、collation 名，又是 SQL 保留字（token BINARY），
+     * 若归一化为裸词输出 CHARSET = binary，Druid 再次解析时会把它当成 BINARY 一元操作符，
+     * 表现为抛 ParserException 或静默吞并后续 option（导致 COLLATE 丢失、charset 元数据被污染）。
+     * 后续如发现其他同类保留字，直接追加到本配置即可，无需改代码。
+     */
+    public static final String TASK_REFORMAT_DDL_CHARACTER_QUOTE_KEYWORDS =
+        "task_reformat_ddl_character_quote_keywords";
     public static final String TASK_REFORMAT_DDL_HINT_BLACKLIST = "task_reformat_ddl_hint_blacklist";
+    public static final String META_BUILD_CHECK_VIRTUAL_TABLE_CONSISTENCY =
+        "meta_build_check_virtual_table_consistency";
     /**
      * 元数据转储到磁盘时，根存储目录
      */
@@ -1503,6 +1813,10 @@ public abstract class ConfigKeys {
      * 是否对SchemaObject进行持久化，默认false
      */
     public static final String META_PERSIST_ENABLED = "meta_persist_enabled";
+    /**
+     * 持久化阈值，单位：MB
+     */
+    public static final String META_PERSIST_MEMORY_THRESHOLD_MB = "meta_persist_memory_threshold_mb";
     /**
      * 是否对Topology中的字符串进行share共享，默认false，DN数量非常多的时候建议开启，可节省大量内存
      */
@@ -1513,7 +1827,7 @@ public abstract class ConfigKeys {
     public static final String META_CACHE_COMPARE_RESULT_ENABLED = "meta_cache_compare_result_enabled";
     public static final String META_BUILD_IGNORE_APPLY_ERROR = "meta_build_ignore_apply_error";
     public static final String META_CACHE_TABLE_META_MAX_SIZE = "meta_cache_table_meta_max_size";
-    public static final String META_CACHE_TABLE_MEAT_EXPIRE_TIME_MINUTES = "meta_cache_table_meat_expire_time_minutes";
+    public static final String META_CACHE_TABLE_META_EXPIRE_TIME_MINUTES = "meta_cache_table_meta_expire_time_minutes";
     /**
      * table meta 检测周期
      */
@@ -1573,6 +1887,7 @@ public abstract class ConfigKeys {
     public static final String BINLOGX_DIR_PATH_PREFIX = "binlogx_dir_path_prefix";
     public static final String BINLOGX_STREAM_GROUP_NAME = "binlogx_stream_group_name";
     public static final String BINLOGX_STREAM_COUNT = "binlogx_stream_count";
+    public static final String BINLOGX_STREAM_START_TSO = "binlogx_stream_start_tso";
     public static final String BINLOGX_WAIT_LATEST_TSO_TIMEOUT_SECOND = "binlogx_wait_latest_tso_timeout_second";
     public static final String BINLOGX_WAIT_LATEST_TSO_TIMEOUT_STRATEGY = "binlogx_wait_latest_tso_timeout_strategy";
     public static final String BINLOGX_TRANSMIT_RELAY_ENGINE_TYPE = "binlogx_transmit_relay_engine_type";
@@ -1607,21 +1922,6 @@ public abstract class ConfigKeys {
      */
     public static final String BINLOGX_SCHEDULE_DISPATCHER_ROCKSDB_RATIO = "binlogx_schedule_dispatcher_rocksdb_ratio";
     /**
-     * 构建运行时拓扑时，每个container分配的Dispatcher的个数，如果count小于1，则按照memory模式进行构建
-     */
-    public static final String BINLOGX_SCHEDULE_DISPATCHER_COUNT_PER_NODE =
-        "binlogx_schedule_dispatcher_count_per_node";
-    /**
-     * 构建运行时拓扑时，对Dispatcher进行内存分配的参考值
-     * 1. 当Container可用内存大于Dispatcher最小可用内存，但小于memory unit的两倍时，该Container上只分配一个Dispatcher进程
-     * 2. 当Container可用内存大于等于memory unit的两倍时，调度程序根据DN节点的数量情况，会考虑在该Container上拆分运行多个Task进程
-     */
-    public static final String BINLOGX_SCHEDULE_DISPATCHER_MEMORY_UNIT = "binlogx_schedule_dispatcher_memory_unit";
-    /**
-     * Dispatcher进程所需的最小内存，当Container进程所剩内存小于该值时，调度程序不会给该Container分配Dispatcher进程
-     */
-    public static final String BINLOGX_SCHEDULE_DISPATCHER_MEMORY_MIN = "binlogx_schedule_dispatcher_memory_min";
-    /**
      * 是否支持清理旧版本的逻辑Binlog，默认true，一般测试环境排查问题时，可设置为false
      */
     public static final String BINLOGX_CLEAN_OLD_VERSION_BINLOG_ENABLED = "binlogx_clean_old_version_binlog_enabled";
@@ -1633,6 +1933,23 @@ public abstract class ConfigKeys {
      * 对relay data进行清理的频率，单位：分钟，默认值：1min
      */
     public static final String BINLOGX_CLEAN_RELAY_DATA_INTERVAL_MINUTE = "binlogx_clean_relay_data_interval_minute";
+    /**
+     * relay log清理时，checkpoint距离maxReadTso的最大时间阈值，单位：分钟，默认值：120min（2小时）
+     * 当checkpoint的lastTso距离maxReadTso超过此阈值时，清理阈值时间之前的数据
+     */
+    public static final String BINLOGX_RELAY_CLEANUP_CHECKPOINT_MAX_LAG_MINUTES =
+        "binlogx_relay_cleanup_checkpoint_max_lag_minutes";
+    /**
+     * relay log清理时，空间压力触发阈值，比例值，默认值：0.8
+     * 当当前文件数/slowdown阈值 >= 此值时，触发空间压力清理
+     */
+    public static final String BINLOGX_RELAY_CLEANUP_SPACE_SLOWDOWN_RATIO =
+        "binlogx_relay_cleanup_space_slowdown_ratio";
+    /**
+     * relay log清理时，空间压力或checkpoint场景下的buffer时间，单位：分钟，默认值：1min
+     */
+    public static final String BINLOGX_RELAY_CLEANUP_AGGRESSIVE_BUFFER_MINUTES =
+        "binlogx_relay_cleanup_aggressive_buffer_minutes";
     /**
      * 多流场景下，所有Grpc client的flow control window size的总和，即每个client的 window-size = total-window-size / client-count
      * 如果不加控制的话，会导致直接内存out of memory
@@ -1647,6 +1964,10 @@ public abstract class ConfigKeys {
      * kway多路归并，merge source queue size
      */
     public static final String BINLOGX_KWAY_SOURCE_QUEUE_SIZE = "binlogx_kway_source_queue_size";
+    /**
+     * kway多路归并，是否校验同一消息内所有TxnItem的partitionId一致
+     */
+    public static final String BINLOGX_KWAY_PARTITION_ID_CHECK_ENABLED = "binlogx_kway_partition_id_check_enabled";
 
     /**
      * logic TableMeta count
@@ -1671,8 +1992,6 @@ public abstract class ConfigKeys {
      */
     public static final String RPL_SUPPORT_RUNNING_CHECK = "rpl_task_support_running_check";
 
-    public static final String RPL_RANDOM_COMPARE_ALL = "rpl_random_compare_all";
-
     public static final String RPL_ROCKSDB_DESERIALIZE_PARALLELISM = "rpl_rocksdb_deserialize_parallelism";
 
     public static final String RPL_DEFAULT_IGNORE_DB_LIST = "rpl_default_ignore_db_list";
@@ -1680,6 +1999,30 @@ public abstract class ConfigKeys {
     public static final String RPL_DEFAULT_SQL_MODE = "rpl_default_sql_mode";
 
     public static final String RPL_POOL_CN_BLACK_IP_LIST = "rpl_pool_cn_black_ip_list";
+
+    /**
+     * CN 独立健康检查连续失败多少次后才触发连接池切换。
+     */
+    public static final String RPL_POOL_CN_HEALTH_FAILURE_THRESHOLD =
+        "rpl_pool_cn_health_failure_threshold";
+
+    /**
+     * 一轮 CN 候选切换全部失败后的最小重试间隔。
+     */
+    public static final String RPL_POOL_CN_SWITCH_RETRY_INTERVAL_MILLIS =
+        "rpl_pool_cn_switch_retry_interval_millis";
+
+    /**
+     * 旧 CN 连接池等待在途连接归还的超时时间。超时只告警，不强制关闭在途连接。
+     */
+    public static final String RPL_POOL_CN_DRAIN_TIMEOUT_MILLIS =
+        "rpl_pool_cn_drain_timeout_millis";
+
+    /**
+     * 旧 CN 连接池超过该硬超时时间仍未排空时，强制关闭并释放资源。
+     */
+    public static final String RPL_POOL_CN_FORCE_CLOSE_TIMEOUT_MILLIS =
+        "rpl_pool_cn_force_close_timeout_millis";
 
     public static final String RPL_TASK_KEEP_ALIVE_INTERVAL_SECONDS = "rpl_task_keep_alive_interval_seconds";
 
@@ -1703,6 +2046,8 @@ public abstract class ConfigKeys {
 
     public static final String RPL_DELAY_ALARM_THRESHOLD_SECOND = "rpl_delay_alarm_threshold_second";
 
+    public static final String PHONE_ALARM_WHEN_DDL = "phonealarmwhenddl";
+
     public static final String RPL_DDL_PARSE_ERROR_PROCESS_MODE = "rpl_ddl_parse_error_process_mode";
 
     public static final String RPL_ERROR_SQL_TRUNCATE_LENGTH = "rpl_error_sql_truncate_length";
@@ -1719,6 +2064,9 @@ public abstract class ConfigKeys {
 
     public static final String RPL_FULL_VALID_TABLE_PARALLELISM = "rpl_full_valid_table_parallelism";
 
+    public static final String RPL_FULL_VALID_ONLY_COMPARE_ROW_COUNT_TABLES =
+        "rpl_full_valid_only_compare_row_count_tables";
+
     public static final String RPL_REPAIR_PARALLELISM = "rpl_repair_parallelism";
 
     public static final String RPL_FULL_VALID_MAX_PERSIST_ROWS_COUNT = "rpl_full_valid_max_persist_rows_count";
@@ -1733,11 +2081,19 @@ public abstract class ConfigKeys {
 
     public static final String RPL_POLARDBX1_OLD_VERSION_OPTION = "rpl_polardbx1_old_version_option";
 
+    public static final String RPL_FORCE_IGNORE_UK = "rpl_force_ignore_uk";
+
     public static final String RPL_SET_MAX_STATEMENT_TIME_OPTION = "rpl_set_max_statement_time_option";
 
     public static final String RPL_ASYNC_DDL_ENABLED = "rpl_async_ddl_enabled";
 
     public static final String RPL_ASYNC_DDL_THRESHOLD_IN_SECOND = "rpl_async_ddl_threshold_in_second";
+
+    /**
+     * Whether RPL applies ALTER TABLE MODIFY COLUMN ... EXTERNALIZE as an asynchronous DDL.
+     * This switch is independent from the general async-DDL switch and execution-time threshold.
+     */
+    public static final String RPL_ASYNC_EXTERNALIZE_DDL_ENABLED = "rpl_async_externalize_ddl_enabled";
 
     public static final String RPL_PARALLEL_SCHEMA_APPLY_ENABLED = "rpl_parallel_schema_apply_enabled";
 
@@ -1750,10 +2106,13 @@ public abstract class ConfigKeys {
     public static final String RPL_PARALLEL_SCHEMA_APPLY_BATCH_SIZE = "rpl_parallel_schema_apply_batch_size";
 
     public static final String RPL_DEFAULT_MEMORY = "rpl_default_memory";
+    public static final String RPL_FULL_COPY_DIRECT_IGNORE = "rpl_full_copy_direct_ignore";
 
     public static final String RPL_DEFAULT_LOWER_MEMORY = "rpl_default_lower_memory";
 
     public static final String RPL_CONNECTION_INIT_SQL = "rpl_connection_init_sql";
+
+    public static final String RPL_LAB_80_ENABLED = "rpl_lab_80_enabled";
 
     public static final String RPL_APPLY_USE_CACHED_THREAD_POOL_ENABLED = "rpl_apply_use_cached_thread_pool_enabled";
 
@@ -1802,13 +2161,37 @@ public abstract class ConfigKeys {
     public static final String RPL_INC_DDL_SKIP_MISS_LOCAL_PARTITION_ERROR =
         "rpl_inc_ddl_skip_miss_local_partition_error";
 
+    /**
+     * 当主备都配置了TTL能力时，主备两侧会各自独立执行TTL自动增删分区（或子分区）的DDL。
+     * CDC将主库的此类DDL同步到备库时，若备库已经自行执行过同样的操作，会产生幂等冲突报错：
+     * ADD PARTITION: [ERR_PARTITION_MANAGEMENT] Partition name: pXXXX already exists.
+     * DROP PARTITION: [ERR_PARTITION_MANAGEMENT] Partition group 'pXXXX' doesn't exist.
+     * 开启此开关后，CDC会通过以下校验识别上述场景并直接跳过这类DDL，不视为错误：
+     * 1. DDL 必须是操作单个分区/子分区的 ADD/DROP PARTITION（多分区操作不跳过，避免部分冲突）
+     * 2. 错误信息必须与DDL类型严格对应（ADD→已存在，DROP→不存在）
+     * 3. 目标表必须是 TTL 表（通过 SHOW CREATE TABLE 检查 TTL 选项）
+     */
+    public static final String RPL_INC_DDL_SKIP_TTL_AUTO_PARTITION_ERROR =
+        "rpl_inc_ddl_skip_ttl_auto_partition_error";
+
     public static final String RPL_MERGE_APPLY_GROUP_BY_TABLE_ENABLED = "rpl_merge_apply_group_by_table_enabled";
 
     public static final String RPL_SPLIT_APPLY_IN_TRANSACTION_ENABLED = "rpl_split_apply_in_transaction_enabled";
 
+    public static final String RPL_SPLIT_APPLY_IN_TRANSACTION_WITHOUT_GSI =
+        "rpl_split_apply_in_transaction_without_gsi";
+
+    public static final String RPL_SPLIT_APPLY_BATCH_MERGE_ENABLED = "rpl_split_apply_batch_merge_enabled";
+
+    public static final String RPL_SPLIT_APPLY_IN_MULTI_STAGE_ENABLED = "rpl_split_apply_in_multi_stage_enabled";
+
+    public static final String RPL_SPLIT_APPLY_GROUP_BY_ACTION_ENABLED = "rpl_split_apply_group_by_action_enabled";
+
     public static final String RPL_APPLY_DRY_RUN_ENABLED = "rpl_apply_dry_run_enabled";
 
     public static final String RPL_INC_MAX_POOL_SIZE = "rpl_inc_max_pool_size";
+
+    public static final String RPL_INC_MAX_POOL_SIZE_IN_LAB = "rpl_inc_max_pool_size_in_lab";
 
     public static final String RPL_INC_MIN_POOL_SIZE = "rpl_inc_min_pool_size";
 
@@ -1824,9 +2207,24 @@ public abstract class ConfigKeys {
 
     public static final String RPL_INC_BATCH_SIZE = "rpl_inc_batch_size";
 
+    public static final String RPL_INC_DML_BATCH_SIZE = "rpl_inc_dml_batch_size";
+
     public static final String RPL_BACK_FLOW_X_STREAM_OPTION = "rpl_back_flow_x_stream_option";
 
     public static final String RPL_BACK_FLOW_X_STREAM_GROUP_NAME = "rpl_back_flow_x_stream_group_name";
+
+    public static final String RPL_TRANSACTION_SPLIT_SIZE = "rpl_transaction_split_size";
+
+    public static final String RPL_FULL_FROM_DN = "rpl_full_from_dn";
+
+    public static final String RPL_UK_AS_PK_TABLE_CONFIG = "rpl_uk_as_pk_table_config";
+    public static final String RPL_UK_AS_PK_FILTER_COLUMN_CONFIG = "rpl_uk_as_pk_filter_column_config";
+
+    public static final String RPL_COMPACTION_ENABLED = "rpl_compaction_enabled";
+
+    public static final String RPL_BATCH_ENABLED = "rpl_batch_enabled";
+
+    public static final String RPL_COMPACTION_LOG_ENABLED = "rpl_compaction_log_enabled";
 
     /**
      * Columnar是否已经心跳超时的阈值
@@ -1858,18 +2256,12 @@ public abstract class ConfigKeys {
     //******************************************************************************************************************
     //*********************************Binlog_System_Config表中有，但config文件中没有的一些配置******************************
     //******************************************************************************************************************
-
-    public static String getKeyWithClusterId(String key) {
-        return String.format("%s:%s", getPropertiesValue(ConfigKeys.CLUSTER_ID), key);
-    }
-
     public static final String EXPECTED_STORAGE_TSO_KEY =
         String.format("%s:expected_storage_tso",
             getPropertiesValue(ConfigKeys.CLUSTER_ID));
     public static final String CLUSTER_SNAPSHOT_VERSION_KEY =
         String.format("%s:cluster_snapshot_version",
             getPropertiesValue(ConfigKeys.CLUSTER_ID));
-
     public static final String CLUSTER_TOPOLOGY_EXCLUDE_NODES = "cluster_topology_exclude_nodes";
     public static final String CLUSTER_TOPOLOGY_EXCLUDE_NODES_KEY =
         String.format("%s:%s", getPropertiesValue(ConfigKeys.CLUSTER_ID), CLUSTER_TOPOLOGY_EXCLUDE_NODES);
@@ -1887,4 +2279,11 @@ public abstract class ConfigKeys {
     public static final String CLUSTER_REBALANCE_INSTRUCTION =
         String.format("%s:cluster_rebalance_instruction",
             getPropertiesValue(ConfigKeys.CLUSTER_ID));
+    public static final String STREAM_NAME = "streamName";
+
+    public static final String RPL_DDL_STRIP_LEADING_COMMENTS = "rpl_ddl_strip_leading_comments";
+
+    public static String getKeyWithClusterId(String key) {
+        return String.format("%s:%s", getPropertiesValue(ConfigKeys.CLUSTER_ID), key);
+    }
 }

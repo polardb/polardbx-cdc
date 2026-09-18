@@ -13,97 +13,81 @@ public interface BinlogDumpStatusOrBuilder extends
     // @@protoc_insertion_point(interface_extends:dumper.BinlogDumpStatus)
     com.google.protobuf.MessageOrBuilder {
 
-    /**
-     * <code>string ip = 1;</code>
-     *
-     * @return The ip.
-     */
-    java.lang.String getIp();
+  /**
+   * <code>string ip = 1;</code>
+   * @return The ip.
+   */
+  java.lang.String getIp();
+  /**
+   * <code>string ip = 1;</code>
+   * @return The bytes for ip.
+   */
+  com.google.protobuf.ByteString
+      getIpBytes();
 
-    /**
-     * <code>string ip = 1;</code>
-     *
-     * @return The bytes for ip.
-     */
-    com.google.protobuf.ByteString
-    getIpBytes();
+  /**
+   * <code>int64 id = 2;</code>
+   * @return The id.
+   */
+  long getId();
 
-    /**
-     * <code>int64 id = 2;</code>
-     *
-     * @return The id.
-     */
-    long getId();
+  /**
+   * <code>string traceId = 3;</code>
+   * @return The traceId.
+   */
+  java.lang.String getTraceId();
+  /**
+   * <code>string traceId = 3;</code>
+   * @return The bytes for traceId.
+   */
+  com.google.protobuf.ByteString
+      getTraceIdBytes();
 
-    /**
-     * <code>string traceId = 3;</code>
-     *
-     * @return The traceId.
-     */
-    java.lang.String getTraceId();
+  /**
+   * <code>int32 port = 4;</code>
+   * @return The port.
+   */
+  int getPort();
 
-    /**
-     * <code>string traceId = 3;</code>
-     *
-     * @return The bytes for traceId.
-     */
-    com.google.protobuf.ByteString
-    getTraceIdBytes();
+  /**
+   * <code>string fileName = 5;</code>
+   * @return The fileName.
+   */
+  java.lang.String getFileName();
+  /**
+   * <code>string fileName = 5;</code>
+   * @return The bytes for fileName.
+   */
+  com.google.protobuf.ByteString
+      getFileNameBytes();
 
-    /**
-     * <code>int32 port = 4;</code>
-     *
-     * @return The port.
-     */
-    int getPort();
+  /**
+   * <code>int64 position = 6;</code>
+   * @return The position.
+   */
+  long getPosition();
 
-    /**
-     * <code>string fileName = 5;</code>
-     *
-     * @return The fileName.
-     */
-    java.lang.String getFileName();
+  /**
+   * <code>int64 delay = 7;</code>
+   * @return The delay.
+   */
+  long getDelay();
 
-    /**
-     * <code>string fileName = 5;</code>
-     *
-     * @return The bytes for fileName.
-     */
-    com.google.protobuf.ByteString
-    getFileNameBytes();
+  /**
+   * <code>int64 bps = 8;</code>
+   * @return The bps.
+   */
+  long getBps();
 
-    /**
-     * <code>int64 position = 6;</code>
-     *
-     * @return The position.
-     */
-    long getPosition();
+  /**
+   * <code>int64 lastSyncTimeStamp = 9;</code>
+   * @return The lastSyncTimeStamp.
+   */
+  long getLastSyncTimeStamp();
 
-    /**
-     * <code>int64 delay = 7;</code>
-     *
-     * @return The delay.
-     */
-    long getDelay();
-
-    /**
-     * <code>int64 bps = 8;</code>
-     *
-     * @return The bps.
-     */
-    long getBps();
-
-    /**
-     * <code>int64 lastSyncTimeStamp = 9;</code>
-     *
-     * @return The lastSyncTimeStamp.
-     */
-    long getLastSyncTimeStamp();
-
-    /**
-     * <code>int64 aliveSecond = 10;</code>
-     *
-     * @return The aliveSecond.
-     */
-    long getAliveSecond();
+  /**
+   * <code>int64 aliveSecond = 10;</code>
+   * @return The aliveSecond.
+   */
+  long getAliveSecond();
 }

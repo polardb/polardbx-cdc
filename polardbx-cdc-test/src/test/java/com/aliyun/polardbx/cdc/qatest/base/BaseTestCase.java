@@ -641,7 +641,7 @@ public class BaseTestCase implements BaseTestMode {
     }
 
     public void useDb(Connection connection, String db) {
-        JdbcUtil.executeQuery("use " + db, connection);
+        JdbcUtil.useDb(connection, db);
     }
 
     public List<String> getColumnsByDesc(String database, String tableName, Connection conn) throws Exception {
@@ -652,7 +652,7 @@ public class BaseTestCase implements BaseTestMode {
         try {
             sql = String.format("DESC `%s`.`%s`", escape(database), escape(tableName));
             stmt = conn.prepareStatement(sql);
-            rs = stmt.executeQuery(sql);
+            rs = stmt.executeQuery();
             while (rs.next()) {
                 columns.add(rs.getString(1));
             }
@@ -675,7 +675,7 @@ public class BaseTestCase implements BaseTestMode {
                 "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'",
                 database, tableName);
             stmt = conn.prepareStatement(sql);
-            rs = stmt.executeQuery(sql);
+            rs = stmt.executeQuery();
             while (rs.next()) {
                 columns.add(rs.getString(1));
             }

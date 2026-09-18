@@ -28,6 +28,8 @@ public interface StoreEngine {
 
     String getMaxCleanTso();
 
+    String getMaxReadTso();
+
     RelayDataReader newRelayDataReader(byte[] beginKey);
 
     LockingCleaner getLockingCleaner();

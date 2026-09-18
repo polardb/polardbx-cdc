@@ -15,6 +15,7 @@ import com.aliyun.polardbx.binlog.proc.ProcUtils;
 import com.aliyun.polardbx.binlog.util.CommonMetricsHelper;
 import com.aliyun.polardbx.binlog.util.MetricsReporter;
 import com.aliyun.polardbx.binlog.util.format.TableFormat;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import lombok.SneakyThrows;
 import org.slf4j.Logger;
@@ -147,7 +148,8 @@ public class MetricsManager {
         METRICS_LOGGER.info(sb.toString());
     }
 
-    private void contactColumnarMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
+    @VisibleForTesting
+    protected void contactColumnarMetrics(MetricsSnapshot snapshot, StringBuilder sb) {
         ColumnarMetrics columnarMetrics = snapshot.columnarMetrics;
         TableFormat columnarFormat = new TableFormat("Columnar Metrics");
         columnarFormat.addColumn("getIndexCount", "getPartitionCount", "getGroupCommitLatency",
@@ -160,7 +162,8 @@ public class MetricsManager {
             "getPkIdxRemoteReadCount", "getPkIdxRemoteReadBytes", "getPkIdxSstWriteCount", "getPkIdxSstWriteBytes",
             "getPkIdxLogFixCount", "getBinlogNetThroughput", "getBinlogEventThroughput", "getBinlogEventInsert",
             "getBinlogEventDelete", "getBinlogEventUpdate", "getBinlogEventDDL", "getBinlogEventInsertRows",
-            "getBinlogEventDeleteRows", "getBinlogEventUpdateRows", "getBinlogTrxCount", "getBinlogReadLatency");
+            "getBinlogEventDeleteRows", "getBinlogEventUpdateRows", "getBinlogTrxCount", "getBinlogReadLatency",
+            "getBinlogEventSize", "getAllBinlogEventThroughput", "getAllBinlogEventSize");
         columnarFormat.addRow(columnarMetrics.getIndexCount(), columnarMetrics.getPartitionCount(),
             columnarMetrics.getGroupCommitLatency(), columnarMetrics.getGroupCommitThroughput(),
             columnarMetrics.getGroupCommitRow(), columnarMetrics.getBinlogQueueLatency(),
@@ -181,7 +184,8 @@ public class MetricsManager {
             columnarMetrics.getBinlogEventUpdate(), columnarMetrics.getBinlogEventDDL(),
             columnarMetrics.getBinlogEventInsertRows(), columnarMetrics.getBinlogEventDeleteRows(),
             columnarMetrics.getBinlogEventUpdateRows(), columnarMetrics.getBinlogTrxCount(),
-            columnarMetrics.getBinlogReadLatency());
+            columnarMetrics.getBinlogReadLatency(), columnarMetrics.getBinlogEventSize(),
+            columnarMetrics.getAllBinlogEventThroughput(), columnarMetrics.getAllBinlogEventSize());
         sb.append(columnarFormat);
     }
 

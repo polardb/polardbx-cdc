@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.aliyun.polardbx</groupId>
     <artifactId>polardbx-cdc</artifactId>
-    <version>5.4.19-SNAPSHOT</version>
+    <version>5.4.21-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -34,9 +34,9 @@
         <grpc.version>1.30.0</grpc.version>
         <logback.version>1.2.8</logback.version>
         <slf4j.version>1.7.26</slf4j.version>
-        <jdbc.version>5.1.49</jdbc.version>
+        <polardbx-connector.version>2.2.9</polardbx-connector.version>
         <druid.version>1.0.25.2018030201</druid.version>
-        <polardbx-parser.version>6.35</polardbx-parser.version>
+        <polardbx-parser.version>6.73</polardbx-parser.version>
         <fastjson.version>1.2.50_noneautotype</fastjson.version>
         <lombok.version>1.18.0</lombok.version>
         <spring.version>5.3.20</spring.version>
@@ -83,11 +83,26 @@
         <aws-java-sdk-s3.version>2.31.13</aws-java-sdk-s3.version>
         <aws-java-sdk-s3-old.version>1.12.261</aws-java-sdk-s3-old.version>
         <maven-surefire-plugin.version>3.0.0-M4</maven-surefire-plugin.version>
+        <securitysdk.version>2.21.3</securitysdk.version>
         <cdc.client.version>2.0.50</cdc.client.version>
+        <commons-compress.version>1.26.0</commons-compress.version>
+        <com.github.luben.version>1.5.6-4</com.github.luben.version>
+        <mysql-binlog-connector.version>0.30.3</mysql-binlog-connector.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.github.luben</groupId>
+                <artifactId>zstd-jni</artifactId>
+                <version>${com.github.luben.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>${commons-compress.version}</version>
+                <scope>compile</scope>
+            </dependency>
             <dependency>
                 <groupId>com.google.guava</groupId>
                 <artifactId>guava</artifactId>
@@ -149,9 +164,9 @@
                 <version>${commons-io.version}</version>
             </dependency>
             <dependency>
-                <groupId>mysql</groupId>
-                <artifactId>mysql-connector-java</artifactId>
-                <version>${jdbc.version}</version>
+                <groupId>com.alibaba.polardbx</groupId>
+                <artifactId>polardbx-connector-java</artifactId>
+                <version>${polardbx-connector.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.alibaba</groupId>
@@ -461,6 +476,16 @@
                     </exclusion>
                 </exclusions>
             </dependency>
+            <dependency>
+                <groupId>com.aliyun.securitysdk</groupId>
+                <artifactId>rass-sdk-core</artifactId>
+                <version>${securitysdk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.zendesk</groupId>
+                <artifactId>mysql-binlog-connector-java</artifactId>
+                <version>${mysql-binlog-connector.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -515,8 +540,8 @@
             <artifactId>commons-io</artifactId>
         </dependency>
         <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
+            <groupId>com.alibaba.polardbx</groupId>
+            <artifactId>polardbx-connector-java</artifactId>
         </dependency>
         <dependency>
             <groupId>com.alibaba</groupId>
@@ -600,20 +625,12 @@
             <artifactId>mockito-inline</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+            <version>${com.github.luben.version}</version>
+        </dependency>
     </dependencies>
-
-    <distributionManagement>
-        <repository>
-            <id>releases</id>
-            <name>taobao mirror</name>
-            <url>http://mvnrepo.alibaba-inc.com/mvn/releases</url>
-        </repository>
-        <snapshotRepository>
-            <id>snapshots</id>
-            <name>taobao mirror snapshots</name>
-            <url>http://mvnrepo.alibaba-inc.com/mvn/snapshots</url>
-        </snapshotRepository>
-    </distributionManagement>
 
     <profiles>
         <profile>
@@ -636,7 +653,7 @@
                     <version>${maven-surefire-plugin.version}</version>
                     <configuration>
                         <!-- 这个argLine会报红，但不能删除jacoco生成报告用的占位符，见jacoco里的propertyName，默认是argLine -->
-                        <argLine>${argLine} -Dfile.encoding=UTF-8 -Xms256M -Xmx6g -Xss2048k -XX:SurvivorRatio=10
+                        <argLine>${argLine} -XX:+UseG1GC -Dfile.encoding=UTF-8 -Xms256M -Xmx6g -Xss2048k
                         </argLine>
                         <includes>
                             <include>**/**</include>
@@ -756,14 +773,13 @@
                 <version>3.0.1</version>
                 <executions>
                     <execution>
-                        <id>install-external</id>
+                        <id>install-polardbx-parser</id>
                         <phase>clean</phase>
                         <configuration>
-                            <file>${basedir}/lib/polardbx-parser-6.35.jar</file>
-                            <repositoryLayout>default</repositoryLayout>
+                            <file>${basedir}/lib/polardbx-parser-${polardbx-parser.version}.jar</file>
                             <groupId>com.alibaba.polardbx</groupId>
                             <artifactId>polardbx-parser</artifactId>
-                            <version>6.35</version>
+                            <version>${polardbx-parser.version}</version>
                             <packaging>jar</packaging>
                             <generatePom>true</generatePom>
                         </configuration>

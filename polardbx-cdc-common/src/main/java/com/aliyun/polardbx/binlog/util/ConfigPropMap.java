@@ -6,6 +6,8 @@
  */
 package com.aliyun.polardbx.binlog.util;
 
+import com.aliyun.polardbx.binlog.DynamicApplicationConfig;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -32,6 +34,33 @@ public class ConfigPropMap {
 
     public static String getPropertyValue(String configName) {
         return CONFIG_MAP.get(configName);
+    }
+
+    /**
+     * 尝试从DynamicApplicationConfig中读取配置
+     * 如果此时Spring未初始化完成，则从config.properties文件中读取
+     *
+     * @return {@link String }
+     */
+    public static String getSpringPropertyValue(String configName) {
+        String value;
+        try {
+            value = DynamicApplicationConfig.getValue(configName);
+        } catch (Exception e) {
+            log.warn("read config:{} from spring error, may spring not init yet", configName, e);
+            value = CONFIG_MAP.get(configName);
+        }
+        return value;
+    }
+
+    /**
+     * 尝试从DynamicApplicationConfig中读取配置
+     * 如果此时Spring未初始化完成，则从config.properties文件中读取
+     *
+     * @return {@link String }
+     */
+    public static boolean getSpringPropertyBoolean(String configName) {
+        return Boolean.parseBoolean(getSpringPropertyValue(configName));
     }
 
 }

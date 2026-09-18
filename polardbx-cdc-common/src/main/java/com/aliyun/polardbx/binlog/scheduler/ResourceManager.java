@@ -27,8 +27,10 @@ import com.aliyun.polardbx.binlog.service.NodeInfoService;
 import com.aliyun.polardbx.binlog.util.GmsTimeUtil;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.RandomUtils;
 import org.mybatis.dynamic.sql.SqlBuilder;
 
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
@@ -107,6 +109,19 @@ public class ResourceManager {
             result.add(container);
         }
         return result;
+    }
+
+    public List<Container> tryRandomRemoveContainer(List<Container> list, boolean randomRemove) {
+        list = new ArrayList<>(list);
+        if (randomRemove && list.size() > 1) {
+            int removeCount = RandomUtils.nextInt(0, list.size());
+            for (int i = 0; i < removeCount; i++) {
+                int removeIndex = RandomUtils.nextInt(0, list.size());
+                list.remove(removeIndex);
+            }
+            log.info("random remove containers " + removeCount + " from " + list.size());
+        }
+        return list;
     }
 
     public ExecutionSnapshot getExecutionSnapshot() {

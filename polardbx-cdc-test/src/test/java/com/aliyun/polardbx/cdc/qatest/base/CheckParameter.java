@@ -10,6 +10,7 @@ import com.aliyun.polardbx.binlog.relay.HashLevel;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -20,9 +21,14 @@ import java.util.function.Supplier;
 public class CheckParameter {
     private String dbName;
     private String tbName;
+    private String aliasTbName;
     private boolean directCompareDetail;
     private HashLevel expectHashLevel;
     private boolean compareDetailOneByOne;
     private long loopWaitTimeoutMs = -1L;
     private Supplier<String> contextInfoSupplier;
+    /**
+     * 对比时忽略的列名集合（如生成列），这些列不参与源端和目标端的数据对比
+     */
+    private Set<String> ignoreColumns;
 }

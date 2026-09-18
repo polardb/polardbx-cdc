@@ -6,6 +6,19 @@
  */
 package com.aliyun.polardbx.binlog.columnar.metrics;
 
+import com.aliyun.polardbx.binlog.CommonMetrics;
+import com.aliyun.polardbx.binlog.SpringContextHolder;
+import com.aliyun.polardbx.binlog.dao.ColumnarTaskConfigDynamicSqlSupport;
+import com.aliyun.polardbx.binlog.dao.ColumnarTaskConfigMapper;
+import com.aliyun.polardbx.binlog.domain.po.ColumnarTaskConfig;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.io.Resources;
+import com.google.gson.Gson;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -18,18 +31,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import com.aliyun.polardbx.binlog.CommonMetrics;
-import com.aliyun.polardbx.binlog.SpringContextHolder;
-import com.aliyun.polardbx.binlog.dao.ColumnarTaskConfigDynamicSqlSupport;
-import com.aliyun.polardbx.binlog.dao.ColumnarTaskConfigMapper;
-import com.aliyun.polardbx.binlog.domain.po.ColumnarTaskConfig;
-import com.google.common.io.Resources;
-import com.google.gson.Gson;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang3.StringUtils;
-import org.mybatis.dynamic.sql.where.condition.IsEqualTo;
 
 @Slf4j
 public class ColumnarMetrics {
@@ -211,6 +212,21 @@ public class ColumnarMetrics {
      */
     private double binlogReadLatency = 0;
 
+    /**
+     * Binlog事件大小吞吐
+     */
+    private double binlogEventSize = 0;
+
+    /**
+     * Binlog事件总吞吐
+     */
+    private double allBinlogEventThroughput = 0;
+
+    /**
+     * Binlog事件大小总吞吐
+     */
+    private double allBinlogEventSize = 0;
+
     public ColumnarMetrics snapshot() {
         ColumnarMetrics snapshot = new ColumnarMetrics();
         getColumnarMetricsMap();
@@ -259,6 +275,9 @@ public class ColumnarMetrics {
         snapshot.binlogEventUpdateRows = this.binlogEventUpdateRows;
         snapshot.binlogTrxCount = this.binlogTrxCount;
         snapshot.binlogReadLatency = this.binlogReadLatency;
+        snapshot.binlogEventSize = this.binlogEventSize;
+        snapshot.allBinlogEventThroughput = this.allBinlogEventThroughput;
+        snapshot.allBinlogEventSize = this.allBinlogEventSize;
 
         return snapshot;
     }
@@ -453,6 +472,18 @@ public class ColumnarMetrics {
         return binlogReadLatency;
     }
 
+    public double getBinlogEventSize() {
+        return binlogEventSize;
+    }
+
+    public double getAllBinlogEventThroughput() {
+        return allBinlogEventThroughput;
+    }
+
+    public double getAllBinlogEventSize() {
+        return allBinlogEventSize;
+    }
+
     public void getMetricsByHttp() {
         ColumnarTaskConfigMapper mapper = SpringContextHolder.getObject(ColumnarTaskConfigMapper.class);
         Optional<ColumnarTaskConfig> opTask = mapper
@@ -499,6 +530,11 @@ public class ColumnarMetrics {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    @VisibleForTesting
+    protected void put(String key, double value) {
+        columnarMetricValueMap.put(key, value);
     }
 
     public void buildMetricValue() {
@@ -588,6 +624,12 @@ public class ColumnarMetrics {
             columnarMetricValueMap.get("binlogTrxCount") : 0;
         this.binlogReadLatency = columnarMetricValueMap.containsKey("binlogReadLatency") ?
             columnarMetricValueMap.get("binlogReadLatency") : 0;
+        this.binlogEventSize = columnarMetricValueMap.containsKey("binlogEventSize") ?
+            columnarMetricValueMap.get("binlogEventSize") : 0;
+        this.allBinlogEventThroughput = columnarMetricValueMap.containsKey("allBinlogEventThroughput") ?
+            columnarMetricValueMap.get("allBinlogEventThroughput") : 0;
+        this.allBinlogEventSize = columnarMetricValueMap.containsKey("allBinlogEventSize") ?
+            columnarMetricValueMap.get("allBinlogEventSize") : 0;
     }
 
     public static class ColumnarMetricsData {

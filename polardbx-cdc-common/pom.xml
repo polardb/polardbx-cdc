@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.aliyun.polardbx</groupId>
         <artifactId>polardbx-cdc</artifactId>
-        <version>5.4.19-SNAPSHOT</version>
+        <version>5.4.21-SNAPSHOT</version>
     </parent>
     <artifactId>polardbx-cdc-common</artifactId>
     <url>http://maven.apache.org</url>
@@ -123,9 +123,9 @@
 
                 <dependencies>
                     <dependency>
-                        <groupId>mysql</groupId>
-                        <artifactId>mysql-connector-java</artifactId>
-                        <version>8.0.20</version>
+                        <groupId>com.alibaba.polardbx</groupId>
+                        <artifactId>polardbx-connector-java</artifactId>
+                        <version>${polardbx-connector.version}</version>
                     </dependency>
                 </dependencies>
             </plugin>

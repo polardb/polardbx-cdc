@@ -45,8 +45,11 @@ public class BinlogDecoder {
     private ServerCharactorSet set;
 
     public static void main(String[] args) throws IOException, SQLException {
+        if (args.length != 4) {
+            throw new IllegalArgumentException("Usage: BinlogDecoder <host> <port> <username> <password>");
+        }
         BinlogDecoder decoder = new BinlogDecoder();
-        decoder.decodeRemove("11.158.129.153", "3306", "diamond", "diamond1qaz@2wsx");
+        decoder.decodeRemove(args[0], args[1], args[2], args[3]);
     }
 
     public void decodeRemove(String ip, String port, String username, String pwd) throws SQLException, IOException {
@@ -54,7 +57,7 @@ public class BinlogDecoder {
         update(conn);
         DirectLogFetcher fetcher = new DirectLogFetcher();
         fetcher.open(conn, fileName, 987987);
-        FileOutputStream fos = new FileOutputStream("/Users/yanfenglin/Downloads/tmp/bin01.txt");
+        FileOutputStream fos = new FileOutputStream("binlog-decoded.txt");
         PrintStream printStream = new PrintStream(fos);
         decode(fetcher, printStream);
         fetcher.close();
@@ -99,7 +102,7 @@ public class BinlogDecoder {
         info.put("socketTimeout", 999 + "");
         String url = "jdbc:mysql://" + ip + ":"
             + port + "?allowMultiQueries=true&useSSL=false";
-        com.mysql.jdbc.Driver driver = new com.mysql.jdbc.Driver();
+        com.alibaba.polardbx.core.jdbc.Driver driver = new com.alibaba.polardbx.core.jdbc.Driver();
         return driver.connect(url, info);
     }
 

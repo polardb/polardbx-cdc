@@ -25,9 +25,25 @@ public class ColumnInfo {
     private String typeName;
     private int size;
     private boolean onUpdate;
+    /**
+     * Whether this is a logical EXTERNALIZE column on the PolarDB-X target table.
+     * <p>
+     * JDBC {@link java.sql.DatabaseMetaData#getColumns(String, String, String, String)} and
+     * {@code DESC} only expose the logical TEXT/BLOB type, so this flag is populated separately
+     * from {@code SHOW CREATE TABLE}. RPL uses it to prevent an unchanged physical BlobRef address
+     * from being blindly written back as the logical column value during UPDATE compaction/batching.
+     */
+    private boolean externalized;
+    private String characterSetName;
+    private String collationName;
 
     public ColumnInfo(String name, int type, String javaCharset, boolean nullable, boolean generated, String typeName,
                       int size) {
+        this(name, type, javaCharset, nullable, generated, typeName, size, null, null);
+    }
+
+    public ColumnInfo(String name, int type, String javaCharset, boolean nullable, boolean generated, String typeName,
+                      int size, String characterSetName, String collationName) {
         this.name = name;
         this.type = type;
         this.javaCharset = javaCharset;
@@ -35,13 +51,7 @@ public class ColumnInfo {
         this.generated = generated;
         this.typeName = typeName;
         this.size = size;
-    }
-
-    public boolean isOnUpdate() {
-        return onUpdate;
-    }
-
-    public void setOnUpdate(boolean onUpdate) {
-        this.onUpdate = onUpdate;
+        this.characterSetName = characterSetName;
+        this.collationName = collationName;
     }
 }

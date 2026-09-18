@@ -9,7 +9,7 @@ package com.aliyun.polardbx.binlog.backup;
 import com.aliyun.polardbx.binlog.domain.TaskType;
 import lombok.Data;
 
-import java.util.List;
+import java.util.Set;
 
 /**
  * @author yudong
@@ -18,7 +18,7 @@ import java.util.List;
 @Data
 public class StreamContext {
     private final String group;
-    private final List<String> streamList;
+    private final Set<String> streamSet;
     private final String clusterId;
     private final String taskName;
     private final TaskType taskType;
