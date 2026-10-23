@@ -141,6 +141,7 @@ public class SQLFlashBackTool {
     }
 
     private static Set<String> getTableList(String fileStr) throws IOException {
+        // read target file
         File file = new File(fileStr);
         BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
         String s;
